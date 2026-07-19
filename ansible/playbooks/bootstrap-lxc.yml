@@ -1,0 +1,7 @@
+---
+- name: Bootstrap Linux LXC
+  hosts: linux_lxcs
+  become: true
+
+  roles:
+    - lxc_base

@@ -1,0 +1,105 @@
+---
+- name: Vorprüfung für den neuen Ansible-Controller
+  hosts: controllers
+  connection: local
+  gather_facts: false
+
+  module_defaults:
+    group/community.proxmox.proxmox:
+      api_host: "{{ pve_api_host }}"
+      api_user: "{{ pve_api_user }}"
+      api_password: "{{ pve_api_password }}"
+      validate_certs: false
+
+  tasks:
+    - name: Proxmox-Knoten über die API abfragen
+      community.proxmox.proxmox_node_info:
+      register: pve_nodes
+      no_log: true
+
+    - name: Zielknoten muss existieren und online sein
+      ansible.builtin.assert:
+        that:
+          - pve_nodes.proxmox_nodes
+            | selectattr('node', 'equalto', pve_node)
+            | list
+            | length == 1
+          - >-
+            (
+              pve_nodes.proxmox_nodes
+              | selectattr('node', 'equalto', pve_node)
+              | map(attribute='status')
+              | first
+            ) == 'online'
+        fail_msg: >-
+          Der Proxmox-Knoten {{ pve_node }} wurde über die API nicht
+          gefunden oder ist nicht online.
+        success_msg: >-
+          Proxmox-Knoten {{ pve_node }} ist über die API erreichbar.
+
+    - name: Inhalt des lokalen Template-Storages abfragen
+      community.proxmox.proxmox_storage_contents_info:
+        node: "{{ pve_node }}"
+        storage: "local"
+        content: all
+      register: local_storage_content
+      no_log: true
+
+    - name: Debian-Template muss vorhanden sein
+      ansible.builtin.assert:
+        that:
+          - controller_template in
+            (
+              local_storage_content.proxmox_storage_content
+              | map(attribute='volid')
+              | list
+            )
+        fail_msg: >-
+          Template {{ controller_template }} wurde auf Storage local
+          nicht gefunden.
+        success_msg: >-
+          Template {{ controller_template }} ist vorhanden.
+
+    - name: Prüfen, ob VMID bereits verwendet wird
+      community.proxmox.proxmox_vm_info:
+        node: "{{ pve_node }}"
+        vmid: "{{ controller_vmid }}"
+        config: current
+      register: existing_controller
+      no_log: true
+
+    - name: VMID muss frei oder bereits der richtige Controller sein
+      ansible.builtin.assert:
+        that:
+          - existing_controller.proxmox_vms | length == 0
+            or
+            (
+              existing_controller.proxmox_vms[0].name
+              | default('')
+            ) == controller_hostname
+        fail_msg: >-
+          VMID {{ controller_vmid }} wird bereits von
+          {{
+            existing_controller.proxmox_vms[0].name
+            | default('einem anderen Gast')
+          }}
+          verwendet.
+        success_msg: >-
+          VMID {{ controller_vmid }} ist frei oder gehört bereits
+          zu {{ controller_hostname }}.
+
+    - name: Geplante Konfiguration anzeigen
+      ansible.builtin.debug:
+        msg:
+          - "Zielknoten: {{ pve_node }}"
+          - "API: {{ pve_api_host }}"
+          - "VMID: {{ controller_vmid }}"
+          - "Hostname: {{ controller_hostname }}"
+          - "Template: {{ controller_template }}"
+          - "RootFS: {{ controller_storage }}:{{ controller_rootfs_size }} GiB"
+          - "CPU/RAM: {{ controller_cores }} Cores / {{ controller_memory }} MiB"
+          - "Bridge: {{ controller_bridge }}"
+          - "VLAN-Tag: {{ controller_vlan_tag }}"
+          - "IPv4: {{ controller_ip }}"
+          - "IPv6: {{ controller_ip6 }}"
+

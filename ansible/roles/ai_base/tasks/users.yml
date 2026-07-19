@@ -1,0 +1,32 @@
+---
+- name: Gemeinsame KI-Gruppe anlegen
+  ansible.builtin.group:
+    name: "{{ ai_group }}"
+    system: true
+    state: present
+
+- name: Dienstbenutzer für KI-Komponenten anlegen
+  ansible.builtin.user:
+    name: "{{ item.name }}"
+    group: "{{ ai_group }}"
+    home: "{{ item.home }}"
+    shell: "{{ ai_service_shell }}"
+    system: true
+    create_home: true
+    password_lock: true
+    state: present
+  loop: "{{ ai_service_users }}"
+  loop_control:
+    label: "{{ item.name }}"
+
+- name: Vorhandene Benutzer erfassen
+  ansible.builtin.getent:
+    database: passwd
+
+- name: Ansible-Benutzer zur KI-Gruppe hinzufügen
+  ansible.builtin.user:
+    name: ansible
+    groups:
+      - "{{ ai_group }}"
+    append: true
+  when: "'ansible' in ansible_facts.getent_passwd"

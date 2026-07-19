@@ -1,0 +1,119 @@
+---
+- name: Neuen Bergen-Platform-Controller bootstrapen
+  hosts: bp-controller
+  become: true
+  gather_facts: true
+
+  vars:
+    controller_admin_user: ansible
+    controller_admin_home: /home/ansible
+    controller_project_dir: /home/ansible/bergen-platform
+    controller_venv_dir: /home/ansible/bergen-platform/.venv
+
+    controller_packages:
+      - sudo
+      - git
+      - curl
+      - ca-certificates
+      - rsync
+      - jq
+      - tmux
+      - vim
+      - tree
+      - python3
+      - python3-venv
+      - python3-pip
+      - openssh-client
+
+  tasks:
+    - name: Paketindex aktualisieren
+      ansible.builtin.apt:
+        update_cache: true
+        cache_valid_time: 3600
+
+    - name: Grundpakete installieren
+      ansible.builtin.apt:
+        name: "{{ controller_packages }}"
+        state: present
+
+    - name: Benutzer ansible anlegen
+      ansible.builtin.user:
+        name: "{{ controller_admin_user }}"
+        home: "{{ controller_admin_home }}"
+        shell: /bin/bash
+        create_home: true
+        groups:
+          - sudo
+        append: true
+
+    - name: SSH-Verzeichnis anlegen
+      ansible.builtin.file:
+        path: "{{ controller_admin_home }}/.ssh"
+        state: directory
+        owner: "{{ controller_admin_user }}"
+        group: "{{ controller_admin_user }}"
+        mode: "0700"
+
+    - name: SSH-Schlüssel des alten Controllers hinterlegen
+      ansible.posix.authorized_key:
+        user: "{{ controller_admin_user }}"
+        key: "{{ lookup('file', lookup('env', 'HOME') + '/.ssh/id_ed25519.pub') }}"
+        state: present
+
+    - name: Passwortloses sudo für ansible konfigurieren
+      ansible.builtin.copy:
+        dest: /etc/sudoers.d/90-ansible
+        content: "ansible ALL=(ALL) NOPASSWD: ALL\n"
+        owner: root
+        group: root
+        mode: "0440"
+        validate: "/usr/sbin/visudo -cf %s"
+
+    - name: Projektverzeichnis anlegen
+      ansible.builtin.file:
+        path: "{{ controller_project_dir }}"
+        state: directory
+        owner: "{{ controller_admin_user }}"
+        group: "{{ controller_admin_user }}"
+        mode: "0750"
+
+    - name: Python-venv anlegen
+      ansible.builtin.command:
+        cmd: "python3 -m venv {{ controller_venv_dir }}"
+        creates: "{{ controller_venv_dir }}/bin/python"
+      become_user: "{{ controller_admin_user }}"
+
+    - name: Python-Werkzeuge in der venv installieren
+      ansible.builtin.pip:
+        name:
+          - ansible
+          - proxmoxer
+          - requests
+        virtualenv: "{{ controller_venv_dir }}"
+        state: present
+      become_user: "{{ controller_admin_user }}"
+
+    - name: community.proxmox installieren
+      ansible.builtin.command:
+        cmd: >-
+          {{ controller_venv_dir }}/bin/ansible-galaxy
+          collection install community.proxmox
+      become_user: "{{ controller_admin_user }}"
+      register: galaxy_install
+      changed_when: "'was installed successfully' in galaxy_install.stdout"
+
+    - name: Installation prüfen
+      ansible.builtin.command:
+        cmd: >-
+          {{ controller_venv_dir }}/bin/python
+          -c "import ansible, proxmoxer, requests; print('OK')"
+      become_user: "{{ controller_admin_user }}"
+      register: controller_check
+      changed_when: false
+
+    - name: Ergebnis anzeigen
+      ansible.builtin.debug:
+        msg:
+          - "Controller-Bootstrap abgeschlossen."
+          - "Python-Test: {{ controller_check.stdout }}"
+          - "Venv: {{ controller_venv_dir }}"

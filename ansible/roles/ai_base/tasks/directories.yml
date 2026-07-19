@@ -1,0 +1,30 @@
+---
+- name: Gemeinsame KI-Verzeichnisse anlegen
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    owner: root
+    group: "{{ ai_group }}"
+    mode: "{{ ai_directory_mode }}"
+  loop:
+    - /srv/ai
+    - "{{ ai_model_directory }}"
+    - "{{ ai_data_directory }}"
+    - "{{ ai_cache_directory }}"
+    - "{{ ai_log_directory }}"
+
+- name: Installationsverzeichnis für llama.cpp anlegen
+  ansible.builtin.file:
+    path: "{{ ai_llama_cpp_directory }}"
+    state: directory
+    owner: llama
+    group: "{{ ai_group }}"
+    mode: "0755"
+
+- name: Open-WebUI-Datenverzeichnis anlegen
+  ansible.builtin.file:
+    path: "{{ ai_openwebui_data_directory }}"
+    state: directory
+    owner: openwebui
+    group: "{{ ai_group }}"
+    mode: "0750"

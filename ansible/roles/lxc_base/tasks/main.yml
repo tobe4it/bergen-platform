@@ -1,0 +1,25 @@
+---
+- name: Install common LXC base packages
+  ansible.builtin.apt:
+    name:
+      - bash
+      - readline-common
+    state: present
+    update_cache: true
+    cache_valid_time: 3600
+
+- name: Enable history search with arrow keys globally
+  ansible.builtin.blockinfile:
+    path: /etc/inputrc
+    marker: "# {mark} BERGEN PLATFORM HISTORY SEARCH"
+    block: |
+      # Up/Down search through matching shell history
+      "\e[A": history-search-backward
+      "\e[B": history-search-forward
+      "\eOA": history-search-backward
+      "\eOB": history-search-forward
+    create: true
+    owner: root
+    group: root
+    mode: "0644"
+

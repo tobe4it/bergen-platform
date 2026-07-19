@@ -1,0 +1,22 @@
+---
+###############################################################################
+# Bergen Platform – AI Base
+#
+# Bereitet Benutzer, Verzeichnisse, Pakete und Hardware-Facts für lokale
+# KI-Dienste vor. Installiert noch keine Inferenz-Engine.
+###############################################################################
+
+- name: KI-Basispakete installieren
+  ansible.builtin.import_tasks: packages.yml
+
+- name: KI-Benutzer und Gruppen einrichten
+  ansible.builtin.import_tasks: users.yml
+
+- name: KI-Verzeichnisstruktur anlegen
+  ansible.builtin.import_tasks: directories.yml
+
+- name: KI-Hardware erkennen
+  ansible.builtin.import_tasks: hardware.yml
+
+- name: KI-Basis validieren
+  ansible.builtin.import_tasks: validate.yml

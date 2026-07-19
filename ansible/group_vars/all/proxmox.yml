@@ -1,0 +1,26 @@
+---
+pve_api_host: "192.168.20.133"
+pve_api_user: "root@pam"
+pve_api_password: "{{ vault_proxmox_root_password }}"
+pve_node: "venombox"
+
+controller_vmid: 100
+controller_hostname: "bp-controller"
+
+controller_template: "local:vztmpl/debian-13-standard_13.6-1_amd64.tar.zst"
+controller_storage: "local-zfs"
+controller_rootfs_size: 16
+
+controller_cores: 2
+controller_memory: 4096
+controller_swap: 512
+
+controller_bridge: "vmbr2"
+controller_vlan_tag: 2
+controller_ip: "dhcp"
+controller_ip6: "dhcp"
+
+controller_lxc_root_password: "{{ vault_lxc_root_password }}"
+
+controller_ssh_public_key: >-
+  {{ lookup('file', lookup('env', 'HOME') + '/.ssh/id_ed25519.pub') }}

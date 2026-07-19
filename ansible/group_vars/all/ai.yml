@@ -1,0 +1,22 @@
+---
+ai_group: ai
+
+ai_model_directory: /srv/ai/models
+ai_data_directory: /srv/ai/data
+ai_cache_directory: /srv/ai/cache
+ai_log_directory: /srv/ai/logs
+
+ai_llama_cpp_directory: /opt/llama.cpp
+ai_openwebui_data_directory: /var/lib/openwebui
+
+ai_service_users:
+  - name: ollama
+    home: /var/lib/ollama
+  - name: llama
+    home: /var/lib/llama
+  - name: openwebui
+    home: /var/lib/openwebui
+
+ai_default_model: qwen3:8b
+ai_ollama_port: 11434
+ai_openwebui_port: 3000

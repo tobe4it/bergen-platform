@@ -1,0 +1,91 @@
+---
+- name: Management-LXC auf Proxmox erzeugen
+  hosts: localhost
+  connection: local
+  gather_facts: false
+
+  vars_files:
+    - ../group_vars/all/proxmox.yml
+    - ../group_vars/all/vault.yml
+
+  tasks:
+    - name: Vorhandenen Controller-LXC abfragen
+      community.proxmox.proxmox_vm_info:
+        api_host: "{{ pve_api_host }}"
+        api_user: "{{ pve_api_user }}"
+        api_password: "{{ pve_api_password }}"
+        validate_certs: false
+        node: "{{ pve_node }}"
+        vmid: "{{ controller_vmid }}"
+        type: lxc
+        config: current
+      register: controller_info
+      no_log: true
+
+    - name: Prüfen, ob VMID bereits anderweitig verwendet wird
+      ansible.builtin.assert:
+        that:
+          - controller_info.proxmox_vms | length == 0
+            or controller_info.proxmox_vms[0].name == controller_hostname
+        fail_msg: >-
+          VMID {{ controller_vmid }} ist bereits durch
+          {{ controller_info.proxmox_vms[0].name | default('ein anderes System') }}
+          belegt.
+
+    - name: Controller-LXC anlegen
+      community.proxmox.proxmox:
+        api_host: "{{ pve_api_host }}"
+        api_user: "{{ pve_api_user }}"
+        api_password: "{{ pve_api_password }}"
+        validate_certs: false
+    
+        node: "{{ pve_node }}"
+        vmid: "{{ controller_vmid }}"
+        hostname: "{{ controller_hostname }}"
+        ostemplate: "{{ controller_template }}"
+    
+        disk: "{{ controller_storage }}:{{ controller_rootfs_size }}"
+        cores: "{{ controller_cores }}"
+        memory: "{{ controller_memory }}"
+        swap: "{{ controller_swap }}"
+    
+        unprivileged: true
+        onboot: true
+        cmode: console
+    
+        startup:
+          - "order=10"
+          - "up=30"
+          - "down=60"
+    
+        password: "{{ controller_lxc_root_password }}"
+        pubkey: "{{ controller_ssh_public_key }}"
+    
+        netif:
+          net0: "name=eth0,bridge={{ controller_bridge }},ip={{ controller_ip }},ip6={{ controller_ip6 }},firewall=1"
+    
+        state: present
+        timeout: 300
+      register: controller_created
+      no_log: true
+
+    - name: Controller-LXC starten
+      community.proxmox.proxmox:
+        api_host: "{{ pve_api_host }}"
+        api_user: "{{ pve_api_user }}"
+        api_password: "{{ pve_api_password }}"
+        validate_certs: false
+
+        node: "{{ pve_node }}"
+        vmid: "{{ controller_vmid }}"
+        state: started
+        timeout: 180
+      no_log: true
+
+    - name: Ergebnis anzeigen
+      ansible.builtin.debug:
+        msg:
+          - "LXC {{ controller_hostname }} wurde bereitgestellt."
+          - "VMID: {{ controller_vmid }}"
+          - "IP-Konfiguration: {{ controller_ip }}"
+          - "Die per DHCP vergebene IP jetzt in UniFi oder Proxmox ermitteln."

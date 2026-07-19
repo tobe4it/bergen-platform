@@ -1,0 +1,73 @@
+---
+- name: Generic Proxmox LXC Deployment
+  hosts: localhost
+  connection: local
+  gather_facts: false
+
+  tasks:
+
+    - name: LXC "{{ lxc_hostname }}" erstellen
+      community.proxmox.proxmox:
+        api_host: "{{ pve_api_host }}"
+        api_user: "{{ pve_api_user }}"
+        api_password: "{{ pve_api_password }}"
+        validate_certs: false
+
+        node: "{{ pve_node }}"
+        vmid: "{{ lxc_vmid }}"
+        hostname: "{{ lxc_hostname }}"
+
+        ostemplate: "{{ lxc_template }}"
+
+        disk: "{{ lxc_storage }}:{{ lxc_rootfs_size }}"
+
+        cores: "{{ lxc_cores }}"
+        memory: "{{ lxc_memory }}"
+        swap: "{{ lxc_swap }}"
+
+        password: "{{ lxc_root_password }}"
+        pubkey: "{{ lxc_ssh_public_key }}"
+
+        unprivileged: "{{ lxc_unprivileged }}"
+        onboot: "{{ lxc_onboot }}"
+        cmode: console
+
+        features: "{{ lxc_features | default([]) }}"
+
+        startup:
+          - "order={{ lxc_start_order | default(50) }}"
+          - "up={{ lxc_start_delay | default(30) }}"
+          - "down={{ lxc_shutdown_delay | default(60) }}"
+
+        netif:
+          net0: "name=eth0,bridge={{ lxc_bridge }},ip={{ lxc_ip }},ip6={{ lxc_ip6 }},firewall={{ lxc_firewall | default(1) }}"
+
+        state: present
+        timeout: 300
+
+      register: lxc_created
+      no_log: true
+
+    - name: LXC starten
+      community.proxmox.proxmox:
+        api_host: "{{ pve_api_host }}"
+        api_user: "{{ pve_api_user }}"
+        api_password: "{{ pve_api_password }}"
+        validate_certs: false
+
+        node: "{{ pve_node }}"
+        vmid: "{{ lxc_vmid }}"
+
+        state: started
+        timeout: 180
+
+    - name: Ergebnis anzeigen
+      debug:
+        msg:
+          - "Hostname : {{ lxc_hostname }}"
+          - "VMID     : {{ lxc_vmid }}"
+          - "Bridge   : {{ lxc_bridge }}"
+          - "Storage  : {{ lxc_storage }}"
+          - "RAM      : {{ lxc_memory }} MB"
+          - "CPU      : {{ lxc_cores }}"
+          - "Status   : erfolgreich erstellt"

@@ -1,0 +1,59 @@
+---
+###############################################################################
+# Bergen Platform
+#
+# Bootstrap eines KI-Knotens.
+#
+# Das Playbook setzt auf einem zuvor mit create-lxc.yml erzeugten und durch
+# bootstrap-lxc.yml vorbereiteten Linux-LXC den KI-Stack auf.
+###############################################################################
+
+- name: Bootstrap Bergen Platform AI node
+  hosts: ai_nodes
+  become: true
+  gather_facts: true
+
+  roles:
+    # Gemeinsame Grundkonfiguration aller Bergen-Platform-LXCs
+    - role: lxc_base
+      tags:
+        - base
+
+    # Erkennung und Vorbereitung der verfügbaren Hardware
+    - role: ai_base
+      tags:
+        - ai
+        - hardware
+
+    # OCI-Containerlaufzeit für Open WebUI und spätere AI-Werkzeuge
+    - role: podman
+      tags:
+        - ai
+        - containers
+        - podman
+
+    # Lokaler Inferenzdienst und Modellverwaltung
+    - role: ollama
+      tags:
+        - ai
+        - inference
+        - ollama
+
+    # Native GGUF-Inferenz und OpenAI-kompatibler Server
+    - role: llama_cpp
+      tags:
+        - ai
+        - inference
+        - llama_cpp
+
+    # Weboberfläche für lokale und angebundene Modelle
+    - role: open_webui
+      tags:
+        - ai
+        - webui
+
+    # Funktions- und Erreichbarkeitstests
+    - role: ai_validation
+      tags:
+        - ai
+        - validation

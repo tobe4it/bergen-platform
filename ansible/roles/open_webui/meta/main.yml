@@ -1,0 +1,9 @@
+---
+galaxy_info:
+  role_name: open_webui
+  author: Bergen Platform
+  description: Bergen Platform role open_webui
+  license: proprietary
+  min_ansible_version: "2.16"
+
+dependencies: []

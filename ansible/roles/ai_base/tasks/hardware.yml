@@ -1,0 +1,50 @@
+---
+- name: CPU-Informationen erfassen
+  ansible.builtin.command:
+    cmd: lscpu
+  register: ai_lscpu
+  changed_when: false
+
+- name: PCI-Geräte erfassen
+  ansible.builtin.command:
+    cmd: lspci -nn
+  register: ai_lspci
+  changed_when: false
+
+- name: Virtualisierungsumgebung erkennen
+  ansible.builtin.command:
+    cmd: systemd-detect-virt
+  register: ai_virtualization
+  changed_when: false
+  failed_when: false
+
+- name: CPU-Flags lesen
+  ansible.builtin.slurp:
+    src: /proc/cpuinfo
+  register: ai_cpuinfo_raw
+
+- name: KI-Hardware-Facts setzen
+  ansible.builtin.set_fact:
+    ai_cpuinfo_text: "{{ ai_cpuinfo_raw.content | b64decode }}"
+    ai_cpu_supports_avx: >-
+      {{ ' avx ' in (' ' ~ (ai_cpuinfo_raw.content | b64decode) ~ ' ') }}
+    ai_cpu_supports_avx2: >-
+      {{ ' avx2 ' in (' ' ~ (ai_cpuinfo_raw.content | b64decode) ~ ' ') }}
+    ai_cpu_supports_avx512: >-
+      {{ ' avx512' in (ai_cpuinfo_raw.content | b64decode) }}
+    ai_gpu_devices: >-
+      {{
+        ai_lspci.stdout_lines
+        | select('search', 'VGA compatible controller|3D controller|Display controller')
+        | list
+      }}
+    ai_has_gpu: >-
+      {{
+        (
+          ai_lspci.stdout_lines
+          | select('search', 'VGA compatible controller|3D controller|Display controller')
+          | list
+          | length
+        ) > 0
+      }}
+    ai_virtualization_type: "{{ ai_virtualization.stdout | default('unknown') | trim }}"

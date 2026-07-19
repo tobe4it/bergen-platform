@@ -1,0 +1,60 @@
+---
+- name: Proxmox-Version prüfen
+  ansible.builtin.command:
+    cmd: pveversion
+  register: pveversion_result
+  changed_when: false
+
+- name: FQDN prüfen
+  ansible.builtin.assert:
+    that:
+      - ansible_fqdn is defined
+      - ansible_fqdn | length > 0
+    fail_msg: "FQDN konnte nicht ermittelt werden."
+    success_msg: "FQDN: {{ ansible_fqdn }}"
+
+- name: Erforderliche Proxmox-Dienste prüfen
+  ansible.builtin.service_facts:
+
+- name: Proxmox-Dienste validieren
+  ansible.builtin.assert:
+    that:
+      - ansible_facts.services[item + '.service'] is defined
+      - ansible_facts.services[item + '.service'].state == 'running'
+    fail_msg: "Dienst {{ item }} läuft nicht."
+    success_msg: "Dienst {{ item }} läuft."
+  loop:
+    - pveproxy
+    - pvedaemon
+    - pvestatd
+    - pve-cluster
+    - ssh
+
+- name: ZFS-Pools erfassen
+  ansible.builtin.command:
+    cmd: zpool status -x
+  register: zpool_status
+  changed_when: false
+  failed_when: false
+
+- name: ZFS-Status anzeigen
+  ansible.builtin.debug:
+    msg: "{{ zpool_status.stdout | default('Kein ZFS-Status verfügbar') }}"
+
+- name: Netzwerk-Bridges anzeigen
+  ansible.builtin.command:
+    cmd: ip -brief link show type bridge
+  register: bridge_status
+  changed_when: false
+
+- name: Bridge-Status ausgeben
+  ansible.builtin.debug:
+    var: bridge_status.stdout_lines
+
+- name: Abschlussbericht
+  ansible.builtin.debug:
+    msg:
+      - "Host: {{ inventory_hostname }}"
+      - "FQDN: {{ ansible_fqdn }}"
+      - "Proxmox: {{ pveversion_result.stdout }}"
+      - "Validation abgeschlossen."

@@ -1,0 +1,29 @@
+---
+all:
+  children:
+
+    controllers:
+      hosts:
+        ansible-old:
+          ansible_connection: local
+
+        bp-controller:
+          ansible_host: 192.168.20.250
+          ansible_user: root
+          ansible_python_interpreter: /usr/bin/python3
+
+    proxmox_hosts:
+      hosts:
+        venombox:
+          ansible_host: 192.168.20.133
+          ansible_user: root
+          ansible_python_interpreter: /usr/bin/python3
+
+        bergen-ai:
+          ansible_host: 192.168.20.204
+          ansible_user: root
+          ansible_python_interpreter: /usr/bin/python3
+
+    ai_nodes:
+      hosts:
+        bergen-ai:

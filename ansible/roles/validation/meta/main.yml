@@ -1,0 +1,9 @@
+---
+galaxy_info:
+  role_name: validation
+  author: Bergen Platform
+  description: Validiert grundlegende Proxmox-Hostfunktionen
+  license: proprietary
+  min_ansible_version: "2.16"
+
+dependencies: []

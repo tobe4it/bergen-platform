@@ -1,0 +1,9 @@
+---
+galaxy_info:
+  role_name: ai_validation
+  author: Bergen Platform
+  description: Bergen Platform role ai_validation
+  license: proprietary
+  min_ansible_version: "2.16"
+
+dependencies: []

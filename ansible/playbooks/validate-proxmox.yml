@@ -1,0 +1,8 @@
+---
+- name: Validate Proxmox Host
+  hosts: proxmox_hosts
+  become: true
+  gather_facts: true
+
+  roles:
+    - validation

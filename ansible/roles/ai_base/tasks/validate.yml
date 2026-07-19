@@ -1,0 +1,30 @@
+---
+- name: Gemeinsame Modellablage prüfen
+  ansible.builtin.stat:
+    path: "{{ ai_model_directory }}"
+  register: ai_model_directory_status
+
+- name: KI-Basiszustand validieren
+  ansible.builtin.assert:
+    that:
+      - ai_model_directory_status.stat.exists
+      - ai_model_directory_status.stat.isdir
+      - ai_group is defined
+      - ai_service_users | length > 0
+    fail_msg: "Die KI-Basis wurde nicht vollständig eingerichtet."
+    success_msg: "Die KI-Basis wurde erfolgreich eingerichtet."
+
+- name: KI-Hardwarebericht ausgeben
+  ansible.builtin.debug:
+    msg:
+      - "Host: {{ inventory_hostname }}"
+      - "CPU: {{ ansible_facts.processor[-1] | default('unbekannt') }}"
+      - "vCPU: {{ ansible_facts.processor_vcpus | default('unbekannt') }}"
+      - "RAM: {{ ansible_facts.memtotal_mb | default('unbekannt') }} MiB"
+      - "Virtualisierung: {{ ai_virtualization_type }}"
+      - "AVX: {{ ai_cpu_supports_avx }}"
+      - "AVX2: {{ ai_cpu_supports_avx2 }}"
+      - "AVX-512: {{ ai_cpu_supports_avx512 }}"
+      - "GPU sichtbar: {{ ai_has_gpu }}"
+      - "GPU-Geräte: {{ ai_gpu_devices | default([]) }}"
+      - "Modellpfad: {{ ai_model_directory }}"
