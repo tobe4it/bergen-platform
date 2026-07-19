@@ -1,10 +1,66 @@
 ---
+###############################################################################
+#
+# Bergen Platform
+#
+# Playbook:
+#   create-lxc.yml
+#
+# Purpose:
+#   Create and start a generic Proxmox LXC and report its effective
+#   runtime and network configuration.
+#
+###############################################################################
+
 - name: Generic Proxmox LXC Deployment
   hosts: localhost
   connection: local
   gather_facts: false
 
   tasks:
+    ###########################################################################
+    # Validation
+    ###########################################################################
+
+    - name: Erforderliche LXC-Variablen prüfen
+      ansible.builtin.assert:
+        that:
+          - pve_api_host is defined
+          - pve_api_user is defined
+          - pve_api_password is defined
+          - pve_node is defined
+
+          - lxc_vmid is defined
+          - lxc_hostname is defined
+          - lxc_template is defined
+
+          - lxc_storage is defined
+          - lxc_rootfs_size is defined
+
+          - lxc_cores is defined
+          - lxc_memory is defined
+          - lxc_swap is defined
+
+          - lxc_root_password is defined
+          - lxc_ssh_public_key is defined
+
+          - lxc_unprivileged is defined
+          - lxc_onboot is defined
+
+          - lxc_bridge is defined
+          - lxc_ip is defined
+          - lxc_ip6 is defined
+
+        fail_msg: >-
+          Für die LXC-Erstellung fehlen erforderliche Variablen.
+          Prüfe die übergebene Variablendatei.
+
+        success_msg: >-
+          Alle erforderlichen LXC-Variablen sind vorhanden.
+
+    ###########################################################################
+    # Provisioning
+    ###########################################################################
 
     - name: LXC "{{ lxc_hostname }}" erstellen
       community.proxmox.proxmox:
@@ -40,7 +96,10 @@
           - "down={{ lxc_shutdown_delay | default(60) }}"
 
         netif:
-          net0: "name=eth0,bridge={{ lxc_bridge }},ip={{ lxc_ip }},ip6={{ lxc_ip6 }},firewall={{ lxc_firewall | default(1) }}"
+          net0: >-
+            name=eth0,bridge={{ lxc_bridge }},
+            ip={{ lxc_ip }},ip6={{ lxc_ip6 }},
+            firewall={{ lxc_firewall | default(1) }}
 
         state: present
         timeout: 300
@@ -48,7 +107,7 @@
       register: lxc_created
       no_log: true
 
-    - name: LXC starten
+    - name: LXC "{{ lxc_hostname }}" starten
       community.proxmox.proxmox:
         api_host: "{{ pve_api_host }}"
         api_user: "{{ pve_api_user }}"
@@ -61,13 +120,117 @@
         state: started
         timeout: 180
 
+      register: lxc_started
+      no_log: true
+
+    ###########################################################################
+    # Runtime discovery
+    ###########################################################################
+
+    - name: Auf eine IPv4-Adresse im LXC warten
+      ansible.builtin.command:
+        argv:
+          - pct
+          - exec
+          - "{{ lxc_vmid | string }}"
+          - --
+          - ip
+          - -4
+          - -o
+          - addr
+          - show
+          - dev
+          - eth0
+          - scope
+          - global
+
+      delegate_to: "{{ pve_inventory_host | default(pve_node) }}"
+      register: lxc_ipv4_result
+      changed_when: false
+      failed_when: false
+
+      retries: 24
+      delay: 5
+
+      until:
+        - lxc_ipv4_result.rc == 0
+        - >-
+          lxc_ipv4_result.stdout
+          | regex_findall('inet\s+([0-9.]+/[0-9]+)')
+          | length > 0
+
+    - name: Effektive Proxmox-LXC-Konfiguration lesen
+      ansible.builtin.command:
+        argv:
+          - pct
+          - config
+          - "{{ lxc_vmid | string }}"
+
+      delegate_to: "{{ pve_inventory_host | default(pve_node) }}"
+      register: lxc_config_result
+      changed_when: false
+
+    - name: Effektive LXC-Netzwerkdaten setzen
+      ansible.builtin.set_fact:
+        lxc_effective_ipv4: >-
+          {{
+            (
+              lxc_ipv4_result.stdout
+              | regex_findall('inet\s+([0-9.]+/[0-9]+)')
+              | first
+            )
+            | regex_replace('/.*$', '')
+          }}
+
+        lxc_effective_mac: >-
+          {{
+            (
+              lxc_config_result.stdout
+              | regex_findall('hwaddr=([^,\n]+)')
+              | first
+            )
+            | default('nicht ermittelt', true)
+          }}
+
+        lxc_effective_bridge: >-
+          {{
+            (
+              lxc_config_result.stdout
+              | regex_findall('bridge=([^,\n]+)')
+              | first
+            )
+            | default(lxc_bridge, true)
+          }}
+
+    ###########################################################################
+    # Result
+    ###########################################################################
+
     - name: Ergebnis anzeigen
-      debug:
+      ansible.builtin.debug:
         msg:
+          - "============================================================"
+          - "Bergen Platform LXC erfolgreich bereitgestellt"
+          - "============================================================"
           - "Hostname : {{ lxc_hostname }}"
           - "VMID     : {{ lxc_vmid }}"
-          - "Bridge   : {{ lxc_bridge }}"
+          - "Node     : {{ pve_node }}"
+          - "Bridge   : {{ lxc_effective_bridge }}"
+          - "MAC      : {{ lxc_effective_mac }}"
+          - "IPv4     : {{ lxc_effective_ipv4 }}"
           - "Storage  : {{ lxc_storage }}"
-          - "RAM      : {{ lxc_memory }} MB"
+          - "RAM      : {{ lxc_memory }} MiB"
           - "CPU      : {{ lxc_cores }}"
-          - "Status   : erfolgreich erstellt"
+          - ""
+          - "SSH:"
+          - "  ssh root@{{ lxc_effective_ipv4 }}"
+          - ""
+          - "Inventory-Eintrag:"
+          - "  {{ lxc_hostname }}:"
+          - "    ansible_host: {{ lxc_effective_ipv4 }}"
+          - ""
+          - "Nächster Schritt:"
+          - >-
+            ansible-playbook ansible/playbooks/bootstrap-lxc.yml 
+            --limit {{ lxc_hostname }} --ask-vault-pass
+          - "============================================================"
