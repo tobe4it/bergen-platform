@@ -1,0 +1,173 @@
+---
+###############################################################################
+#
+# Bergen Platform
+#
+# Playbook:
+#   restart-lxc.yml
+#
+# Purpose:
+#   Perform a complete stop/start cycle for an existing Proxmox LXC.
+#
+# Responsibilities:
+#   - Validate required variables
+#   - Verify that the LXC exists
+#   - Stop the LXC if it is running
+#   - Start the LXC
+#   - Verify the running state
+#   - Verify that eth0 is available
+#
+# Not included:
+#   - Creating the LXC
+#   - Discovering its IPv4 address
+#   - Modifying the Ansible inventory
+#   - Applying the Linux baseline
+#
+###############################################################################
+
+- name: Restart existing Proxmox LXC
+  hosts: "{{ pve_inventory_host | default(pve_node) }}"
+  gather_facts: false
+
+  tasks:
+    ###########################################################################
+    # Validation
+    ###########################################################################
+
+    - name: Erforderliche Restart-Variablen prüfen
+      ansible.builtin.assert:
+        that:
+          - pve_node is defined
+          - pve_node | string | length > 0
+
+          - lxc_vmid is defined
+          - lxc_vmid | int > 0
+
+          - lxc_hostname is defined
+          - lxc_hostname | string | length > 0
+
+        fail_msg: >-
+          Für den LXC-Neustart fehlen erforderliche Variablen.
+          Prüfe die übergebene Variablendatei.
+
+        success_msg: >-
+          Alle erforderlichen Restart-Variablen sind vorhanden.
+
+    ###########################################################################
+    # Current state
+    ###########################################################################
+
+    - name: LXC-Status prüfen
+      ansible.builtin.raw: >-
+        /usr/sbin/pct status {{ lxc_vmid }}
+      register: lxc_status
+      changed_when: false
+      failed_when: false
+
+    - name: Vorhandensein des LXC prüfen
+      ansible.builtin.assert:
+        that:
+          - lxc_status.rc == 0
+          - "'status:' in lxc_status.stdout"
+
+        fail_msg: >-
+          Der LXC {{ lxc_hostname }} mit VMID {{ lxc_vmid }}
+          wurde auf {{ inventory_hostname }} nicht gefunden.
+
+        success_msg: >-
+          Der LXC {{ lxc_hostname }} mit VMID {{ lxc_vmid }} ist vorhanden.
+
+    ###########################################################################
+    # Stop
+    ###########################################################################
+
+    - name: LXC "{{ lxc_hostname }}" vollständig stoppen
+      ansible.builtin.raw: >-
+        /usr/sbin/pct shutdown {{ lxc_vmid }}
+        --timeout {{ lxc_shutdown_timeout | default(60) }}
+        || /usr/sbin/pct stop {{ lxc_vmid }}
+      register: lxc_stop_result
+      changed_when: true
+      when: "'status: running' in lxc_status.stdout"
+
+    - name: Auf gestoppten LXC warten
+      ansible.builtin.raw: >-
+        /usr/sbin/pct status {{ lxc_vmid }}
+      register: lxc_stopped_status
+      changed_when: false
+      retries: "{{ lxc_stop_retries | default(24) }}"
+      delay: "{{ lxc_stop_check_delay | default(5) }}"
+      until:
+        - lxc_stopped_status.rc == 0
+        - "'status: stopped' in lxc_stopped_status.stdout"
+
+    ###########################################################################
+    # Start
+    ###########################################################################
+
+    - name: LXC "{{ lxc_hostname }}" starten
+      ansible.builtin.raw: >-
+        /usr/sbin/pct start {{ lxc_vmid }}
+      register: lxc_start_result
+      changed_when: true
+
+    - name: Auf laufenden LXC warten
+      ansible.builtin.raw: >-
+        /usr/sbin/pct status {{ lxc_vmid }}
+      register: lxc_running_status
+      changed_when: false
+      retries: "{{ lxc_start_retries | default(24) }}"
+      delay: "{{ lxc_start_check_delay | default(5) }}"
+      until:
+        - lxc_running_status.rc == 0
+        - "'status: running' in lxc_running_status.stdout"
+
+    ###########################################################################
+    # Runtime validation
+    ###########################################################################
+
+    - name: Auf Netzwerkschnittstelle eth0 warten
+      ansible.builtin.raw: >-
+        /usr/sbin/pct exec {{ lxc_vmid }} --
+        test -d /sys/class/net/eth0
+      register: lxc_eth0_status
+      changed_when: false
+      failed_when: false
+      retries: "{{ lxc_network_retries | default(24) }}"
+      delay: "{{ lxc_network_check_delay | default(5) }}"
+      until: lxc_eth0_status.rc == 0
+
+    - name: Netzwerkschnittstelle eth0 validieren
+      ansible.builtin.assert:
+        that:
+          - lxc_eth0_status.rc == 0
+
+        fail_msg: >-
+          Der LXC {{ lxc_hostname }} läuft, aber die Netzwerkschnittstelle
+          eth0 wurde nicht verfügbar.
+
+        success_msg: >-
+          Der LXC {{ lxc_hostname }} läuft und eth0 ist verfügbar.
+
+    ###########################################################################
+    # Result
+    ###########################################################################
+
+    - name: Neustart zusammenfassen
+      ansible.builtin.debug:
+        msg:
+          - "============================================================"
+          - "Bergen Platform LXC erfolgreich neu gestartet"
+          - "============================================================"
+          - "Hostname : {{ lxc_hostname }}"
+          - "VMID     : {{ lxc_vmid }}"
+          - "Node     : {{ pve_node }}"
+          - "Status   : running"
+          - "eth0     : verfügbar"
+          - ""
+          - "Nächster Schritt:"
+          - >-
+            ansible-playbook ansible/playbooks/discover-lxc.yml
+            -e @ansible/group_vars/all/{{ lxc_hostname }}.yml
+            --ask-vault-pass
+          - "============================================================"

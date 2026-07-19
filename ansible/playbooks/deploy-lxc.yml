@@ -1,0 +1,25 @@
+---
+###############################################################################
+#
+# Bergen Platform
+#
+# Playbook:
+#   deploy-lxc.yml
+#
+# Purpose:
+#   Complete deployment of a generic Linux LXC.
+#
+###############################################################################
+
+- import_playbook: create-lxc.yml
+
+- import_playbook: restart-lxc.yml
+
+- import_playbook: discover-lxc.yml
+
+- import_playbook: update-inventory.yml
+
+- import_playbook: bootstrap-lxc.yml
+  vars:
+    bootstrap_lxc_target: discovered_lxcs
+    bootstrap_refresh_host_keys: true

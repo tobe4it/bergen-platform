@@ -1,7 +1,412 @@
 ---
+###############################################################################
+#
+# Bergen Platform
+#
+# Playbook:
+#   bootstrap-lxc.yml
+#
+# Purpose:
+#   Apply the common Bergen Platform Linux baseline to existing LXC containers.
+#
+# Responsibilities:
+#   - Validate the selected bootstrap target group
+#   - Optionally refresh SSH host keys after provisioning
+#   - Wait for SSH reachability
+#   - Gather target facts
+#   - Apply the lxc_base role
+#   - Validate the resulting baseline
+#
+# Not included:
+#   - Creating an LXC
+#   - Starting or restarting an LXC
+#   - Discovering runtime network data
+#   - Persistently modifying ansible/inventory.yml
+#
+###############################################################################
+
+###############################################################################
+# SSH preparation
+###############################################################################
+
+- name: Prepare SSH access for Linux LXC bootstrap
+  hosts: localhost
+  gather_facts: false
+
+  vars:
+    bootstrap_target_group: >-
+      {{ bootstrap_lxc_target | default('linux_lxcs') }}
+
+    bootstrap_known_hosts_file: >-
+      {{ lookup('env', 'HOME') }}/.ssh/known_hosts
+
+  tasks:
+    ###########################################################################
+    # Target validation
+    ###########################################################################
+
+    - name: Bootstrap-Zielgruppe prüfen
+      ansible.builtin.assert:
+        that:
+          - bootstrap_target_group in groups
+          - groups[bootstrap_target_group] | length > 0
+
+        fail_msg: >-
+          Die Bootstrap-Zielgruppe {{ bootstrap_target_group }}
+          existiert nicht oder enthält keine Hosts.
+
+        success_msg: >-
+          Die Bootstrap-Zielgruppe {{ bootstrap_target_group }}
+          enthält {{ groups[bootstrap_target_group] | length }} Host(s).
+
+    - name: SSH-Zielinformationen zusammenstellen
+      ansible.builtin.set_fact:
+        bootstrap_ssh_targets: >-
+          {{
+            bootstrap_ssh_targets | default([]) +
+            [
+              {
+                'name': item,
+                'address': hostvars[item].ansible_host | default(item),
+                'port': hostvars[item].ansible_port | default(22)
+              }
+            ]
+          }}
+      loop: "{{ groups[bootstrap_target_group] }}"
+      loop_control:
+        label: "{{ item }}"
+
+    - name: SSH-Zielinformationen prüfen
+      ansible.builtin.assert:
+        that:
+          - bootstrap_ssh_targets is defined
+          - bootstrap_ssh_targets | length > 0
+          - item.address | string | length > 0
+          - item.port | int > 0
+
+        fail_msg: >-
+          Für {{ item.name }} fehlen gültige SSH-Verbindungsdaten.
+
+        success_msg: >-
+          SSH-Ziel {{ item.name }}:
+          {{ item.address }}:{{ item.port }}
+
+      loop: "{{ bootstrap_ssh_targets }}"
+      loop_control:
+        label: "{{ item.name }}"
+
+    ###########################################################################
+    # Local SSH directory
+    ###########################################################################
+
+    - name: Lokales SSH-Verzeichnis sicherstellen
+      ansible.builtin.file:
+        path: "{{ lookup('env', 'HOME') }}/.ssh"
+        state: directory
+        mode: "0700"
+
+    - name: Lokale known_hosts-Datei sicherstellen
+      ansible.builtin.file:
+        path: "{{ bootstrap_known_hosts_file }}"
+        state: touch
+        mode: "0600"
+        modification_time: preserve
+        access_time: preserve
+
+    ###########################################################################
+    # SSH reachability
+    ###########################################################################
+
+    - name: Auf SSH-Port der Zielhosts warten
+      ansible.builtin.wait_for:
+        host: "{{ item.address }}"
+        port: "{{ item.port }}"
+        state: started
+        connect_timeout: 5
+        sleep: 5
+        timeout: "{{ bootstrap_ssh_timeout | default(180) }}"
+
+      loop: "{{ bootstrap_ssh_targets }}"
+      loop_control:
+        label: "{{ item.name }} → {{ item.address }}:{{ item.port }}"
+
+    ###########################################################################
+    # SSH host-key refresh
+    ###########################################################################
+
+    - name: Alte SSH-Hostschlüssel für Standardport entfernen
+      ansible.builtin.command:
+        argv:
+          - ssh-keygen
+          - -R
+          - "{{ item.address }}"
+          - -f
+          - "{{ bootstrap_known_hosts_file }}"
+
+      register: bootstrap_remove_standard_host_key
+      changed_when: >-
+        'not found' not in
+        (
+          bootstrap_remove_standard_host_key.stdout
+          | default('')
+          | lower
+        )
+
+      failed_when: false
+
+      loop: "{{ bootstrap_ssh_targets }}"
+      loop_control:
+        label: "{{ item.name }} → {{ item.address }}"
+
+      when:
+        - bootstrap_refresh_host_keys | default(false) | bool
+        - item.port | int == 22
+
+    - name: Alte SSH-Hostschlüssel für abweichenden Port entfernen
+      ansible.builtin.command:
+        argv:
+          - ssh-keygen
+          - -R
+          - "[{{ item.address }}]:{{ item.port }}"
+          - -f
+          - "{{ bootstrap_known_hosts_file }}"
+
+      register: bootstrap_remove_custom_host_key
+      changed_when: >-
+        'not found' not in
+        (
+          bootstrap_remove_custom_host_key.stdout
+          | default('')
+          | lower
+        )
+
+      failed_when: false
+
+      loop: "{{ bootstrap_ssh_targets }}"
+      loop_control:
+        label: "{{ item.name }} → [{{ item.address }}]:{{ item.port }}"
+
+      when:
+        - bootstrap_refresh_host_keys | default(false) | bool
+        - item.port | int != 22
+
+    - name: Aktuelle SSH-Hostschlüssel für Standardport einlesen
+      ansible.builtin.command:
+        argv:
+          - ssh-keyscan
+          - -T
+          - "10"
+          - "{{ item.address }}"
+
+      register: bootstrap_standard_keyscan
+      changed_when: false
+
+      retries: 6
+      delay: 5
+
+      until:
+        - bootstrap_standard_keyscan.rc == 0
+        - bootstrap_standard_keyscan.stdout | trim | length > 0
+
+      loop: "{{ bootstrap_ssh_targets }}"
+      loop_control:
+        label: "{{ item.name }} → {{ item.address }}"
+
+      when:
+        - bootstrap_refresh_host_keys | default(false) | bool
+        - item.port | int == 22
+
+    - name: Aktuelle SSH-Hostschlüssel für abweichenden Port einlesen
+      ansible.builtin.command:
+        argv:
+          - ssh-keyscan
+          - -T
+          - "10"
+          - -p
+          - "{{ item.port | string }}"
+          - "{{ item.address }}"
+
+      register: bootstrap_custom_keyscan
+      changed_when: false
+
+      retries: 6
+      delay: 5
+
+      until:
+        - bootstrap_custom_keyscan.rc == 0
+        - bootstrap_custom_keyscan.stdout | trim | length > 0
+
+      loop: "{{ bootstrap_ssh_targets }}"
+      loop_control:
+        label: "{{ item.name }} → {{ item.address }}:{{ item.port }}"
+
+      when:
+        - bootstrap_refresh_host_keys | default(false) | bool
+        - item.port | int != 22
+
+    - name: SSH-Hostschlüssel für Standardport registrieren
+      ansible.builtin.lineinfile:
+        path: "{{ bootstrap_known_hosts_file }}"
+        line: "{{ item.1 }}"
+        state: present
+        create: true
+        mode: "0600"
+
+      loop: >-
+        {{
+          bootstrap_standard_keyscan.results
+          | default([])
+          | subelements('stdout_lines', skip_missing=True)
+        }}
+
+      loop_control:
+        label: >-
+          {{
+            item.0.item.name
+            | default(item.0.item.address)
+          }}
+
+      when:
+        - bootstrap_refresh_host_keys | default(false) | bool
+        - item.1 | trim | length > 0
+        - not item.1.startswith('#')
+
+    - name: SSH-Hostschlüssel für abweichenden Port registrieren
+      ansible.builtin.lineinfile:
+        path: "{{ bootstrap_known_hosts_file }}"
+        line: "{{ item.1 }}"
+        state: present
+        create: true
+        mode: "0600"
+
+      loop: >-
+        {{
+          bootstrap_custom_keyscan.results
+          | default([])
+          | subelements('stdout_lines', skip_missing=True)
+        }}
+
+      loop_control:
+        label: >-
+          {{
+            item.0.item.name
+            | default(item.0.item.address)
+          }}
+
+      when:
+        - bootstrap_refresh_host_keys | default(false) | bool
+        - item.1 | trim | length > 0
+        - not item.1.startswith('#')
+
+    ###########################################################################
+    # SSH preparation result
+    ###########################################################################
+
+    - name: SSH-Vorbereitung zusammenfassen
+      ansible.builtin.debug:
+        msg:
+          - "============================================================"
+          - "SSH-Vorbereitung abgeschlossen"
+          - "============================================================"
+          - "Zielgruppe : {{ bootstrap_target_group }}"
+          - "Hosts      : {{ groups[bootstrap_target_group] | length }}"
+          - >-
+            Hostkeys   :
+            {{
+              'aktualisiert'
+              if bootstrap_refresh_host_keys | default(false) | bool
+              else 'unverändert'
+            }}
+          - "============================================================"
+
+###############################################################################
+# Linux baseline
+###############################################################################
+
 - name: Bootstrap Linux LXC
-  hosts: linux_lxcs
+  hosts: "{{ bootstrap_lxc_target | default('linux_lxcs') }}"
   become: true
+  gather_facts: true
+
+  pre_tasks:
+    ###########################################################################
+    # Target validation
+    ###########################################################################
+
+    - name: Linux-Zielsystem validieren
+      ansible.builtin.assert:
+        that:
+          - ansible_system == 'Linux'
+
+        fail_msg: >-
+          {{ inventory_hostname }} ist kein unterstütztes Linux-System.
+
+        success_msg: >-
+          {{ inventory_hostname }} wurde als Linux-System erkannt.
+
+    - name: Container-Virtualisierung anzeigen
+      ansible.builtin.debug:
+        msg:
+          - "Hostname        : {{ inventory_hostname }}"
+          - "System          : {{ ansible_system }}"
+          - "Distribution    : {{ ansible_distribution }}"
+          - "Version         : {{ ansible_distribution_version }}"
+          - >-
+            Virtualisierung :
+            {{ ansible_virtualization_type | default('nicht ermittelt') }}
 
   roles:
-    - lxc_base
+    ###########################################################################
+    # Common Linux LXC baseline
+    ###########################################################################
+
+    - role: lxc_base
+      tags:
+        - base
+        - lxc_base
+
+  post_tasks:
+    ###########################################################################
+    # Validation
+    ###########################################################################
+
+    - name: Ansible-Verbindung nach dem Bootstrap prüfen
+      ansible.builtin.ping:
+
+    - name: tmux-Installation prüfen
+      ansible.builtin.command:
+        argv:
+          - dpkg-query
+          - -W
+          - -f=${Status}
+          - tmux
+
+      register: bootstrap_tmux_status
+      changed_when: false
+
+      failed_when: >-
+        bootstrap_tmux_status.rc != 0
+        or
+        'install ok installed' not in bootstrap_tmux_status.stdout
+
+    ###########################################################################
+    # Result
+    ###########################################################################
+
+    - name: Bootstrap-Ergebnis anzeigen
+      ansible.builtin.debug:
+        msg:
+          - "============================================================"
+          - "Bergen Platform Linux-LXC-Baseline angewendet"
+          - "============================================================"
+          - "Hostname       : {{ inventory_hostname }}"
+          - "IPv4           : {{ ansible_host | default(inventory_hostname) }}"
+          - "Distribution   : {{ ansible_distribution }}"
+          - "Version        : {{ ansible_distribution_version }}"
+          - >-
+            Virtualisierung:
+            {{ ansible_virtualization_type | default('nicht ermittelt') }}
+          - "Rolle          : lxc_base"
+          - "tmux           : installiert"
+          - "Status         : erfolgreich"
+          - "============================================================"

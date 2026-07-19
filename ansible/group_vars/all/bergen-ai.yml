@@ -22,3 +22,7 @@ lxc_firewall: 1
 
 lxc_ssh_public_key: "{{ lookup('file', lookup('env','HOME') + '/.ssh/id_ed25519.pub') }}"
 lxc_root_password: "{{ vault_lxc_root_password }}"
+
+pve_node: venombox
+pve_inventory_host: venombox
+

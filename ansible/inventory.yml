@@ -20,7 +20,7 @@ all:
           ansible_python_interpreter: /usr/bin/python3
 
         bergen-ai:
-          ansible_host: 192.168.20.204
+          ansible_host: 192.168.20.130
           ansible_user: root
           ansible_python_interpreter: /usr/bin/python3
 

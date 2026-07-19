@@ -1,0 +1,236 @@
+---
+###############################################################################
+#
+# Bergen Platform
+#
+# Playbook:
+#   discover-lxc.yml
+#
+# Purpose:
+#   Discover the runtime configuration of an existing Proxmox LXC and
+#   register it in the temporary Ansible runtime inventory.
+#
+# Responsibilities:
+#   - Validate required variables
+#   - Verify that the LXC exists
+#   - Verify that the LXC is running
+#   - Discover IPv4 address, MAC address and bridge
+#   - Wait for SSH reachability
+#   - Register the LXC in the runtime inventory
+#
+# Not included:
+#   - Creating the LXC
+#   - Starting or restarting the LXC
+#   - Persistently modifying ansible/inventory.yml
+#   - Applying the Linux baseline
+#
+###############################################################################
+
+- name: Discover Proxmox LXC runtime configuration
+  hosts: "{{ pve_inventory_host | default(pve_node) }}"
+  gather_facts: false
+
+  tasks:
+    ###########################################################################
+    # Validation
+    ###########################################################################
+
+    - name: Erforderliche Discovery-Variablen prüfen
+      ansible.builtin.assert:
+        that:
+          - pve_node is defined
+          - pve_node | string | length > 0
+
+          - lxc_vmid is defined
+          - lxc_vmid | int > 0
+
+          - lxc_hostname is defined
+          - lxc_hostname | string | length > 0
+
+        fail_msg: >-
+          Für die LXC-Ermittlung fehlen erforderliche Variablen.
+          Prüfe die übergebene Variablendatei.
+
+        success_msg: >-
+          Alle erforderlichen Discovery-Variablen sind vorhanden.
+
+    ###########################################################################
+    # Runtime status
+    ###########################################################################
+
+    - name: LXC-Status prüfen
+      ansible.builtin.raw: >-
+        /usr/sbin/pct status {{ lxc_vmid }}
+      register: lxc_status
+      changed_when: false
+      failed_when: false
+
+    - name: Vorhandensein des LXC prüfen
+      ansible.builtin.assert:
+        that:
+          - lxc_status.rc == 0
+          - "'status:' in lxc_status.stdout"
+
+        fail_msg: >-
+          Der LXC {{ lxc_hostname }} mit VMID {{ lxc_vmid }}
+          wurde auf {{ inventory_hostname }} nicht gefunden.
+
+        success_msg: >-
+          Der LXC {{ lxc_hostname }} mit VMID {{ lxc_vmid }} ist vorhanden.
+
+    - name: Laufenden LXC voraussetzen
+      ansible.builtin.assert:
+        that:
+          - "'status: running' in lxc_status.stdout"
+
+        fail_msg: >-
+          Der LXC {{ lxc_hostname }} mit VMID {{ lxc_vmid }} läuft nicht.
+          Führe zuvor restart-lxc.yml aus.
+
+        success_msg: >-
+          Der LXC {{ lxc_hostname }} läuft.
+
+    ###########################################################################
+    # Network discovery
+    ###########################################################################
+
+    - name: Auf eine IPv4-Adresse im LXC warten
+      ansible.builtin.raw: >-
+        /usr/sbin/pct exec {{ lxc_vmid }} --
+        hostname -I
+      register: lxc_ipv4_output
+      changed_when: false
+      retries: 24
+      delay: 5
+      until:
+        - lxc_ipv4_output.rc == 0
+        - >-
+          lxc_ipv4_output.stdout
+          | regex_findall('(?:^|\s)([0-9]{1,3}(?:\.[0-9]{1,3}){3})(?:\s|$)')
+          | length > 0
+
+    - name: Ermittelte IPv4-Adresse validieren
+      ansible.builtin.assert:
+        that:
+          - lxc_ipv4_output.rc == 0
+          - >-
+            lxc_ipv4_output.stdout
+            | regex_findall('(?:^|\s)([0-9]{1,3}(?:\.[0-9]{1,3}){3})(?:\s|$)')
+            | length > 0
+
+        fail_msg: >-
+          Für den LXC {{ lxc_hostname }} mit VMID {{ lxc_vmid }}
+          konnte keine IPv4-Adresse ermittelt werden.
+
+        success_msg: >-
+          Eine IPv4-Adresse wurde erfolgreich ermittelt.
+
+    - name: Effektive Proxmox-LXC-Konfiguration lesen
+      ansible.builtin.raw: >-
+        /usr/sbin/pct config {{ lxc_vmid }}
+      register: lxc_config_output
+      changed_when: false
+
+    - name: Effektive LXC-Netzwerkdaten setzen
+      ansible.builtin.set_fact:
+        lxc_effective_ipv4: >-
+          {{
+            lxc_ipv4_output.stdout
+            | regex_findall('(?:^|\s)([0-9]{1,3}(?:\.[0-9]{1,3}){3})(?:\s|$)')
+            | first
+          }}
+
+        lxc_effective_mac: >-
+          {{
+            (
+              lxc_config_output.stdout
+              | regex_findall('hwaddr=([^,\r\n]+)')
+              | first
+            )
+            | default('nicht ermittelt', true)
+          }}
+
+        lxc_effective_bridge: >-
+          {{
+            (
+              lxc_config_output.stdout
+              | regex_findall('bridge=([^,\r\n]+)')
+              | first
+            )
+            | default(lxc_bridge | default('nicht ermittelt'), true)
+          }}
+
+    ###########################################################################
+    # Reachability
+    ###########################################################################
+
+    - name: Auf SSH-Erreichbarkeit warten
+      ansible.builtin.wait_for:
+        host: "{{ lxc_effective_ipv4 }}"
+        port: 22
+        state: started
+        connect_timeout: 5
+        sleep: 5
+        timeout: 180
+      delegate_to: localhost
+
+    ###########################################################################
+    # Runtime inventory
+    ###########################################################################
+
+    - name: LXC zum temporären Laufzeit-Inventar hinzufügen
+      ansible.builtin.add_host:
+        name: "{{ lxc_hostname }}"
+
+        groups:
+          - discovered_lxcs
+          - linux_lxcs
+
+        ansible_host: "{{ lxc_effective_ipv4 }}"
+        ansible_user: "{{ lxc_ansible_user | default('root') }}"
+        ansible_python_interpreter: /usr/bin/python3
+
+        lxc_deployed_vmid: "{{ lxc_vmid }}"
+        lxc_deployed_ipv4: "{{ lxc_effective_ipv4 }}"
+        lxc_deployed_mac: "{{ lxc_effective_mac }}"
+        lxc_deployed_bridge: "{{ lxc_effective_bridge }}"
+
+      changed_when: false
+
+    ###########################################################################
+    # Result
+    ###########################################################################
+
+    - name: Discovery-Ergebnis anzeigen
+      ansible.builtin.debug:
+        msg:
+          - "============================================================"
+          - "Bergen Platform LXC erfolgreich ermittelt"
+          - "============================================================"
+          - "Hostname : {{ lxc_hostname }}"
+          - "VMID     : {{ lxc_vmid }}"
+          - "Node     : {{ pve_node }}"
+          - "Bridge   : {{ lxc_effective_bridge }}"
+          - "MAC      : {{ lxc_effective_mac }}"
+          - "IPv4     : {{ lxc_effective_ipv4 }}"
+          - "Status   : running"
+          - ""
+          - "SSH:"
+          - "  ssh {{ lxc_ansible_user | default('root') }}@{{ lxc_effective_ipv4 }}"
+          - ""
+          - "Temporäre Gruppen:"
+          - "  discovered_lxcs"
+          - "  linux_lxcs"
+          - ""
+          - "Inventory-Eintrag:"
+          - "  {{ lxc_hostname }}:"
+          - "    ansible_host: {{ lxc_effective_ipv4 }}"
+          - ""
+          - "Nächster Schritt:"
+          - >-
+            ansible-playbook ansible/playbooks/bootstrap-lxc.yml
+            --limit {{ lxc_hostname }} --ask-vault-pass
+          - ""
+          - "Hinweis:"
+          - "  ansible/inventory.yml wurde nicht verändert."
+          - "============================================================"

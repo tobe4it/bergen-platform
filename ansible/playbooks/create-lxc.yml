@@ -7,14 +7,23 @@
 #   create-lxc.yml
 #
 # Purpose:
-#   Create and start a generic Proxmox LXC and report its effective
-#   runtime and network configuration.
+#   Create a generic Proxmox LXC container.
+#
+# Responsibilities:
+#   - Validate required variables
+#   - Create the LXC through the Proxmox API
+#   - Report the provisioning result
+#
+# Not included:
+#   - Starting the LXC
+#   - Runtime network discovery
+#   - Runtime inventory registration
+#   - Linux baseline configuration
 #
 ###############################################################################
 
-- name: Generic Proxmox LXC Deployment
+- name: Create generic Proxmox LXC
   hosts: localhost
-  connection: local
   gather_facts: false
 
   tasks:
@@ -22,34 +31,71 @@
     # Validation
     ###########################################################################
 
-    - name: Erforderliche LXC-Variablen prüfen
+    - name: Erforderliche Proxmox-Variablen prüfen
       ansible.builtin.assert:
         that:
           - pve_api_host is defined
-          - pve_api_user is defined
-          - pve_api_password is defined
-          - pve_node is defined
+          - pve_api_host | string | length > 0
 
+          - pve_api_user is defined
+          - pve_api_user | string | length > 0
+
+          - pve_api_password is defined
+          - pve_api_password | string | length > 0
+
+          - pve_node is defined
+          - pve_node | string | length > 0
+
+        fail_msg: >-
+          Für den Zugriff auf die Proxmox-API fehlen erforderliche Variablen.
+
+        success_msg: >-
+          Alle erforderlichen Proxmox-Variablen sind vorhanden.
+
+    - name: Erforderliche LXC-Variablen prüfen
+      ansible.builtin.assert:
+        that:
           - lxc_vmid is defined
+          - lxc_vmid | int > 0
+
           - lxc_hostname is defined
+          - lxc_hostname | string | length > 0
+
           - lxc_template is defined
+          - lxc_template | string | length > 0
 
           - lxc_storage is defined
+          - lxc_storage | string | length > 0
+
           - lxc_rootfs_size is defined
+          - lxc_rootfs_size | int > 0
 
           - lxc_cores is defined
+          - lxc_cores | int > 0
+
           - lxc_memory is defined
+          - lxc_memory | int > 0
+
           - lxc_swap is defined
+          - lxc_swap | int >= 0
 
           - lxc_root_password is defined
+          - lxc_root_password | string | length > 0
+
           - lxc_ssh_public_key is defined
+          - lxc_ssh_public_key | string | length > 0
 
           - lxc_unprivileged is defined
           - lxc_onboot is defined
 
           - lxc_bridge is defined
+          - lxc_bridge | string | length > 0
+
           - lxc_ip is defined
+          - lxc_ip | string | length > 0
+
           - lxc_ip6 is defined
+          - lxc_ip6 | string | length > 0
 
         fail_msg: >-
           Für die LXC-Erstellung fehlen erforderliche Variablen.
@@ -67,7 +113,7 @@
         api_host: "{{ pve_api_host }}"
         api_user: "{{ pve_api_user }}"
         api_password: "{{ pve_api_password }}"
-        validate_certs: false
+        validate_certs: "{{ pve_validate_certs | default(false) }}"
 
         node: "{{ pve_node }}"
         vmid: "{{ lxc_vmid }}"
@@ -95,141 +141,39 @@
           - "down={{ lxc_shutdown_delay | default(60) }}"
 
         netif:
-          net0: >-
-            name=eth0,bridge={{ lxc_bridge }},
-            ip={{ lxc_ip }},ip6={{ lxc_ip6 }},
-            firewall={{ lxc_firewall | default(1) }}
+          net0: "name=eth0,bridge={{ lxc_bridge }},ip={{ lxc_ip }},ip6={{ lxc_ip6 }},firewall={{ lxc_firewall | default(1) }}"
 
         state: present
         timeout: 300
 
-      register: lxc_created
+      register: lxc_create_result
       no_log: true
-
-    - name: LXC "{{ lxc_hostname }}" starten
-      community.proxmox.proxmox:
-        api_host: "{{ pve_api_host }}"
-        api_user: "{{ pve_api_user }}"
-        api_password: "{{ pve_api_password }}"
-        validate_certs: false
-
-        node: "{{ pve_node }}"
-        vmid: "{{ lxc_vmid }}"
-
-        state: started
-        timeout: 180
-
-      register: lxc_started
-      no_log: true
-
-    ###########################################################################
-    # Runtime discovery
-    ###########################################################################
-
-    - name: Auf eine IPv4-Adresse im LXC warten
-      ansible.builtin.command:
-        argv:
-          - pct
-          - exec
-          - "{{ lxc_vmid | string }}"
-          - --
-          - ip
-          - -4
-          - -o
-          - addr
-          - show
-          - dev
-          - eth0
-          - scope
-          - global
-
-      delegate_to: "{{ pve_inventory_host | default(pve_node) }}"
-      register: lxc_ipv4_result
-      changed_when: false
-      failed_when: false
-
-      retries: 24
-      delay: 5
-
-      until:
-        - lxc_ipv4_result.rc == 0
-        - >-
-          lxc_ipv4_result.stdout
-          | regex_findall('inet\\s+([0-9.]+/[0-9]+)')
-          | length > 0
-
-    - name: Effektive Proxmox-LXC-Konfiguration lesen
-      ansible.builtin.command:
-        argv:
-          - pct
-          - config
-          - "{{ lxc_vmid | string }}"
-
-      delegate_to: "{{ pve_inventory_host | default(pve_node) }}"
-      register: lxc_config_result
-      changed_when: false
-
-    - name: Effektive LXC-Netzwerkdaten setzen
-      ansible.builtin.set_fact:
-        lxc_effective_ipv4: >-
-          {{
-            (
-              lxc_ipv4_result.stdout
-              | regex_findall('inet\\s+([0-9.]+/[0-9]+)')
-              | first
-            )
-            | regex_replace('/.*$', '')
-          }}
-
-        lxc_effective_mac: >-
-          {{
-            (
-              lxc_config_result.stdout
-              | regex_findall('hwaddr=([^,\\n]+)')
-              | first
-            )
-            | default('nicht ermittelt', true)
-          }}
-
-        lxc_effective_bridge: >-
-          {{
-            (
-              lxc_config_result.stdout
-              | regex_findall('bridge=([^,\\n]+)')
-              | first
-            )
-            | default(lxc_bridge, true)
-          }}
 
     ###########################################################################
     # Result
     ###########################################################################
 
-    - name: Ergebnis anzeigen
+    - name: Erstellung zusammenfassen
       ansible.builtin.debug:
         msg:
           - "============================================================"
-          - "Bergen Platform LXC erfolgreich bereitgestellt"
+          - "Bergen Platform LXC erfolgreich angelegt"
           - "============================================================"
           - "Hostname : {{ lxc_hostname }}"
           - "VMID     : {{ lxc_vmid }}"
           - "Node     : {{ pve_node }}"
-          - "Bridge   : {{ lxc_effective_bridge }}"
-          - "MAC      : {{ lxc_effective_mac }}"
-          - "IPv4     : {{ lxc_effective_ipv4 }}"
-          - "Storage  : {{ lxc_storage }}"
-          - "RAM      : {{ lxc_memory }} MiB"
+          - "Template : {{ lxc_template }}"
+          - "Storage  : {{ lxc_storage }}:{{ lxc_rootfs_size }}"
           - "CPU      : {{ lxc_cores }}"
-          - ""
-          - "SSH:"
-          - "  ssh root@{{ lxc_effective_ipv4 }}"
-          - ""
-          - "Inventory-Eintrag:"
-          - "  {{ lxc_hostname }}:"
-          - "    ansible_host: {{ lxc_effective_ipv4 }}"
+          - "RAM      : {{ lxc_memory }} MiB"
+          - "Swap     : {{ lxc_swap }} MiB"
+          - "Bridge   : {{ lxc_bridge }}"
+          - "IP-Modus : {{ lxc_ip }}"
+          - "Status   : angelegt"
           - ""
           - "Nächster Schritt:"
           - >-
-            ansible-playbook ansible/playbooks/bootstrap-lxc.yml
-            --limit {{ lxc_hostname }} --ask-vault-pass
+            ansible-playbook ansible/playbooks/discover-lxc.yml
+            -e @ansible/group_vars/all/{{ lxc_hostname }}.yml
+            --ask-vault-pass
           - "============================================================"

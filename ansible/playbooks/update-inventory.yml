@@ -1,0 +1,75 @@
+---
+###############################################################################
+#
+# Bergen Platform
+#
+# Playbook:
+#   update-inventory.yml
+#
+# Purpose:
+#   Persist the discovered LXC IPv4 address in ansible/inventory.yml.
+#
+###############################################################################
+
+- name: Persist discovered LXC inventory data
+  hosts: localhost
+  gather_facts: false
+
+  vars:
+    inventory_file_path: "{{ playbook_dir }}/../inventory.yml"
+    discovered_inventory_ipv4: "{{ hostvars[lxc_hostname].ansible_host }}"
+
+  tasks:
+    - name: Erforderliche Inventory-Variablen prüfen
+      ansible.builtin.assert:
+        that:
+          - lxc_hostname is defined
+          - lxc_hostname | string | length > 0
+          - hostvars[lxc_hostname] is defined
+          - hostvars[lxc_hostname].ansible_host is defined
+          - hostvars[lxc_hostname].ansible_host | string | length > 0
+
+        fail_msg: >-
+          Für {{ lxc_hostname | default('den LXC') }} wurden keine
+          gültigen Laufzeitdaten im temporären Inventory gefunden.
+
+        success_msg: >-
+          Die Laufzeitdaten für {{ lxc_hostname }} sind vorhanden.
+
+    - name: Inventory-Datei prüfen
+      ansible.builtin.stat:
+        path: "{{ inventory_file_path }}"
+      register: inventory_file
+
+    - name: Vorhandene Inventory-Datei voraussetzen
+      ansible.builtin.assert:
+        that:
+          - inventory_file.stat.exists
+          - inventory_file.stat.isreg
+
+        fail_msg: >-
+          Die Inventory-Datei {{ inventory_file_path }} wurde nicht gefunden.
+
+    - name: IPv4-Adresse des vorhandenen Hosts aktualisieren
+      ansible.builtin.replace:
+        path: "{{ inventory_file_path }}"
+        regexp: >-
+          (?ms)^(\s+{{ lxc_hostname | regex_escape }}:\s*\n
+          (?:(?!^\s{4}\S).)*?
+          \s+ansible_host:\s*)[^\n]+
+        replace: '\g<1>{{ discovered_inventory_ipv4 }}'
+      register: inventory_update
+
+    - name: Inventory-Aktualisierung anzeigen
+      ansible.builtin.debug:
+        msg:
+          - "============================================================"
+          - "Bergen Platform Inventory aktualisiert"
+          - "============================================================"
+          - "Hostname : {{ lxc_hostname }}"
+          - "IPv4     : {{ discovered_inventory_ipv4 }}"
+          - "Datei    : {{ inventory_file_path }}"
+          - >-
+            Status   :
+            {{ 'geändert' if inventory_update.changed else 'unverändert' }}
+          - "============================================================"
