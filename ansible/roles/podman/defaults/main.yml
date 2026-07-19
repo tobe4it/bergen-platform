@@ -1,2 +1,17 @@
 ---
-{}
+podman_packages:
+
+  - podman
+  - buildah
+  - skopeo
+
+  - fuse-overlayfs
+  - uidmap
+  - slirp4netns
+
+  - netavark
+  - aardvark-dns
+
+podman_storage_root: /srv/containers
+
+podman_quadlet_directory: /etc/containers/systemd

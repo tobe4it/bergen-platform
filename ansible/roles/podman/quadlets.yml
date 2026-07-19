@@ -1,0 +1,14 @@
+---
+- name: Create Quadlet directory
+
+  ansible.builtin.file:
+
+    path: "{{ podman_quadlet_directory }}"
+
+    state: directory
+
+    owner: root
+
+    group: root
+
+    mode: "0755"

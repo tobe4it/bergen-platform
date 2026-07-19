@@ -1,0 +1,40 @@
+---
+- name: Podman Version
+
+  command: podman --version
+
+  register: podman_version
+
+  changed_when: false
+
+- name: Buildah Version
+
+  command: buildah --version
+
+  register: buildah_version
+
+  changed_when: false
+
+- name: Skopeo Version
+
+  command: skopeo --version
+
+  register: skopeo_version
+
+  changed_when: false
+
+- name: Show validation
+
+  debug:
+
+    msg:
+
+      - "{{ podman_version.stdout }}"
+
+      - "{{ buildah_version.stdout }}"
+
+      - "{{ skopeo_version.stdout }}"
+
+      - "Storage: {{ podman_storage_root }}"
+
+      - "Quadlets: {{ podman_quadlet_directory }}"

@@ -1,2 +1,19 @@
 ---
-[]
+###############################################################################
+#
+# Bergen Platform
+#
+# Rolle:
+#   podman
+#
+# Installiert die OCI Container Runtime
+#
+###############################################################################
+
+- import_tasks: packages.yml
+
+- import_tasks: directories.yml
+
+- import_tasks: quadlets.yml
+
+- import_tasks: validate.yml
