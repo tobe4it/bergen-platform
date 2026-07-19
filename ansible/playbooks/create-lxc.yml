@@ -74,7 +74,6 @@
         hostname: "{{ lxc_hostname }}"
 
         ostemplate: "{{ lxc_template }}"
-
         disk: "{{ lxc_storage }}:{{ lxc_rootfs_size }}"
 
         cores: "{{ lxc_cores }}"
@@ -156,7 +155,7 @@
         - lxc_ipv4_result.rc == 0
         - >-
           lxc_ipv4_result.stdout
-          | regex_findall('inet\s+([0-9.]+/[0-9]+)')
+          | regex_findall('inet\\s+([0-9.]+/[0-9]+)')
           | length > 0
 
     - name: Effektive Proxmox-LXC-Konfiguration lesen
@@ -176,7 +175,7 @@
           {{
             (
               lxc_ipv4_result.stdout
-              | regex_findall('inet\s+([0-9.]+/[0-9]+)')
+              | regex_findall('inet\\s+([0-9.]+/[0-9]+)')
               | first
             )
             | regex_replace('/.*$', '')
@@ -186,7 +185,7 @@
           {{
             (
               lxc_config_result.stdout
-              | regex_findall('hwaddr=([^,\n]+)')
+              | regex_findall('hwaddr=([^,\\n]+)')
               | first
             )
             | default('nicht ermittelt', true)
@@ -196,7 +195,7 @@
           {{
             (
               lxc_config_result.stdout
-              | regex_findall('bridge=([^,\n]+)')
+              | regex_findall('bridge=([^,\\n]+)')
               | first
             )
             | default(lxc_bridge, true)
@@ -231,6 +230,6 @@
           - ""
           - "Nächster Schritt:"
           - >-
-            ansible-playbook ansible/playbooks/bootstrap-lxc.yml 
+            ansible-playbook ansible/playbooks/bootstrap-lxc.yml
             --limit {{ lxc_hostname }} --ask-vault-pass
           - "============================================================"
