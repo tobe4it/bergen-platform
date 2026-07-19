@@ -10,3 +10,6 @@ ollama_models_path: /srv/ai/models
 ollama_host: "0.0.0.0:11434"
 
 ollama_keep_alive: "30m"
+
+ollama_enable_vulkan: false
+ollama_enable_igpu: false

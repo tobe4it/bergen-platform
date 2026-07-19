@@ -1,0 +1,205 @@
+---
+###############################################################################
+#
+# Bergen Platform
+#
+# Playbook:
+#   install-ollama-models.yml
+#
+# Purpose:
+#   Install explicitly selected models on an existing Ollama node.
+#
+# Responsibilities:
+#   - Validate the selected target group
+#   - Verify that Ollama is available
+#   - Read the currently installed models
+#   - Pull only missing models
+#   - Validate the resulting model inventory
+#
+# Not included:
+#   - Installing or configuring Ollama
+#   - Removing models
+#   - Installing Open WebUI
+#
+###############################################################################
+
+- name: Install Ollama models
+  hosts: "{{ ollama_models_target | default('ai_nodes') }}"
+  become: true
+  gather_facts: false
+
+  vars:
+    ollama_models_requested:
+      - qwen3.5:9b
+
+  tasks:
+    ###########################################################################
+    # Validation
+    ###########################################################################
+
+    - name: Modellkonfiguration prüfen
+      ansible.builtin.assert:
+        that:
+          - ollama_models_requested is iterable
+          - ollama_models_requested is not string
+          - ollama_models_requested | length > 0
+
+        fail_msg: >-
+          Es wurden keine zu installierenden Ollama-Modelle definiert.
+
+        success_msg: >-
+          {{ ollama_models_requested | length }} Ollama-Modell(e)
+          wurden zur Installation ausgewählt.
+
+    - name: Ollama-Verfügbarkeit prüfen
+      ansible.builtin.command:
+        argv:
+          - /usr/local/bin/ollama
+          - --version
+      register: ollama_models_version
+      changed_when: false
+      check_mode: false
+
+    - name: Ollama-API prüfen
+      ansible.builtin.uri:
+        url: http://127.0.0.1:11434/api/tags
+        method: GET
+        return_content: true
+        status_code: 200
+      register: ollama_models_api
+      changed_when: false
+      check_mode: false
+
+    ###########################################################################
+    # Existing models
+    ###########################################################################
+
+    - name: Installierte Ollama-Modelle ermitteln
+      ansible.builtin.set_fact:
+        ollama_models_installed: >-
+          {{
+            ollama_models_api.json.models
+            | default([])
+            | map(attribute='name')
+            | list
+          }}
+
+    - name: Fehlende Ollama-Modelle ermitteln
+      ansible.builtin.set_fact:
+        ollama_models_missing: >-
+          {{
+            ollama_models_requested
+            | difference(ollama_models_installed)
+          }}
+
+    - name: Modellstatus anzeigen
+      ansible.builtin.debug:
+        msg:
+          - "Angefordert : {{ ollama_models_requested | join(', ') }}"
+          - >-
+            Installiert :
+            {{
+              ollama_models_installed
+              | default([])
+              | join(', ')
+              if ollama_models_installed | length > 0
+              else 'keine'
+            }}
+          - >-
+            Fehlend     :
+            {{
+              ollama_models_missing
+              | join(', ')
+              if ollama_models_missing | length > 0
+              else 'keine'
+            }}
+
+    ###########################################################################
+    # Installation
+    ###########################################################################
+
+    - name: Fehlende Ollama-Modelle installieren
+      ansible.builtin.command:
+        argv:
+          - /usr/local/bin/ollama
+          - pull
+          - "{{ item }}"
+      environment:
+        OLLAMA_HOST: http://127.0.0.1:11434
+      loop: "{{ ollama_models_missing }}"
+      loop_control:
+        label: "{{ item }}"
+      register: ollama_model_pull
+      changed_when: true
+      when:
+        - not ansible_check_mode
+        - ollama_models_missing | length > 0
+
+    - name: Modellinstallation im Check-Mode anzeigen
+      ansible.builtin.debug:
+        msg: >-
+          Folgende Modelle würden installiert:
+          {{ ollama_models_missing | join(', ') }}
+      when:
+        - ansible_check_mode
+        - ollama_models_missing | length > 0
+
+    ###########################################################################
+    # Validation
+    ###########################################################################
+
+    - name: Ollama-Modellbestand erneut abfragen
+      ansible.builtin.uri:
+        url: http://127.0.0.1:11434/api/tags
+        method: GET
+        return_content: true
+        status_code: 200
+      register: ollama_models_final_api
+      changed_when: false
+      check_mode: false
+      when: not ansible_check_mode
+
+    - name: Installierte Modelle validieren
+      ansible.builtin.assert:
+        that:
+          - >-
+            item in
+            (
+              ollama_models_final_api.json.models
+              | default([])
+              | map(attribute='name')
+              | list
+            )
+
+        fail_msg: >-
+          Das Ollama-Modell {{ item }} wurde nicht erfolgreich installiert.
+
+        success_msg: >-
+          Das Ollama-Modell {{ item }} ist installiert.
+
+      loop: "{{ ollama_models_requested }}"
+      loop_control:
+        label: "{{ item }}"
+      when: not ansible_check_mode
+
+    ###########################################################################
+    # Result
+    ###########################################################################
+
+    - name: Modellinstallation zusammenfassen
+      ansible.builtin.debug:
+        msg:
+          - "============================================================"
+          - "Bergen Platform Ollama-Modelle bereitgestellt"
+          - "============================================================"
+          - "Host    : {{ inventory_hostname }}"
+          - "Ollama  : {{ ollama_models_version.stdout | trim }}"
+          - "Modelle : {{ ollama_models_requested | join(', ') }}"
+          - >-
+            Status  :
+            {{
+              'im Check-Mode geprüft'
+              if ansible_check_mode
+              else 'installiert und validiert'
+            }}
+          - "============================================================"

@@ -11,6 +11,27 @@
   register: ai_lspci
   changed_when: false
 
+- name: DRI-Verzeichnis prüfen
+  ansible.builtin.stat:
+    path: /dev/dri
+  register: ai_dri_directory
+
+- name: Render-Geräte ermitteln
+  ansible.builtin.find:
+    paths: /dev/dri
+    patterns: "renderD*"
+    file_type: file
+  register: ai_render_devices
+  when: ai_dri_directory.stat.exists
+
+- name: Vulkan verfügbar prüfen
+  ansible.builtin.command:
+    cmd: vulkaninfo --summary
+  register: ai_vulkaninfo
+  changed_when: false
+  failed_when: false
+  when: ai_dri_directory.stat.exists
+
 - name: Virtualisierungsumgebung erkennen
   ansible.builtin.command:
     cmd: systemd-detect-virt
@@ -48,3 +69,16 @@
         ) > 0
       }}
     ai_virtualization_type: "{{ ai_virtualization.stdout | default('unknown') | trim }}"
+    ai_gpu_passthrough: "{{ ai_dri_directory.stat.exists | default(false) }}"
+    ai_render_device_count: >-
+      {{
+        ai_render_devices.files | default([])
+        | length
+      }}
+    
+    ai_vulkan_available: >-
+      {{
+        ai_vulkaninfo.rc is defined
+        and ai_vulkaninfo.rc == 0
+      }}
+

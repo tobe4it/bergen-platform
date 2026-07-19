@@ -8,3 +8,10 @@
   ansible.builtin.apt:
     name: "{{ ai_base_packages }}"
     state: present
+
+- name: GPU-Validierungswerkzeuge installieren
+  ansible.builtin.apt:
+    name: "{{ ai_gpu_validation_packages }}"
+    state: present
+    update_cache: true
+  when: lxc_gpu.enabled | default(false) | bool

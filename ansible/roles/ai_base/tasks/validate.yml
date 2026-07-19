@@ -18,6 +18,18 @@
     fail_msg: "Die KI-Basis wurde nicht vollständig eingerichtet."
     success_msg: "Die KI-Basis wurde erfolgreich eingerichtet."
 
+- name: GPU-Passthrough validieren
+  ansible.builtin.assert:
+    that:
+      - ai_dri_directory.stat.exists
+      - ai_render_devices | length > 0
+    fail_msg: >-
+      GPU-Passthrough wurde für diesen KI-Knoten angefordert,
+      aber /dev/dri ist im LXC nicht verfügbar.
+  when:
+    - not ansible_check_mode
+    - lxc_gpu.enabled | default(false) | bool
+
 - name: KI-Hardwarebericht ausgeben
   ansible.builtin.debug:
     msg:

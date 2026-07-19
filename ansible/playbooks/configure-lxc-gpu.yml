@@ -1,0 +1,308 @@
+---
+###############################################################################
+#
+# Bergen Platform
+#
+# Playbook:
+#   configure-lxc-gpu.yml
+#
+# Purpose:
+#   Configure optional DRI GPU access for an existing unprivileged
+#   Proxmox LXC container.
+#
+# Responsibilities:
+#   - Validate the requested GPU configuration
+#   - Validate /dev/dri on the Proxmox host
+#   - Permit DRI character devices through the LXC cgroup
+#   - Bind-mount /dev/dri into the container
+#   - Map host video and render groups into the unprivileged LXC
+#
+# Not included:
+#   - Restarting the LXC
+#   - Installing Vulkan userspace packages
+#   - Configuring Ollama
+#
+###############################################################################
+
+- name: Configure optional GPU access for Proxmox LXC
+  hosts: "{{ pve_inventory_host | default(pve_node) }}"
+  gather_facts: false
+  become: true
+
+  vars:
+    lxc_gpu_config_file: "/etc/pve/lxc/{{ lxc_vmid }}.conf"
+
+    lxc_gpu_video_host_gid: >-
+      {{ lxc_gpu.video_host_gid | default(44) | int }}
+
+    lxc_gpu_render_host_gid: >-
+      {{ lxc_gpu.render_host_gid | default(993) | int }}
+
+    lxc_gpu_video_container_gid: >-
+      {{ lxc_gpu.video_container_gid | default(44) | int }}
+
+    lxc_gpu_render_container_gid: >-
+      {{ lxc_gpu.render_container_gid | default(992) | int }}
+
+  tasks:
+    ###########################################################################
+    # Disabled state
+    ###########################################################################
+
+    - name: GPU-Konfiguration überspringen
+      ansible.builtin.debug:
+        msg: >-
+          Für {{ lxc_hostname | default('den angeforderten LXC') }}
+          ist kein GPU-Passthrough aktiviert.
+      when: not (lxc_gpu.enabled | default(false) | bool)
+
+    ###########################################################################
+    # GPU configuration
+    ###########################################################################
+
+    - name: GPU-Passthrough konfigurieren
+      when: lxc_gpu.enabled | default(false) | bool
+      block:
+        #######################################################################
+        # Input validation
+        #######################################################################
+
+        - name: Erforderliche GPU-Variablen prüfen
+          ansible.builtin.assert:
+            that:
+              - lxc_vmid is defined
+              - lxc_vmid | int > 0
+              - lxc_hostname is defined
+              - lxc_gpu.host_path is defined
+              - lxc_gpu.container_path is defined
+              - lxc_gpu_video_host_gid | int > 0
+              - lxc_gpu_render_host_gid | int > 0
+              - lxc_gpu_video_container_gid | int > 0
+              - lxc_gpu_render_container_gid | int > 0
+              - >-
+                (lxc_gpu_video_container_gid | int)
+                <
+                (lxc_gpu_render_container_gid | int)
+            fail_msg: >-
+              Für den GPU-Passthrough fehlen erforderliche Variablen
+              oder die angegebenen Gruppen-IDs sind ungültig.
+            success_msg: >-
+              Alle erforderlichen GPU-Passthrough-Variablen sind vorhanden.
+
+        #######################################################################
+        # Host validation
+        #######################################################################
+
+        - name: DRI-Verzeichnis auf dem Proxmox-Host prüfen
+          ansible.builtin.stat:
+            path: "{{ lxc_gpu.host_path }}"
+          register: lxc_gpu_host_dri
+
+        - name: Vorhandenes DRI-Verzeichnis voraussetzen
+          ansible.builtin.assert:
+            that:
+              - lxc_gpu_host_dri.stat.exists
+              - lxc_gpu_host_dri.stat.isdir
+            fail_msg: >-
+              {{ lxc_gpu.host_path }} ist auf dem Proxmox-Host
+              {{ inventory_hostname }} nicht vorhanden.
+            success_msg: >-
+              {{ lxc_gpu.host_path }} ist auf dem Proxmox-Host vorhanden.
+
+        - name: Render-Gerät auf dem Proxmox-Host prüfen
+          ansible.builtin.stat:
+            path: "{{ lxc_gpu.host_path }}/renderD128"
+          register: lxc_gpu_host_render_device
+
+        - name: Vorhandenes Render-Gerät voraussetzen
+          ansible.builtin.assert:
+            that:
+              - lxc_gpu_host_render_device.stat.exists
+            fail_msg: >-
+              Das Render-Gerät
+              {{ lxc_gpu.host_path }}/renderD128
+              wurde auf {{ inventory_hostname }} nicht gefunden.
+            success_msg: >-
+              Das Render-Gerät
+              {{ lxc_gpu.host_path }}/renderD128
+              ist vorhanden.
+
+        - name: LXC-Konfigurationsdatei prüfen
+          ansible.builtin.stat:
+            path: "{{ lxc_gpu_config_file }}"
+          register: lxc_gpu_config
+
+        - name: Vorhandene LXC-Konfiguration voraussetzen
+          ansible.builtin.assert:
+            that:
+              - lxc_gpu_config.stat.exists
+              - lxc_gpu_config.stat.isreg
+            fail_msg: >-
+              Die LXC-Konfiguration {{ lxc_gpu_config_file }}
+              wurde nicht gefunden.
+            success_msg: >-
+              Die LXC-Konfiguration {{ lxc_gpu_config_file }}
+              ist vorhanden.
+
+        - name: LXC-Konfiguration einlesen
+          ansible.builtin.slurp:
+            src: "{{ lxc_gpu_config_file }}"
+          register: lxc_gpu_config_raw
+
+        - name: Eingelesene LXC-Konfiguration dekodieren
+          ansible.builtin.set_fact:
+            lxc_gpu_config_content: >-
+              {{ lxc_gpu_config_raw.content | b64decode }}
+
+        - name: Unprivilegierten LXC voraussetzen
+          ansible.builtin.assert:
+            that:
+              - "'unprivileged: 1' in lxc_gpu_config_content"
+            fail_msg: >-
+              Dieses Playbook erwartet einen unprivilegierten LXC.
+              In {{ lxc_gpu_config_file }} wurde
+              "unprivileged: 1" nicht gefunden.
+            success_msg: >-
+              Der LXC {{ lxc_hostname }} ist unprivilegiert.
+
+        #######################################################################
+        # Existing ID-map validation
+        #######################################################################
+
+        - name: Vorhandene ID-Mappings ermitteln
+          ansible.builtin.set_fact:
+            lxc_gpu_existing_idmaps: >-
+              {{
+                lxc_gpu_config_content
+                | regex_findall('(?m)^lxc\\.idmap:.*$')
+              }}
+
+            lxc_gpu_managed_idmap_present: >-
+              {{
+                'BEGIN BERGEN PLATFORM GPU IDMAP'
+                in lxc_gpu_config_content
+              }}
+
+        - name: Konfliktfreie ID-Mapping-Konfiguration voraussetzen
+          ansible.builtin.assert:
+            that:
+              - >-
+                (lxc_gpu_existing_idmaps | length == 0)
+                or
+                (lxc_gpu_managed_idmap_present | bool)
+            fail_msg: >-
+              In {{ lxc_gpu_config_file }} existieren bereits
+              lxc.idmap-Einträge, die nicht von Bergen Platform verwaltet
+              werden. Die vorhandenen Einträge müssen vor einer automatischen
+              Änderung geprüft werden.
+            success_msg: >-
+              Die GPU-ID-Mappings können konfliktfrei verwaltet werden.
+
+        #######################################################################
+        # Host subordinate group permissions
+        #######################################################################
+
+        - name: Host-GID der Gruppe video für root freigeben
+          ansible.builtin.lineinfile:
+            path: /etc/subgid
+            regexp: "^root:{{ lxc_gpu_video_host_gid }}:1$"
+            line: "root:{{ lxc_gpu_video_host_gid }}:1"
+            create: true
+            owner: root
+            group: root
+            mode: "0644"
+          register: lxc_gpu_video_subgid
+
+        - name: Host-GID der Gruppe render für root freigeben
+          ansible.builtin.lineinfile:
+            path: /etc/subgid
+            regexp: "^root:{{ lxc_gpu_render_host_gid }}:1$"
+            line: "root:{{ lxc_gpu_render_host_gid }}:1"
+            create: true
+            owner: root
+            group: root
+            mode: "0644"
+          register: lxc_gpu_render_subgid
+
+        #######################################################################
+        # Device access and mount
+        #######################################################################
+
+        - name: Zugriff auf DRI-Geräte erlauben
+          ansible.builtin.lineinfile:
+            path: "{{ lxc_gpu_config_file }}"
+            regexp: '^lxc\.cgroup2\.devices\.allow:\s*c\s+226:\*\s+rwm$'
+            line: "lxc.cgroup2.devices.allow: c 226:* rwm"
+            insertafter: EOF
+          register: lxc_gpu_cgroup_rule
+
+        - name: DRI-Verzeichnis in den LXC einbinden
+          ansible.builtin.lineinfile:
+            path: "{{ lxc_gpu_config_file }}"
+            regexp: >-
+              ^lxc\.mount\.entry:\s*/dev/dri\s+dev/dri\s+none\s+bind,optional,create=dir$
+            line: >-
+              lxc.mount.entry: /dev/dri dev/dri none bind,optional,create=dir
+            insertafter: EOF
+          register: lxc_gpu_mount_rule
+
+        #######################################################################
+        # UID/GID mapping
+        #
+        # Container GID 44:
+        #   maps to host GID 44 (video)
+        #
+        # Container GID 992:
+        #   maps to host GID 993 (render)
+        #
+        # All other IDs remain in the regular namespace beginning at 100000.
+        #######################################################################
+
+        - name: GPU-Gruppen in den unprivilegierten LXC abbilden
+          ansible.builtin.blockinfile:
+            path: "{{ lxc_gpu_config_file }}"
+            marker: "# {mark} BERGEN PLATFORM GPU IDMAP"
+            insertafter: EOF
+            block: |
+              lxc.idmap: u 0 100000 65536
+              lxc.idmap: g 0 100000 {{ lxc_gpu_video_container_gid | int }}
+              lxc.idmap: g {{ lxc_gpu_video_container_gid | int }} {{ lxc_gpu_video_host_gid | int }} 1
+              lxc.idmap: g {{ (lxc_gpu_video_container_gid | int) + 1 }} {{ 100000 + (lxc_gpu_video_container_gid | int) + 1 }} {{ (lxc_gpu_render_container_gid | int) - (lxc_gpu_video_container_gid | int) - 1 }}
+              lxc.idmap: g {{ lxc_gpu_render_container_gid | int }} {{ lxc_gpu_render_host_gid | int }} 1
+              lxc.idmap: g {{ (lxc_gpu_render_container_gid | int) + 1 }} {{ 100000 + (lxc_gpu_render_container_gid | int) + 1 }} {{ 65536 - (lxc_gpu_render_container_gid | int) - 1 }}
+          register: lxc_gpu_idmap
+
+        #######################################################################
+        # Result
+        #######################################################################
+
+        - name: GPU-Konfiguration zusammenfassen
+          ansible.builtin.debug:
+            msg:
+              - "============================================================"
+              - "Bergen Platform LXC-GPU-Konfiguration"
+              - "============================================================"
+              - "Hostname        : {{ lxc_hostname }}"
+              - "VMID            : {{ lxc_vmid }}"
+              - "Proxmox-Host    : {{ inventory_hostname }}"
+              - "Host-Gerät      : {{ lxc_gpu.host_path }}"
+              - "Container-Gerät : {{ lxc_gpu.container_path }}"
+              - >-
+                video GID       :
+                Container {{ lxc_gpu_video_container_gid }}
+                -> Host {{ lxc_gpu_video_host_gid }}
+              - >-
+                render GID      :
+                Container {{ lxc_gpu_render_container_gid }}
+                -> Host {{ lxc_gpu_render_host_gid }}
+              - >-
+                Änderung        :
+                {{
+                  lxc_gpu_video_subgid.changed
+                  or lxc_gpu_render_subgid.changed
+                  or lxc_gpu_cgroup_rule.changed
+                  or lxc_gpu_mount_rule.changed
+                  or lxc_gpu_idmap.changed
+                }}
+              - "Nächster Schritt: LXC neu starten"
+              - "============================================================"

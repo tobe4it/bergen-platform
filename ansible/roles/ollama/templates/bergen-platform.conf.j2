@@ -11,3 +11,11 @@
 Environment="OLLAMA_MODELS={{ ollama_models_path }}"
 Environment="OLLAMA_HOST={{ ollama_host }}"
 Environment="OLLAMA_KEEP_ALIVE={{ ollama_keep_alive }}"
+
+{% if ollama_enable_vulkan | default(false) | bool %}
+Environment="OLLAMA_VULKAN=1"
+{% endif %}
+
+{% if ollama_enable_igpu | default(false) | bool %}
+Environment="OLLAMA_IGPU_ENABLE=1"
+{% endif %}

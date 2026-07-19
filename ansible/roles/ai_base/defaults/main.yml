@@ -20,3 +20,7 @@ ai_base_packages:
 
 ai_directory_mode: "2775"
 ai_service_shell: /usr/sbin/nologin
+
+ai_gpu_validation_packages:
+  - vulkan-tools
+

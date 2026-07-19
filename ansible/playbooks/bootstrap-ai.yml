@@ -22,6 +22,7 @@
     # Erkennung und Vorbereitung der verfügbaren Hardware
     - role: ai_base
       tags:
+        - base
         - ai
         - hardware
 

@@ -26,3 +26,18 @@ lxc_root_password: "{{ vault_lxc_root_password }}"
 pve_node: venombox
 pve_inventory_host: venombox
 
+lxc_gpu:
+  enabled: true
+
+  host_path: /dev/dri
+  container_path: /dev/dri
+
+  video_host_gid: 44
+  render_host_gid: 993
+
+  video_container_gid: 44
+  render_container_gid: 992
+
+ollama_enable_vulkan: true
+ollama_enable_igpu: true
+

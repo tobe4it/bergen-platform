@@ -27,6 +27,8 @@
 
 - import_playbook: create-lxc.yml
 
+- import_playbook: configure-lxc-gpu.yml
+
 - import_playbook: restart-lxc.yml
 
 - import_playbook: discover-lxc.yml
