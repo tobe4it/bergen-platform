@@ -1,0 +1,42 @@
+---
+- name: Warten bis API verfügbar
+
+  ansible.builtin.wait_for:
+
+    host: 127.0.0.1
+
+    port: 11434
+
+    timeout: 60
+
+- name: Modelle abfragen
+
+  ansible.builtin.uri:
+
+    url: http://127.0.0.1:11434/api/tags
+
+    return_content: true
+
+  register: ollama_api
+
+- name: Ollama Version
+
+  ansible.builtin.command:
+
+    cmd: ollama --version
+
+  register: ollama_version
+
+  changed_when: false
+
+- name: Validierung ausgeben
+
+  ansible.builtin.debug:
+
+    msg:
+
+      - "{{ ollama_version.stdout }}"
+
+      - "API erreichbar"
+
+      - "Modelle: {{ ollama_api.json.models | default([]) | length }}"

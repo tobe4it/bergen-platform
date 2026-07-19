@@ -1,0 +1,22 @@
+---
+###############################################################################
+#
+# Bergen Platform
+#
+# Role:
+#   ollama
+#
+# Task:
+#   API readiness validation
+#
+###############################################################################
+
+- name: Wait until Ollama API is reachable
+
+  ansible.builtin.wait_for:
+
+    host: 127.0.0.1
+
+    port: 11434
+
+    timeout: 60

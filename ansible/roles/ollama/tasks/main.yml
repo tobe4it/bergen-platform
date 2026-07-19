@@ -1,2 +1,42 @@
 ---
-[]
+###############################################################################
+#
+# Bergen Platform
+#
+# Role:
+#   ollama
+#
+# Purpose:
+#   Deploy and manage the Ollama inference service.
+#
+###############################################################################
+
+###############################################################################
+#
+# Execution Flow
+#
+# install
+#     ↓
+# directories
+#     ↓
+# configure
+#     ↓
+# service
+#     ↓
+# api
+#     ↓
+# validate
+#
+###############################################################################
+
+- ansible.builtin.import_tasks: install.yml
+
+- ansible.builtin.import_tasks: directories.yml
+
+- ansible.builtin.import_tasks: configure.yml
+
+- ansible.builtin.import_tasks: service.yml
+
+- ansible.builtin.import_tasks: api.yml
+
+- ansible.builtin.import_tasks: validate.yml

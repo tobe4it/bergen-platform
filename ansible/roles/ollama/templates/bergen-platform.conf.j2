@@ -1,0 +1,13 @@
+###############################################################################
+#
+# Bergen Platform
+#
+# Ollama systemd configuration
+#
+###############################################################################
+
+[Service]
+
+Environment="OLLAMA_MODELS={{ ollama_models_path }}"
+Environment="OLLAMA_HOST={{ ollama_host }}"
+Environment="OLLAMA_KEEP_ALIVE={{ ollama_keep_alive }}"

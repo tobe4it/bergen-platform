@@ -1,0 +1,10 @@
+---
+- name: Ollama aktivieren
+
+  ansible.builtin.systemd:
+
+    name: ollama
+
+    enabled: true
+
+    state: started

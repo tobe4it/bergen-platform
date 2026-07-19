@@ -1,0 +1,50 @@
+---
+###############################################################################
+#
+# Bergen Platform
+#
+# Role:
+#   ollama
+#
+# Task:
+#   Install Ollama
+#
+###############################################################################
+
+- name: Install Ollama installation dependencies
+  ansible.builtin.apt:
+    name:
+      - curl
+      - zstd
+    state: present
+    update_cache: true
+    cache_valid_time: 3600
+
+- name: Create Ollama system group
+  ansible.builtin.group:
+    name: "{{ ollama_user }}"
+    system: true
+    state: present
+
+- name: Add Ollama service user to required groups
+  ansible.builtin.user:
+    name: "{{ ollama_user }}"
+    groups:
+      - "{{ ollama_group }}"
+      - "{{ ollama_user }}"
+    append: true
+    state: present
+
+- name: Check whether Ollama is already installed
+  ansible.builtin.stat:
+    path: /usr/local/bin/ollama
+  register: ollama_binary
+
+- name: Download and install Ollama
+  ansible.builtin.shell:
+    cmd: |
+      set -o pipefail
+      curl -fsSL https://ollama.com/install.sh | sh
+    executable: /bin/bash
+  when: not ollama_binary.stat.exists
+  changed_when: true

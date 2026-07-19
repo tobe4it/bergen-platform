@@ -1,0 +1,30 @@
+---
+###############################################################################
+#
+# Bergen Platform
+#
+# Role:
+#   ollama
+#
+# Task:
+#   Configure Ollama
+#
+###############################################################################
+
+- name: Install Bergen Platform systemd configuration
+
+  ansible.builtin.template:
+
+    src: bergen-platform.conf.j2
+
+    dest: /etc/systemd/system/ollama.service.d/bergen-platform.conf
+
+    owner: root
+
+    group: root
+
+    mode: "0644"
+
+  notify:
+
+    - Restart Ollama

@@ -1,2 +1,12 @@
 ---
-{}
+ollama_version: latest
+
+ollama_user: ollama
+
+ollama_group: ai
+
+ollama_models_path: /srv/ai/models
+
+ollama_host: "0.0.0.0:11434"
+
+ollama_keep_alive: "30m"
