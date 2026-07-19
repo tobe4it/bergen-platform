@@ -215,6 +215,7 @@
       when:
         - bootstrap_refresh_host_keys | default(false) | bool
         - item.port | int == 22
+        - not ansible_check_mode
 
     - name: Aktuelle SSH-Hostschlüssel für abweichenden Port einlesen
       ansible.builtin.command:
@@ -243,6 +244,7 @@
       when:
         - bootstrap_refresh_host_keys | default(false) | bool
         - item.port | int != 22
+        - not ansible_check_mode
 
     - name: SSH-Hostschlüssel für Standardport registrieren
       ansible.builtin.lineinfile:

@@ -14,12 +14,17 @@
 #   - Verify that the LXC exists
 #   - Stop the LXC if it is running
 #   - Start the LXC
-#   - Verify the running state
+#   - Wait for the running state
 #   - Verify that eth0 is available
+#
+# Check mode:
+#   - Read-only validation is executed
+#   - Stop and start operations are skipped
+#   - Runtime validation after restart is skipped
 #
 # Not included:
 #   - Creating the LXC
-#   - Discovering its IPv4 address
+#   - Discovering its network configuration
 #   - Modifying the Ansible inventory
 #   - Applying the Linux baseline
 #
@@ -63,19 +68,21 @@
       register: lxc_status
       changed_when: false
       failed_when: false
+      check_mode: false
 
     - name: Vorhandensein des LXC prüfen
       ansible.builtin.assert:
         that:
-          - lxc_status.rc == 0
-          - "'status:' in lxc_status.stdout"
+          - lxc_status.rc | default(1) == 0
+          - "'status:' in (lxc_status.stdout | default(''))"
 
         fail_msg: >-
           Der LXC {{ lxc_hostname }} mit VMID {{ lxc_vmid }}
           wurde auf {{ inventory_hostname }} nicht gefunden.
 
         success_msg: >-
-          Der LXC {{ lxc_hostname }} mit VMID {{ lxc_vmid }} ist vorhanden.
+          Der LXC {{ lxc_hostname }} mit VMID {{ lxc_vmid }}
+          ist vorhanden.
 
     ###########################################################################
     # Stop
@@ -88,18 +95,24 @@
         || /usr/sbin/pct stop {{ lxc_vmid }}
       register: lxc_stop_result
       changed_when: true
-      when: "'status: running' in lxc_status.stdout"
+      when:
+        - not ansible_check_mode
+        - "'status: running' in (lxc_status.stdout | default(''))"
 
     - name: Auf gestoppten LXC warten
       ansible.builtin.raw: >-
         /usr/sbin/pct status {{ lxc_vmid }}
       register: lxc_stopped_status
       changed_when: false
+      failed_when: false
       retries: "{{ lxc_stop_retries | default(24) }}"
       delay: "{{ lxc_stop_check_delay | default(5) }}"
       until:
-        - lxc_stopped_status.rc == 0
-        - "'status: stopped' in lxc_stopped_status.stdout"
+        - lxc_stopped_status.rc | default(1) == 0
+        - "'status: stopped' in (lxc_stopped_status.stdout | default(''))"
+      when:
+        - not ansible_check_mode
+        - "'status: running' in (lxc_status.stdout | default(''))"
 
     ###########################################################################
     # Start
@@ -110,17 +123,20 @@
         /usr/sbin/pct start {{ lxc_vmid }}
       register: lxc_start_result
       changed_when: true
+      when: not ansible_check_mode
 
     - name: Auf laufenden LXC warten
       ansible.builtin.raw: >-
         /usr/sbin/pct status {{ lxc_vmid }}
       register: lxc_running_status
       changed_when: false
+      failed_when: false
       retries: "{{ lxc_start_retries | default(24) }}"
       delay: "{{ lxc_start_check_delay | default(5) }}"
       until:
-        - lxc_running_status.rc == 0
-        - "'status: running' in lxc_running_status.stdout"
+        - lxc_running_status.rc | default(1) == 0
+        - "'status: running' in (lxc_running_status.stdout | default(''))"
+      when: not ansible_check_mode
 
     ###########################################################################
     # Runtime validation
@@ -135,12 +151,14 @@
       failed_when: false
       retries: "{{ lxc_network_retries | default(24) }}"
       delay: "{{ lxc_network_check_delay | default(5) }}"
-      until: lxc_eth0_status.rc == 0
+      until:
+        - lxc_eth0_status.rc | default(1) == 0
+      when: not ansible_check_mode
 
     - name: Netzwerkschnittstelle eth0 validieren
       ansible.builtin.assert:
         that:
-          - lxc_eth0_status.rc == 0
+          - lxc_eth0_status.rc | default(1) == 0
 
         fail_msg: >-
           Der LXC {{ lxc_hostname }} läuft, aber die Netzwerkschnittstelle
@@ -148,6 +166,8 @@
 
         success_msg: >-
           Der LXC {{ lxc_hostname }} läuft und eth0 ist verfügbar.
+
+      when: not ansible_check_mode
 
     ###########################################################################
     # Result
@@ -171,3 +191,24 @@
             -e @ansible/group_vars/all/{{ lxc_hostname }}.yml
             --ask-vault-pass
           - "============================================================"
+      when: not ansible_check_mode
+
+    - name: Check-Mode zusammenfassen
+      ansible.builtin.debug:
+        msg:
+          - "============================================================"
+          - "Bergen Platform LXC-Neustart geprüft"
+          - "============================================================"
+          - "Hostname : {{ lxc_hostname }}"
+          - "VMID     : {{ lxc_vmid }}"
+          - "Node     : {{ pve_node }}"
+          - >-
+            Status   :
+            {{
+              lxc_status.stdout
+              | default('nicht ermittelt')
+              | trim
+            }}
+          - "Aktion   : Neustart im Check-Mode nicht ausgeführt"
+          - "============================================================"
+      when: ansible_check_mode

@@ -1,0 +1,43 @@
+---
+###############################################################################
+#
+# Bergen Platform
+#
+# Playbook:
+#   deploy-ai.yml
+#
+# Purpose:
+#   Complete deployment of a Bergen Platform AI node.
+#
+# Execution flow:
+#
+#   create-lxc.yml
+#        ↓
+#   restart-lxc.yml
+#        ↓
+#   discover-lxc.yml
+#        ↓
+#   update-inventory.yml
+#        ↓
+#   bootstrap-lxc.yml
+#        ↓
+#   bootstrap-ai.yml
+#
+###############################################################################
+
+- import_playbook: create-lxc.yml
+
+- import_playbook: restart-lxc.yml
+
+- import_playbook: discover-lxc.yml
+
+- import_playbook: update-inventory.yml
+
+- import_playbook: bootstrap-lxc.yml
+  vars:
+    bootstrap_lxc_target: discovered_lxcs
+    bootstrap_refresh_host_keys: true
+
+- import_playbook: bootstrap-ai.yml
+  vars:
+    bootstrap_ai_target: discovered_lxcs

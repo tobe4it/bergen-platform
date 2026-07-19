@@ -1,4 +1,8 @@
 ---
+- name: Validierung im Check-Mode überspringen
+  ansible.builtin.meta: end_host
+  when: ansible_check_mode
+
 - name: Gemeinsame Modellablage prüfen
   ansible.builtin.stat:
     path: "{{ ai_model_directory }}"

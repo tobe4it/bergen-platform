@@ -9,7 +9,7 @@
 ###############################################################################
 
 - name: Bootstrap Bergen Platform AI node
-  hosts: ai_nodes
+  hosts: "{{ bootstrap_ai_target | default('ai_nodes') }}"
   become: true
   gather_facts: true
 
