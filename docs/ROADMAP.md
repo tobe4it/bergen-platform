@@ -1,88 +1,140 @@
 # Bergen Platform Roadmap
 
-This roadmap describes the planned evolution of the Bergen Platform.
-Priorities may change as the project grows.
+This document describes the planned evolution of the Bergen Platform.
 
-## Guiding Principles
+The roadmap reflects current priorities and may change as the project evolves.
 
-- Infrastructure as Code
-- Reproducible deployments
-- Modular architecture
-- Security by default
-- Documentation first
+---
 
-## v0.5.1 – Open WebUI Improvements
+# Vision
 
-Planned
-- Automatic LDAP user activation
-- Improve Open WebUI administration
-- Refine LDAP integration
-- Improve validation tasks
-- Minor bug fixes
+Provide a reproducible, fully documented and modular Infrastructure-as-Code
+platform for self-hosted services running on Proxmox VE.
 
-## v0.6.0 – AI Platform
+The platform should allow a complete environment to be rebuilt from scratch
+using Ansible.
 
-Planned
-- llama.cpp integration
+---
+
+# v0.5.1
+
+Documentation and Open WebUI stabilization.
+
+Planned:
+
+- Documentation cleanup
+- Open WebUI improvements
+- LDAP refinements
+- Validation improvements
+- Operational stability
+
+---
+
+# v0.6.0
+
+## AI Platform
+
+Planned:
+
 - Model management
-- Model download automation
-- GPU improvements
-- AI runtime enhancements
+- Automated model provisioning
+- llama.cpp integration
+- GPU support improvements
+- AI validation
+- Resource monitoring
 
-## v0.7.0 – Mail Platform
+---
 
-Planned
-- Postfix deployment
-- Dovecot deployment
-- Rspamd integration
-- DKIM automation
-- Mail gateway role
+# v0.7.0
 
-## v0.8.0 – IBM MQ
+## Monitoring
 
-Planned
-- MQ Client deployment
-- MQ administration automation
-- MQ object management
-- MQSC deployment
-- MQ validation
+Planned:
 
-## v0.9.0 – Infrastructure Services
+- Observium deployment
+- Automated monitoring configuration
+- Host monitoring
+- LXC monitoring
+- Service monitoring
+- Alerting preparation
 
-Planned
-- Observium
+---
+
+# v0.8.0
+
+## Backup & Recovery
+
+Planned:
+
+- Automated LXC backups
+- Configuration backups
+- Restore procedures
+- Backup validation
+- Scheduled backups
+- Disaster recovery documentation
+
+---
+
+# v0.9.0
+
+## Security
+
+Planned:
+
+- Security hardening
+- SSH hardening
+- Firewall validation
+- Secrets management
+- Central logging
+- Audit support
+- Patch management
+
+---
+
+# v1.0.0
+
+## First Stable Release
+
+Goals:
+
+- Stable deployment process
+- Fully documented platform
+- Open WebUI
+- Ollama
+- LDAP authentication
 - Monitoring
 - Backup
-- Security hardening
-- Logging improvements
+- Security baseline
+- Reliable update procedures
 
-## v1.0.0 – Bergen Platform
+---
 
-Goal
-First stable public release.
+# Beyond v1.0
 
-Scope
-- Complete AI platform
-- Mail platform
-- LDAP integration
-- Monitoring
-- IBM MQ automation
-- Comprehensive documentation
-- Stable release process
-- Semantic Versioning
-- GitHub releases
+## Mail Platform
 
-## Beyond v1.0
+Planned:
 
-Potential future areas:
+- Postfix
+- Dovecot
+- Rspamd
+- DKIM
+- DMARC
+- MTA-STS
+- TLS Reporting
+- Mail migration
+
+---
+
+## Additional Services
+
+Future candidates:
+
 - Nextcloud
-- Authentik / SSO
 - Matrix
 - Asterisk
-- Kubernetes integration
 - High Availability
 - Multi-node deployments
-- CI/CD pipelines
+- CI/CD
 - Automated testing
-- Community contributions
 
