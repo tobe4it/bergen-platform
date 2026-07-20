@@ -23,4 +23,8 @@
   ansible.builtin.systemd:
     name: "{{ open_webui_service_name }}"
     state: restarted
-  when: open_webui_quadlet.changed
+  when:
+    - >-
+      (open_webui_quadlet.changed | default(false))
+      or
+      (ldap_open_webui_env.changed | default(false))

@@ -1,0 +1,17 @@
+---
+###############################################################################
+#
+# Bergen Platform
+#
+# LDAP client and application integration
+#
+###############################################################################
+
+- name: LDAP packages
+  ansible.builtin.import_tasks: packages.yml
+
+- name: LDAP configuration
+  ansible.builtin.import_tasks: configure.yml
+
+- name: LDAP validation
+  ansible.builtin.import_tasks: validate.yml

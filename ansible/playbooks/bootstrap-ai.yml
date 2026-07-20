@@ -47,6 +47,14 @@
         - inference
         - llama_cpp
 
+    # Zentrale LDAP-Konfiguration und Authentifizierungsanbindung
+    - role: ldap
+      tags:
+        - ai
+        - auth
+        - ldap
+        - webui
+
     # Weboberfläche für lokale und angebundene Modelle
     - role: open_webui
       tags:

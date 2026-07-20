@@ -15,13 +15,18 @@ Requires=ollama.service
 [Container]
 ContainerName={{ open_webui_container_name }}
 Image={{ open_webui_image }}
+
 Network=host
+
 Volume={{ open_webui_data_directory }}:/app/backend/data
 
 Environment=PORT={{ open_webui_port }}
 Environment=OLLAMA_BASE_URL={{ open_webui_ollama_base_url }}
 Environment=WEBUI_AUTH={{ open_webui_auth_enabled | ternary('True', 'False') }}
 Environment=ENABLE_SIGNUP={{ open_webui_signup_enabled | ternary('True', 'False') }}
+Environment=ENABLE_PERSISTENT_CONFIG=false
+
+EnvironmentFile={{ ldap_open_webui_env_file }}
 
 [Service]
 Restart=always

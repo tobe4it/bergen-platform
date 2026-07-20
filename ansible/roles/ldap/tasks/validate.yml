@@ -1,0 +1,78 @@
+---
+###############################################################################
+#
+# Bergen Platform
+#
+# LDAP validation
+#
+###############################################################################
+
+- name: LDAP-Port erreichen
+  ansible.builtin.wait_for:
+    host: "{{ ldap_host }}"
+    port: "{{ ldap_port }}"
+    timeout: 5
+
+- name: LDAP-Benutzersuche mit anonymem Bind prüfen
+  ansible.builtin.command:
+    argv:
+      - ldapsearch
+      - -x
+      - -H
+      - "{{ ldap_protocol }}://{{ ldap_host }}:{{ ldap_port }}"
+      - -b
+      - "{{ ldap_search_base }}"
+      - "({{ ldap_username_attribute }}=*)"
+  register: ldap_anonymous_search
+  changed_when: false
+  failed_when: false
+  when: ldap_bind_dn | length == 0
+
+- name: LDAP-Benutzersuche mit Application-Bind prüfen
+  ansible.builtin.command:
+    argv:
+      - ldapsearch
+      - -x
+      - -H
+      - "{{ ldap_protocol }}://{{ ldap_host }}:{{ ldap_port }}"
+      - -D
+      - "{{ ldap_bind_dn }}"
+      - -w
+      - "{{ ldap_bind_password }}"
+      - -b
+      - "{{ ldap_search_base }}"
+      - "({{ ldap_username_attribute }}=*)"
+  register: ldap_authenticated_search
+  changed_when: false
+  failed_when: false
+  when: ldap_bind_dn | length > 0
+
+- name: LDAP-Suchergebnis validieren
+  ansible.builtin.assert:
+    that:
+      - >
+        (
+          ldap_anonymous_search.rc | default(1)
+        ) == 0
+        or
+        (
+          ldap_authenticated_search.rc | default(1)
+        ) == 0
+    fail_msg: >
+      LDAP search failed.
+      Check host, port, search base and bind configuration.
+    success_msg: >
+      LDAP directory search successful.
+
+- name: LDAP-Konfiguration zusammenfassen
+  ansible.builtin.debug:
+    msg:
+      - "=============================================================="
+      - "Bergen Platform LDAP configured"
+      - "=============================================================="
+      - "Server      : {{ ldap_protocol }}://{{ ldap_host }}:{{ ldap_port }}"
+      - "Base DN     : {{ ldap_base_dn }}"
+      - "Search Base : {{ ldap_search_base }}"
+      - "Bind DN     : {{ ldap_bind_dn | default('anonymous') | default('anonymous', true) }}"
+      - "=============================================================="
+

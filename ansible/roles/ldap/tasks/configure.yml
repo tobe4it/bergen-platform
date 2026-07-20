@@ -1,0 +1,59 @@
+---
+###############################################################################
+# Preconditions
+###############################################################################
+
+- name: LDAP-Konfiguration prüfen
+  ansible.builtin.assert:
+    that:
+      - ldap_host | string | length > 0
+      - "'://' not in ldap_host"
+      - ldap_port | int > 0
+      - ldap_port | int <= 65535
+      - ldap_base_dn | string | length > 0
+      - ldap_search_base | string | length > 0
+      - ldap_username_attribute | string | length > 0
+      - ldap_mail_attribute | string | length > 0
+      - >-
+        (
+          (ldap_bind_dn | string | length == 0)
+          and
+          (ldap_bind_password | string | length == 0)
+        )
+        or
+        (
+          (ldap_bind_dn | string | length > 0)
+          and
+          (ldap_bind_password | string | length > 0)
+        )
+      - not (ldap_validate_cert | bool) or (ldap_use_tls | bool)
+    fail_msg: >-
+      Die LDAP-Konfiguration ist unvollständig oder widersprüchlich.
+      LDAP_SERVER_HOST darf insbesondere kein ldap://-Präfix enthalten.
+    success_msg: "Die LDAP-Konfiguration ist syntaktisch vollständig."
+
+###############################################################################
+# Configuration directory
+###############################################################################
+
+- name: Bergen-Platform-Konfigurationsverzeichnis anlegen
+  ansible.builtin.file:
+    path: "{{ ldap_config_directory }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+
+###############################################################################
+# Open WebUI environment
+###############################################################################
+
+- name: LDAP-Environment für Open WebUI erzeugen
+  ansible.builtin.template:
+    src: open-webui-ldap.env.j2
+    dest: "{{ ldap_open_webui_env_file }}"
+    owner: "{{ ldap_open_webui_env_owner }}"
+    group: "{{ ldap_open_webui_env_group }}"
+    mode: "{{ ldap_open_webui_env_mode }}"
+  register: ldap_open_webui_env
+  no_log: "{{ ldap_bind_password | string | length > 0 }}"

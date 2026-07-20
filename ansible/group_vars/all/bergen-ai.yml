@@ -41,3 +41,26 @@ lxc_gpu:
 ollama_enable_vulkan: true
 ollama_enable_igpu: true
 
+###############################################################################
+# LDAP
+###############################################################################
+
+ldap_enabled: true
+
+ldap_server_label: "Bergen OpenLDAP"
+ldap_host: bergen.intern
+ldap_port: 389
+
+ldap_use_tls: false
+ldap_validate_cert: false
+
+ldap_base_dn: dc=bergen,dc=intern
+ldap_search_base: cn=users,dc=bergen,dc=intern
+
+ldap_username_attribute: uid
+ldap_mail_attribute: mail
+ldap_search_filter: "(objectClass=inetOrgPerson)"
+
+# Synology erlaubt derzeit anonyme LDAP-Suchen.
+ldap_bind_dn: ""
+ldap_bind_password: ""

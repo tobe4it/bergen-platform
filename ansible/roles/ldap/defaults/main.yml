@@ -1,0 +1,40 @@
+---
+###############################################################################
+#
+# Bergen Platform
+#
+# LDAP role defaults
+#
+###############################################################################
+
+ldap_packages:
+  - ldap-utils
+
+ldap_enabled: true
+
+ldap_protocol: ldap
+ldap_host: bergen.intern
+ldap_port: 389
+
+ldap_use_tls: false
+ldap_validate_cert: false
+ldap_server_label: Bergen LDAP
+
+ldap_base_dn: dc=bergen,dc=intern
+ldap_search_base: cn=users,dc=bergen,dc=intern
+ldap_search_filter: "({{ ldap_username_attribute }}=*)"
+
+ldap_username_attribute: uid
+ldap_mail_attribute: mail
+ldap_name_attribute: displayName
+
+ldap_bind_dn: ""
+ldap_bind_password: ""
+
+ldap_config_directory: /etc/bergen-platform
+
+ldap_open_webui_env_directory: "{{ ldap_config_directory }}"
+ldap_open_webui_env_file: "{{ ldap_open_webui_env_directory }}/open-webui-ldap.env"
+ldap_open_webui_env_owner: root
+ldap_open_webui_env_group: root
+ldap_open_webui_env_mode: "0600"

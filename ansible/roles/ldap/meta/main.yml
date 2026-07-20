@@ -1,0 +1,14 @@
+---
+galaxy_info:
+  role_name: ldap
+  author: Thomas Bergen
+  description: Configure LDAP access and Open WebUI LDAP environment
+  license: private
+  min_ansible_version: "2.16"
+
+  platforms:
+    - name: Debian
+      versions:
+        - all
+
+dependencies: []

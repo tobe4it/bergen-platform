@@ -1,4 +1,12 @@
 ---
+###############################################################################
+#
+# Bergen Platform
+#
+# Open WebUI validation
+#
+###############################################################################
+
 - name: Open WebUI systemd service status abfragen
   ansible.builtin.command:
     cmd: "systemctl is-active {{ open_webui_service_name }}"
@@ -10,45 +18,52 @@
   ansible.builtin.uri:
     url: "http://127.0.0.1:{{ open_webui_port }}"
     method: GET
-    status_code:
-      - 200
-      - 302
-      - 307
     return_content: false
+    follow_redirects: none
+    timeout: 10
   register: open_webui_http_status
+  changed_when: false
+  failed_when: false
   retries: "{{ open_webui_healthcheck_retries }}"
   delay: "{{ open_webui_healthcheck_delay }}"
-  until: open_webui_http_status.status is defined
-  changed_when: false
+  until:
+    - open_webui_http_status.status is defined
+    - open_webui_http_status.status in [200, 302, 307]
 
 - name: Open WebUI Containerstatus abfragen
   ansible.builtin.command:
     cmd: "podman inspect {{ open_webui_container_name }}"
   register: open_webui_container_status
   changed_when: false
+  failed_when: false
 
 - name: Open WebUI Bereitstellung validieren
   ansible.builtin.assert:
     that:
       - open_webui_service_status.rc == 0
       - open_webui_service_status.stdout | trim == "active"
-      - open_webui_http_status.status in [200, 302, 307]
+      - open_webui_http_status.status | default(-1) in [200, 302, 307]
       - open_webui_container_status.rc == 0
     success_msg: "Open WebUI wurde erfolgreich bereitgestellt."
-    fail_msg: "Open WebUI wurde nicht vollständig bereitgestellt."
+    fail_msg: >-
+      Open WebUI wurde nicht vollständig bereitgestellt.
+      systemd={{ open_webui_service_status.stdout | default('unbekannt') | trim }},
+      HTTP={{ open_webui_http_status.status | default(-1) }},
+      Container-RC={{ open_webui_container_status.rc | default(-1) }}.
 
 - name: Open WebUI Bereitstellung zusammenfassen
   ansible.builtin.debug:
     msg:
-      - "============================================================"
+      - "=============================================================="
       - "Bergen Platform Open WebUI bereitgestellt"
-      - "============================================================"
+      - "=============================================================="
       - "Host       : {{ inventory_hostname }}"
       - "Container  : {{ open_webui_container_name }}"
       - "Image      : {{ open_webui_image }}"
       - "Dienst     : {{ open_webui_service_name }}"
       - "Status     : {{ open_webui_service_status.stdout | trim }}"
+      - "HTTP       : {{ open_webui_http_status.status }}"
       - "URL        : http://{{ ansible_host | default(inventory_hostname) }}:{{ open_webui_port }}"
       - "Ollama     : {{ open_webui_ollama_base_url }}"
       - "Daten      : {{ open_webui_data_directory }}"
-      - "============================================================"
+      - "=============================================================="
