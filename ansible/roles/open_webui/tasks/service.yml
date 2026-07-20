@@ -1,0 +1,26 @@
+---
+- name: Open WebUI Quadlet installieren
+  ansible.builtin.template:
+    src: open-webui.container.j2
+    dest: "{{ open_webui_quadlet_path }}"
+    owner: root
+    group: root
+    mode: "0644"
+  register: open_webui_quadlet
+
+- name: systemd nach Quadlet-Änderung neu laden
+  ansible.builtin.systemd:
+    daemon_reload: true
+  when: open_webui_quadlet.changed
+
+- name: Open WebUI aktivieren und starten
+  ansible.builtin.systemd:
+    name: "{{ open_webui_service_name }}"
+    enabled: true
+    state: started
+
+- name: Open WebUI nach Konfigurationsänderung neu starten
+  ansible.builtin.systemd:
+    name: "{{ open_webui_service_name }}"
+    state: restarted
+  when: open_webui_quadlet.changed

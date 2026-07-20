@@ -1,0 +1,16 @@
+---
+- name: Open WebUI Quadlet directory anlegen
+  ansible.builtin.file:
+    path: "{{ open_webui_quadlet_directory }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Open WebUI data directory anlegen
+  ansible.builtin.file:
+    path: "{{ open_webui_data_directory }}"
+    state: directory
+    owner: root
+    group: "{{ ai_group | default('ai') }}"
+    mode: "0770"

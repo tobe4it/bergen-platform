@@ -1,0 +1,262 @@
+---
+###############################################################################
+#
+# Bergen Platform
+#
+# Configure an LXC for nested OCI container runtimes
+#
+# Configures on the Proxmox node:
+#   - FUSE kernel module
+#   - LXC features fuse, keyctl and nesting
+#   - /dev/fuse device permission
+#   - /dev/fuse bind mount
+#
+# Existing GPU configuration and ID mappings remain untouched.
+#
+###############################################################################
+
+- name: Configure LXC container runtime support
+  hosts: "{{ pve_inventory_host | default(pve_node) }}"
+  become: true
+  gather_facts: false
+
+  vars:
+    lxc_runtime_config_path: "/etc/pve/lxc/{{ lxc_vmid }}.conf"
+    lxc_runtime_required_features: "fuse=1,keyctl=1,nesting=1"
+
+  tasks:
+    ###########################################################################
+    # Preconditions
+    ###########################################################################
+
+    - name: Erforderliche Variablen prüfen
+      ansible.builtin.assert:
+        that:
+          - lxc_vmid is defined
+          - lxc_vmid | string | length > 0
+          - pve_node is defined
+          - pve_node | string | length > 0
+        fail_msg: >-
+          Für die Container-Runtime-Konfiguration müssen lxc_vmid und
+          pve_node definiert sein.
+
+    - name: LXC-Konfigurationsdatei prüfen
+      ansible.builtin.stat:
+        path: "{{ lxc_runtime_config_path }}"
+      register: lxc_runtime_config_file
+
+    - name: Vorhandene LXC-Konfiguration voraussetzen
+      ansible.builtin.assert:
+        that:
+          - lxc_runtime_config_file.stat.exists
+        fail_msg: >-
+          Die LXC-Konfiguration {{ lxc_runtime_config_path }}
+          wurde nicht gefunden.
+
+    ###########################################################################
+    # Proxmox host FUSE support
+    ###########################################################################
+
+    - name: FUSE-Gerät auf dem Proxmox-Host prüfen
+      ansible.builtin.stat:
+        path: /dev/fuse
+      register: pve_fuse_device
+
+    - name: FUSE-Kernelmodul laden
+      ansible.builtin.command:
+        cmd: modprobe fuse
+      changed_when: false
+      when: not pve_fuse_device.stat.exists
+
+    - name: FUSE-Gerät erneut prüfen
+      ansible.builtin.stat:
+        path: /dev/fuse
+      register: pve_fuse_device_after
+
+    - name: FUSE-Gerät auf dem Proxmox-Host voraussetzen
+      ansible.builtin.assert:
+        that:
+          - pve_fuse_device_after.stat.exists
+          - pve_fuse_device_after.stat.ischr | default(false)
+        fail_msg: >-
+          /dev/fuse ist auf dem Proxmox-Host {{ inventory_hostname }}
+          nicht als Character Device verfügbar.
+
+    - name: FUSE-Modul beim Systemstart laden
+      ansible.builtin.copy:
+        dest: /etc/modules-load.d/bergen-platform-fuse.conf
+        owner: root
+        group: root
+        mode: "0644"
+        content: |
+          # Bergen Platform
+          fuse
+
+    ###########################################################################
+    # Current LXC configuration
+    ###########################################################################
+
+    - name: Laufstatus des LXC ermitteln
+      ansible.builtin.command:
+        cmd: "pct status {{ lxc_vmid }}"
+      register: lxc_runtime_status
+      changed_when: false
+
+    - name: Aktuelle LXC-Konfiguration einlesen
+      ansible.builtin.command:
+        cmd: "pct config {{ lxc_vmid }}"
+      register: lxc_runtime_config_before
+      changed_when: false
+
+    - name: Vorherigen Laufstatus speichern
+      ansible.builtin.set_fact:
+        lxc_runtime_was_running: >-
+          {{ 'running' in lxc_runtime_status.stdout }}
+
+    ###########################################################################
+    # LXC runtime features
+    ###########################################################################
+
+    - name: LXC-Features für verschachtelte Container setzen
+      ansible.builtin.command:
+        cmd: >-
+          pct set {{ lxc_vmid }}
+          --features {{ lxc_runtime_required_features }}
+      register: lxc_runtime_features
+      when: >-
+        ('fuse=1' not in lxc_runtime_config_before.stdout)
+        or
+        ('keyctl=1' not in lxc_runtime_config_before.stdout)
+        or
+        ('nesting=1' not in lxc_runtime_config_before.stdout)
+      changed_when: true
+
+    ###########################################################################
+    # /dev/fuse passthrough
+    ###########################################################################
+
+    - name: FUSE-Gerätezugriff konfigurieren
+      ansible.builtin.lineinfile:
+        path: "{{ lxc_runtime_config_path }}"
+        regexp: '^lxc\.cgroup2\.devices\.allow:\s*c\s+10:229\s+rwm\s*$'
+        line: 'lxc.cgroup2.devices.allow: c 10:229 rwm'
+        insertafter: EOF
+        state: present
+      register: lxc_runtime_fuse_allow
+
+    - name: FUSE-Gerät in den LXC einbinden
+      ansible.builtin.lineinfile:
+        path: "{{ lxc_runtime_config_path }}"
+        regexp: '^lxc\.mount\.entry:\s*/dev/fuse\s+dev/fuse\s+'
+        line: >-
+          lxc.mount.entry: /dev/fuse dev/fuse none
+          bind,optional,create=file
+        insertafter: EOF
+        state: present
+      register: lxc_runtime_fuse_mount
+
+    - name: Neustartbedarf bestimmen
+      ansible.builtin.set_fact:
+        lxc_runtime_restart_required: >-
+          {{
+            (lxc_runtime_features.changed | default(false))
+            or lxc_runtime_fuse_allow.changed
+            or lxc_runtime_fuse_mount.changed
+          }}
+
+    ###########################################################################
+    # Restart LXC when required
+    ###########################################################################
+
+    - name: LXC für neue Gerätezuordnung stoppen
+      ansible.builtin.command:
+        cmd: "pct stop {{ lxc_vmid }}"
+      when:
+        - lxc_runtime_restart_required
+        - lxc_runtime_was_running
+
+    - name: Auf gestoppten LXC warten
+      ansible.builtin.command:
+        cmd: "pct status {{ lxc_vmid }}"
+      register: lxc_runtime_stopped
+      changed_when: false
+      retries: 30
+      delay: 2
+      until: "'stopped' in lxc_runtime_stopped.stdout"
+      when:
+        - lxc_runtime_restart_required
+        - lxc_runtime_was_running
+
+    - name: LXC wieder starten
+      ansible.builtin.command:
+        cmd: "pct start {{ lxc_vmid }}"
+      when:
+        - lxc_runtime_restart_required
+        - lxc_runtime_was_running
+
+    - name: Auf laufenden LXC warten
+      ansible.builtin.command:
+        cmd: "pct status {{ lxc_vmid }}"
+      register: lxc_runtime_running
+      changed_when: false
+      retries: 30
+      delay: 2
+      until: "'running' in lxc_runtime_running.stdout"
+      when:
+        - lxc_runtime_was_running
+
+    ###########################################################################
+    # Validation
+    ###########################################################################
+
+    - name: FUSE-Gerät im LXC prüfen
+      ansible.builtin.command:
+        cmd: "pct exec {{ lxc_vmid }} -- test -c /dev/fuse"
+      register: lxc_runtime_fuse_validation
+      changed_when: false
+      retries: 15
+      delay: 2
+      until: lxc_runtime_fuse_validation.rc == 0
+      when:
+        - lxc_runtime_was_running
+
+    - name: Effektive LXC-Konfiguration einlesen
+      ansible.builtin.command:
+        cmd: "pct config {{ lxc_vmid }}"
+      register: lxc_runtime_config_after
+      changed_when: false
+
+    - name: Effektive LXC-Features prüfen
+      ansible.builtin.assert:
+        that:
+          - "'fuse=1' in lxc_runtime_config_after.stdout"
+          - "'keyctl=1' in lxc_runtime_config_after.stdout"
+          - "'nesting=1' in lxc_runtime_config_after.stdout"
+          - >-
+            'lxc.cgroup2.devices.allow: c 10:229 rwm'
+            in lxc_runtime_config_after.stdout
+          - >-
+            'lxc.mount.entry: /dev/fuse dev/fuse none
+            bind,optional,create=file'
+            in lxc_runtime_config_after.stdout
+        fail_msg: >-
+          Die Container-Runtime-Konfiguration wurde für LXC
+          {{ lxc_vmid }} nicht vollständig übernommen.
+        success_msg: >-
+          Die Container-Runtime-Konfiguration für LXC
+          {{ lxc_vmid }} ist vollständig.
+
+    - name: Container-Runtime-Konfiguration zusammenfassen
+      ansible.builtin.debug:
+        msg:
+          - "============================================================"
+          - "Bergen Platform LXC container runtime configured"
+          - "============================================================"
+          - "Node        : {{ inventory_hostname }}"
+          - "LXC         : {{ lxc_vmid }}"
+          - "Hostname    : {{ lxc_hostname | default('nicht definiert') }}"
+          - "Features    : {{ lxc_runtime_required_features }}"
+          - "/dev/fuse   : konfiguriert"
+          - "Restart     : {{ lxc_runtime_restart_required }}"
+          - "Was running : {{ lxc_runtime_was_running }}"
+          - "============================================================"

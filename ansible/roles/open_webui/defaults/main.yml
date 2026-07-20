@@ -1,2 +1,24 @@
 ---
-{}
+open_webui_image: ghcr.io/open-webui/open-webui:main
+
+open_webui_container_name: open-webui
+open_webui_service_name: open-webui.service
+
+open_webui_quadlet_directory: /etc/containers/systemd
+open_webui_quadlet_path: /etc/containers/systemd/open-webui.container
+
+open_webui_data_directory: /srv/ai/open-webui
+
+open_webui_network_mode: host
+open_webui_port: 3000
+
+open_webui_ollama_base_url: http://127.0.0.1:11434
+
+open_webui_auth_enabled: true
+open_webui_signup_enabled: true
+
+open_webui_restart_policy: always
+open_webui_pull_policy: newer
+
+open_webui_healthcheck_retries: 30
+open_webui_healthcheck_delay: 5

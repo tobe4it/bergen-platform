@@ -1,2 +1,17 @@
 ---
-[]
+###############################################################################
+#
+# Bergen Platform
+#
+# Open WebUI
+#
+###############################################################################
+
+- name: Open WebUI directories
+  ansible.builtin.import_tasks: directories.yml
+
+- name: Open WebUI service
+  ansible.builtin.import_tasks: service.yml
+
+- name: Open WebUI validation
+  ansible.builtin.import_tasks: validate.yml

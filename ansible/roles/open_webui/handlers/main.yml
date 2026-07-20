@@ -1,2 +1,9 @@
 ---
-[]
+- name: systemd daemon reload
+  ansible.builtin.systemd:
+    daemon_reload: true
+
+- name: restart open webui
+  ansible.builtin.systemd:
+    name: "{{ open_webui_service_name }}"
+    state: restarted
