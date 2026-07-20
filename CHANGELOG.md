@@ -2,13 +2,51 @@
 
 Alle wesentlichen Änderungen an der Bergen Platform werden in dieser Datei dokumentiert.
 
-Das Format orientiert sich an "Keep a Changelog".
+Das Format orientiert sich an **Keep a Changelog** und das Projekt folgt **Semantic Versioning (SemVer)**.
+
+---
+
+## [0.5.0] - 2026-07-20
+
+### Added
+
+#### LDAP
+- OpenLDAP-Integration für Open WebUI
+- LDAP-Authentifizierung gegen Synology Directory Server
+- Unterstützung für Anonymous Bind
+- Unterstützung für Application Bind
+- LDAP Search Filter konfigurierbar
+- Automatische Generierung der Open-WebUI-LDAP-Konfiguration per Ansible
+
+#### Open WebUI
+- LDAP-Konfiguration vollständig über Umgebungsvariablen
+- Unterstützung für automatische Benutzeranlage bei erfolgreicher LDAP-Anmeldung
+
+### Changed
+
+- Open WebUI wird vollständig über Ansible konfiguriert.
+- LDAP-Konfiguration in eigene Ansible-Rolle ausgelagert.
+- LDAP-Konfiguration vollständig templatisiert.
+
+### Verified
+
+- Verbindung zum Synology Directory Server erfolgreich.
+- LDAP-Suche erfolgreich getestet.
+- Anmeldung mit LDAP-Benutzern erfolgreich.
+- LDAP Search Filter wird korrekt an Open WebUI übergeben.
+- Benutzer werden automatisch in Open WebUI angelegt.
+
+### Known Issues
+
+- Neue LDAP-Benutzer müssen derzeit einmalig durch einen Administrator aktiviert werden.
+- Open WebUI informiert Administratoren derzeit nicht automatisch über wartende Benutzer.
+- Nach der Aktivierung funktioniert die LDAP-Anmeldung dauerhaft.
 
 ---
 
 ## [Unreleased]
 
-### Hinzugefügt
+### Added
 
 #### Projektstruktur
 
@@ -21,7 +59,7 @@ Das Format orientiert sich an "Keep a Changelog".
 
 #### Proxmox
 
-- Playbook `validate-proxmox.yml`
+- Playbook 
 - Validierung der Proxmox-API
 - Prüfung der Host-Erreichbarkeit
 - Prüfung der Proxmox-Dienste
@@ -31,7 +69,7 @@ Das Format orientiert sich an "Keep a Changelog".
 
 #### Management
 
-- Management-LXC `bp-controller`
+- Management-LXC 
 - Python Virtual Environment
 - Ansible installiert
 - Vault eingerichtet
@@ -40,7 +78,7 @@ Das Format orientiert sich an "Keep a Changelog".
 
 #### LXC
 
-- Generisches Playbook `create-lxc.yml`
+- Generisches Playbook 
 - Unterstützung für beliebige Debian-LXCs
 - DHCP für IPv4/IPv6
 - vmbr2-Unterstützung
@@ -53,7 +91,7 @@ Das Format orientiert sich an "Keep a Changelog".
 
 Neue Rolle:
 
-- `lxc_base`
+- 
 
 Erste Funktionen:
 
@@ -64,7 +102,7 @@ Erste Funktionen:
 
 Neuer LXC:
 
-- `bergen-ai`
+- 
 
 Status:
 
@@ -76,23 +114,17 @@ Status:
 
 Automatisierter Ablauf erfolgreich umgesetzt:
 
-```
-validate-proxmox
-        ↓
-create-lxc
-        ↓
-bootstrap-lxc
-```
+
 
 Erster vollständig automatisierter End-to-End-Deployment-Prozess erfolgreich abgeschlossen.
 
 ---
 
-### Geändert
+### Changed
 
 #### Netzwerk
 
-- Umstellung aller generischen LXCs auf `vmbr2`
+- Umstellung aller generischen LXCs auf 
 - Wegfall der VLAN-Tags innerhalb der LXC-Konfiguration
 - Nutzung VLAN-fähiger Bridges
 
@@ -103,25 +135,24 @@ Erster vollständig automatisierter End-to-End-Deployment-Prozess erfolgreich ab
   - Rollen
   - Variablen
   - Inventory
-
 - Einführung generischer LXC-Deployment-Playbooks
 
 ---
 
-### Behoben
+### Fixed
 
 #### Proxmox
 
-- Fehlerhafte `cmode`-Konfiguration
+- Fehlerhafte -Konfiguration
 - Timeout beim Start neuer LXCs
 - Netzwerkkonfiguration für VLAN 2
-- API-Parameterformat für `net0`
-- SSH-Key-Übernahme auf `bp-controller`
+- API-Parameterformat für 
+- SSH-Key-Übernahme auf 
 
 #### Ansible
 
 - Rollenpfad korrigiert
-- `meta/main.yml` validiert
+-  validiert
 - Inventory-Struktur verbessert
 - Bootstrap erfolgreich auf neuem Controller getestet
 
