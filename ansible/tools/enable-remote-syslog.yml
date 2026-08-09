@@ -1,0 +1,90 @@
+---
+- name: Bergen Platform | Enable remote syslog on ad-hoc Linux host
+  hosts: all
+  gather_facts: true
+  become: true
+
+  vars:
+    syslog_server: "192.168.20.164"
+    syslog_port: 514
+    syslog_protocol: "tcp"
+    syslog_config_path: "/etc/rsyslog.d/90-bergen-remote.conf"
+
+  pre_tasks:
+    - name: Validate supported operating system family
+      ansible.builtin.assert:
+        that:
+          - ansible_os_family in ['Debian', 'RedHat', 'Suse']
+        fail_msg: >-
+          Unsupported OS family: {{ ansible_os_family }}.
+          Supported families: Debian, RedHat, Suse.
+
+    - name: Validate syslog protocol
+      ansible.builtin.assert:
+        that:
+          - syslog_protocol in ['tcp', 'udp']
+        fail_msg: "syslog_protocol must be tcp or udp"
+
+  tasks:
+    - name: Install rsyslog
+      ansible.builtin.package:
+        name: rsyslog
+        state: present
+
+    - name: Ensure rsyslog service is enabled and started
+      ansible.builtin.service:
+        name: rsyslog
+        enabled: true
+        state: started
+
+    - name: Configure forwarding to Bergen syslog server
+      ansible.builtin.copy:
+        dest: "{{ syslog_config_path }}"
+        owner: root
+        group: root
+        mode: "0644"
+        content: |
+          # Managed by Bergen Platform
+          # Ad-hoc remote syslog forwarding
+
+          action(
+            type="omfwd"
+            target="{{ syslog_server }}"
+            port="{{ syslog_port }}"
+            protocol="{{ syslog_protocol }}"
+            action.resumeRetryCount="-1"
+            queue.type="linkedList"
+            queue.size="10000"
+          )
+      notify: Restart rsyslog
+
+    - name: Validate rsyslog configuration
+      ansible.builtin.command:
+        cmd: rsyslogd -N1
+      changed_when: false
+
+    - name: Flush handlers before test message
+      ansible.builtin.meta: flush_handlers
+
+    - name: Send Bergen test message
+      ansible.builtin.command:
+        argv:
+          - logger
+          - -t
+          - BERGEN-SYSLOG-TEST
+          - "Remote syslog enabled on {{ inventory_hostname }}"
+      changed_when: false
+
+    - name: Show result
+      ansible.builtin.debug:
+        msg:
+          - "Remote syslog enabled on {{ inventory_hostname }}"
+          - "Target: {{ syslog_server }}:{{ syslog_port }}/{{ syslog_protocol }}"
+          - "Configuration: {{ syslog_config_path }}"
+          - "This host was not added to Bergen Platform inventory."
+
+  handlers:
+    - name: Restart rsyslog
+      ansible.builtin.service:
+        name: rsyslog
+        state: restarted
