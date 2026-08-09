@@ -1,0 +1,31 @@
+# Managed by Ansible - Bergen Platform
+
+{% if syslog_udp_enabled %}
+module(load="imudp")
+{% endif %}
+{% if syslog_tcp_enabled %}
+module(load="imtcp")
+{% endif %}
+
+template(
+  name="BergenRemoteLog"
+  type="string"
+  string="{{ syslog_remote_log_dir }}/%FROMHOST-IP%.log"
+)
+
+ruleset(name="bergen_remote") {
+  action(
+    type="omfile"
+    dynaFile="BergenRemoteLog"
+    createDirs="on"
+    dirCreateMode="0750"
+    fileCreateMode="0640"
+  )
+}
+
+{% if syslog_udp_enabled %}
+input(type="imudp" port="{{ syslog_port }}" ruleset="bergen_remote")
+{% endif %}
+{% if syslog_tcp_enabled %}
+input(type="imtcp" port="{{ syslog_port }}" ruleset="bergen_remote")
+{% endif %}
