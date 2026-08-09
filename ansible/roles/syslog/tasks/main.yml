@@ -1,0 +1,67 @@
+---
+- name: Validate syslog configuration
+  ansible.builtin.assert:
+    that:
+      - syslog_port | int > 0
+      - syslog_port | int < 65536
+      - syslog_retention_days | int > 0
+      - syslog_udp_enabled or syslog_tcp_enabled
+    fail_msg: Invalid Bergen Platform syslog configuration.
+
+- name: Install syslog packages
+  ansible.builtin.apt:
+    name:
+      - rsyslog
+      - logrotate
+    state: present
+    update_cache: true
+
+- name: Create remote log directory
+  ansible.builtin.file:
+    path: "{{ syslog_remote_log_dir }}"
+    state: directory
+    owner: root
+    group: adm
+    mode: "0750"
+
+- name: Configure central syslog receiver
+  ansible.builtin.template:
+    src: remote.conf.j2
+    dest: /etc/rsyslog.d/10-remote.conf
+    owner: root
+    group: root
+    mode: "0644"
+  notify: Restart rsyslog
+
+- name: Configure log rotation for remote logs
+  ansible.builtin.template:
+    src: remote-logrotate.j2
+    dest: /etc/logrotate.d/remote-syslog
+    owner: root
+    group: root
+    mode: "0644"
+
+- name: Validate rsyslog configuration
+  ansible.builtin.command: rsyslogd -N1
+  changed_when: false
+
+- name: Enable and start rsyslog
+  ansible.builtin.service:
+    name: rsyslog
+    enabled: true
+    state: started
+
+- name: Apply pending rsyslog handler before listener validation
+  ansible.builtin.meta: flush_handlers
+
+- name: Read listening sockets
+  ansible.builtin.command: ss -lntu
+  register: syslog_listeners
+  changed_when: false
+
+- name: Validate syslog listener
+  ansible.builtin.assert:
+    that:
+      - (':' ~ (syslog_port | string)) in syslog_listeners.stdout
+    fail_msg: "No listener found on configured syslog port {{ syslog_port }}."
+    success_msg: "Central syslog receiver is listening on port {{ syslog_port }}."
