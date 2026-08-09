@@ -1,0 +1,6 @@
+---
+syslog_remote_log_dir: /var/log/remote
+syslog_udp_enabled: true
+syslog_tcp_enabled: true
+syslog_port: 514
+syslog_retention_days: 90
