@@ -1,0 +1,10 @@
+# Managed by Ansible - Bergen Platform
+{{ syslog_remote_log_dir }}/*.log {
+    daily
+    rotate {{ syslog_retention_days }}
+    compress
+    delaycompress
+    missingok
+    notifempty
+    copytruncate
+}
