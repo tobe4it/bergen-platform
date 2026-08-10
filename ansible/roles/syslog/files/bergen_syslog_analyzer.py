@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 import argparse
+import fcntl
 import glob
 import json
 import os
@@ -10,6 +11,7 @@ from datetime import datetime, timezone
 
 DB = os.environ.get('BERGEN_ANALYZER_DB', '/var/lib/bergen-syslog/analyzer.db')
 LOG_GLOB = os.environ.get('BERGEN_REMOTE_LOG_GLOB', '/var/log/remote/*.log')
+LOCK = os.environ.get('BERGEN_ANALYZER_LOCK', '/var/lib/bergen-syslog/analyzer.lock')
 MAC_RE = re.compile(r'(?i)\b([0-9a-f]{2}(?::[0-9a-f]{2}){5})\b')
 TS_RE = re.compile(r'^(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:?\d{2}))')
 RSSI_RE = re.compile(r'(?i)(?:auth_rssi["=: ]+|\brssi["=: ]+)(-?\d+)')
@@ -26,7 +28,8 @@ EVENTS = [
 
 def connect():
     os.makedirs(os.path.dirname(DB), exist_ok=True)
-    db = sqlite3.connect(DB)
+    db = sqlite3.connect(DB, timeout=30)
+    db.execute('PRAGMA busy_timeout=30000')
     db.execute('PRAGMA journal_mode=WAL')
     db.executescript('''
       CREATE TABLE IF NOT EXISTS offsets(path TEXT PRIMARY KEY, inode INTEGER, pos INTEGER);
@@ -113,6 +116,16 @@ def show(db, mac):
     for ts,source,kind,rssi,raw in db.execute('SELECT ts,source,kind,rssi,raw FROM events WHERE mac=? ORDER BY id DESC LIMIT 25', (mac.lower(),)):
         print(f'{ts} {source} {kind} rssi={rssi if rssi is not None else "-"}\n  {raw}')
 
+def run_locked(db):
+    os.makedirs(os.path.dirname(LOCK), exist_ok=True)
+    with open(LOCK, 'w') as lockfile:
+        try:
+            fcntl.flock(lockfile, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            print('analyzer run already in progress; skipping')
+            return 0
+        return ingest(db)
+
 def main():
     p=argparse.ArgumentParser(description='Bergen Syslog Operations Analyzer')
     sub=p.add_subparsers(dest='cmd')
@@ -120,7 +133,7 @@ def main():
     lp=sub.add_parser('list'); lp.add_argument('--severity', choices=['INFO','OBSERVE','ACTION','CRITICAL'])
     sp=sub.add_parser('show'); sp.add_argument('mac')
     args=p.parse_args(); db=connect()
-    if args.cmd=='run-once': print(f'ingested {ingest(db)} normalized events')
+    if args.cmd=='run-once': print(f'ingested {run_locked(db)} normalized events')
     elif args.cmd=='list': list_incidents(db,args.severity)
     elif args.cmd=='show': show(db,args.mac)
     else: p.print_help()
