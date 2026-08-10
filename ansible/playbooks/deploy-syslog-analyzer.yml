@@ -39,14 +39,23 @@
         mode: "0644"
       notify: Reload systemd
 
-    - name: Flush systemd reload before enabling timer
+    - name: Flush systemd reload before initial ingestion
       ansible.builtin.meta: flush_handlers
 
-    - name: Enable and start analyzer timer
+    - name: Stop analyzer timer during deployment
       ansible.builtin.systemd:
         name: bergen-syslog-analyzer.timer
-        enabled: true
-        state: started
+        state: stopped
+      failed_when: false
+
+    - name: Wait for any running analyzer service to finish
+      ansible.builtin.command: systemctl is-active bergen-syslog-analyzer.service
+      register: analyzer_service_state
+      changed_when: false
+      failed_when: false
+      retries: 30
+      delay: 1
+      until: analyzer_service_state.rc != 0
 
     - name: Run initial ingestion
       ansible.builtin.command: /usr/local/bin/bergen-syslog-analyzer run-once
@@ -56,6 +65,12 @@
     - name: Show initial analyzer result
       ansible.builtin.debug:
         var: analyzer_initial.stdout
+
+    - name: Enable and start analyzer timer
+      ansible.builtin.systemd:
+        name: bergen-syslog-analyzer.timer
+        enabled: true
+        state: started
 
   handlers:
     - name: Reload systemd
