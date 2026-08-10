@@ -1,4 +1,7 @@
 # Managed by Bergen Platform / Ansible
+# Debian's /etc/mosquitto/mosquitto.conf already defines the global
+# persistence settings. Keep this include focused on the Bergen listener,
+# authentication/ACL and logging to avoid duplicate global directives.
 
 listener {{ mqtt_port }} {{ mqtt_bind_address }}
 protocol mqtt
@@ -8,11 +11,6 @@ allow_anonymous {{ 'true' if mqtt_allow_anonymous else 'false' }}
 {% if not mqtt_allow_anonymous %}
 password_file {{ mqtt_password_file }}
 acl_file {{ mqtt_acl_file }}
-{% endif %}
-
-persistence {{ 'true' if mqtt_persistence else 'false' }}
-{% if mqtt_persistence %}
-persistence_location {{ mqtt_persistence_location }}
 {% endif %}
 
 log_dest syslog
