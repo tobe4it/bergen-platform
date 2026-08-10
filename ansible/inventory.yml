@@ -28,8 +28,10 @@ all:
       hosts:
         bergen-ai:
 
+    mqtt_nodes:
+      hosts: {}
+
     linux_lxcs:
       hosts:
         bp-controller:
         bergen-ai:
-

@@ -1,0 +1,20 @@
+---
+mqtt_port: 1883
+mqtt_bind_address: "0.0.0.0"
+mqtt_allow_anonymous: false
+mqtt_persistence: true
+mqtt_persistence_location: /var/lib/mosquitto/
+mqtt_password_file: /etc/mosquitto/passwd
+mqtt_acl_file: /etc/mosquitto/acl
+
+# Define users in Ansible Vault or another protected variable source.
+# Example:
+# mqtt_users:
+#   - username: homey
+#     password: "{{ vault_mqtt_homey_password }}"
+mqtt_users: []
+
+# Default ACL grants authenticated users read/write access to all topics.
+# Override for least-privilege topic policies as clients are migrated.
+mqtt_acl_lines:
+  - "pattern readwrite #"

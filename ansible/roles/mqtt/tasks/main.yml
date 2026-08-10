@@ -1,0 +1,97 @@
+---
+- name: Validate MQTT configuration
+  ansible.builtin.assert:
+    that:
+      - mqtt_port | int > 0
+      - mqtt_port | int < 65536
+      - mqtt_allow_anonymous or (mqtt_users | length > 0)
+    fail_msg: >-
+      Invalid Bergen Platform MQTT configuration. Configure at least one
+      mqtt_users entry when anonymous access is disabled.
+
+- name: Install Mosquitto packages
+  ansible.builtin.apt:
+    name:
+      - mosquitto
+      - mosquitto-clients
+    state: present
+    update_cache: true
+
+- name: Create Mosquitto persistence directory
+  ansible.builtin.file:
+    path: "{{ mqtt_persistence_location }}"
+    state: directory
+    owner: mosquitto
+    group: mosquitto
+    mode: "0750"
+  when: mqtt_persistence
+
+- name: Create MQTT password file
+  ansible.builtin.file:
+    path: "{{ mqtt_password_file }}"
+    state: touch
+    owner: root
+    group: mosquitto
+    mode: "0640"
+  when: not mqtt_allow_anonymous
+
+- name: Configure MQTT users
+  ansible.builtin.command:
+    argv:
+      - mosquitto_passwd
+      - -b
+      - "{{ mqtt_password_file }}"
+      - "{{ item.username }}"
+      - "{{ item.password }}"
+  loop: "{{ mqtt_users }}"
+  loop_control:
+    label: "{{ item.username }}"
+  no_log: true
+  changed_when: true
+  notify: Restart mosquitto
+  when: not mqtt_allow_anonymous
+
+- name: Configure MQTT ACL
+  ansible.builtin.template:
+    src: acl.j2
+    dest: "{{ mqtt_acl_file }}"
+    owner: root
+    group: mosquitto
+    mode: "0640"
+  notify: Restart mosquitto
+  when: not mqtt_allow_anonymous
+
+- name: Configure Mosquitto listener
+  ansible.builtin.template:
+    src: bergen-mqtt.conf.j2
+    dest: /etc/mosquitto/conf.d/bergen-mqtt.conf
+    owner: root
+    group: root
+    mode: "0644"
+  notify: Restart mosquitto
+
+- name: Validate Mosquitto configuration
+  ansible.builtin.command:
+    cmd: mosquitto -c /etc/mosquitto/mosquitto.conf -t
+  changed_when: false
+
+- name: Enable and start Mosquitto
+  ansible.builtin.service:
+    name: mosquitto
+    enabled: true
+    state: started
+
+- name: Apply pending Mosquitto handler before listener validation
+  ansible.builtin.meta: flush_handlers
+
+- name: Read listening sockets
+  ansible.builtin.command: ss -lnt
+  register: mqtt_listeners
+  changed_when: false
+
+- name: Validate MQTT listener
+  ansible.builtin.assert:
+    that:
+      - (':' ~ (mqtt_port | string)) in mqtt_listeners.stdout
+    fail_msg: "No MQTT listener found on configured port {{ mqtt_port }}."
+    success_msg: "Mosquitto is listening on MQTT port {{ mqtt_port }}."

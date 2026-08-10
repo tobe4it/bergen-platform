@@ -1,0 +1,37 @@
+---
+###############################################################################
+# Bergen Platform
+#
+# LXC configuration: bergen-mqtt
+#
+# Dedicated MQTT broker for home automation and infrastructure messaging.
+###############################################################################
+
+lxc_vmid: 121
+lxc_hostname: bergen-mqtt
+
+lxc_template: local:vztmpl/debian-13-standard_13.6-1_amd64.tar.zst
+
+lxc_storage: local-zfs
+lxc_rootfs_size: 8
+
+lxc_memory: 512
+lxc_swap: 256
+lxc_cores: 1
+
+lxc_bridge: vmbr2
+
+lxc_ip: dhcp
+lxc_ip6: dhcp
+
+lxc_unprivileged: true
+lxc_onboot: true
+lxc_start_order: 20
+
+lxc_firewall: 1
+
+lxc_ssh_public_key: "{{ lookup('file', lookup('env','HOME') + '/.ssh/id_ed25519.pub') }}"
+lxc_root_password: "{{ vault_lxc_root_password }}"
+
+pve_node: venombox
+pve_inventory_host: venombox

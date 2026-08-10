@@ -1,0 +1,21 @@
+---
+###############################################################################
+# Bergen Platform
+#
+# Bootstrap a dedicated MQTT broker node.
+###############################################################################
+
+- name: Bootstrap Bergen Platform MQTT node
+  hosts: "{{ bootstrap_mqtt_target | default('mqtt_nodes') }}"
+  become: true
+  gather_facts: true
+
+  roles:
+    - role: lxc_base
+      tags:
+        - base
+
+    - role: mqtt
+      tags:
+        - mqtt
+        - messaging

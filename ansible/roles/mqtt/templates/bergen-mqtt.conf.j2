@@ -1,0 +1,24 @@
+# Managed by Bergen Platform / Ansible
+
+listener {{ mqtt_port }} {{ mqtt_bind_address }}
+protocol mqtt
+
+allow_anonymous {{ 'true' if mqtt_allow_anonymous else 'false' }}
+
+{% if not mqtt_allow_anonymous %}
+password_file {{ mqtt_password_file }}
+acl_file {{ mqtt_acl_file }}
+{% endif %}
+
+persistence {{ 'true' if mqtt_persistence else 'false' }}
+{% if mqtt_persistence %}
+persistence_location {{ mqtt_persistence_location }}
+{% endif %}
+
+log_dest syslog
+log_type error
+log_type warning
+log_type notice
+log_type information
+
+connection_messages true
