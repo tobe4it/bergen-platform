@@ -35,3 +35,25 @@ lxc_root_password: "{{ vault_lxc_root_password }}"
 
 pve_node: venombox
 pve_inventory_host: venombox
+
+###############################################################################
+# MQTT service accounts
+#
+# User identities and ACL policy are declarative. Credentials live only in the
+# encrypted/local Ansible Vault and are referenced here by variable name.
+###############################################################################
+
+mqtt_users:
+  - username: evcc
+    password: "{{ vault_mqtt_evcc_password }}"
+  - username: go-echarger
+    password: "{{ vault_mqtt_go_echarger_password }}"
+
+# Initial least-privilege policy derived from the currently known top-level
+# topics. Extend this deliberately when another client/topic is migrated.
+mqtt_acl_lines:
+  - "user evcc"
+  - "topic readwrite evcc/#"
+  - "topic readwrite go-eCharger/#"
+  - "user go-echarger"
+  - "topic readwrite go-eCharger/#"

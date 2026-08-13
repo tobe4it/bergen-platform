@@ -1,0 +1,79 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+PLAYBOOK="$ROOT/ansible/playbooks/mqtt-user.yml"
+
+usage() {
+  cat <<'EOF'
+Usage:
+  tools/mqtt-user add USER [--read TOPIC] [--write TOPIC] [--rw TOPIC]...
+  tools/mqtt-user passwd USER
+  tools/mqtt-user remove USER
+
+Examples:
+  tools/mqtt-user add evcc --rw 'evcc/#' --rw 'go-eCharger/#'
+  tools/mqtt-user add go-echarger --rw 'go-eCharger/#'
+  tools/mqtt-user passwd evcc
+  tools/mqtt-user remove evcc
+
+The password is prompted without echo and passed to Ansible only for this run.
+It is not written to the repository. Use --ask-vault-pass for Bergen Platform
+vault variables required by inventory/group_vars.
+EOF
+}
+
+[[ $# -ge 2 ]] || { usage; exit 2; }
+action="$1"; shift
+user="$1"; shift
+
+read_topics=()
+write_topics=()
+rw_topics=()
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --read)  [[ $# -ge 2 ]] || exit 2; read_topics+=("$2"); shift 2 ;;
+    --write) [[ $# -ge 2 ]] || exit 2; write_topics+=("$2"); shift 2 ;;
+    --rw)    [[ $# -ge 2 ]] || exit 2; rw_topics+=("$2"); shift 2 ;;
+    -h|--help) usage; exit 0 ;;
+    *) echo "Unknown option: $1" >&2; usage; exit 2 ;;
+  esac
+done
+
+json_array() {
+  python3 -c 'import json,sys; print(json.dumps(sys.argv[1:]))' "$@"
+}
+
+extra=("mqtt_user_name=$user")
+
+case "$action" in
+  add|passwd)
+    read -rsp "MQTT password for $user: " password; echo
+    read -rsp "Repeat password: " password2; echo
+    [[ "$password" == "$password2" ]] || { echo "Passwords do not match." >&2; exit 1; }
+    [[ -n "$password" ]] || { echo "Password must not be empty." >&2; exit 1; }
+    extra+=("mqtt_user_state_input=present" "mqtt_user_password=$password")
+    if [[ "$action" == add ]]; then
+      extra+=("mqtt_user_read_topics_input=$(json_array "${read_topics[@]}")")
+      extra+=("mqtt_user_write_topics_input=$(json_array "${write_topics[@]}")")
+      extra+=("mqtt_user_readwrite_topics_input=$(json_array "${rw_topics[@]}")")
+    else
+      # passwd changes credentials only; preserve ACL by not supplying ACL options.
+      exec ansible -i "$ROOT/ansible/inventory.yml" mqtt_nodes -b \
+        -m ansible.builtin.command \
+        -a "mosquitto_passwd -b /etc/mosquitto/passwd '$user' '$password'" \
+        --ask-vault-pass
+    fi
+    ;;
+  remove)
+    extra+=("mqtt_user_state_input=absent")
+    ;;
+  *) echo "Unknown action: $action" >&2; usage; exit 2 ;;
+esac
+
+args=()
+for item in "${extra[@]}"; do args+=(--extra-vars "$item"); done
+
+exec ansible-playbook -i "$ROOT/ansible/inventory.yml" "$PLAYBOOK" \
+  --ask-vault-pass "${args[@]}"

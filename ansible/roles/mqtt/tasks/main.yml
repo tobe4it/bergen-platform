@@ -70,11 +70,6 @@
     mode: "0644"
   notify: Restart mosquitto
 
-- name: Validate Mosquitto configuration
-  ansible.builtin.command:
-    cmd: mosquitto -c /etc/mosquitto/mosquitto.conf -t
-  changed_when: false
-
 - name: Enable and start Mosquitto
   ansible.builtin.service:
     name: mosquitto

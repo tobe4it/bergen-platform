@@ -1,0 +1,133 @@
+---
+###############################################################################
+# Bergen Platform
+#
+# Manage one technical MQTT user on an existing broker.
+#
+# Required extra vars:
+#   mqtt_user_name
+#   mqtt_user_password
+# Optional:
+#   mqtt_user_state: present|absent (default: present)
+#   mqtt_user_read_topics: []
+#   mqtt_user_write_topics: []
+#   mqtt_user_readwrite_topics: []
+###############################################################################
+
+- name: Manage Bergen Platform MQTT technical user
+  hosts: "{{ mqtt_user_target | default('mqtt_nodes') }}"
+  become: true
+  gather_facts: false
+
+  vars:
+    mqtt_user_state: "{{ mqtt_user_state_input | default('present') }}"
+    mqtt_user_read_topics: "{{ mqtt_user_read_topics_input | default([]) }}"
+    mqtt_user_write_topics: "{{ mqtt_user_write_topics_input | default([]) }}"
+    mqtt_user_readwrite_topics: "{{ mqtt_user_readwrite_topics_input | default([]) }}"
+
+  tasks:
+    - name: Validate MQTT user input
+      ansible.builtin.assert:
+        that:
+          - mqtt_user_name is defined
+          - mqtt_user_name | length > 0
+          - mqtt_user_state in ['present', 'absent']
+          - mqtt_user_state == 'absent' or mqtt_user_password is defined
+          - mqtt_user_state == 'absent' or mqtt_user_password | length > 0
+        fail_msg: "mqtt_user_name and, for state=present, mqtt_user_password are required."
+
+    - name: Ensure Mosquitto password utility is installed
+      ansible.builtin.package:
+        name: mosquitto
+        state: present
+
+    - name: Ensure MQTT password file exists
+      ansible.builtin.file:
+        path: "{{ mqtt_password_file | default('/etc/mosquitto/passwd') }}"
+        state: touch
+        owner: root
+        group: mosquitto
+        mode: '0640'
+        modification_time: preserve
+        access_time: preserve
+
+    - name: Create or update MQTT user
+      ansible.builtin.command:
+        argv:
+          - mosquitto_passwd
+          - -b
+          - "{{ mqtt_password_file | default('/etc/mosquitto/passwd') }}"
+          - "{{ mqtt_user_name }}"
+          - "{{ mqtt_user_password }}"
+      no_log: true
+      when: mqtt_user_state == 'present'
+      notify: Restart Mosquitto
+
+    - name: Remove MQTT user
+      ansible.builtin.command:
+        argv:
+          - mosquitto_passwd
+          - -D
+          - "{{ mqtt_password_file | default('/etc/mosquitto/passwd') }}"
+          - "{{ mqtt_user_name }}"
+      register: mqtt_user_remove
+      changed_when: mqtt_user_remove.rc == 0
+      failed_when: mqtt_user_remove.rc not in [0, 1]
+      when: mqtt_user_state == 'absent'
+      notify: Restart Mosquitto
+
+    - name: Ensure per-user ACL directory exists
+      ansible.builtin.file:
+        path: /etc/mosquitto/acl.d
+        state: directory
+        owner: root
+        group: mosquitto
+        mode: '0750'
+
+    - name: Write MQTT user ACL fragment
+      ansible.builtin.copy:
+        dest: "/etc/mosquitto/acl.d/{{ mqtt_user_name }}.acl"
+        owner: root
+        group: mosquitto
+        mode: '0640'
+        content: |
+          user {{ mqtt_user_name }}
+          {% for topic in mqtt_user_read_topics %}
+          topic read {{ topic }}
+          {% endfor %}
+          {% for topic in mqtt_user_write_topics %}
+          topic write {{ topic }}
+          {% endfor %}
+          {% for topic in mqtt_user_readwrite_topics %}
+          topic readwrite {{ topic }}
+          {% endfor %}
+      when: mqtt_user_state == 'present'
+      notify: Rebuild MQTT ACL
+
+    - name: Remove MQTT user ACL fragment
+      ansible.builtin.file:
+        path: "/etc/mosquitto/acl.d/{{ mqtt_user_name }}.acl"
+        state: absent
+      when: mqtt_user_state == 'absent'
+      notify: Rebuild MQTT ACL
+
+  handlers:
+    - name: Rebuild MQTT ACL
+      ansible.builtin.shell: |
+        set -e
+        tmp=$(mktemp)
+        for f in /etc/mosquitto/acl.d/*.acl; do
+          [ -e "$f" ] || continue
+          cat "$f" >> "$tmp"
+          printf '\n' >> "$tmp"
+        done
+        install -o root -g mosquitto -m 0640 "$tmp" "{{ mqtt_acl_file | default('/etc/mosquitto/acl') }}"
+        rm -f "$tmp"
+      args:
+        executable: /bin/bash
+      notify: Restart Mosquitto
+
+    - name: Restart Mosquitto
+      ansible.builtin.service:
+        name: mosquitto
+        state: restarted
