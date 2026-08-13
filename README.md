@@ -22,6 +22,7 @@ Current capabilities include:
 - Open WebUI deployment
 - Ollama deployment
 - OpenLDAP authentication
+- Mosquitto MQTT deployment and per-client access management
 - Centralized configuration
 - Semantic Versioning
 - Complete project documentation
@@ -60,6 +61,7 @@ bergen-platform/
 |   |
 |   +-- ARCHITECTURE.md
 |   +-- CHANGELOG.md
+|   +-- MQTT.md
 |   +-- ROADMAP.md
 |   +-- UPDATE.md
 |
@@ -76,6 +78,7 @@ Project documentation can be found in the **docs/** directory.
 
 - ARCHITECTURE.md
 - CHANGELOG.md
+- MQTT.md
 - ROADMAP.md
 - UPDATE.md
 
@@ -127,6 +130,14 @@ Identity
 - OpenLDAP
 - Synology Directory Server
 
+Messaging / IoT
+
+- Mosquitto MQTT broker
+- Per-client authentication and topic ACLs
+- `tools/mqtt-user` technical-user management
+
+See **docs/MQTT.md** for deployment, client configuration, user management and troubleshooting.
+
 ---
 
 ## Roadmap
@@ -158,4 +169,3 @@ See **docs/CHANGELOG.md** for release history.
 ## License
 
 See LICENSE.
-
