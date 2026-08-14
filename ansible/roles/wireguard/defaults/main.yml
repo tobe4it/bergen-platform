@@ -1,0 +1,14 @@
+---
+wireguard_interface: wg0
+wireguard_address: 192.168.5.4/32
+wireguard_mtu: 1500
+
+wireguard_peer_public_key: ""
+wireguard_peer_endpoint: ""
+wireguard_persistent_keepalive: 25
+
+wireguard_allowed_ips:
+  - 192.168.4.0/22
+  - 192.168.8.0/23
+  - 192.168.2.0/23
+  - 192.168.20.0/23

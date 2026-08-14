@@ -1,0 +1,31 @@
+---
+###############################################################################
+# Bergen Platform
+#
+# Bootstrap a Rocky Linux mail node through its temporary public SSH access.
+#
+# This playbook deliberately performs NO firewall changes.
+###############################################################################
+
+- name: Bootstrap Bergen Platform mail node
+  hosts: all
+  become: true
+  gather_facts: true
+
+  roles:
+    - role: rocky_base
+      tags:
+        - base
+
+    - role: wireguard
+      tags:
+        - wireguard
+
+  post_tasks:
+    - name: Bootstrap completion summary
+      ansible.builtin.debug:
+        msg:
+          - "Mail-node bootstrap completed."
+          - "Firewall state was not modified."
+          - "Next: add the generated WireGuard public key to the UCG."
+          - "Then validate SSH and Ansible through 192.168.5.4."

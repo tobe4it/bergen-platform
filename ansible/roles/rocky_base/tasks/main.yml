@@ -1,0 +1,77 @@
+---
+- name: Validate Rocky Linux host
+  ansible.builtin.assert:
+    that:
+      - ansible_os_family == "RedHat"
+      - ansible_distribution == "Rocky"
+      - ansible_distribution_major_version == "9"
+    fail_msg: >-
+      rocky_base currently supports Rocky Linux 9 only.
+      Detected {{ ansible_distribution }} {{ ansible_distribution_version }}.
+
+- name: Validate Rocky base variables
+  ansible.builtin.assert:
+    that:
+      - rocky_base_hostname | length > 0
+      - rocky_base_admin_user | length > 0
+      - rocky_base_admin_public_key | length > 0
+
+- name: Set hostname
+  ansible.builtin.hostname:
+    name: "{{ rocky_base_hostname }}"
+
+- name: Install Rocky base packages
+  ansible.builtin.dnf:
+    name: "{{ rocky_base_packages }}"
+    state: present
+
+- name: Create administrative user
+  ansible.builtin.user:
+    name: "{{ rocky_base_admin_user }}"
+    create_home: true
+    shell: /bin/bash
+    state: present
+
+- name: Create administrative SSH directory
+  ansible.builtin.file:
+    path: "/home/{{ rocky_base_admin_user }}/.ssh"
+    state: directory
+    owner: "{{ rocky_base_admin_user }}"
+    group: "{{ rocky_base_admin_user }}"
+    mode: "0700"
+
+- name: Install administrative SSH key
+  ansible.builtin.copy:
+    content: "{{ rocky_base_admin_public_key | trim }}\n"
+    dest: "/home/{{ rocky_base_admin_user }}/.ssh/authorized_keys"
+    owner: "{{ rocky_base_admin_user }}"
+    group: "{{ rocky_base_admin_user }}"
+    mode: "0600"
+
+- name: Configure passwordless sudo for administrative user
+  ansible.builtin.copy:
+    content: "{{ rocky_base_admin_user }} ALL=(ALL) NOPASSWD: ALL\n"
+    dest: "/etc/sudoers.d/{{ rocky_base_admin_user }}"
+    owner: root
+    group: root
+    mode: "0440"
+    validate: "/usr/sbin/visudo -cf %s"
+
+- name: Ensure SELinux remains enforcing
+  ansible.builtin.command: getenforce
+  register: rocky_base_selinux
+  changed_when: false
+  failed_when: rocky_base_selinux.stdout != "Enforcing"
+
+- name: Enable rsyslog
+  ansible.builtin.service:
+    name: rsyslog
+    enabled: true
+    state: started
+
+- name: Confirm administrative user
+  ansible.builtin.command:
+    argv:
+      - id
+      - "{{ rocky_base_admin_user }}"
+  changed_when: false

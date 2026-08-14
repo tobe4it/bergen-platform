@@ -1,0 +1,12 @@
+---
+rocky_base_hostname: mx3
+rocky_base_admin_user: lxadmin
+rocky_base_admin_public_key: "{{ lookup('file', lookup('env', 'HOME') + '/.ssh/id_ed25519.pub') }}"
+
+rocky_base_packages:
+  - sudo
+  - tmux
+  - vim-minimal
+  - rsync
+  - rsyslog
+  - bash-completion

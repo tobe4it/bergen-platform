@@ -1,0 +1,136 @@
+---
+- name: Validate WireGuard variables
+  ansible.builtin.assert:
+    that:
+      - wireguard_interface | length > 0
+      - wireguard_address | length > 0
+      - wireguard_peer_public_key | length > 0
+      - wireguard_peer_endpoint | length > 0
+      - wireguard_allowed_ips | length > 0
+    fail_msg: >-
+      WireGuard peer public key and endpoint must be supplied from private
+      variables or extra vars.
+
+- name: Install WireGuard tools
+  ansible.builtin.dnf:
+    name: wireguard-tools
+    state: present
+
+- name: Create WireGuard directory
+  ansible.builtin.file:
+    path: /etc/wireguard
+    state: directory
+    owner: root
+    group: root
+    mode: "0700"
+
+- name: Check for existing WireGuard private key
+  ansible.builtin.stat:
+    path: /etc/wireguard/privatekey
+  register: wireguard_private_key_file
+
+- name: Generate WireGuard key pair on target
+  ansible.builtin.shell: |
+    set -euo pipefail
+    umask 077
+    wg genkey > /etc/wireguard/privatekey
+    wg pubkey < /etc/wireguard/privatekey > /etc/wireguard/publickey
+  args:
+    executable: /bin/bash
+  when: not wireguard_private_key_file.stat.exists
+  no_log: true
+
+- name: Ensure WireGuard key permissions
+  ansible.builtin.file:
+    path: "{{ item.path }}"
+    owner: root
+    group: root
+    mode: "{{ item.mode }}"
+  loop:
+    - path: /etc/wireguard/privatekey
+      mode: "0600"
+    - path: /etc/wireguard/publickey
+      mode: "0644"
+
+- name: Build WireGuard configuration on target
+  ansible.builtin.shell: |
+    set -euo pipefail
+
+    private_key="$(cat /etc/wireguard/privatekey)"
+    tmp="$(mktemp)"
+
+    cat > "${tmp}" <<CONFIG
+    [Interface]
+    PrivateKey = ${private_key}
+    Address = {{ wireguard_address }}
+    MTU = {{ wireguard_mtu }}
+
+    [Peer]
+    PublicKey = {{ wireguard_peer_public_key }}
+    AllowedIPs = {{ wireguard_allowed_ips | join(',') }}
+    PersistentKeepalive = {{ wireguard_persistent_keepalive }}
+    Endpoint = {{ wireguard_peer_endpoint }}
+    CONFIG
+
+    if ! cmp -s "${tmp}" "/etc/wireguard/{{ wireguard_interface }}.conf"; then
+        install -o root -g root -m 0600 \
+          "${tmp}" "/etc/wireguard/{{ wireguard_interface }}.conf"
+        echo changed
+    fi
+
+    rm -f "${tmp}"
+  args:
+    executable: /bin/bash
+  register: wireguard_config
+  changed_when: "'changed' in wireguard_config.stdout"
+  no_log: true
+  notify: Restart WireGuard
+
+- name: Enable and start WireGuard
+  ansible.builtin.service:
+    name: "wg-quick@{{ wireguard_interface }}"
+    enabled: true
+    state: started
+
+- name: Apply pending WireGuard restart
+  ansible.builtin.meta: flush_handlers
+
+- name: Read WireGuard public key
+  ansible.builtin.command:
+    argv:
+      - cat
+      - /etc/wireguard/publickey
+  register: wireguard_public_key
+  changed_when: false
+
+- name: Validate WireGuard interface address
+  ansible.builtin.command:
+    argv:
+      - ip
+      - -brief
+      - address
+      - show
+      - "{{ wireguard_interface }}"
+  register: wireguard_address_state
+  changed_when: false
+  failed_when: wireguard_address.split('/')[0] not in wireguard_address_state.stdout
+
+- name: Validate WireGuard peer
+  ansible.builtin.command:
+    argv:
+      - wg
+      - show
+      - "{{ wireguard_interface }}"
+  register: wireguard_state
+  changed_when: false
+  failed_when: wireguard_peer_public_key not in wireguard_state.stdout
+
+- name: Show WireGuard public key for UCG peer
+  ansible.builtin.debug:
+    msg:
+      - "WireGuard interface: {{ wireguard_interface }}"
+      - "Tunnel address: {{ wireguard_address }}"
+      - "Public key for the UCG peer:"
+      - "{{ wireguard_public_key.stdout }}"
+      - "No firewall changes have been made."
+      - "Add this public key to the UCG before performing the external acceptance test."
