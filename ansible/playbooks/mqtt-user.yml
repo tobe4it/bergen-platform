@@ -6,12 +6,12 @@
 #
 # Required extra vars:
 #   mqtt_user_name
-#   mqtt_user_password
 # Optional:
-#   mqtt_user_state: present|absent (default: present)
-#   mqtt_user_read_topics_input: JSON array, e.g. '["foo/#"]'
-#   mqtt_user_write_topics_input: JSON array
-#   mqtt_user_readwrite_topics_input: JSON array
+#   mqtt_user_password (required for state=present)
+#   mqtt_user_state_input: present|absent (default: present)
+#   mqtt_user_read_topics_input: list of topics
+#   mqtt_user_write_topics_input: list of topics
+#   mqtt_user_readwrite_topics_input: list of topics
 ###############################################################################
 
 - name: Manage Bergen Platform MQTT technical user
@@ -21,11 +21,11 @@
 
   vars:
     mqtt_user_state: "{{ mqtt_user_state_input | default('present') }}"
-    # tools/mqtt-user passes these through --extra-vars key=value. Ansible therefore
-    # receives the JSON arrays as strings; decode them before Jinja iterates them.
-    mqtt_user_read_topics: "{{ (mqtt_user_read_topics_input | from_json) if mqtt_user_read_topics_input is defined else [] }}"
-    mqtt_user_write_topics: "{{ (mqtt_user_write_topics_input | from_json) if mqtt_user_write_topics_input is defined else [] }}"
-    mqtt_user_readwrite_topics: "{{ (mqtt_user_readwrite_topics_input | from_json) if mqtt_user_readwrite_topics_input is defined else [] }}"
+    # Prefer native lists (tools/mqtt-user passes a JSON vars file). Retain
+    # compatibility with callers that still supply a JSON-encoded string.
+    mqtt_user_read_topics: "{{ (mqtt_user_read_topics_input | from_json) if (mqtt_user_read_topics_input is defined and mqtt_user_read_topics_input is string) else (mqtt_user_read_topics_input | default([])) }}"
+    mqtt_user_write_topics: "{{ (mqtt_user_write_topics_input | from_json) if (mqtt_user_write_topics_input is defined and mqtt_user_write_topics_input is string) else (mqtt_user_write_topics_input | default([])) }}"
+    mqtt_user_readwrite_topics: "{{ (mqtt_user_readwrite_topics_input | from_json) if (mqtt_user_readwrite_topics_input is defined and mqtt_user_readwrite_topics_input is string) else (mqtt_user_readwrite_topics_input | default([])) }}"
 
   tasks:
     - name: Validate MQTT user input
@@ -42,7 +42,7 @@
           - mqtt_user_write_topics is not string
           - mqtt_user_readwrite_topics is sequence
           - mqtt_user_readwrite_topics is not string
-        fail_msg: "mqtt_user_name and, for state=present, mqtt_user_password are required; ACL topic inputs must be JSON arrays."
+        fail_msg: "mqtt_user_name and, for state=present, mqtt_user_password are required; ACL topic inputs must be lists."
 
     - name: Ensure Mosquitto password utility is installed
       ansible.builtin.package:
