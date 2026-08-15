@@ -12,14 +12,16 @@ Usage:
   tools/mqtt-user remove USER
 
 Examples:
-  tools/mqtt-user add evcc --rw 'evcc/#' --rw 'go-eCharger/#'
-  tools/mqtt-user add go-echarger --rw 'go-eCharger/#'
+  tools/mqtt-user add evcc --write 'evcc/#'
+  tools/mqtt-user add go-echarger --write 'go-eCharger/#'
+  tools/mqtt-user add homey --read 'go-eCharger/#' --read 'evcc/#' --write 'homey/#'
   tools/mqtt-user passwd evcc
   tools/mqtt-user remove evcc
 
-The password is prompted without echo and passed to Ansible only for this run.
-It is not written to the repository. Use --ask-vault-pass for Bergen Platform
-vault variables required by inventory/group_vars.
+The password is prompted without echo. For add/remove operations the variables are
+written to a mode-0600 temporary JSON file so Ansible receives ACL topics as real
+lists, including topics containing # or +. The file is removed after the run.
+Use --ask-vault-pass for Bergen Platform vault variables required by inventory/group_vars.
 EOF
 }
 
@@ -45,35 +47,62 @@ json_array() {
   python3 -c 'import json,sys; print(json.dumps(sys.argv[1:]))' "$@"
 }
 
-extra=("mqtt_user_name=$user")
+run_playbook_with_json() {
+  local state="$1"
+  local password="${2-}"
+  local read_json write_json rw_json extra_file
+
+  read_json="$(json_array "${read_topics[@]}")"
+  write_json="$(json_array "${write_topics[@]}")"
+  rw_json="$(json_array "${rw_topics[@]}")"
+
+  extra_file="$(mktemp)"
+  chmod 600 "$extra_file"
+  trap 'rm -f "$extra_file"' EXIT
+
+  python3 - "$extra_file" "$user" "$state" "$password" "$read_json" "$write_json" "$rw_json" <<'PY'
+import json
+import sys
+
+path, user, state, password, read_json, write_json, rw_json = sys.argv[1:]
+data = {
+    "mqtt_user_name": user,
+    "mqtt_user_state_input": state,
+    "mqtt_user_read_topics_input": json.loads(read_json),
+    "mqtt_user_write_topics_input": json.loads(write_json),
+    "mqtt_user_readwrite_topics_input": json.loads(rw_json),
+}
+if state == "present":
+    data["mqtt_user_password"] = password
+with open(path, "w", encoding="utf-8") as fh:
+    json.dump(data, fh)
+PY
+
+  ansible-playbook -i "$ROOT/ansible/inventory.yml" "$PLAYBOOK" \
+    --ask-vault-pass --extra-vars "@$extra_file"
+}
 
 case "$action" in
-  add|passwd)
+  add)
     read -rsp "MQTT password for $user: " password; echo
     read -rsp "Repeat password: " password2; echo
     [[ "$password" == "$password2" ]] || { echo "Passwords do not match." >&2; exit 1; }
     [[ -n "$password" ]] || { echo "Password must not be empty." >&2; exit 1; }
-    extra+=("mqtt_user_state_input=present" "mqtt_user_password=$password")
-    if [[ "$action" == add ]]; then
-      extra+=("mqtt_user_read_topics_input=$(json_array "${read_topics[@]}")")
-      extra+=("mqtt_user_write_topics_input=$(json_array "${write_topics[@]}")")
-      extra+=("mqtt_user_readwrite_topics_input=$(json_array "${rw_topics[@]}")")
-    else
-      # passwd changes credentials only; preserve ACL by not supplying ACL options.
-      exec ansible -i "$ROOT/ansible/inventory.yml" mqtt_nodes -b \
-        -m ansible.builtin.command \
-        -a "mosquitto_passwd -b /etc/mosquitto/passwd '$user' '$password'" \
-        --ask-vault-pass
-    fi
+    run_playbook_with_json present "$password"
+    ;;
+  passwd)
+    read -rsp "MQTT password for $user: " password; echo
+    read -rsp "Repeat password: " password2; echo
+    [[ "$password" == "$password2" ]] || { echo "Passwords do not match." >&2; exit 1; }
+    [[ -n "$password" ]] || { echo "Password must not be empty." >&2; exit 1; }
+    # passwd changes credentials only; preserve the existing ACL fragment.
+    exec ansible -i "$ROOT/ansible/inventory.yml" mqtt_nodes -b \
+      -m ansible.builtin.command \
+      -a "mosquitto_passwd -b /etc/mosquitto/passwd '$user' '$password'" \
+      --ask-vault-pass
     ;;
   remove)
-    extra+=("mqtt_user_state_input=absent")
+    run_playbook_with_json absent
     ;;
   *) echo "Unknown action: $action" >&2; usage; exit 2 ;;
 esac
-
-args=()
-for item in "${extra[@]}"; do args+=(--extra-vars "$item"); done
-
-exec ansible-playbook -i "$ROOT/ansible/inventory.yml" "$PLAYBOOK" \
-  --ask-vault-pass "${args[@]}"
