@@ -51,13 +51,15 @@ def ldap_connection(config: dict[str, object]) -> Connection:
         if config["start_tls"] and parsed.scheme == "ldap"
         else AUTO_BIND_NO_TLS
     )
-    return Connection(
-        server,
-        user=str(config["bind_dn"]),
-        password=str(config["bind_password"]),
-        auto_bind=auto_bind,
-        raise_exceptions=True,
-    )
+    connection_options: dict[str, object] = {
+        "auto_bind": auto_bind,
+        "raise_exceptions": True,
+    }
+    if config["bind_dn"]:
+        connection_options["user"] = str(config["bind_dn"])
+        connection_options["password"] = str(config["bind_password"])
+
+    return Connection(server, **connection_options)
 
 
 def mailbox_exists(address: str) -> bool:

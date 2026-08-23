@@ -63,6 +63,7 @@ The project follows **Semantic Versioning (SemVer)** and the changelog format is
 - Daily create-only mailbox provisioning timer
 - Equivalent identity domains, recipient aliases and explicit Send-as owners
 - Site-local, Git-ignored mail inventory for the effective LXC address
+- Anonymous or authenticated LDAP directory searches for the mail backend
 - Migration, backup and security-boundary documentation
 
 #### Project Structure

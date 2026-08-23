@@ -55,6 +55,11 @@ Do not cut over based only on an assumed `memberOf` implementation. Verify the
 queries with `ldapsearch` and test both directory account types used at the
 site.
 
+Directory searches support either anonymous access or an application bind.
+Leave both bind variables empty for anonymous search; configure both together
+for an application bind. Password verification remains a user bind and does
+not require password hashes on the mail server.
+
 ## Alias migration
 
 Synology Mail Server aliases are mail-server configuration, not automatically

@@ -73,6 +73,12 @@ Start from `ansible/group_vars/all/bergen-mail.yml.example`. Site-specific
 values belong in the ignored `bergen-mail.yml`; secrets belong in Ansible
 Vault.
 
+LDAP searches may use either an anonymous bind or an application account. For
+anonymous search, leave both `mail_backend_ldap_bind_dn` and
+`mail_backend_ldap_bind_password` empty. For an application bind, configure
+both values together. SMTP/IMAP password verification still binds as the
+authenticating LDAP user.
+
 ## Generated files
 
 - `/etc/postfix/main.cf`

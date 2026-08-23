@@ -67,8 +67,13 @@ mail_backend_postmaster_address: postmaster@example.net
 
 mail_backend_ldap_uri: ldaps://ldap.example.net:636
 mail_backend_ldap_user_search_base: cn=users,dc=example,dc=net
-mail_backend_ldap_bind_dn: "{{ vault_mail_backend_ldap_bind_dn }}"
-mail_backend_ldap_bind_password: "{{ vault_mail_backend_ldap_bind_password }}"
+
+# Leave both values empty when anonymous directory searches are permitted.
+# For an application bind, set both values and keep the password in Vault.
+mail_backend_ldap_bind_dn: ""
+mail_backend_ldap_bind_password: ""
+# mail_backend_ldap_bind_dn: "{{ vault_mail_backend_ldap_bind_dn }}"
+# mail_backend_ldap_bind_password: "{{ vault_mail_backend_ldap_bind_password }}"
 
 mail_backend_ldap_username_attribute: uid
 

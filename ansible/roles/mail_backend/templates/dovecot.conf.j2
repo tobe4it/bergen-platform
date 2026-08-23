@@ -31,8 +31,10 @@ namespace inbox {
 ldap_uris = {{ mail_backend_ldap_uri }}
 ldap_version = 3
 ldap_base = {{ mail_backend_ldap_user_search_base }}
+{% if mail_backend_ldap_bind_dn | length > 0 %}
 ldap_auth_dn = {{ mail_backend_ldap_bind_dn }}
 ldap_auth_dn_password = {{ mail_backend_ldap_bind_password }}
+{% endif %}
 ldap_starttls = {{ 'yes' if mail_backend_ldap_start_tls | bool else 'no' }}
 {% if mail_backend_ldap_ca_file | length > 0 %}
 ssl_client_ca_file = {{ mail_backend_ldap_ca_file }}

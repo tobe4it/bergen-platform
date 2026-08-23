@@ -32,8 +32,16 @@
     that:
       - mail_backend_ldap_uri is match('^ldaps?://')
       - mail_backend_ldap_user_search_base | length > 0
-      - mail_backend_ldap_bind_dn | length > 0
-      - mail_backend_ldap_bind_password | length > 0
+      - >-
+        (
+          mail_backend_ldap_bind_dn | length == 0
+          and mail_backend_ldap_bind_password | length == 0
+        )
+        or
+        (
+          mail_backend_ldap_bind_dn | length > 0
+          and mail_backend_ldap_bind_password | length > 0
+        )
       - mail_backend_ldap_username_attribute | length > 0
       - mail_backend_ldap_mailuser_filter | length > 0
       - mail_backend_ldap_recipient_query_filter | length > 0
@@ -42,9 +50,10 @@
       - mail_backend_ldap_userdb_filter | length > 0
       - not mail_backend_ldap_start_tls or mail_backend_ldap_uri is match('^ldap://')
     fail_msg: >-
-      LDAP configuration is incomplete. Authentication applies to all matching
-      accounts; mailbox delivery must additionally be restricted by the
-      Mailuser group filter.
+      LDAP configuration is incomplete. Bind DN and password must either both
+      be empty for anonymous search or both be configured. Authentication
+      applies to all matching accounts; mailbox delivery must additionally be
+      restricted by the Mailuser group filter.
   no_log: true
 
 - name: Validate alias declarations
