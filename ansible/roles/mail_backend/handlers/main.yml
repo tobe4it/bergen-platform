@@ -1,0 +1,24 @@
+---
+- name: Validate and reload postfix
+  ansible.builtin.command: postfix check
+  changed_when: false
+  notify: Reload postfix
+
+- name: Reload postfix
+  ansible.builtin.service:
+    name: postfix
+    state: reloaded
+
+- name: Validate and restart dovecot
+  ansible.builtin.command: doveconf -n
+  changed_when: false
+  notify: Restart dovecot
+
+- name: Restart dovecot
+  ansible.builtin.service:
+    name: dovecot
+    state: restarted
+
+- name: Reload systemd
+  ansible.builtin.systemd_service:
+    daemon_reload: true

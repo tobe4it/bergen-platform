@@ -113,16 +113,24 @@ Goals:
 
 ## Mail Platform
 
+Implemented foundation:
+
+- Internal Postfix submission and delivery backend
+- Dovecot LDAP authentication, LMTP and IMAPS
+- Mailuser-only create-only mailbox provisioning
+- Declarative aliases and Send-as ownership
+- Relay integration with an existing public gateway
+
 Planned:
 
-- Postfix
-- Dovecot
 - Rspamd
 - DKIM
 - DMARC
 - MTA-STS
 - TLS Reporting
 - Mail migration
+- RFC 5322 From-header ownership policy/Milter
+- Webmail evaluation
 
 ---
 
@@ -137,4 +145,3 @@ Future candidates:
 - Multi-node deployments
 - CI/CD
 - Automated testing
-

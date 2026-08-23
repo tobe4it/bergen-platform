@@ -1,0 +1,4 @@
+# Managed by Bergen Platform.
+{% for alias in mail_backend_aliases | sort(attribute='address') %}
+{{ alias.address }} {{ alias.send_as | join(',') }}
+{% endfor %}

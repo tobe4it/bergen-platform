@@ -1,0 +1,44 @@
+---
+- name: Validate effective Postfix configuration
+  ansible.builtin.command: postfix check
+  changed_when: false
+
+- name: Validate effective Dovecot configuration
+  ansible.builtin.command: doveconf -n
+  changed_when: false
+  register: mail_backend_doveconf
+
+- name: Read TCP listeners
+  ansible.builtin.command: ss -lnt
+  changed_when: false
+  register: mail_backend_listeners
+
+- name: Validate mail listeners
+  ansible.builtin.assert:
+    that:
+      - (':' ~ (mail_backend_imaps_port | string)) in mail_backend_listeners.stdout
+      - >-
+        not mail_backend_submission_enabled
+        or (':' ~ (mail_backend_submission_port | string)) in mail_backend_listeners.stdout
+      - >-
+        not mail_backend_submissions_enabled
+        or (':' ~ (mail_backend_submissions_port | string)) in mail_backend_listeners.stdout
+      - "'protocols = imap lmtp' in mail_backend_doveconf.stdout"
+    fail_msg: One or more configured mail listeners are missing.
+    success_msg: IMAPS and enabled submission listeners are active.
+
+- name: Summarize mail backend deployment
+  ansible.builtin.debug:
+    msg:
+      - "============================================================"
+      - "Bergen Platform mail backend configured"
+      - "============================================================"
+      - "Host       : {{ mail_backend_hostname }}"
+      - "Mail domain: {{ mail_backend_primary_domain }}"
+      - "Submission : {{ mail_backend_submission_port if mail_backend_submission_enabled else 'disabled' }}"
+      - "Submissions: {{ mail_backend_submissions_port if mail_backend_submissions_enabled else 'disabled' }}"
+      - "IMAPS      : {{ mail_backend_imaps_port }}"
+      - "Relay      : {{ mail_backend_relay_host }}:{{ mail_backend_relay_port }}"
+      - "Mailbox    : LDAP Mailuser group only"
+      - "SMTP AUTH  : all matching LDAP accounts"
+      - "============================================================"

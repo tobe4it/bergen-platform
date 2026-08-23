@@ -26,9 +26,19 @@ GitHub
                           |     +-- Open WebUI
                           |     +-- OpenLDAP Authentication
                           |
-                          +-- mail-gateway
+                          +-- bergen-mail
+                          |     +-- Postfix submission and local delivery
+                          |     +-- Dovecot LMTP and IMAPS
+                          |     +-- LDAP authentication
                           |
                           +-- monitoring
+
+Public Infrastructure
+  |
+  +-- mail-gateway
+        +-- Public SMTP edge policy
+        +-- DKIM and internet delivery
+        +-- Private relay to bergen-mail
 
 Synology NAS
   |
@@ -101,6 +111,12 @@ Identity
 - Synology Directory Server
 - OpenLDAP
 
+Mail
+- Postfix/Dovecot backend LXC
+- LDAP-backed SMTP authentication
+- Mailuser-only mailbox provisioning
+- Existing external edge gateway without user database
+
 AI
 - Ollama
 - Open WebUI
@@ -108,7 +124,6 @@ AI
 Planned
 - llama.cpp
 - IBM MQ
-- Mail Gateway
 - Monitoring
 - Nextcloud
 - Backup
@@ -117,4 +132,3 @@ Planned
 ## Version
 
 Current architecture baseline: v0.5.0
-

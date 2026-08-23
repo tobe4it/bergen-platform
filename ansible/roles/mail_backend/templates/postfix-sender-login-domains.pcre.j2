@@ -1,0 +1,6 @@
+# Managed by Bergen Platform.
+# Every authenticated LDAP identity may use its own local part on each identity
+# domain. Explicit aliases are authorized by sender_login_aliases instead.
+{% for domain in mail_backend_identity_domains | sort %}
+/^([^@]+)@{{ domain | replace('.', '\\.') }}$/ ${1}
+{% endfor %}

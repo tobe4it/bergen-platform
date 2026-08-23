@@ -1,0 +1,96 @@
+# Managed by Bergen Platform. Local changes will be overwritten.
+
+protocols = imap lmtp
+listen = *, ::
+
+base_dir = /run/dovecot
+state_dir = /var/lib/dovecot
+log_path = syslog
+info_log_path = syslog
+
+auth_mechanisms = plain login
+auth_username_format = %{user | lower}
+
+ssl = required
+ssl_min_protocol = TLSv1.2
+ssl_server_cert_file = {{ mail_backend_tls_cert_file }}
+ssl_server_key_file = {{ mail_backend_tls_key_file }}
+
+mail_driver = maildir
+mail_path = {{ mail_backend_mail_root }}/{{ mail_backend_primary_domain }}/%{user | username}/Maildir
+mail_home = {{ mail_backend_mail_root }}/{{ mail_backend_primary_domain }}/%{user | username}
+mail_uid = {{ mail_backend_mail_user }}
+mail_gid = {{ mail_backend_mail_group }}
+first_valid_uid = {{ mail_backend_mail_uid }}
+
+namespace inbox {
+  inbox = yes
+  separator = /
+}
+
+ldap_uris = {{ mail_backend_ldap_uri }}
+ldap_version = 3
+ldap_base = {{ mail_backend_ldap_user_search_base }}
+ldap_auth_dn = {{ mail_backend_ldap_bind_dn }}
+ldap_auth_dn_password = {{ mail_backend_ldap_bind_password }}
+ldap_starttls = {{ 'yes' if mail_backend_ldap_start_tls | bool else 'no' }}
+{% if mail_backend_ldap_ca_file | length > 0 %}
+ssl_client_ca_file = {{ mail_backend_ldap_ca_file }}
+{% endif %}
+ssl_client_require_valid_cert = {{ 'yes' if mail_backend_ldap_validate_certificate | bool else 'no' }}
+
+# All matching LDAP accounts may authenticate. SMTP AUTH stops after passdb,
+# therefore a technical account does not need a mailbox/userdb result.
+passdb ldap {
+  bind = yes
+  filter = {{ mail_backend_ldap_passdb_filter }}
+  fields {
+    user = %{ldap:{{ mail_backend_ldap_username_attribute }}}
+  }
+}
+
+# IMAP and LMTP need userdb and are restricted to the Mailuser group filter.
+userdb ldap {
+  filter = {{ mail_backend_ldap_userdb_filter }}
+  fields {
+    user = %{ldap:{{ mail_backend_ldap_username_attribute }}}
+    uid = {{ mail_backend_mail_uid }}
+    gid = {{ mail_backend_mail_gid }}
+    home = {{ mail_backend_mail_root }}/{{ mail_backend_primary_domain }}/%{ldap:{{ mail_backend_ldap_username_attribute }}}
+  }
+  iterate_filter = {{ mail_backend_ldap_mailuser_filter }}
+  iterate_fields {
+    user = %{ldap:{{ mail_backend_ldap_username_attribute }}}
+  }
+}
+
+service auth {
+  unix_listener /var/spool/postfix/private/auth {
+    mode = 0660
+    user = postfix
+    group = postfix
+  }
+}
+
+service lmtp {
+  unix_listener /var/spool/postfix/private/dovecot-lmtp {
+    mode = 0600
+    user = postfix
+    group = postfix
+  }
+}
+
+service imap-login {
+  inet_listener imap {
+    port = 0
+  }
+
+  inet_listener imaps {
+    port = {{ mail_backend_imaps_port }}
+    ssl = yes
+  }
+}
+
+protocol lmtp {
+  postmaster_address = {{ mail_backend_postmaster_address }}
+}

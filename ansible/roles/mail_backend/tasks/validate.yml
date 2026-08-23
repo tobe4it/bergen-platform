@@ -1,0 +1,96 @@
+---
+- name: Validate supported operating system
+  ansible.builtin.assert:
+    that:
+      - ansible_facts.os_family == 'Debian'
+      - ansible_facts.distribution_major_version | int >= 13
+    fail_msg: >-
+      The mail_backend role currently targets Debian 13 or newer because its
+      Dovecot configuration uses the Dovecot 2.4 syntax.
+
+- name: Validate mail service topology
+  ansible.builtin.assert:
+    that:
+      - mail_backend_hostname | length > 0
+      - mail_backend_primary_domain | length > 0
+      - mail_backend_primary_domain in mail_backend_identity_domains
+      - mail_backend_identity_domains | length > 0
+      - mail_backend_identity_domains | unique | length == mail_backend_identity_domains | length
+      - mail_backend_postmaster_address | length > 0
+      - mail_backend_relay_host | length > 0
+      - mail_backend_relay_port | int > 0
+      - mail_backend_relay_port | int < 65536
+      - mail_backend_trusted_networks | length > 0
+      - mail_backend_mail_uid | int >= 1000
+      - mail_backend_mail_gid | int >= 1000
+    fail_msg: >-
+      Mail topology is incomplete. Configure hostname, primary/identity
+      domains, postmaster, relay and trusted gateway networks.
+
+- name: Validate LDAP configuration
+  ansible.builtin.assert:
+    that:
+      - mail_backend_ldap_uri is match('^ldaps?://')
+      - mail_backend_ldap_user_search_base | length > 0
+      - mail_backend_ldap_bind_dn | length > 0
+      - mail_backend_ldap_bind_password | length > 0
+      - mail_backend_ldap_username_attribute | length > 0
+      - mail_backend_ldap_mailuser_filter | length > 0
+      - mail_backend_ldap_recipient_query_filter | length > 0
+      - mail_backend_ldap_domain_alias_query_filter | length > 0
+      - mail_backend_ldap_passdb_filter | length > 0
+      - mail_backend_ldap_userdb_filter | length > 0
+      - not mail_backend_ldap_start_tls or mail_backend_ldap_uri is match('^ldap://')
+    fail_msg: >-
+      LDAP configuration is incomplete. Authentication applies to all matching
+      accounts; mailbox delivery must additionally be restricted by the
+      Mailuser group filter.
+  no_log: true
+
+- name: Validate alias declarations
+  ansible.builtin.assert:
+    that:
+      - item.address is defined
+      - item.address | length > 0
+      - "'@' in item.address"
+      - item.address.split('@')[-1] in mail_backend_identity_domains
+      - item.recipients is defined
+      - item.recipients | length > 0
+      - >-
+        item.recipients | select('match', '^[^@ ]+@[^@ ]+$') | list | length
+        == item.recipients | length
+      - item.send_as is defined
+      - item.send_as | length > 0
+      - >-
+        item.send_as | select('match', '^[A-Za-z0-9][A-Za-z0-9._+-]*$') | list | length
+        == item.send_as | length
+    fail_msg: >-
+      Every alias needs address, recipients and explicit send_as owners.
+  loop: "{{ mail_backend_aliases }}"
+  loop_control:
+    label: "{{ item.address | default('invalid alias') }}"
+
+- name: Validate unique alias addresses
+  ansible.builtin.assert:
+    that:
+      - >-
+        mail_backend_aliases | map(attribute='address') | list | unique | length
+        == mail_backend_aliases | length
+    fail_msg: Duplicate addresses exist in mail_backend_aliases.
+
+- name: Validate listener ports
+  ansible.builtin.assert:
+    that:
+      - mail_backend_submission_port | int > 0
+      - mail_backend_submission_port | int < 65536
+      - mail_backend_submissions_port | int > 0
+      - mail_backend_submissions_port | int < 65536
+      - mail_backend_imaps_port | int > 0
+      - mail_backend_imaps_port | int < 65536
+      - >-
+        [
+          mail_backend_submission_port | int,
+          mail_backend_submissions_port | int,
+          mail_backend_imaps_port | int
+        ] | unique | length == 3
+    fail_msg: Submission, submissions and IMAPS ports must be valid and unique.

@@ -31,6 +31,13 @@ all:
     mqtt_nodes:
       hosts: {}
 
+    mail_backend_nodes:
+      hosts:
+        bergen-mail:
+          ansible_host: bergen-mail
+          ansible_user: root
+          ansible_python_interpreter: /usr/bin/python3
+
     linux_lxcs:
       hosts:
         bp-controller:

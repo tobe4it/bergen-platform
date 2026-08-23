@@ -1,0 +1,24 @@
+---
+- name: Validate mail backend variables
+  ansible.builtin.import_tasks: validate.yml
+
+- name: Install mail backend packages
+  ansible.builtin.import_tasks: packages.yml
+
+- name: Create mail backend accounts and directories
+  ansible.builtin.import_tasks: directories.yml
+
+- name: Configure TLS material
+  ansible.builtin.import_tasks: tls.yml
+
+- name: Configure Postfix and Dovecot
+  ansible.builtin.import_tasks: configure.yml
+
+- name: Configure mailbox provisioning
+  ansible.builtin.import_tasks: provisioning.yml
+
+- name: Enable mail backend services
+  ansible.builtin.import_tasks: service.yml
+
+- name: Validate the running mail backend
+  ansible.builtin.import_tasks: validate_runtime.yml

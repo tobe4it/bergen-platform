@@ -54,6 +54,16 @@ The project follows **Semantic Versioning (SemVer)** and the changelog format is
 
 ### Added
 
+#### Mail Platform
+
+- Dedicated Debian 13 `bergen-mail` LXC example and deployment workflow
+- Postfix trusted inbound and authenticated submission services
+- Dovecot LDAP authentication, LMTP and IMAPS
+- LDAP `Mailuser`-restricted mailbox authorization
+- Daily create-only mailbox provisioning timer
+- Equivalent identity domains, recipient aliases and explicit Send-as owners
+- Migration, backup and security-boundary documentation
+
 #### Project Structure
 
 - Initial Ansible project layout

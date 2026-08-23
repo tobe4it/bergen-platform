@@ -1,0 +1,57 @@
+---
+- name: Install LDAP mailbox provisioning program
+  ansible.builtin.copy:
+    src: bergen-mailbox-provision.py
+    dest: /usr/local/sbin/bergen-mailbox-provision
+    owner: root
+    group: root
+    mode: "0750"
+  when: mail_backend_provisioning_enabled | bool
+
+- name: Configure LDAP mailbox provisioning
+  ansible.builtin.template:
+    src: mailbox-provision.json.j2
+    dest: "{{ mail_backend_config_directory }}/mailbox-provision.json"
+    owner: root
+    group: root
+    mode: "0600"
+  no_log: true
+  when: mail_backend_provisioning_enabled | bool
+
+- name: Install mailbox provisioning service
+  ansible.builtin.template:
+    src: bergen-mailbox-provision.service.j2
+    dest: /etc/systemd/system/bergen-mailbox-provision.service
+    owner: root
+    group: root
+    mode: "0644"
+  when: mail_backend_provisioning_enabled | bool
+  notify: Reload systemd
+
+- name: Install mailbox provisioning timer
+  ansible.builtin.template:
+    src: bergen-mailbox-provision.timer.j2
+    dest: /etc/systemd/system/bergen-mailbox-provision.timer
+    owner: root
+    group: root
+    mode: "0644"
+  when: mail_backend_provisioning_enabled | bool
+  notify: Reload systemd
+
+- name: Flush systemd handler before enabling timer
+  ansible.builtin.meta: flush_handlers
+
+- name: Enable daily mailbox provisioning
+  ansible.builtin.systemd_service:
+    name: bergen-mailbox-provision.timer
+    enabled: true
+    state: started
+  when: mail_backend_provisioning_enabled | bool
+
+- name: Remove provisioning timer when disabled
+  ansible.builtin.systemd_service:
+    name: bergen-mailbox-provision.timer
+    enabled: false
+    state: stopped
+  failed_when: false
+  when: not mail_backend_provisioning_enabled | bool

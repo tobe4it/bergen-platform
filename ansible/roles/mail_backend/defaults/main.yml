@@ -1,0 +1,81 @@
+---
+###############################################################################
+# Bergen Platform mail backend defaults
+###############################################################################
+
+mail_backend_packages:
+  - ca-certificates
+  - dovecot-core
+  - dovecot-imapd
+  - dovecot-ldap
+  - dovecot-lmtpd
+  - ldap-utils
+  - openssl
+  - postfix
+  - postfix-ldap
+  - postfix-pcre
+  - python3
+  - python3-ldap3
+
+mail_backend_hostname: ""
+mail_backend_primary_domain: ""
+mail_backend_identity_domains: []
+mail_backend_postmaster_address: ""
+
+mail_backend_relay_host: ""
+mail_backend_relay_port: 26
+mail_backend_relay_tls_security_level: encrypt
+
+mail_backend_trusted_networks:
+  - 127.0.0.0/8
+  - "[::1]/128"
+
+mail_backend_submission_enabled: true
+mail_backend_submission_port: 587
+mail_backend_submissions_enabled: true
+mail_backend_submissions_port: 465
+mail_backend_imaps_port: 993
+mail_backend_message_size_limit: 52428800
+
+mail_backend_mail_root: /var/vmail
+mail_backend_mail_user: vmail
+mail_backend_mail_group: vmail
+mail_backend_mail_uid: 5000
+mail_backend_mail_gid: 5000
+
+mail_backend_config_directory: /etc/bergen-platform
+mail_backend_alias_map: /etc/postfix/virtual_aliases
+mail_backend_sender_alias_map: /etc/postfix/sender_login_aliases
+mail_backend_sender_domain_map: /etc/postfix/sender_login_domains.pcre
+mail_backend_ldap_mailbox_map: /etc/postfix/ldap_mailboxes.cf
+mail_backend_ldap_domain_alias_map: /etc/postfix/ldap_domain_aliases.cf
+
+mail_backend_aliases: []
+
+mail_backend_ldap_uri: ""
+mail_backend_ldap_user_search_base: ""
+mail_backend_ldap_bind_dn: ""
+mail_backend_ldap_bind_password: ""
+mail_backend_ldap_username_attribute: uid
+mail_backend_ldap_mailuser_filter: ""
+mail_backend_ldap_recipient_query_filter: ""
+mail_backend_ldap_domain_alias_query_filter: ""
+mail_backend_ldap_passdb_filter: ""
+mail_backend_ldap_userdb_filter: ""
+mail_backend_ldap_start_tls: false
+mail_backend_ldap_validate_certificate: true
+mail_backend_ldap_ca_file: ""
+
+mail_backend_provisioning_enabled: true
+mail_backend_provisioning_hour: 3
+mail_backend_provisioning_minute: 15
+mail_backend_provisioning_random_delay: 15m
+
+mail_backend_tls_generate_self_signed: true
+mail_backend_tls_cert_file: /etc/ssl/certs/mail-backend-fullchain.pem
+mail_backend_tls_key_file: /etc/ssl/private/mail-backend-key.pem
+mail_backend_tls_self_signed_days: 30
+
+mail_backend_dovecot_config_file: /etc/dovecot/dovecot.conf
+mail_backend_postfix_main_config_file: /etc/postfix/main.cf
+mail_backend_postfix_master_config_file: /etc/postfix/master.cf

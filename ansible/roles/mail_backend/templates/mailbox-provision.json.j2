@@ -1,0 +1,12 @@
+{
+  "ldap_uri": {{ mail_backend_ldap_uri | to_json }},
+  "bind_dn": {{ mail_backend_ldap_bind_dn | to_json }},
+  "bind_password": {{ mail_backend_ldap_bind_password | to_json }},
+  "search_base": {{ mail_backend_ldap_user_search_base | to_json }},
+  "search_filter": {{ mail_backend_ldap_mailuser_filter | to_json }},
+  "username_attribute": {{ mail_backend_ldap_username_attribute | to_json }},
+  "primary_domain": {{ mail_backend_primary_domain | to_json }},
+  "start_tls": {{ mail_backend_ldap_start_tls | bool | to_json }},
+  "validate_certificate": {{ mail_backend_ldap_validate_certificate | bool | to_json }},
+  "ca_file": {{ mail_backend_ldap_ca_file | to_json }}
+}

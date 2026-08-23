@@ -1,0 +1,12 @@
+---
+galaxy_info:
+  role_name: mail_backend
+  author: Bergen Platform
+  description: Internal Postfix and Dovecot mail backend with LDAP identities
+  min_ansible_version: "2.16"
+  platforms:
+    - name: Debian
+      versions:
+        - trixie
+
+dependencies: []

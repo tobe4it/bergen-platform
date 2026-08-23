@@ -1,0 +1,117 @@
+---
+###############################################################################
+# Bergen Platform
+#
+# Example configuration: bergen-mail
+#
+# Copy this file to bergen-mail.yml and replace every CHANGE_ME value. The
+# destination file is ignored by Git so that site-specific topology and LDAP
+# credentials do not enter the public repository.
+###############################################################################
+
+lxc_vmid: 122
+lxc_hostname: bergen-mail
+
+lxc_template: local:vztmpl/debian-13-standard_13.6-1_amd64.tar.zst
+lxc_storage: local-zfs
+lxc_rootfs_size: 32
+
+lxc_memory: 2048
+lxc_swap: 512
+lxc_cores: 2
+
+lxc_bridge: vmbr2
+lxc_ip: dhcp
+lxc_ip6: dhcp
+lxc_unprivileged: true
+lxc_onboot: true
+lxc_start_order: 15
+lxc_firewall: 1
+
+lxc_ssh_public_key: >-
+  {{ lookup('file', lookup('env', 'HOME') + '/.ssh/id_ed25519.pub') }}
+lxc_root_password: "{{ vault_lxc_root_password }}"
+
+pve_node: venombox
+pve_inventory_host: venombox
+
+###############################################################################
+# Mail service
+###############################################################################
+
+mail_backend_hostname: mail.example.net
+mail_backend_primary_domain: example.net
+
+# Every authenticated LDAP user may submit as <login>@one-of-these-domains.
+mail_backend_identity_domains:
+  - example.net
+
+# The public edge MTA remains account-agnostic. It accepts this backend over a
+# private transport such as WireGuard and performs public delivery/DKIM.
+mail_backend_relay_host: mx.example.net
+mail_backend_relay_port: 26
+mail_backend_trusted_networks:
+  - 127.0.0.0/8
+  - "[::1]/128"
+  - CHANGE_ME_GATEWAY_WIREGUARD_IP/32
+
+mail_backend_postmaster_address: postmaster@example.net
+
+###############################################################################
+# LDAP
+###############################################################################
+
+mail_backend_ldap_uri: ldaps://ldap.example.net:636
+mail_backend_ldap_user_search_base: cn=users,dc=example,dc=net
+mail_backend_ldap_bind_dn: "{{ vault_mail_backend_ldap_bind_dn }}"
+mail_backend_ldap_bind_password: "{{ vault_mail_backend_ldap_bind_password }}"
+
+mail_backend_ldap_username_attribute: uid
+
+# Adapt this to the directory schema. It must match only members of the group
+# that is allowed to own an IMAP mailbox.
+mail_backend_ldap_mailuser_filter: >-
+  (&(objectClass=posixAccount)(memberOf=cn=Mailuser,cn=groups,dc=example,dc=net))
+
+# Postfix substitutes %u with the recipient local part. Both filters must
+# return only users currently entitled to a mailbox.
+mail_backend_ldap_recipient_query_filter: >-
+  (&(uid=%u)(memberOf=cn=Mailuser,cn=groups,dc=example,dc=net))
+mail_backend_ldap_domain_alias_query_filter: >-
+  (&(uid=%u)(memberOf=cn=Mailuser,cn=groups,dc=example,dc=net))
+
+# Dovecot substitutes its own %{user | username} expression at runtime.
+mail_backend_ldap_passdb_filter: >-
+  (&(objectClass=posixAccount)(uid=%{user | username}))
+mail_backend_ldap_userdb_filter: >-
+  (&(objectClass=posixAccount)(uid=%{user | username})(memberOf=cn=Mailuser,cn=groups,dc=example,dc=net))
+
+###############################################################################
+# TLS
+###############################################################################
+
+# Bootstrap certificates are intentionally disabled for production examples.
+# Supply a certificate/key through Vault or a separate certificate role.
+mail_backend_tls_generate_self_signed: false
+mail_backend_tls_cert_file: /etc/ssl/certs/mail-backend-fullchain.pem
+mail_backend_tls_key_file: /etc/ssl/private/mail-backend-key.pem
+
+###############################################################################
+# Aliases and explicit Send-as ownership
+###############################################################################
+
+# identity_domains already allow every LDAP login to use the same local part
+# across all listed domains. Define only aliases with a different local part or
+# distribution list membership here.
+mail_backend_aliases:
+  - address: info@example.net
+    recipients:
+      - user@example.net
+    send_as:
+      - user
+
+  - address: camera@example.net
+    recipients:
+      - user@example.net
+    send_as:
+      - reolink-camera

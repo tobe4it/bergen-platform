@@ -1,0 +1,55 @@
+---
+- name: Generate temporary self-signed mail certificate
+  ansible.builtin.command:
+    argv:
+      - openssl
+      - req
+      - -x509
+      - -newkey
+      - rsa:3072
+      - -sha256
+      - -nodes
+      - -days
+      - "{{ mail_backend_tls_self_signed_days | string }}"
+      - -subj
+      - "/CN={{ mail_backend_hostname }}"
+      - -addext
+      - "subjectAltName=DNS:{{ mail_backend_hostname }}"
+      - -keyout
+      - "{{ mail_backend_tls_key_file }}"
+      - -out
+      - "{{ mail_backend_tls_cert_file }}"
+  args:
+    creates: "{{ mail_backend_tls_key_file }}"
+  when: mail_backend_tls_generate_self_signed | bool
+  notify:
+    - Validate and reload postfix
+    - Validate and restart dovecot
+
+- name: Check TLS certificate
+  ansible.builtin.stat:
+    path: "{{ mail_backend_tls_cert_file }}"
+  register: mail_backend_tls_certificate
+
+- name: Check TLS private key
+  ansible.builtin.stat:
+    path: "{{ mail_backend_tls_key_file }}"
+  register: mail_backend_tls_private_key
+
+- name: Require TLS material
+  ansible.builtin.assert:
+    that:
+      - mail_backend_tls_certificate.stat.exists
+      - mail_backend_tls_certificate.stat.isreg
+      - mail_backend_tls_private_key.stat.exists
+      - mail_backend_tls_private_key.stat.isreg
+    fail_msg: >-
+      TLS material is missing. Supply the configured certificate and key or
+      enable temporary self-signed certificate generation for bootstrap.
+
+- name: Secure TLS private key
+  ansible.builtin.file:
+    path: "{{ mail_backend_tls_key_file }}"
+    owner: root
+    group: root
+    mode: "0600"

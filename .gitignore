@@ -1,6 +1,7 @@
 .venv/
 *.retry
 ansible/group_vars/all/vault.yml
+ansible/group_vars/all/bergen-mail.yml
 ansible/reports/
 __pycache__/
 *.pyc
