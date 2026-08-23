@@ -35,6 +35,10 @@ lxc_root_password: "{{ vault_lxc_root_password }}"
 pve_node: venombox
 pve_inventory_host: venombox
 
+# Runtime discovery writes the effective LXC address only to this ignored,
+# site-local inventory. Keep the public inventory free of local topology.
+lxc_inventory_file: "{{ playbook_dir }}/../inventory.local.yml"
+
 ###############################################################################
 # Mail service
 ###############################################################################

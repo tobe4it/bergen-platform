@@ -105,7 +105,12 @@ publish the backend's port 25 directly to the internet.
 cp ansible/group_vars/all/bergen-mail.yml.example \
   ansible/group_vars/all/bergen-mail.yml
 
+cp ansible/inventory.local.yml.example \
+  ansible/inventory.local.yml
+
 ansible-playbook ansible/playbooks/deploy-mail-backend.yml \
+  -i ansible/inventory.yml \
+  -i ansible/inventory.local.yml \
   -e @ansible/group_vars/all/bergen-mail.yml \
   --ask-vault-pass
 ```
@@ -114,9 +119,16 @@ Deploy the role to an existing container with:
 
 ```bash
 ansible-playbook ansible/playbooks/bootstrap-mail-backend.yml \
+  -i ansible/inventory.yml \
+  -i ansible/inventory.local.yml \
   -e @ansible/group_vars/all/bergen-mail.yml \
   --ask-vault-pass
 ```
+
+The discovered address is persisted only in the ignored
+`ansible/inventory.local.yml`. The tracked `ansible/inventory.yml` keeps an
+empty `mail_backend_nodes` group and therefore contains no site-specific mail
+backend address.
 
 ## Validation
 

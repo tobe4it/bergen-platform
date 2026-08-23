@@ -16,7 +16,8 @@
   gather_facts: false
 
   vars:
-    inventory_file_path: "{{ playbook_dir }}/../inventory.yml"
+    inventory_file_path: >-
+      {{ lxc_inventory_file | default(playbook_dir ~ '/../inventory.yml') }}
     discovered_inventory_ipv4: "{{ hostvars[lxc_hostname].ansible_host }}"
 
   tasks:

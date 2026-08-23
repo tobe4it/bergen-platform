@@ -1,0 +1,16 @@
+---
+###############################################################################
+# Site-local inventory example
+#
+# Copy to inventory.local.yml. The destination is ignored by Git. Runtime
+# discovery replaces ansible_host with the effective address of the LXC.
+###############################################################################
+
+all:
+  children:
+    mail_backend_nodes:
+      hosts:
+        bergen-mail:
+          ansible_host: bergen-mail
+          ansible_user: root
+          ansible_python_interpreter: /usr/bin/python3

@@ -86,7 +86,10 @@ unless that is the intended policy.
 
 ### 2. Deploy without traffic
 
-- create `bergen-mail` from the example variables;
+- copy both `bergen-mail.yml.example` and `inventory.local.yml.example` to
+  their ignored destination files;
+- create `bergen-mail` from the local variables while passing the public and
+  local inventory sources to Ansible;
 - verify both LDAP directory types and the `Mailuser` group filter;
 - run `bergen-mailbox-provision.service` manually;
 - test IMAPS and SMTP AUTH with a temporary certificate/trust setup;
@@ -129,6 +132,12 @@ Back up at least:
 - Ansible/Vault configuration;
 - TLS material where it is not reproducibly issued;
 - an alias/configuration export at each significant change.
+
+The site configuration in `ansible/group_vars/all/bergen-mail.yml`, Vault file
+and effective address in `ansible/inventory.local.yml` are ignored by Git.
+Back them up separately from the public repository. The generated operational
+configuration also exists inside the LXC and is covered by a complete LXC
+backup.
 
 Mailbox deletion is intentionally outside the role. Define retention and an
 archive workflow before automating deprovisioning.
