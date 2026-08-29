@@ -1,28 +1,9 @@
 ---
-- name: Create container directories
-
+- name: Create Podman storage directories
   ansible.builtin.file:
-
     path: "{{ item }}"
-
     state: directory
-
-    owner: root
-
-    group: ai
-
-    mode: "2775"
-
-  loop:
-
-    - "{{ podman_storage_root }}"
-
-    - "{{ podman_storage_root }}/openwebui"
-
-    - "{{ podman_storage_root }}/postgres"
-
-    - "{{ podman_storage_root }}/redis"
-
-    - "{{ podman_storage_root }}/anythingllm"
-
-    - "{{ podman_storage_root }}/searxng"
+    owner: "{{ podman_storage_owner }}"
+    group: "{{ podman_storage_group }}"
+    mode: "{{ podman_storage_mode }}"
+  loop: "{{ [podman_storage_root] + podman_storage_directories }}"
