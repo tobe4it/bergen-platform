@@ -15,6 +15,11 @@
       tags:
         - base
 
+    - role: remote_syslog
+      tags:
+        - logging
+        - syslog
+
     - role: mail_backend
       tags:
         - mail
