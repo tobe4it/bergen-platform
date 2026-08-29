@@ -16,6 +16,15 @@ The project follows **Semantic Versioning (SemVer)** and the changelog format is
   configuration validation and an optional deployment test event.
 - Integrated central Syslog forwarding into the mail-backend bootstrap.
 
+#### DNS Filtering
+
+- Added a dedicated `bergen-pihole` Debian 13 LXC definition and first-deploy
+  workflow.
+- Added a Pi-hole v6 Podman/Quadlet role with persistent state, vaulted
+  administration credential, explicit upstream DNS and runtime validation.
+- Added staged DNS-cutover documentation that preserves UniFi routing/policies
+  and keeps Synology DNS as the initial internal/upstream resolver.
+
 ### Fixed
 
 #### Mail Platform

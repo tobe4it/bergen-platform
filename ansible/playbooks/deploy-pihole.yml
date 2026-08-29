@@ -1,0 +1,57 @@
+---
+###############################################################################
+# Bergen Platform
+#
+# Complete first deployment of the dedicated Pi-hole LXC.
+#
+# The first deployment deliberately does not persist the DHCP address in the
+# tracked inventory. Pi-hole requires a stable address before client cutover;
+# reserve the discovered address in UniFi first and then add it to the ignored
+# site-local inventory.
+###############################################################################
+
+- name: Validate Pi-hole LXC identity before provisioning
+  hosts: "{{ pve_inventory_host | default(pve_node) }}"
+  become: true
+  gather_facts: false
+
+  tasks:
+    - name: Check whether the requested VMID already exists
+      ansible.builtin.command:
+        argv:
+          - pct
+          - config
+          - "{{ lxc_vmid | string }}"
+      register: pihole_existing_lxc
+      changed_when: false
+      failed_when: false
+
+    - name: Reject an occupied VMID belonging to another LXC
+      ansible.builtin.assert:
+        that:
+          - >-
+            pihole_existing_lxc.rc != 0
+            or
+            ('hostname: ' ~ lxc_hostname) in pihole_existing_lxc.stdout
+        fail_msg: >-
+          VMID {{ lxc_vmid }} already exists but is not {{ lxc_hostname }}.
+          Choose another lxc_vmid before provisioning.
+        success_msg: >-
+          VMID {{ lxc_vmid }} is free or already belongs to {{ lxc_hostname }}.
+
+- import_playbook: create-lxc.yml
+
+- import_playbook: restart-lxc.yml
+
+- import_playbook: discover-lxc.yml
+
+- import_playbook: bootstrap-lxc.yml
+  vars:
+    bootstrap_lxc_target: discovered_lxcs
+    bootstrap_refresh_host_keys: true
+
+- import_playbook: configure-lxc-container-runtime.yml
+
+- import_playbook: bootstrap-pihole.yml
+  vars:
+    bootstrap_pihole_target: discovered_lxcs

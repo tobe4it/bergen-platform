@@ -1,0 +1,30 @@
+###############################################################################
+#
+# Bergen Platform
+#
+# Pi-hole Podman Quadlet
+#
+###############################################################################
+
+[Unit]
+Description=Bergen Platform Pi-hole DNS filtering
+Wants=network-online.target
+After=network-online.target
+
+[Container]
+ContainerName={{ pihole_container_name }}
+Image={{ pihole_image }}
+
+# Dedicated LXC + host networking gives Pi-hole the LXC address directly and
+# preserves source client addresses for per-client/group policy.
+Network=host
+
+Volume={{ pihole_data_directory }}:/etc/pihole
+EnvironmentFile={{ pihole_environment_file }}
+
+[Service]
+Restart=always
+TimeoutStartSec=300
+
+[Install]
+WantedBy=multi-user.target

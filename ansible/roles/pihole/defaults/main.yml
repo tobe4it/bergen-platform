@@ -1,0 +1,22 @@
+---
+pihole_image: "docker.io/pihole/pihole:2026.07.2"
+pihole_container_name: "pihole"
+
+pihole_data_directory: "/srv/pihole/etc-pihole"
+pihole_environment_file: "/etc/bergen-platform/pihole.env"
+pihole_quadlet_path: "/etc/containers/systemd/pihole.container"
+pihole_service_name: "pihole.service"
+
+pihole_timezone: "UTC"
+pihole_upstreams: []
+
+pihole_dns_interface: "eth0"
+pihole_dns_listening_mode: "SINGLE"
+pihole_query_logging: true
+pihole_dnssec: false
+
+pihole_dhcp_enabled: false
+pihole_ntp_enabled: false
+
+# Must be provided through site-local/vaulted configuration.
+pihole_web_password: ""

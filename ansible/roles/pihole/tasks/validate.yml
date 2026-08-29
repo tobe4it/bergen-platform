@@ -1,0 +1,52 @@
+---
+- name: Wait for Pi-hole DNS listener
+  ansible.builtin.wait_for:
+    host: "127.0.0.1"
+    port: 53
+    state: started
+    timeout: 180
+
+- name: Wait for Pi-hole web listener
+  ansible.builtin.wait_for:
+    host: "127.0.0.1"
+    port: 80
+    state: started
+    timeout: 180
+
+- name: Verify Pi-hole systemd service
+  ansible.builtin.command:
+    argv:
+      - systemctl
+      - is-active
+      - "{{ pihole_service_name }}"
+  register: pihole_service_status
+  changed_when: false
+  failed_when: pihole_service_status.stdout | trim != "active"
+
+- name: Verify Pi-hole application status
+  ansible.builtin.command:
+    argv:
+      - podman
+      - exec
+      - "{{ pihole_container_name }}"
+      - pihole
+      - status
+  register: pihole_application_status
+  changed_when: false
+
+- name: Summarize Pi-hole service
+  ansible.builtin.debug:
+    msg:
+      - "============================================================"
+      - "Bergen Platform Pi-hole service ready"
+      - "============================================================"
+      - "Image       : {{ pihole_image }}"
+      - "DNS         : TCP/UDP 53"
+      - "Web         : HTTP 80 / HTTPS 443"
+      - "Interface   : {{ pihole_dns_interface }}"
+      - "Listen mode : {{ pihole_dns_listening_mode }}"
+      - "Upstream    : {{ pihole_upstreams | join(', ') }}"
+      - "DHCP        : {{ pihole_dhcp_enabled }}"
+      - "NTP         : {{ pihole_ntp_enabled }}"
+      - "Status      : active"
+      - "============================================================"

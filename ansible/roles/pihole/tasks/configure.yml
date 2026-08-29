@@ -1,0 +1,19 @@
+---
+- name: Render Pi-hole environment
+  ansible.builtin.template:
+    src: pihole.env.j2
+    dest: "{{ pihole_environment_file }}"
+    owner: root
+    group: root
+    mode: "0600"
+  register: pihole_environment
+  no_log: true
+
+- name: Render Pi-hole Quadlet
+  ansible.builtin.template:
+    src: pihole.container.j2
+    dest: "{{ pihole_quadlet_path }}"
+    owner: root
+    group: root
+    mode: "0644"
+  register: pihole_quadlet

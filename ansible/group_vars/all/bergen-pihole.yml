@@ -1,0 +1,68 @@
+---
+###############################################################################
+# Bergen Platform
+#
+# LXC configuration: bergen-pihole
+#
+# Dedicated Pi-hole DNS filtering service.
+###############################################################################
+
+lxc_vmid: 123
+lxc_hostname: bergen-pihole
+
+lxc_template: local:vztmpl/debian-13-standard_13.6-1_amd64.tar.zst
+
+lxc_storage: local-zfs
+lxc_rootfs_size: 8
+
+lxc_memory: 1024
+lxc_swap: 256
+lxc_cores: 1
+
+lxc_bridge: vmbr2
+
+# Initial deployment uses DHCP so Bergen Platform can discover the new LXC.
+# Before clients use Pi-hole, reserve the discovered address in UniFi.
+lxc_ip: dhcp
+lxc_ip6: dhcp
+
+lxc_unprivileged: true
+lxc_onboot: true
+lxc_start_order: 10
+
+lxc_firewall: 1
+
+lxc_ssh_public_key: >-
+  {{ lookup('file', lookup('env', 'HOME') + '/.ssh/id_ed25519.pub') }}
+lxc_root_password: "{{ vault_lxc_root_password }}"
+
+pve_node: venombox
+pve_inventory_host: venombox
+
+###############################################################################
+# Pi-hole
+###############################################################################
+
+# Pin deployments to an explicit upstream release. Upgrade deliberately in Git.
+pihole_image: docker.io/pihole/pihole:2026.07.2
+
+pihole_timezone: Europe/Berlin
+
+# Preserve the existing internal DNS authority and split-DNS behavior.
+# Do not point Synology DNS back to Pi-hole or to a resolver that forwards to
+# Pi-hole, otherwise a DNS forwarding loop is created.
+pihole_upstreams:
+  - 192.168.6.11
+
+# The LXC has one routed service interface. SINGLE accepts queries from routed
+# VLANs on that interface while avoiding listeners on unrelated interfaces.
+pihole_dns_interface: eth0
+pihole_dns_listening_mode: SINGLE
+
+pihole_query_logging: true
+pihole_dnssec: false
+pihole_dhcp_enabled: false
+pihole_ntp_enabled: false
+
+# Secret is stored only in ansible/group_vars/all/vault.yml.
+pihole_web_password: "{{ vault_pihole_web_password }}"

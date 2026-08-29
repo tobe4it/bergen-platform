@@ -1,0 +1,26 @@
+---
+###############################################################################
+# Bergen Platform
+#
+# Bootstrap or reconcile a dedicated Pi-hole DNS filtering node.
+###############################################################################
+
+- name: Bootstrap Bergen Platform Pi-hole node
+  hosts: "{{ bootstrap_pihole_target | default('pihole_nodes') }}"
+  become: true
+  gather_facts: true
+
+  roles:
+    - role: lxc_base
+      tags:
+        - base
+
+    - role: podman
+      tags:
+        - podman
+        - runtime
+
+    - role: pihole
+      tags:
+        - pihole
+        - dns

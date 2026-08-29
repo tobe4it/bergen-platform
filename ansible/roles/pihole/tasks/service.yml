@@ -1,0 +1,21 @@
+---
+- name: Reload systemd after Pi-hole Quadlet changes
+  ansible.builtin.systemd:
+    daemon_reload: true
+  when: pihole_quadlet.changed
+
+- name: Enable and start Pi-hole
+  ansible.builtin.systemd:
+    name: "{{ pihole_service_name }}"
+    enabled: true
+    state: started
+
+- name: Restart Pi-hole after managed configuration changes
+  ansible.builtin.systemd:
+    name: "{{ pihole_service_name }}"
+    state: restarted
+  when:
+    - >-
+      (pihole_environment.changed | default(false))
+      or
+      (pihole_quadlet.changed | default(false))

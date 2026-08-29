@@ -24,6 +24,7 @@ Current capabilities include:
 - OpenLDAP authentication
 - Mosquitto MQTT deployment and per-client access management
 - Postfix/Dovecot mail backend with LDAP identities and explicit aliases
+- Pi-hole DNS filtering in a dedicated LXC
 - Centralized configuration
 - Semantic Versioning
 - Complete project documentation
@@ -63,6 +64,7 @@ bergen-platform/
 |   +-- ARCHITECTURE.md
 |   +-- CHANGELOG.md
 |   +-- MQTT.md
+|   +-- PIHOLE.md
 |   +-- ROADMAP.md
 |   +-- UPDATE.md
 |
@@ -81,6 +83,7 @@ Project documentation can be found in the **docs/** directory.
 - CHANGELOG.md
 - MAIL.md
 - MQTT.md
+- PIHOLE.md
 - ROADMAP.md
 - UPDATE.md
 
@@ -148,6 +151,16 @@ Mail
 - Declarative aliases and Send-as ownership
 
 See **docs/MAIL.md** for architecture, deployment boundaries and migration.
+
+DNS Filtering
+
+- Dedicated Pi-hole LXC behind the UniFi gateway
+- Podman/Quadlet deployment with persistent Pi-hole state
+- Synology DNS retained as the initial upstream/internal DNS authority
+- Pi-hole DHCP and NTP disabled so routing/DHCP remain on UniFi
+
+See **docs/PIHOLE.md** for deployment, stable addressing, validation and the
+later UniFi DNS cutover.
 
 ---
 

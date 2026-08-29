@@ -1,0 +1,16 @@
+---
+- name: Create Pi-hole persistent data directory
+  ansible.builtin.file:
+    path: "{{ pihole_data_directory }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Create Bergen Platform service configuration directory
+  ansible.builtin.file:
+    path: "{{ pihole_environment_file | dirname }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"

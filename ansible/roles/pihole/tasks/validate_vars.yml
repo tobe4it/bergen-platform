@@ -1,0 +1,28 @@
+---
+- name: Validate Pi-hole configuration
+  ansible.builtin.assert:
+    that:
+      - pihole_image | string | length > 0
+      - pihole_container_name | string | length > 0
+      - pihole_data_directory | string | length > 0
+      - pihole_environment_file | string | length > 0
+      - pihole_quadlet_path | string | length > 0
+      - pihole_service_name | string | length > 0
+      - pihole_timezone | string | length > 0
+      - pihole_upstreams is sequence
+      - pihole_upstreams is not string
+      - pihole_upstreams | length > 0
+      - pihole_dns_interface | string | length > 0
+      - pihole_dns_listening_mode in ['LOCAL', 'SINGLE', 'BIND', 'ALL', 'NONE']
+      - pihole_web_password | string | length >= 12
+    fail_msg: >-
+      Pi-hole requires an image, paths, timezone, at least one upstream DNS
+      server, a valid listening mode and a vaulted web password of at least
+      12 characters.
+
+- name: Explain routed DNS listening mode
+  ansible.builtin.debug:
+    msg: >-
+      Pi-hole listens in {{ pihole_dns_listening_mode }} mode on
+      {{ pihole_dns_interface }}. Network access must remain restricted by
+      the UniFi gateway/firewall.

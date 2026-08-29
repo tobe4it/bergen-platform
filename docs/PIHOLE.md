@@ -1,0 +1,164 @@
+# Pi-hole DNS Filtering
+
+## Purpose
+
+`bergen-pihole` provides DNS filtering for networks routed by the UniFi gateway.
+It exists because DNS filters on an upstream router cannot reliably apply
+per-client policy to clients hidden behind a downstream routed/NAT boundary.
+
+Routing and security policy stay on UniFi. Pi-hole is not a router or firewall.
+
+```text
+UniFi VLAN clients
+        |
+        | DNS TCP/UDP 53
+        v
+ bergen-pihole
+        |
+        | upstream DNS
+        v
+ Synology DNS
+        |
+        v
+ Internet resolver path
+```
+
+## Platform design
+
+- LXC: Debian 13, unprivileged
+- Default VMID: `123`
+- CPU: 1 vCPU
+- RAM: 1024 MiB
+- Root filesystem: 8 GiB
+- Runtime: Podman inside the LXC
+- Pi-hole image: pinned in `bergen-pihole.yml`
+- Network: `vmbr2`
+- Initial addressing: DHCP for first deployment/discovery
+- Pi-hole DHCP: disabled
+- Pi-hole NTP: disabled
+- DNS listening mode: `SINGLE` on `eth0`
+
+The first deployment intentionally leaves UniFi DHCP/DNS settings unchanged.
+
+## Preconditions
+
+Add the Pi-hole web/API password to the existing local Ansible Vault:
+
+```yaml
+vault_pihole_web_password: "use-a-long-random-password"
+```
+
+Before later changing any UniFi network to use Pi-hole, verify the DNS forwarding
+chain cannot loop. With the default configuration Pi-hole forwards to
+`192.168.6.11` (Synology DNS). Synology DNS must therefore not forward back to
+Pi-hole or to a resolver that ultimately sends the same query back to Pi-hole.
+
+VMID `123` follows the current Bergen Platform allocation. If it is already in
+use on Proxmox, change `lxc_vmid` before deployment.
+
+## First deployment
+
+Run from the Bergen Platform controller:
+
+```bash
+ansible-playbook ansible/playbooks/deploy-pihole.yml \
+  -e @ansible/group_vars/all/bergen-pihole.yml \
+  --ask-vault-pass
+```
+
+The workflow:
+
+```text
+create LXC
+  -> start/restart
+  -> discover DHCP address
+  -> Linux baseline
+  -> enable nested Podman runtime support
+  -> install Podman
+  -> deploy Pi-hole
+  -> validate DNS/web listeners and application status
+```
+
+No client DNS setting is changed by this playbook.
+
+## Make the DNS address stable
+
+A DNS server must not depend on a changing client address. After the first
+deployment, create a UniFi DHCP reservation for `bergen-pihole` using the
+address/MAC learned during deployment.
+
+Only after that reservation is in place should clients or UniFi DHCP scopes
+refer to the Pi-hole address.
+
+Record the stable address in the ignored site-local inventory. The repository
+contains an example `pihole_nodes` group:
+
+```yaml
+pihole_nodes:
+  hosts:
+    bergen-pihole:
+      ansible_host: 192.168.20.CHANGE_ME
+      ansible_user: root
+      ansible_python_interpreter: /usr/bin/python3
+```
+
+For later service reconciliation use both inventories:
+
+```bash
+ansible-playbook ansible/playbooks/bootstrap-pihole.yml \
+  -i ansible/inventory.yml \
+  -i ansible/inventory.local.yml \
+  -e @ansible/group_vars/all/bergen-pihole.yml \
+  --ask-vault-pass
+```
+
+## Initial validation
+
+Before changing DHCP DNS for any VLAN:
+
+```bash
+nslookup example.org PIHOLE_IP
+nslookup bergen.intern PIHOLE_IP
+```
+
+Open:
+
+```text
+http://PIHOLE_IP/admin/
+```
+
+Confirm that queries appear in Pi-hole and that internal Synology-hosted names
+still resolve.
+
+## UniFi cutover
+
+Cut over one network at a time. Configure that network's DHCP DNS server to the
+stable Pi-hole address, renew one test client's lease and verify browsing,
+internal DNS and Pi-hole query logging.
+
+For enforced child-network filtering, the later firewall phase should:
+
+- permit client TCP/UDP 53 to Pi-hole,
+- permit Pi-hole TCP/UDP 53 to its configured upstream resolver,
+- block client DNS to other destinations,
+- handle encrypted DNS bypass separately (DoT/DoQ/DoH/VPN policy),
+- restrict the Pi-hole web interface to administration networks.
+
+Do not enable those enforcement rules until Pi-hole itself has been validated.
+
+## Blocklists and family policy
+
+The initial deployment deliberately does not import the previously evaluated
+HaGeZi lists. First establish stable DNS service and the correct resolver path.
+Then add blocklists and Pi-hole client/group policy as a separate, testable
+change.
+
+This separation keeps DNS infrastructure deployment independent from content
+policy and makes rollback straightforward.
+
+## Upgrade policy
+
+The official Pi-hole container image is pinned to an explicit date-based release
+instead of `latest`. Upgrade by changing `pihole_image` in Git, reconciling the
+service and validating DNS before committing the new version as operationally
+verified.

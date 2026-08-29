@@ -3,7 +3,8 @@
 # Site-local inventory example
 #
 # Copy to inventory.local.yml. The destination is ignored by Git. Runtime
-# discovery replaces ansible_host with the effective address of the LXC.
+# discovery or an administrator replaces ansible_host with the effective,
+# stable address of each site-local service.
 ###############################################################################
 
 all:
@@ -12,5 +13,12 @@ all:
       hosts:
         bergen-mail:
           ansible_host: bergen-mail
+          ansible_user: root
+          ansible_python_interpreter: /usr/bin/python3
+
+    pihole_nodes:
+      hosts:
+        bergen-pihole:
+          ansible_host: 192.168.20.CHANGE_ME
           ansible_user: root
           ansible_python_interpreter: /usr/bin/python3
