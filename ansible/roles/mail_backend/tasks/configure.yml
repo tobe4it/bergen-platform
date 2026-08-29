@@ -1,0 +1,113 @@
+---
+- name: Configure Postfix main.cf
+  ansible.builtin.template:
+    src: postfix-main.cf.j2
+    dest: "{{ mail_backend_postfix_main_config_file }}"
+    owner: root
+    group: root
+    mode: "0644"
+    backup: true
+  notify: Validate and restart postfix
+
+- name: Configure Postfix master.cf
+  ansible.builtin.template:
+    src: postfix-master.cf.j2
+    dest: "{{ mail_backend_postfix_master_config_file }}"
+    owner: root
+    group: root
+    mode: "0644"
+    backup: true
+  notify: Validate and restart postfix
+
+- name: Configure LDAP mailbox lookup for Postfix
+  ansible.builtin.template:
+    src: postfix-ldap-mailboxes.cf.j2
+    dest: "{{ mail_backend_ldap_mailbox_map }}"
+    owner: root
+    group: postfix
+    mode: "0640"
+  no_log: true
+  notify: Validate and restart postfix
+
+- name: Configure LDAP equivalent-domain lookup for Postfix
+  ansible.builtin.template:
+    src: postfix-ldap-domain-aliases.cf.j2
+    dest: "{{ mail_backend_ldap_domain_alias_map }}"
+    owner: root
+    group: postfix
+    mode: "0640"
+  no_log: true
+  notify: Validate and restart postfix
+
+- name: Configure recipient aliases
+  ansible.builtin.template:
+    src: postfix-virtual-aliases.j2
+    dest: "{{ mail_backend_alias_map }}"
+    owner: root
+    group: root
+    mode: "0644"
+  register: mail_backend_virtual_aliases
+
+- name: Configure explicit alias Send-as owners
+  ansible.builtin.template:
+    src: postfix-sender-login-aliases.j2
+    dest: "{{ mail_backend_sender_alias_map }}"
+    owner: root
+    group: root
+    mode: "0644"
+  register: mail_backend_sender_aliases
+
+- name: Check recipient alias database
+  ansible.builtin.stat:
+    path: "{{ mail_backend_alias_map }}.db"
+  register: mail_backend_virtual_alias_database
+
+- name: Check Send-as alias database
+  ansible.builtin.stat:
+    path: "{{ mail_backend_sender_alias_map }}.db"
+  register: mail_backend_sender_alias_database
+
+- name: Build recipient alias database
+  ansible.builtin.command:
+    argv:
+      - postmap
+      - "hash:{{ mail_backend_alias_map }}"
+  when:
+    - >-
+      mail_backend_virtual_aliases.changed
+      or not mail_backend_virtual_alias_database.stat.exists
+  notify: Validate and restart postfix
+
+- name: Build Send-as alias database
+  ansible.builtin.command:
+    argv:
+      - postmap
+      - "hash:{{ mail_backend_sender_alias_map }}"
+  when:
+    - >-
+      mail_backend_sender_aliases.changed
+      or not mail_backend_sender_alias_database.stat.exists
+  notify: Validate and restart postfix
+
+- name: Configure identity-domain Send-as ownership
+  ansible.builtin.template:
+    src: postfix-sender-login-domains.pcre.j2
+    dest: "{{ mail_backend_sender_domain_map }}"
+    owner: root
+    group: root
+    mode: "0644"
+  notify: Validate and restart postfix
+
+- name: Configure Dovecot
+  ansible.builtin.template:
+    src: dovecot.conf.j2
+    dest: "{{ mail_backend_dovecot_config_file }}"
+    owner: root
+    group: dovecot
+    mode: "0640"
+    backup: true
+  no_log: true
+  notify: Validate and restart dovecot
+
+- name: Flush validation and reload handlers before service checks
+  ansible.builtin.meta: flush_handlers

@@ -1,0 +1,11 @@
+[Unit]
+Description=Daily LDAP Mailuser mailbox provisioning
+
+[Timer]
+OnCalendar=*-*-* {{ '%02d' | format(mail_backend_provisioning_hour | int) }}:{{ '%02d' | format(mail_backend_provisioning_minute | int) }}:00
+Persistent=true
+RandomizedDelaySec={{ mail_backend_provisioning_random_delay }}
+Unit=bergen-mailbox-provision.service
+
+[Install]
+WantedBy=timers.target

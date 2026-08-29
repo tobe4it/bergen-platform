@@ -1,0 +1,16 @@
+[Unit]
+Description=Provision Dovecot mailboxes from LDAP Mailuser membership
+After=network-online.target dovecot.service
+Wants=network-online.target
+Requires=dovecot.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/bergen-mailbox-provision
+User=root
+Group=root
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths={{ mail_backend_mail_root }} /run/dovecot /var/lib/dovecot
+NoNewPrivileges=true

@@ -1,0 +1,21 @@
+---
+###############################################################################
+# Bergen Platform
+#
+# Bootstrap a dedicated Postfix/Dovecot mail backend node.
+###############################################################################
+
+- name: Bootstrap Bergen Platform mail backend node
+  hosts: "{{ bootstrap_mail_backend_target | default('mail_backend_nodes') }}"
+  become: true
+  gather_facts: true
+
+  roles:
+    - role: lxc_base
+      tags:
+        - base
+
+    - role: mail_backend
+      tags:
+        - mail
+        - mail_backend

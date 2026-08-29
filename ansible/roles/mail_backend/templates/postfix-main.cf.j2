@@ -1,0 +1,57 @@
+# Managed by Bergen Platform. Local changes will be overwritten.
+{% set mail_backend_alias_domains = mail_backend_identity_domains | reject('equalto', mail_backend_primary_domain) | list %}
+
+compatibility_level = 3.10
+
+myhostname = {{ mail_backend_hostname }}
+mydomain = {{ mail_backend_primary_domain }}
+myorigin = $mydomain
+mydestination = localhost
+
+inet_interfaces = all
+inet_protocols = all
+mynetworks = {{ mail_backend_trusted_networks | join(', ') }}
+
+alias_maps = hash:/etc/aliases
+alias_database = hash:/etc/aliases
+
+virtual_mailbox_domains = {{ mail_backend_primary_domain }}
+virtual_mailbox_maps = ldap:{{ mail_backend_ldap_mailbox_map }}
+virtual_transport = lmtp:unix:private/dovecot-lmtp
+
+virtual_alias_domains = {{ mail_backend_alias_domains | join(', ') }}
+virtual_alias_maps = hash:{{ mail_backend_alias_map }}{% if mail_backend_alias_domains | length > 0 %}, ldap:{{ mail_backend_ldap_domain_alias_map }}{% endif %}
+
+relayhost = [{{ mail_backend_relay_host }}]:{{ mail_backend_relay_port }}
+smtp_address_preference = ipv4
+smtp_tls_security_level = {{ mail_backend_relay_tls_security_level }}
+smtp_tls_CApath = /etc/ssl/certs
+
+smtpd_tls_cert_file = {{ mail_backend_tls_cert_file }}
+smtpd_tls_key_file = {{ mail_backend_tls_key_file }}
+smtpd_tls_security_level = may
+smtpd_tls_auth_only = yes
+smtpd_tls_protocols = >=TLSv1.2
+smtpd_tls_mandatory_protocols = >=TLSv1.2
+smtpd_tls_session_cache_database = btree:${data_directory}/smtpd_scache
+
+smtpd_sasl_type = dovecot
+smtpd_sasl_path = private/auth
+smtpd_sasl_auth_enable = no
+smtpd_sasl_security_options = noanonymous
+smtpd_sasl_local_domain =
+
+smtpd_sender_login_maps = pcre:{{ mail_backend_sender_domain_map }}, hash:{{ mail_backend_sender_alias_map }}
+smtpd_relay_restrictions = permit_mynetworks, reject_unauth_destination
+smtpd_recipient_restrictions = reject_unauth_destination
+
+disable_vrfy_command = yes
+strict_rfc821_envelopes = yes
+smtpd_helo_required = yes
+message_size_limit = {{ mail_backend_message_size_limit }}
+recipient_delimiter = +
+
+mailbox_size_limit = 0
+biff = no
+append_dot_mydomain = no
+readme_directory = no

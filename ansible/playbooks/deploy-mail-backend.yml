@@ -1,0 +1,12 @@
+---
+###############################################################################
+# Bergen Platform
+#
+# Create, discover, bootstrap and configure the dedicated mail backend LXC.
+###############################################################################
+
+- import_playbook: deploy-lxc.yml
+
+- import_playbook: bootstrap-mail-backend.yml
+  vars:
+    bootstrap_mail_backend_target: discovered_lxcs

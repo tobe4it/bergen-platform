@@ -1,0 +1,53 @@
+---
+- name: Create virtual mail group
+  ansible.builtin.group:
+    name: "{{ mail_backend_mail_group }}"
+    gid: "{{ mail_backend_mail_gid }}"
+    system: true
+    state: present
+
+- name: Create virtual mail user
+  ansible.builtin.user:
+    name: "{{ mail_backend_mail_user }}"
+    uid: "{{ mail_backend_mail_uid }}"
+    group: "{{ mail_backend_mail_group }}"
+    home: "{{ mail_backend_mail_root }}"
+    shell: /usr/sbin/nologin
+    create_home: false
+    system: true
+    state: present
+
+- name: Create virtual mail root
+  ansible.builtin.file:
+    path: "{{ mail_backend_mail_root }}"
+    state: directory
+    owner: "{{ mail_backend_mail_user }}"
+    group: "{{ mail_backend_mail_group }}"
+    mode: "0750"
+
+- name: Create Bergen Platform configuration directory
+  ansible.builtin.file:
+    path: "{{ mail_backend_config_directory }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0750"
+
+- name: Create TLS parent directories
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+  loop:
+    - "{{ mail_backend_tls_cert_file | dirname }}"
+    - "{{ mail_backend_tls_key_file | dirname }}"
+
+- name: Secure TLS private-key directory
+  ansible.builtin.file:
+    path: "{{ mail_backend_tls_key_file | dirname }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0700"

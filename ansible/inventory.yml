@@ -31,6 +31,9 @@ all:
     mqtt_nodes:
       hosts: {}
 
+    mail_backend_nodes:
+      hosts: {}
+
     linux_lxcs:
       hosts:
         bp-controller:

@@ -1,0 +1,23 @@
+# Managed by Bergen Platform.
+server_host = {{ mail_backend_ldap_uri }}
+version = 3
+{% if mail_backend_ldap_bind_dn | length > 0 %}
+bind = yes
+bind_dn = {{ mail_backend_ldap_bind_dn }}
+bind_pw = {{ mail_backend_ldap_bind_password }}
+{% else %}
+bind = no
+{% endif %}
+search_base = {{ mail_backend_ldap_user_search_base }}
+scope = sub
+domain = {{ mail_backend_identity_domains | reject('equalto', mail_backend_primary_domain) | join(', ') }}
+query_filter = {{ mail_backend_ldap_domain_alias_query_filter }}
+result_attribute = {{ mail_backend_ldap_username_attribute }}
+result_format = %s@{{ mail_backend_primary_domain }}
+{% if mail_backend_ldap_start_tls | bool %}
+start_tls = yes
+{% endif %}
+{% if mail_backend_ldap_ca_file | length > 0 %}
+tls_ca_cert_file = {{ mail_backend_ldap_ca_file }}
+{% endif %}
+tls_require_cert = {{ 'yes' if mail_backend_ldap_validate_certificate | bool else 'no' }}

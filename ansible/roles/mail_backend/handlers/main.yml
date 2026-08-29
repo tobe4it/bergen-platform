@@ -1,0 +1,26 @@
+---
+- name: Validate Postfix configuration
+  ansible.builtin.command: postfix check
+  changed_when: false
+  listen: Validate and restart postfix
+
+- name: Restart postfix
+  ansible.builtin.service:
+    name: postfix
+    state: restarted
+  listen: Validate and restart postfix
+
+- name: Validate Dovecot configuration
+  ansible.builtin.command: doveconf -n
+  changed_when: false
+  listen: Validate and restart dovecot
+
+- name: Restart dovecot
+  ansible.builtin.service:
+    name: dovecot
+    state: restarted
+  listen: Validate and restart dovecot
+
+- name: Reload systemd
+  ansible.builtin.systemd_service:
+    daemon_reload: true

@@ -16,11 +16,13 @@ using Ansible.
 
 ---
 
-# v0.5.1
+# Released milestones
+
+## v0.5.1
 
 Documentation and Open WebUI stabilization.
 
-Planned:
+Delivered:
 
 - Documentation cleanup
 - Open WebUI improvements
@@ -30,7 +32,23 @@ Planned:
 
 ---
 
-# v0.6.0
+## v0.6.0 - Mail Backend Foundation
+
+Released 2026-08-29:
+
+- Debian 13 `bergen-mail` LXC deployment
+- Postfix/Dovecot with LDAP-backed identities
+- Mailuser-only create-only mailbox provisioning
+- authenticated submission, LMTP and IMAPS
+- equivalent identity domains, aliases and Send-as ownership
+- private smart-host integration with IPv4 preference
+- verified internal deployment checkpoint and production-readiness checklist
+
+The production cutover remains governed by the open Mail Platform work below.
+
+---
+
+# v0.7.0
 
 ## AI Platform
 
@@ -45,7 +63,7 @@ Planned:
 
 ---
 
-# v0.7.0
+# v0.8.0
 
 ## Monitoring
 
@@ -60,7 +78,7 @@ Planned:
 
 ---
 
-# v0.8.0
+# v0.9.0
 
 ## Backup & Recovery
 
@@ -75,7 +93,7 @@ Planned:
 
 ---
 
-# v0.9.0
+# v0.10.0
 
 ## Security
 
@@ -113,16 +131,31 @@ Goals:
 
 ## Mail Platform
 
+Implemented foundation:
+
+- Internal Postfix submission and delivery backend
+- Dovecot LDAP authentication, LMTP and IMAPS
+- Mailuser-only create-only mailbox provisioning
+- Declarative aliases and Send-as ownership
+- Relay integration with an existing public gateway
+
 Planned:
 
-- Postfix
-- Dovecot
-- Rspamd
-- DKIM
-- DMARC
-- MTA-STS
-- TLS Reporting
-- Mail migration
+- publicly trusted TLS certificate issuance and renewal
+- firewall and private gateway-path enforcement
+- end-to-end gateway queueing and delivery acceptance tests
+- SMTP AUTH, IMAP, mailbox and alias authorization test matrix
+- mail migration with bulk and final incremental synchronization
+- mailbox backup and isolated restore validation
+- RFC 5322 From-header ownership policy/Milter
+- external client access design and Fail2ban/rate limiting
+- queue, authentication, disk, certificate and timer monitoring
+- Webmail evaluation
+
+The existing public gateway remains responsible for Rspamd/spam policy, DKIM,
+DMARC-related delivery policy, public reputation, MTA-STS and TLS reporting.
+These functions are not duplicated in the internal backend unless the gateway
+architecture changes.
 
 ---
 
@@ -137,4 +170,3 @@ Future candidates:
 - Multi-node deployments
 - CI/CD
 - Automated testing
-

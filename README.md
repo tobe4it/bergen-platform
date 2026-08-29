@@ -23,6 +23,7 @@ Current capabilities include:
 - Ollama deployment
 - OpenLDAP authentication
 - Mosquitto MQTT deployment and per-client access management
+- Postfix/Dovecot mail backend with LDAP identities and explicit aliases
 - Centralized configuration
 - Semantic Versioning
 - Complete project documentation
@@ -78,6 +79,7 @@ Project documentation can be found in the **docs/** directory.
 
 - ARCHITECTURE.md
 - CHANGELOG.md
+- MAIL.md
 - MQTT.md
 - ROADMAP.md
 - UPDATE.md
@@ -138,6 +140,15 @@ Messaging / IoT
 
 See **docs/MQTT.md** for deployment, client configuration, user management and troubleshooting.
 
+Mail
+
+- Internal Postfix/Dovecot backend behind an existing public gateway
+- LDAP authentication for human and technical submission identities
+- Mailbox provisioning restricted to the LDAP `Mailuser` group
+- Declarative aliases and Send-as ownership
+
+See **docs/MAIL.md** for architecture, deployment boundaries and migration.
+
 ---
 
 ## Roadmap
@@ -160,7 +171,7 @@ The Bergen Platform follows Semantic Versioning.
 
 Current release:
 
-v0.5.1
+v0.6.0
 
 See **docs/CHANGELOG.md** for release history.
 

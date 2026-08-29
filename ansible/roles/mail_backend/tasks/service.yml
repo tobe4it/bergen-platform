@@ -1,0 +1,20 @@
+---
+- name: Enable and start Dovecot
+  ansible.builtin.service:
+    name: dovecot
+    enabled: true
+    state: started
+
+- name: Enable and start Postfix
+  ansible.builtin.service:
+    name: postfix
+    enabled: true
+    state: started
+
+- name: Run initial mailbox provisioning
+  ansible.builtin.command: /usr/local/sbin/bergen-mailbox-provision
+  register: mail_backend_initial_provisioning
+  changed_when: "'created=0' not in mail_backend_initial_provisioning.stderr"
+  when:
+    - mail_backend_provisioning_enabled | bool
+    - not ansible_check_mode
