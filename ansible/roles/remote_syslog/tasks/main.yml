@@ -1,0 +1,64 @@
+---
+- name: Configure Bergen remote syslog forwarding
+  when: remote_syslog_enabled | bool
+  block:
+    - name: Validate remote syslog settings
+      ansible.builtin.assert:
+        that:
+          - ansible_os_family in ['Debian', 'RedHat', 'Suse']
+          - remote_syslog_server | string | length > 0
+          - remote_syslog_port | int > 0
+          - remote_syslog_port | int < 65536
+          - remote_syslog_protocol in ['tcp', 'udp']
+          - remote_syslog_queue_size | int > 0
+        fail_msg: >-
+          Use a supported Linux family and configure a server, valid port,
+          tcp/udp protocol and positive queue size for the remote Syslog
+          forwarder.
+
+    - name: Install rsyslog forwarder
+      ansible.builtin.package:
+        name: rsyslog
+        state: present
+
+    - name: Enable and start rsyslog forwarder
+      ansible.builtin.service:
+        name: rsyslog
+        enabled: true
+        state: started
+
+    - name: Configure central Syslog forwarding
+      ansible.builtin.template:
+        src: forward.conf.j2
+        dest: "{{ remote_syslog_config_path }}"
+        owner: root
+        group: root
+        mode: "0644"
+      notify: Restart remote syslog forwarder
+
+    - name: Validate rsyslog configuration
+      ansible.builtin.command:
+        argv:
+          - rsyslogd
+          - -N1
+      changed_when: false
+
+    - name: Apply remote Syslog configuration before testing
+      ansible.builtin.meta: flush_handlers
+
+    - name: Emit Bergen remote Syslog test event
+      ansible.builtin.command:
+        argv:
+          - logger
+          - -t
+          - BERGEN-SYSLOG-TEST
+          - "Remote Syslog forwarding active on {{ inventory_hostname }}"
+      changed_when: false
+      when: remote_syslog_send_test | bool
+
+    - name: Summarize remote Syslog forwarding
+      ansible.builtin.debug:
+        msg:
+          - "Remote Syslog forwarding configured on {{ inventory_hostname }}"
+          - "Target: {{ remote_syslog_server }}:{{ remote_syslog_port }}/{{ remote_syslog_protocol }}"
+          - "Configuration: {{ remote_syslog_config_path }}"

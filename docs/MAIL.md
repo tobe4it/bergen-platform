@@ -19,6 +19,7 @@ bergen-mail LXC
    +-- Postfix inbound/aliases/submission
    +-- Dovecot LDAP auth/LMTP/IMAPS
    +-- /var/vmail mailbox data
+   +-- rsyslog -> bergen-syslog
    |
    +-- Synology/OpenLDAP directory
 ```
@@ -49,6 +50,7 @@ checkpoint, not yet the production cutover from the existing mailbox server.
 | Postfix configuration | Verified | `postfix check` succeeds and the service starts |
 | Runtime listeners | Verified | SMTP, submissions, submission and IMAPS listen on non-loopback IPv4 and IPv6 addresses |
 | Relay selection | Configured | The gateway hostname is retained and outbound SMTP prefers its IPv4 address |
+| Central Syslog forwarding | Automated | The mail bootstrap configures queued TCP forwarding and emits a tagged test event |
 | Repeat bootstrap | Verified | A complete repeat bootstrap finished without failed tasks |
 
 The deployed role deliberately separates facts proven by local service checks
@@ -197,6 +199,33 @@ journalctl -u bergen-mailbox-provision.service -n 100 --no-pager
 
 The public gateway remains the authoritative location for internet-facing SMTP
 connection, reputation, policy and queued-delivery diagnostics.
+
+### Verify central Syslog forwarding
+
+The mail bootstrap installs the reusable `remote_syslog` role. It validates
+rsyslog, restarts it after configuration changes and emits one tagged test
+event. The forwarding action uses a linked-list queue and retries indefinitely
+while the collector is unavailable.
+
+On `bergen-mail`:
+
+```bash
+rsyslogd -N1
+systemctl status rsyslog --no-pager
+logger -t BERGEN-MAIL-TEST "Postfix and Dovecot central logging test"
+```
+
+On `bergen-syslog`, replace the source address with the mail LXC address:
+
+```bash
+grep -E 'BERGEN-(SYSLOG|MAIL)-TEST' \
+  /var/log/remote/MAIL_BACKEND_IP.log
+grep -E 'postfix|dovecot' \
+  /var/log/remote/MAIL_BACKEND_IP.log | tail
+```
+
+Forwarding configuration is not proof of receipt. Confirm the tagged event in
+the collector file after every first deployment or address/firewall change.
 
 ### Verify TLS before client rollout
 
@@ -421,7 +450,7 @@ mailbox without depending on the running source LXC.
 
 - Monitor Postfix queue depth, rejected mail, Dovecot authentication failures,
   disk usage, certificate expiry and provisioning timer failures.
-- Forward relevant logs to the central logging platform.
+- Verify the configured central log forwarding and add parsing, correlation and alerts for relevant mail events.
 - Define alert thresholds and a short incident/rollback runbook.
 - Add automated role syntax/idempotence tests where practical.
 

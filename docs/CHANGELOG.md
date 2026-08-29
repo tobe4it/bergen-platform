@@ -8,7 +8,20 @@ The project follows **Semantic Versioning (SemVer)** and the changelog format is
 
 ## [Unreleased]
 
-No unreleased changes.
+### Added
+
+#### Central Logging
+
+- Added a reusable remote Syslog forwarder role with queued TCP/UDP delivery,
+  configuration validation and an optional deployment test event.
+- Integrated central Syslog forwarding into the mail-backend bootstrap.
+
+### Fixed
+
+#### Mail Platform
+
+- Routed chrooted Postfix LDAP mailbox and domain-alias lookups through the
+  existing unchrooted `proxymap` service.
 
 ---
 
