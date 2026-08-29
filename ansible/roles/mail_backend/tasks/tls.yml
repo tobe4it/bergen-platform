@@ -23,7 +23,7 @@
     creates: "{{ mail_backend_tls_key_file }}"
   when: mail_backend_tls_generate_self_signed | bool
   notify:
-    - Validate and reload postfix
+    - Validate and restart postfix
     - Validate and restart dovecot
 
 - name: Check TLS certificate

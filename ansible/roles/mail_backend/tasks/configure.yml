@@ -7,7 +7,7 @@
     group: root
     mode: "0644"
     backup: true
-  notify: Validate and reload postfix
+  notify: Validate and restart postfix
 
 - name: Configure Postfix master.cf
   ansible.builtin.template:
@@ -17,7 +17,7 @@
     group: root
     mode: "0644"
     backup: true
-  notify: Validate and reload postfix
+  notify: Validate and restart postfix
 
 - name: Configure LDAP mailbox lookup for Postfix
   ansible.builtin.template:
@@ -27,7 +27,7 @@
     group: postfix
     mode: "0640"
   no_log: true
-  notify: Validate and reload postfix
+  notify: Validate and restart postfix
 
 - name: Configure LDAP equivalent-domain lookup for Postfix
   ansible.builtin.template:
@@ -37,7 +37,7 @@
     group: postfix
     mode: "0640"
   no_log: true
-  notify: Validate and reload postfix
+  notify: Validate and restart postfix
 
 - name: Configure recipient aliases
   ansible.builtin.template:
@@ -76,7 +76,7 @@
     - >-
       mail_backend_virtual_aliases.changed
       or not mail_backend_virtual_alias_database.stat.exists
-  notify: Validate and reload postfix
+  notify: Validate and restart postfix
 
 - name: Build Send-as alias database
   ansible.builtin.command:
@@ -87,7 +87,7 @@
     - >-
       mail_backend_sender_aliases.changed
       or not mail_backend_sender_alias_database.stat.exists
-  notify: Validate and reload postfix
+  notify: Validate and restart postfix
 
 - name: Configure identity-domain Send-as ownership
   ansible.builtin.template:
@@ -96,7 +96,7 @@
     owner: root
     group: root
     mode: "0644"
-  notify: Validate and reload postfix
+  notify: Validate and restart postfix
 
 - name: Configure Dovecot
   ansible.builtin.template:

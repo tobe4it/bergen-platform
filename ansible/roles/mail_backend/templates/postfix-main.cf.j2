@@ -23,6 +23,7 @@ virtual_alias_domains = {{ mail_backend_alias_domains | join(', ') }}
 virtual_alias_maps = hash:{{ mail_backend_alias_map }}{% if mail_backend_alias_domains | length > 0 %}, ldap:{{ mail_backend_ldap_domain_alias_map }}{% endif %}
 
 relayhost = [{{ mail_backend_relay_host }}]:{{ mail_backend_relay_port }}
+smtp_address_preference = ipv4
 smtp_tls_security_level = {{ mail_backend_relay_tls_security_level }}
 smtp_tls_CApath = /etc/ssl/certs
 

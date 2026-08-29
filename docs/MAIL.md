@@ -27,6 +27,11 @@ Outgoing messages take the reverse path through the public gateway. The edge
 gateway remains responsible for public delivery, DKIM, reputation and its
 queue. It does not need LDAP users or password hashes.
 
+The backend keeps the gateway's hostname as its Postfix relay target and sets
+`smtp_address_preference = ipv4`. With split DNS, the internal A record can
+therefore select the gateway's private/WireGuard address even when its public
+hostname also has an AAAA record.
+
 ## Authorization rules
 
 1. Every LDAP account matched by `mail_backend_ldap_passdb_filter` may

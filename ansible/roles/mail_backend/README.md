@@ -17,6 +17,10 @@ The role provides:
 - explicit recipient aliases and separate Send-as ownership;
 - relay of all outgoing mail to the existing edge gateway.
 
+Gateway delivery prefers IPv4. This allows a stable relay hostname to retain
+both public address families while an internal split-DNS A record selects the
+private/WireGuard path.
+
 The role intentionally does **not** provide:
 
 - a public MX or edge spam filter;
