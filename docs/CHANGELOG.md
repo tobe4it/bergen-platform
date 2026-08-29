@@ -15,6 +15,8 @@ The project follows **Semantic Versioning (SemVer)** and the changelog format is
 - Added a reusable remote Syslog forwarder role with queued TCP/UDP delivery,
   configuration validation and an optional deployment test event.
 - Integrated central Syslog forwarding into the mail-backend bootstrap.
+- Integrated the same queued remote Syslog forwarding into the Pi-hole
+  bootstrap while keeping DNS query logging local to Pi-hole.
 
 #### DNS Filtering
 

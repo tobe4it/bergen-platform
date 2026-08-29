@@ -37,6 +37,7 @@ UniFi VLAN clients
 - Pi-hole DHCP: disabled
 - Pi-hole NTP: disabled
 - DNS listening mode: `SINGLE` on `eth0`
+- Central logging: queued TCP Syslog forwarding to `bergen-syslog`
 
 The first deployment intentionally leaves UniFi DHCP/DNS settings unchanged.
 
@@ -74,6 +75,7 @@ create LXC
   -> discover DHCP address
   -> Linux baseline
   -> enable nested Podman runtime support
+  -> configure remote Syslog forwarding
   -> install Podman
   -> deploy Pi-hole
   -> validate DNS/web listeners and application status
@@ -129,6 +131,18 @@ http://PIHOLE_IP/admin/
 
 Confirm that queries appear in Pi-hole and that internal Synology-hosted names
 still resolve.
+
+The bootstrap also emits a `BERGEN-SYSLOG-TEST` event through the reusable
+`remote_syslog` role. Verify central receipt on `bergen-syslog` using the
+Pi-hole LXC source address:
+
+```bash
+grep BERGEN-SYSLOG-TEST /var/log/remote/PIHOLE_IP.log
+```
+
+This forwarding is for host/service operational logs. Pi-hole query logging
+remains in Pi-hole itself and is not deliberately duplicated into central
+Syslog.
 
 ## UniFi cutover
 
