@@ -62,6 +62,17 @@ mail_backend_trusted_networks:
 mail_backend_postmaster_address: postmaster@example.net
 
 ###############################################################################
+# Central logging
+###############################################################################
+
+# Forward Postfix, Dovecot and system logs to the Bergen Syslog collector.
+remote_syslog_enabled: true
+remote_syslog_server: 192.168.20.164
+remote_syslog_port: 514
+remote_syslog_protocol: tcp
+remote_syslog_send_test: true
+
+###############################################################################
 # LDAP
 ###############################################################################
 
