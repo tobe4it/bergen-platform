@@ -5,7 +5,7 @@
     - name: Validate remote syslog settings
       ansible.builtin.assert:
         that:
-          - ansible_os_family in ['Debian', 'RedHat', 'Suse']
+          - (ansible_facts['os_family'] | default('')) in ['Debian', 'RedHat', 'Suse']
           - remote_syslog_server | string | length > 0
           - remote_syslog_port | int > 0
           - remote_syslog_port | int < 65536
