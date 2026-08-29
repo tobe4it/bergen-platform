@@ -1,17 +1,21 @@
 ---
 podman_packages:
-
   - podman
   - buildah
   - skopeo
-
   - fuse-overlayfs
   - uidmap
   - slirp4netns
-
   - netavark
   - aardvark-dns
 
+# Generic Podman storage. Service roles own and create their own data
+# directories; the runtime role must not depend on an application-specific
+# user or group such as the historical `ai` group.
 podman_storage_root: /srv/containers
+podman_storage_owner: root
+podman_storage_group: root
+podman_storage_mode: "0755"
+podman_storage_directories: []
 
 podman_quadlet_directory: /etc/containers/systemd
