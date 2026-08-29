@@ -1,0 +1,5 @@
+---
+- name: Restart remote syslog forwarder
+  ansible.builtin.service:
+    name: rsyslog
+    state: restarted
