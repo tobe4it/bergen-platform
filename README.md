@@ -79,6 +79,7 @@ Project documentation can be found in the **docs/** directory.
 
 - ARCHITECTURE.md
 - CHANGELOG.md
+- MAIL.md
 - MQTT.md
 - ROADMAP.md
 - UPDATE.md

@@ -153,6 +153,10 @@ ownership are incomplete. After configuration it runs:
 Before cutover, additionally verify LDAP authentication, one Mailuser, one
 non-Mailuser technical sender, every alias and gateway relay delivery.
 
+The verified initial deployment state, operational commands, migration plan
+and production-readiness acceptance criteria are maintained in
+`docs/MAIL.md`.
+
 ## Security boundary
 
 Postfix `smtpd_sender_login_maps` protects the SMTP envelope sender. It does not

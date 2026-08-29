@@ -65,6 +65,11 @@ The project follows **Semantic Versioning (SemVer)** and the changelog format is
 - Site-local, Git-ignored mail inventory for the effective LXC address
 - Anonymous or authenticated LDAP directory searches for the mail backend
 - Migration, backup and security-boundary documentation
+- Verified initial Debian 13 LXC deployment checkpoint
+- Dovecot 2.4 configuration and storage version declarations
+- IPv4 preference for delivery to the single outbound smart host
+- Runtime validation for non-loopback SMTP, submission and IMAPS listeners
+- Operational validation, troubleshooting and production-readiness checklist
 
 #### Project Structure
 
@@ -176,3 +181,10 @@ bootstrap-ai
 - Role metadata
 - Inventory structure
 - Bootstrap execution
+
+#### Mail Platform
+
+- Postfix configuration changes now validate and restart as one handler event,
+  ensuring `inet_interfaces` changes activate non-loopback listeners.
+- Dovecot validation and restart now run as one ordered handler event.
+- Mail listener validation no longer accepts loopback-only services.

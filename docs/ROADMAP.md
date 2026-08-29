@@ -123,14 +123,21 @@ Implemented foundation:
 
 Planned:
 
-- Rspamd
-- DKIM
-- DMARC
-- MTA-STS
-- TLS Reporting
-- Mail migration
+- publicly trusted TLS certificate issuance and renewal
+- firewall and private gateway-path enforcement
+- end-to-end gateway queueing and delivery acceptance tests
+- SMTP AUTH, IMAP, mailbox and alias authorization test matrix
+- mail migration with bulk and final incremental synchronization
+- mailbox backup and isolated restore validation
 - RFC 5322 From-header ownership policy/Milter
+- external client access design and Fail2ban/rate limiting
+- queue, authentication, disk, certificate and timer monitoring
 - Webmail evaluation
+
+The existing public gateway remains responsible for Rspamd/spam policy, DKIM,
+DMARC-related delivery policy, public reputation, MTA-STS and TLS reporting.
+These functions are not duplicated in the internal backend unless the gateway
+architecture changes.
 
 ---
 
