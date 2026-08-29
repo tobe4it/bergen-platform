@@ -131,4 +131,4 @@ Planned
 
 ## Version
 
-Current architecture baseline: v0.5.0
+Current architecture baseline: v0.6.0

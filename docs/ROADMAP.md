@@ -16,11 +16,13 @@ using Ansible.
 
 ---
 
-# v0.5.1
+# Released milestones
+
+## v0.5.1
 
 Documentation and Open WebUI stabilization.
 
-Planned:
+Delivered:
 
 - Documentation cleanup
 - Open WebUI improvements
@@ -30,7 +32,23 @@ Planned:
 
 ---
 
-# v0.6.0
+## v0.6.0 - Mail Backend Foundation
+
+Released 2026-08-29:
+
+- Debian 13 `bergen-mail` LXC deployment
+- Postfix/Dovecot with LDAP-backed identities
+- Mailuser-only create-only mailbox provisioning
+- authenticated submission, LMTP and IMAPS
+- equivalent identity domains, aliases and Send-as ownership
+- private smart-host integration with IPv4 preference
+- verified internal deployment checkpoint and production-readiness checklist
+
+The production cutover remains governed by the open Mail Platform work below.
+
+---
+
+# v0.7.0
 
 ## AI Platform
 
@@ -45,7 +63,7 @@ Planned:
 
 ---
 
-# v0.7.0
+# v0.8.0
 
 ## Monitoring
 
@@ -60,7 +78,7 @@ Planned:
 
 ---
 
-# v0.8.0
+# v0.9.0
 
 ## Backup & Recovery
 
@@ -75,7 +93,7 @@ Planned:
 
 ---
 
-# v0.9.0
+# v0.10.0
 
 ## Security
 

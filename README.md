@@ -171,7 +171,7 @@ The Bergen Platform follows Semantic Versioning.
 
 Current release:
 
-v0.5.1
+v0.6.0
 
 See **docs/CHANGELOG.md** for release history.
 

@@ -34,9 +34,9 @@ hostname also has an AAAA record.
 
 ## Current implementation checkpoint
 
-The internal deployment stage was reached and verified on 2026-08-29. This is
-a functional infrastructure checkpoint, not yet the production cutover from
-the existing mailbox server.
+The internal deployment stage was reached and verified on 2026-08-29 and is
+released as Bergen Platform v0.6.0. This is a functional infrastructure
+checkpoint, not yet the production cutover from the existing mailbox server.
 
 | Component | State | Verification performed |
 |---|---|---|
