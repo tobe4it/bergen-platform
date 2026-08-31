@@ -74,19 +74,27 @@ pihole_dnssec: false
 pihole_dhcp_enabled: false
 pihole_ntp_enabled: false
 
-# Network-wide SafeSearch / Restricted Mode. These are DNS CNAME mappings
-# recommended by the respective providers. YouTube uses Moderate Restricted
-# Mode globally; a stricter children-only resolver can be added later.
+# Network-wide SafeSearch / Restricted Mode.
+# Pi-hole's embedded dnsmasq cannot reliably CNAME an external target unless
+# that target is locally authoritative/cached, so map the provider hostnames
+# directly to their SafeSearch VIPs instead.
+#
+# Google SafeSearch VIP: 216.239.38.120
+# Bing Strict VIP:       204.79.197.220
+# YouTube Moderate VIP:  216.239.38.119
+#
+# YouTube uses Moderate Restricted Mode globally; a stricter children-only
+# resolver can be added later.
 pihole_dnsmasq_lines:
-  - "cname=www.google.com,forcesafesearch.google.com"
-  - "cname=www.google.de,forcesafesearch.google.com"
-  - "cname=www.bing.com,strict.bing.com"
-  - "cname=edgeservices.bing.com,strict.bing.com"
-  - "cname=www.youtube.com,restrictmoderate.youtube.com"
-  - "cname=m.youtube.com,restrictmoderate.youtube.com"
-  - "cname=youtubei.googleapis.com,restrictmoderate.youtube.com"
-  - "cname=youtube.googleapis.com,restrictmoderate.youtube.com"
-  - "cname=www.youtube-nocookie.com,restrictmoderate.youtube.com"
+  - "address=/www.google.com/216.239.38.120"
+  - "address=/www.google.de/216.239.38.120"
+  - "address=/www.bing.com/204.79.197.220"
+  - "address=/edgeservices.bing.com/204.79.197.220"
+  - "address=/www.youtube.com/216.239.38.119"
+  - "address=/m.youtube.com/216.239.38.119"
+  - "address=/youtubei.googleapis.com/216.239.38.119"
+  - "address=/youtube.googleapis.com/216.239.38.119"
+  - "address=/www.youtube-nocookie.com/216.239.38.119"
 
 # Secret is stored only in ansible/group_vars/all/vault.yml.
 pihole_web_password: "{{ vault_pihole_web_password }}"
