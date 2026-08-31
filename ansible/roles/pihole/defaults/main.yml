@@ -14,6 +14,7 @@ pihole_dns_interface: "eth0"
 pihole_dns_listening_mode: "SINGLE"
 pihole_query_logging: true
 pihole_dnssec: false
+pihole_dnsmasq_lines: []
 
 pihole_dhcp_enabled: false
 pihole_ntp_enabled: false
