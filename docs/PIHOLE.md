@@ -32,8 +32,9 @@ UniFi VLAN clients
 - Root filesystem: 8 GiB
 - Runtime: Podman inside the LXC
 - Pi-hole image: pinned in `bergen-pihole.yml`
-- Network: `vmbr2`
+- Network: `vmbr6` / DMZ VLAN 6
 - Initial addressing: DHCP for first deployment/discovery
+- Stable address: `192.168.6.218` by UniFi DHCP reservation
 - Pi-hole DHCP: disabled
 - Pi-hole NTP: disabled
 - DNS listening mode: `SINGLE` on `eth0`
@@ -99,7 +100,7 @@ contains an example `pihole_nodes` group:
 pihole_nodes:
   hosts:
     bergen-pihole:
-      ansible_host: 192.168.20.CHANGE_ME
+      ansible_host: 192.168.6.218
       ansible_user: root
       ansible_python_interpreter: /usr/bin/python3
 ```
@@ -119,14 +120,14 @@ ansible-playbook ansible/playbooks/bootstrap-pihole.yml \
 Before changing DHCP DNS for any VLAN:
 
 ```bash
-nslookup example.org PIHOLE_IP
-nslookup bergen.intern PIHOLE_IP
+nslookup example.org 192.168.6.218
+nslookup bergen.intern 192.168.6.218
 ```
 
 Open:
 
 ```text
-http://PIHOLE_IP/admin/
+http://192.168.6.218/admin/
 ```
 
 Confirm that queries appear in Pi-hole and that internal Synology-hosted names
@@ -134,11 +135,7 @@ still resolve.
 
 The bootstrap also emits a `BERGEN-SYSLOG-TEST` event through the reusable
 `remote_syslog` role. Verify central receipt on `bergen-syslog` using the
-Pi-hole LXC source address:
-
-```bash
-grep BERGEN-SYSLOG-TEST /var/log/remote/PIHOLE_IP.log
-```
+Pi-hole LXC source address.
 
 This forwarding is for host/service operational logs. Pi-hole query logging
 remains in Pi-hole itself and is not deliberately duplicated into central
@@ -150,25 +147,37 @@ Cut over one network at a time. Configure that network's DHCP DNS server to the
 stable Pi-hole address, renew one test client's lease and verify browsing,
 internal DNS and Pi-hole query logging.
 
-For enforced child-network filtering, the later firewall phase should:
+For enforced child-network filtering, the firewall phase should:
 
 - permit client TCP/UDP 53 to Pi-hole,
+- redirect hard-coded IPv4 DNS TCP/UDP 53 to Pi-hole,
 - permit Pi-hole TCP/UDP 53 to its configured upstream resolver,
-- block client DNS to other destinations,
 - handle encrypted DNS bypass separately (DoT/DoQ/DoH/VPN policy),
 - restrict the Pi-hole web interface to administration networks.
 
-Do not enable those enforcement rules until Pi-hole itself has been validated.
+## Network-wide SafeSearch
+
+SafeSearch is currently applied to all clients using Pi-hole. The managed
+`pihole_dnsmasq_lines` map:
+
+- `www.google.com` and `www.google.de` to the Google SafeSearch VIP,
+- `www.bing.com` and the Edge sidebar search endpoint to Bing Strict,
+- the documented YouTube endpoints to YouTube Moderate Restricted Mode.
+
+The configuration uses provider SafeSearch VIP addresses instead of external
+CNAME targets because Pi-hole's embedded dnsmasq requires CNAME targets to be
+locally known/authoritative. A future children-only resolver may use YouTube
+Strict while the general resolver stays Moderate.
+
+Pi-hole also blocks Apple's Private Relay discovery domains through its built-in
+`dns.specialDomains.iCloudPrivateRelay` behavior so managed DNS policy is not
+silently bypassed by Private Relay.
 
 ## Blocklists and family policy
 
-The initial deployment deliberately does not import the previously evaluated
-HaGeZi lists. First establish stable DNS service and the correct resolver path.
-Then add blocklists and Pi-hole client/group policy as a separate, testable
-change.
-
-This separation keeps DNS infrastructure deployment independent from content
-policy and makes rollback straightforward.
+Blocklists and Pi-hole client/group policy are managed separately from the base
+resolver path so that filtering changes remain independently testable and
+reversible.
 
 ## Upgrade policy
 
