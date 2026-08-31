@@ -19,7 +19,7 @@ lxc_memory: 1024
 lxc_swap: 256
 lxc_cores: 1
 
-lxc_bridge: vmbr2
+lxc_bridge: vmbr6
 
 # Initial deployment uses DHCP so Bergen Platform can discover the new LXC.
 # Before clients use Pi-hole, reserve the discovered address in UniFi.
@@ -73,6 +73,20 @@ pihole_query_logging: true
 pihole_dnssec: false
 pihole_dhcp_enabled: false
 pihole_ntp_enabled: false
+
+# Network-wide SafeSearch / Restricted Mode. These are DNS CNAME mappings
+# recommended by the respective providers. YouTube uses Moderate Restricted
+# Mode globally; a stricter children-only resolver can be added later.
+pihole_dnsmasq_lines:
+  - "cname=www.google.com,forcesafesearch.google.com"
+  - "cname=www.google.de,forcesafesearch.google.com"
+  - "cname=www.bing.com,strict.bing.com"
+  - "cname=edgeservices.bing.com,strict.bing.com"
+  - "cname=www.youtube.com,restrictmoderate.youtube.com"
+  - "cname=m.youtube.com,restrictmoderate.youtube.com"
+  - "cname=youtubei.googleapis.com,restrictmoderate.youtube.com"
+  - "cname=youtube.googleapis.com,restrictmoderate.youtube.com"
+  - "cname=www.youtube-nocookie.com,restrictmoderate.youtube.com"
 
 # Secret is stored only in ansible/group_vars/all/vault.yml.
 pihole_web_password: "{{ vault_pihole_web_password }}"
