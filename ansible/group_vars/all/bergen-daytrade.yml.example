@@ -2,7 +2,7 @@
 ###############################################################################
 # Bergen Platform
 #
-# Example configuration: bergen-daytrade
+# Example configuration: provider-neutral daytrading LXC
 #
 # Copy this file to bergen-daytrade.yml and replace every CHANGE_ME value.
 # The destination file is ignored by Git.
@@ -38,17 +38,3 @@ pve_inventory_host: venombox
 # remains local and is ignored by Git.
 lxc_inventory_file: "{{ playbook_dir }}/../inventory.local.yml"
 lxc_inventory_group: market_collectors
-
-###############################################################################
-# Optional result email
-###############################################################################
-
-daytrading_email_enabled: false
-daytrading_smtp_host: mail.bergen.intern
-daytrading_smtp_port: 25
-daytrading_smtp_starttls: false
-daytrading_smtp_username: ""
-daytrading_smtp_password: ""
-daytrading_email_from: daytrading@thebergens.net
-daytrading_email_to: ""
-

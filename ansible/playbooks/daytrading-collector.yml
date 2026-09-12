@@ -1,7 +1,6 @@
 ---
-- name: Configure daytrading market-data collector
+- name: Remove legacy daytrading market-data collector
   hosts: "{{ daytrading_collector_target | default('market_collectors') }}"
   become: true
   roles:
     - daytrading_collector
-
