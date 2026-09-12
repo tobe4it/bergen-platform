@@ -1,0 +1,87 @@
+---
+- name: Install collector runtime packages
+  ansible.builtin.package:
+    name:
+      - python3
+      - ca-certificates
+      - tzdata
+    state: present
+
+- name: Create collector group
+  ansible.builtin.group:
+    name: "{{ daytrading_collector_group }}"
+    system: true
+    state: present
+
+- name: Create collector user
+  ansible.builtin.user:
+    name: "{{ daytrading_collector_user }}"
+    group: "{{ daytrading_collector_group }}"
+    system: true
+    create_home: false
+    shell: /usr/sbin/nologin
+    state: present
+
+- name: Create collector directories
+  ansible.builtin.file:
+    path: "{{ item.path }}"
+    state: directory
+    owner: "{{ item.owner }}"
+    group: "{{ item.group }}"
+    mode: "{{ item.mode }}"
+  loop:
+    - path: "{{ daytrading_collector_base_dir }}"
+      owner: root
+      group: "{{ daytrading_collector_group }}"
+      mode: "0755"
+    - path: "{{ daytrading_collector_state_dir }}"
+      owner: "{{ daytrading_collector_user }}"
+      group: "{{ daytrading_collector_group }}"
+      mode: "0750"
+
+- name: Install collector program
+  ansible.builtin.template:
+    src: daytrading-collector.py.j2
+    dest: "{{ daytrading_collector_base_dir }}/collector.py"
+    owner: root
+    group: "{{ daytrading_collector_group }}"
+    mode: "0755"
+  notify: Restart daytrading timer
+
+- name: Install collector configuration
+  ansible.builtin.template:
+    src: daytrading-collector.json.j2
+    dest: "{{ daytrading_collector_config }}"
+    owner: root
+    group: "{{ daytrading_collector_group }}"
+    mode: "0640"
+  notify: Restart daytrading timer
+
+- name: Install systemd service
+  ansible.builtin.template:
+    src: bergen-daytrading-collector.service.j2
+    dest: /etc/systemd/system/bergen-daytrading-collector.service
+    owner: root
+    group: root
+    mode: "0644"
+  notify:
+    - Reload systemd
+    - Restart daytrading timer
+
+- name: Install systemd timer
+  ansible.builtin.template:
+    src: bergen-daytrading-collector.timer.j2
+    dest: /etc/systemd/system/bergen-daytrading-collector.timer
+    owner: root
+    group: root
+    mode: "0644"
+  notify:
+    - Reload systemd
+    - Restart daytrading timer
+
+- name: Enable and start daytrading timer
+  ansible.builtin.systemd:
+    name: bergen-daytrading-collector.timer
+    enabled: true
+    state: started
+    daemon_reload: true

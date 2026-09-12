@@ -1,0 +1,25 @@
+[Unit]
+Description=Bergen Platform daytrading market-data collector
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User={{ daytrading_collector_user }}
+Group={{ daytrading_collector_group }}
+ExecStart=/usr/bin/python3 {{ daytrading_collector_base_dir }}/collector.py --config {{ daytrading_collector_config }} run-session
+WorkingDirectory={{ daytrading_collector_base_dir }}
+PrivateTmp=true
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths={{ daytrading_collector_state_dir }}
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+LockPersonality=true
+MemoryDenyWriteExecute=true
+
+[Install]
+WantedBy=multi-user.target

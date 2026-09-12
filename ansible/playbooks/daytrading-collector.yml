@@ -1,0 +1,6 @@
+---
+- name: Configure daytrading market-data collector
+  hosts: market_collectors
+  become: true
+  roles:
+    - daytrading_collector

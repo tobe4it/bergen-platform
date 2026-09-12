@@ -1,0 +1,11 @@
+[Unit]
+Description=Run Bergen daytrading collector on US trading days
+
+[Timer]
+OnCalendar={{ daytrading_timer_on_calendar }}
+AccuracySec=1s
+Persistent=false
+Unit=bergen-daytrading-collector.service
+
+[Install]
+WantedBy=timers.target

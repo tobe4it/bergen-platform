@@ -1,0 +1,11 @@
+---
+- name: Reload systemd
+  ansible.builtin.systemd:
+    daemon_reload: true
+
+- name: Restart daytrading timer
+  ansible.builtin.systemd:
+    name: bergen-daytrading-collector.timer
+    state: restarted
+    enabled: true
+    daemon_reload: true

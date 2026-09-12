@@ -1,0 +1,29 @@
+{
+  "market_timezone": {{ daytrading_market_timezone | to_json }},
+  "state_dir": {{ daytrading_collector_state_dir | to_json }},
+  "gap_min_pct": {{ daytrading_gap_min_pct | float }},
+  "min_price_usd": {{ daytrading_min_price_usd | float }},
+  "min_premarket_volume": {{ daytrading_min_premarket_volume | int }},
+  "min_relative_volume": {{ daytrading_min_relative_volume | float }},
+  "candidate_limit": {{ daytrading_candidate_limit | int }},
+  "opening_range_start": {{ daytrading_opening_range_start | to_json }},
+  "opening_range_end": {{ daytrading_opening_range_end | to_json }},
+  "signal_window_end": {{ daytrading_signal_window_end | to_json }},
+  "signal_poll_seconds": {{ daytrading_signal_poll_seconds | int }},
+  "breakout_confirmations": {{ daytrading_breakout_confirmations | int }},
+  "tradingview_url": {{ daytrading_tradingview_url | to_json }},
+  "yahoo_hosts": {{ daytrading_yahoo_hosts | to_json }},
+  "http_timeout_seconds": {{ daytrading_http_timeout_seconds | int }},
+  "http_retries": {{ daytrading_http_retries | int }},
+  "allowed_exchanges": {{ daytrading_allowed_exchanges | to_json }},
+  "email": {
+    "enabled": {{ daytrading_email_enabled | bool | to_json }},
+    "smtp_host": {{ daytrading_smtp_host | to_json }},
+    "smtp_port": {{ daytrading_smtp_port | int }},
+    "starttls": {{ daytrading_smtp_starttls | bool | to_json }},
+    "username": {{ daytrading_smtp_username | to_json }},
+    "password": {{ daytrading_smtp_password | to_json }},
+    "from": {{ daytrading_email_from | to_json }},
+    "to": {{ daytrading_email_to | to_json }}
+  }
+}
