@@ -1,6 +1,7 @@
 ---
 - name: Configure daytrading market-data collector
-  hosts: market_collectors
+  hosts: "{{ daytrading_collector_target | default('market_collectors') }}"
   become: true
   roles:
     - daytrading_collector
+

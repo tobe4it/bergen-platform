@@ -1,0 +1,54 @@
+---
+###############################################################################
+# Bergen Platform
+#
+# Example configuration: bergen-daytrade
+#
+# Copy this file to bergen-daytrade.yml and replace every CHANGE_ME value.
+# The destination file is ignored by Git.
+###############################################################################
+
+lxc_vmid: CHANGE_ME
+lxc_hostname: daytrade
+
+lxc_template: local:vztmpl/debian-13-standard_13.6-1_amd64.tar.zst
+lxc_storage: local-zfs
+lxc_rootfs_size: 8
+
+lxc_memory: 512
+lxc_swap: 256
+lxc_cores: 1
+
+lxc_bridge: CHANGE_ME
+lxc_ip: dhcp
+lxc_ip6: dhcp
+lxc_unprivileged: true
+lxc_onboot: true
+lxc_start_order: 40
+lxc_firewall: 1
+
+lxc_ssh_public_key: >-
+  {{ lookup('file', lookup('env', 'HOME') + '/.ssh/id_ed25519.pub') }}
+lxc_root_password: "{{ vault_lxc_root_password }}"
+
+pve_node: venombox
+pve_inventory_host: venombox
+
+# Discovery creates or updates this host below market_collectors. The file
+# remains local and is ignored by Git.
+lxc_inventory_file: "{{ playbook_dir }}/../inventory.local.yml"
+lxc_inventory_group: market_collectors
+
+###############################################################################
+# Optional result email
+###############################################################################
+
+daytrading_email_enabled: false
+daytrading_smtp_host: mail.bergen.intern
+daytrading_smtp_port: 25
+daytrading_smtp_starttls: false
+daytrading_smtp_username: ""
+daytrading_smtp_password: ""
+daytrading_email_from: daytrading@thebergens.net
+daytrading_email_to: ""
+

@@ -258,9 +258,16 @@
       ansible.builtin.add_host:
         name: "{{ lxc_hostname }}"
 
-        groups:
-          - discovered_lxcs
-          - linux_lxcs
+        groups: >-
+          {{
+            ['discovered_lxcs', 'linux_lxcs']
+            +
+            (
+              [lxc_inventory_group]
+              if lxc_inventory_group is defined
+              else []
+            )
+          }}
 
         ansible_host: "{{ lxc_effective_ipv4 }}"
         ansible_user: "{{ lxc_ansible_user | default('root') }}"
@@ -328,3 +335,4 @@
             Die persistente Inventory-Aktualisierung erfolgt durch
             update-inventory.yml.
           - "============================================================"
+

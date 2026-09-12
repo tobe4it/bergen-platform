@@ -14,15 +14,25 @@ It **does not place broker orders**.
 
 The collector deliberately fails closed: if exact 1-minute opening-range data are unavailable, it emits `data_error` rather than inventing a trade.
 
-## Inventory
+## LXC and inventory
 
-Add the target LXC/VM to the existing inventory:
+The complete deployment creates a dedicated LXC, discovers its effective IPv4
+address and creates or updates the host below `market_collectors` in
+`ansible/inventory.local.yml`. The local inventory is created automatically
+when it does not yet exist and remains ignored by Git.
+
+The resulting entry has this shape:
 
 ```yaml
-market_collectors:
-  hosts:
-    daytrade:
-      ansible_host: 192.0.2.10   # replace with the real address
+all:
+  children:
+    market_collectors:
+      hosts:
+        daytrade:
+          ansible_host: 192.168.20.X
+          ansible_user: root
+          ansible_port: 22
+          ansible_python_interpreter: /usr/bin/python3
 ```
 
 No LXC ID or IP is hard-coded in the role.
@@ -46,11 +56,34 @@ daytrading_smtp_username: "..."
 daytrading_smtp_password: "{{ vault_daytrading_smtp_password }}"
 ```
 
-## Deploy
+## Complete deployment
+
+Create the ignored local configuration once and set at least `lxc_vmid` and
+`lxc_bridge`:
 
 ```bash
-cd ansible
-ansible-playbook -i inventory.yml playbooks/daytrading-collector.yml
+cp ansible/group_vars/all/bergen-daytrade.yml.example \
+  ansible/group_vars/all/bergen-daytrade.yml
+```
+
+Then create the LXC, discover its address, maintain the local inventory, apply
+the common LXC baseline and install the collector:
+
+```bash
+ansible-playbook \
+  -i ansible/inventory.yml \
+  ansible/playbooks/deploy-daytrading.yml \
+  -e @ansible/group_vars/all/bergen-daytrade.yml \
+  --ask-vault-pass
+```
+
+For later collector-only reconciliation, load both inventory files:
+
+```bash
+ansible-playbook \
+  -i ansible/inventory.yml \
+  -i ansible/inventory.local.yml \
+  ansible/playbooks/daytrading-collector.yml
 ```
 
 ## Validate
@@ -123,3 +156,4 @@ All values are Ansible variables and can be changed for a later experiment witho
 ## Caveats
 
 TradingView's scanner endpoint and Yahoo's chart endpoint are public but not contractual market-data APIs. The role therefore treats unavailable or malformed data as an error and does not fabricate a signal. For real-money trading, use a licensed broker/data-feed API and implement exchange-calendar/holiday handling and execution controls.
+

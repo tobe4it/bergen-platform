@@ -1,0 +1,14 @@
+---
+###############################################################################
+# Bergen Platform
+#
+# Create, discover, inventory, bootstrap and configure the dedicated
+# daytrading market-data collector LXC.
+###############################################################################
+
+- import_playbook: deploy-lxc.yml
+
+- import_playbook: daytrading-collector.yml
+  vars:
+    daytrading_collector_target: discovered_lxcs
+
