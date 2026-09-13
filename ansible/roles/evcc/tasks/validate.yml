@@ -59,6 +59,11 @@
       - 200
       - 401
     return_content: false
+  register: evcc_api_validation
+  retries: "{{ evcc_api_retries }}"
+  delay: "{{ evcc_api_retry_delay }}"
+  until:
+    - evcc_api_validation.status | default(0) | int in [200, 401]
   when: evcc_effective_service_state == 'started'
 
 - name: Summarize EVCC service

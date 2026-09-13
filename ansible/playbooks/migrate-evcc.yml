@@ -30,6 +30,8 @@
 
     evcc_migration_backup_root: /var/backups/evcc
     evcc_migration_web_port: 7070
+    evcc_migration_api_retries: 24
+    evcc_migration_api_retry_delay: 5
 
   tasks:
     ###########################################################################
@@ -460,6 +462,10 @@
               - 401
             return_content: false
           register: evcc_target_api
+          retries: "{{ evcc_migration_api_retries }}"
+          delay: "{{ evcc_migration_api_retry_delay }}"
+          until:
+            - evcc_target_api.status | default(0) | int in [200, 401]
           delegate_to: "{{ evcc_migration_target }}"
 
         - name: Require successful target start and endpoint validation

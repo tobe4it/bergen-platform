@@ -26,6 +26,8 @@ The project follows **Semantic Versioning (SemVer)** and the changelog format is
 
 - First EVCC deployment now forces the migration staging state even when
   higher-precedence site-local extra vars request normal service startup
+- EVCC API validation now retries while the web listener is available but the
+  application routes are still initializing
 
 ---
 

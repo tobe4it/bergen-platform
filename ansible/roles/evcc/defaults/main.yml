@@ -45,3 +45,5 @@ evcc_backup_directory: /var/backups/evcc
 evcc_web_host: 127.0.0.1
 evcc_web_port: 7070
 evcc_start_timeout: 120
+evcc_api_retries: 24
+evcc_api_retry_delay: 5
