@@ -1,0 +1,556 @@
+---
+###############################################################################
+# Bergen Platform
+#
+# Loss-conscious EVCC migration and single-controller cutover.
+#
+# This playbook coordinates both hosts from the Ansible controller. It creates
+# a permanent source-side backup, copies evcc.yaml (when present) and a
+# consistent SQLite backup, validates the target and only then disables the old
+# service. On failure it stops the target and restores the old service state.
+###############################################################################
+
+- name: Migrate EVCC configuration and history
+  hosts: localhost
+  become: true
+  gather_facts: true
+
+  vars:
+    evcc_migration_source_group: evcc_legacy_nodes
+    evcc_migration_target_group: evcc_nodes
+    evcc_migration_confirm: false
+
+    evcc_migration_source_service: evcc
+    evcc_migration_target_service: evcc
+
+    evcc_migration_source_config_path: /etc/evcc.yaml
+    evcc_migration_source_database_path: /var/lib/evcc/evcc.db
+    evcc_migration_target_config_path: /etc/evcc.yaml
+    evcc_migration_target_database_path: /var/lib/evcc/evcc.db
+
+    evcc_migration_backup_root: /var/backups/evcc
+    evcc_migration_web_port: 7070
+
+  tasks:
+    ###########################################################################
+    # Validation and identity
+    ###########################################################################
+
+    - name: Validate explicit cutover confirmation and inventory groups
+      ansible.builtin.assert:
+        that:
+          - evcc_migration_confirm | bool
+          - groups.get(evcc_migration_source_group, []) | length == 1
+          - groups.get(evcc_migration_target_group, []) | length == 1
+        fail_msg: >-
+          Migration requires exactly one host in {{ evcc_migration_source_group }}
+          and {{ evcc_migration_target_group }}, plus
+          -e evcc_migration_confirm=true. The confirmation is required because
+          the old EVCC service is stopped during cutover.
+
+    - name: Resolve migration endpoints and backup timestamp
+      ansible.builtin.set_fact:
+        evcc_migration_source: >-
+          {{ groups[evcc_migration_source_group] | first }}
+        evcc_migration_target: >-
+          {{ groups[evcc_migration_target_group] | first }}
+        evcc_migration_timestamp: >-
+          {{ ansible_date_time.iso8601_basic_short }}Z
+
+    - name: Validate distinct source and target hosts
+      ansible.builtin.assert:
+        that:
+          - evcc_migration_source != evcc_migration_target
+          - >-
+            hostvars[evcc_migration_source].ansible_host
+            != hostvars[evcc_migration_target].ansible_host
+        fail_msg: >-
+          EVCC source and target must use different inventory names and
+          addresses during migration.
+
+    - name: Resolve permanent backup directories
+      ansible.builtin.set_fact:
+        evcc_source_backup_directory: >-
+          {{ evcc_migration_backup_root }}/migration-{{ evcc_migration_timestamp }}
+        evcc_target_backup_directory: >-
+          {{ evcc_migration_backup_root }}/pre-migration-{{ evcc_migration_timestamp }}
+
+    - name: Create protected temporary directory on Ansible controller
+      ansible.builtin.tempfile:
+        state: directory
+        prefix: bergen-evcc-migration-
+      register: evcc_controller_staging
+      become: false
+
+    ###########################################################################
+    # Coordinated migration
+    ###########################################################################
+
+    - name: Copy, validate and cut over EVCC
+      ignore_unreachable: true
+      block:
+        - name: Inspect source EVCC database
+          ansible.builtin.stat:
+            path: "{{ evcc_migration_source_database_path }}"
+          register: evcc_source_database
+          delegate_to: "{{ evcc_migration_source }}"
+
+        - name: Inspect source EVCC configuration
+          ansible.builtin.stat:
+            path: "{{ evcc_migration_source_config_path }}"
+          register: evcc_source_config
+          delegate_to: "{{ evcc_migration_source }}"
+
+        - name: Require a non-empty source EVCC database
+          ansible.builtin.assert:
+            that:
+              - evcc_source_database.stat.exists
+              - evcc_source_database.stat.isreg
+              - evcc_source_database.stat.size | int > 0
+            fail_msg: >-
+              No non-empty EVCC database exists at
+              {{ evcc_migration_source_database_path }} on
+              {{ evcc_migration_source }}. Override the source path if the old
+              installation uses a non-standard location.
+
+        - name: Verify source EVCC systemd unit exists
+          ansible.builtin.command:
+            argv:
+              - systemctl
+              - cat
+              - "{{ evcc_migration_source_service }}"
+          register: evcc_source_service_unit
+          changed_when: false
+          delegate_to: "{{ evcc_migration_source }}"
+
+        - name: Verify target EVCC systemd unit exists
+          ansible.builtin.command:
+            argv:
+              - systemctl
+              - cat
+              - "{{ evcc_migration_target_service }}"
+          register: evcc_target_service_unit
+          changed_when: false
+          delegate_to: "{{ evcc_migration_target }}"
+
+        - name: Read source EVCC version
+          ansible.builtin.command:
+            argv:
+              - /usr/bin/evcc
+              - --version
+          register: evcc_source_version
+          changed_when: false
+          failed_when: false
+          delegate_to: "{{ evcc_migration_source }}"
+
+        - name: Read target EVCC version
+          ansible.builtin.command:
+            argv:
+              - /usr/bin/evcc
+              - --version
+          register: evcc_target_version
+          changed_when: false
+          delegate_to: "{{ evcc_migration_target }}"
+
+        - name: Read original source EVCC activity
+          ansible.builtin.command:
+            argv:
+              - systemctl
+              - is-active
+              - "{{ evcc_migration_source_service }}"
+          register: evcc_source_service_activity
+          changed_when: false
+          failed_when: false
+          delegate_to: "{{ evcc_migration_source }}"
+
+        - name: Read original source EVCC enablement
+          ansible.builtin.command:
+            argv:
+              - systemctl
+              - is-enabled
+              - "{{ evcc_migration_source_service }}"
+          register: evcc_source_service_enablement
+          changed_when: false
+          failed_when: false
+          delegate_to: "{{ evcc_migration_source }}"
+
+        - name: Read target EVCC activity
+          ansible.builtin.command:
+            argv:
+              - systemctl
+              - is-active
+              - "{{ evcc_migration_target_service }}"
+          register: evcc_target_service_activity
+          changed_when: false
+          failed_when: false
+          delegate_to: "{{ evcc_migration_target }}"
+
+        - name: Require target EVCC to be inactive before migration
+          ansible.builtin.assert:
+            that:
+              - evcc_target_service_activity.stdout | trim != 'active'
+            fail_msg: >-
+              EVCC is already active on {{ evcc_migration_target }}. Stop it
+              before migration so two instances cannot control the charger.
+
+        - name: Inspect existing target EVCC database
+          ansible.builtin.stat:
+            path: "{{ evcc_migration_target_database_path }}"
+          register: evcc_target_existing_database
+          delegate_to: "{{ evcc_migration_target }}"
+
+        - name: Inspect existing target EVCC configuration
+          ansible.builtin.stat:
+            path: "{{ evcc_migration_target_config_path }}"
+          register: evcc_target_existing_config
+          delegate_to: "{{ evcc_migration_target }}"
+
+        - name: Create source migration backup directory
+          ansible.builtin.file:
+            path: "{{ evcc_source_backup_directory }}"
+            state: directory
+            owner: root
+            group: root
+            mode: "0700"
+          delegate_to: "{{ evcc_migration_source }}"
+
+        - name: Create target pre-migration backup directory
+          ansible.builtin.file:
+            path: "{{ evcc_target_backup_directory }}"
+            state: directory
+            owner: root
+            group: root
+            mode: "0700"
+          when: >-
+            evcc_target_existing_database.stat.exists
+            or evcc_target_existing_config.stat.exists
+          delegate_to: "{{ evcc_migration_target }}"
+
+        - name: Preserve existing target EVCC database
+          ansible.builtin.copy:
+            src: "{{ evcc_migration_target_database_path }}"
+            dest: "{{ evcc_target_backup_directory }}/evcc.db"
+            remote_src: true
+            owner: root
+            group: root
+            mode: "0600"
+          when: evcc_target_existing_database.stat.exists
+          delegate_to: "{{ evcc_migration_target }}"
+
+        - name: Preserve existing target EVCC configuration
+          ansible.builtin.copy:
+            src: "{{ evcc_migration_target_config_path }}"
+            dest: "{{ evcc_target_backup_directory }}/evcc.yaml"
+            remote_src: true
+            owner: root
+            group: root
+            mode: "0600"
+          when: evcc_target_existing_config.stat.exists
+          no_log: true
+          delegate_to: "{{ evcc_migration_target }}"
+
+        - name: Stop old EVCC for a consistent final snapshot
+          ansible.builtin.systemd_service:
+            name: "{{ evcc_migration_source_service }}"
+            state: stopped
+          register: evcc_source_service_stop
+          delegate_to: "{{ evcc_migration_source }}"
+
+        - name: Require successful connection while stopping old EVCC
+          ansible.builtin.assert:
+            that:
+              - not evcc_source_service_stop.unreachable | default(false)
+            fail_msg: >-
+              The source became unreachable while EVCC was being stopped.
+              Migration cannot safely continue.
+
+        - name: Verify old EVCC process has stopped
+          ansible.builtin.command:
+            argv:
+              - pgrep
+              - --exact
+              - evcc
+          register: evcc_source_process
+          changed_when: false
+          failed_when: evcc_source_process.rc != 1
+          delegate_to: "{{ evcc_migration_source }}"
+
+        - name: Create consistent source-side SQLite backup
+          ansible.builtin.command:
+            argv:
+              - /usr/bin/python3
+              - -c
+              - >-
+                import sqlite3, sys;
+                source = sqlite3.connect('file:' + sys.argv[1] + '?mode=ro', uri=True);
+                target = sqlite3.connect(sys.argv[2]);
+                source.backup(target);
+                result = target.execute('PRAGMA quick_check').fetchone()[0];
+                target.close(); source.close();
+                print(result)
+              - "{{ evcc_migration_source_database_path }}"
+              - "{{ evcc_source_backup_directory }}/evcc.db"
+          register: evcc_source_database_backup
+          changed_when: true
+          failed_when: >-
+            evcc_source_database_backup.rc != 0
+            or evcc_source_database_backup.stdout | trim != 'ok'
+          delegate_to: "{{ evcc_migration_source }}"
+
+        - name: Protect source-side SQLite backup
+          ansible.builtin.file:
+            path: "{{ evcc_source_backup_directory }}/evcc.db"
+            owner: root
+            group: root
+            mode: "0600"
+          delegate_to: "{{ evcc_migration_source }}"
+
+        - name: Preserve source EVCC configuration
+          ansible.builtin.copy:
+            src: "{{ evcc_migration_source_config_path }}"
+            dest: "{{ evcc_source_backup_directory }}/evcc.yaml"
+            remote_src: true
+            owner: root
+            group: root
+            mode: "0600"
+          when: evcc_source_config.stat.exists
+          no_log: true
+          delegate_to: "{{ evcc_migration_source }}"
+
+        - name: Fetch EVCC database backup to protected controller staging
+          ansible.builtin.fetch:
+            src: "{{ evcc_source_backup_directory }}/evcc.db"
+            dest: "{{ evcc_controller_staging.path }}/evcc.db"
+            flat: true
+          delegate_to: "{{ evcc_migration_source }}"
+
+        - name: Fetch EVCC configuration to protected controller staging
+          ansible.builtin.fetch:
+            src: "{{ evcc_source_backup_directory }}/evcc.yaml"
+            dest: "{{ evcc_controller_staging.path }}/evcc.yaml"
+            flat: true
+          when: evcc_source_config.stat.exists
+          no_log: true
+          delegate_to: "{{ evcc_migration_source }}"
+
+        - name: Calculate staged EVCC database checksum
+          ansible.builtin.stat:
+            path: "{{ evcc_controller_staging.path }}/evcc.db"
+            checksum_algorithm: sha256
+          register: evcc_staged_database
+          become: false
+
+        - name: Calculate staged EVCC configuration checksum
+          ansible.builtin.stat:
+            path: "{{ evcc_controller_staging.path }}/evcc.yaml"
+            checksum_algorithm: sha256
+          register: evcc_staged_config
+          when: evcc_source_config.stat.exists
+          become: false
+
+        - name: Install migrated EVCC database on target
+          ansible.builtin.copy:
+            src: "{{ evcc_controller_staging.path }}/evcc.db"
+            dest: "{{ evcc_migration_target_database_path }}"
+            owner: evcc
+            group: evcc
+            mode: "0640"
+          delegate_to: "{{ evcc_migration_target }}"
+
+        - name: Install migrated EVCC configuration on target
+          ansible.builtin.copy:
+            src: "{{ evcc_controller_staging.path }}/evcc.yaml"
+            dest: "{{ evcc_migration_target_config_path }}"
+            owner: evcc
+            group: evcc
+            mode: "0600"
+          when: evcc_source_config.stat.exists
+          no_log: true
+          delegate_to: "{{ evcc_migration_target }}"
+
+        - name: Remove target file configuration when source is database-only
+          ansible.builtin.file:
+            path: "{{ evcc_migration_target_config_path }}"
+            state: absent
+          when: not evcc_source_config.stat.exists
+          delegate_to: "{{ evcc_migration_target }}"
+
+        - name: Calculate installed target database checksum
+          ansible.builtin.stat:
+            path: "{{ evcc_migration_target_database_path }}"
+            checksum_algorithm: sha256
+          register: evcc_target_database
+          delegate_to: "{{ evcc_migration_target }}"
+
+        - name: Calculate installed target configuration checksum
+          ansible.builtin.stat:
+            path: "{{ evcc_migration_target_config_path }}"
+            checksum_algorithm: sha256
+          register: evcc_target_config
+          when: evcc_source_config.stat.exists
+          delegate_to: "{{ evcc_migration_target }}"
+
+        - name: Verify EVCC database migration checksum
+          ansible.builtin.assert:
+            that:
+              - evcc_target_database.stat.checksum == evcc_staged_database.stat.checksum
+            fail_msg: >-
+              EVCC database changed while being transferred to the target.
+
+        - name: Verify EVCC configuration migration checksum
+          ansible.builtin.assert:
+            that:
+              - evcc_target_config.stat.checksum == evcc_staged_config.stat.checksum
+            fail_msg: >-
+              EVCC configuration changed while being transferred to the target.
+          when: evcc_source_config.stat.exists
+
+        - name: Verify migrated SQLite database integrity
+          ansible.builtin.command:
+            argv:
+              - /usr/bin/sqlite3
+              - "{{ evcc_migration_target_database_path }}"
+              - PRAGMA quick_check;
+          register: evcc_target_database_check
+          changed_when: false
+          failed_when: evcc_target_database_check.stdout | trim != 'ok'
+          delegate_to: "{{ evcc_migration_target }}"
+
+        - name: Parse migrated EVCC file configuration
+          ansible.builtin.command:
+            argv:
+              - /usr/sbin/runuser
+              - --user
+              - evcc
+              - --
+              - /usr/bin/evcc
+              - checkconfig
+              - --config
+              - "{{ evcc_migration_target_config_path }}"
+              - --ignore-db
+          register: evcc_target_config_check
+          changed_when: false
+          when: evcc_source_config.stat.exists
+          delegate_to: "{{ evcc_migration_target }}"
+
+        - name: Enable and start migrated EVCC target
+          ansible.builtin.systemd_service:
+            name: "{{ evcc_migration_target_service }}"
+            enabled: true
+            state: started
+          register: evcc_target_service_start
+          delegate_to: "{{ evcc_migration_target }}"
+
+        - name: Wait for migrated EVCC web listener
+          ansible.builtin.wait_for:
+            host: 127.0.0.1
+            port: "{{ evcc_migration_web_port }}"
+            state: started
+            timeout: 120
+          register: evcc_target_listener
+          delegate_to: "{{ evcc_migration_target }}"
+
+        - name: Validate migrated EVCC API endpoint
+          ansible.builtin.uri:
+            url: >-
+              http://127.0.0.1:{{ evcc_migration_web_port }}/api/state
+            method: GET
+            status_code:
+              - 200
+              - 401
+            return_content: false
+          register: evcc_target_api
+          delegate_to: "{{ evcc_migration_target }}"
+
+        - name: Require successful target start and endpoint validation
+          ansible.builtin.assert:
+            that:
+              - not evcc_target_service_start.unreachable | default(false)
+              - not evcc_target_listener.unreachable | default(false)
+              - not evcc_target_api.unreachable | default(false)
+              - evcc_target_api.status | int in [200, 401]
+            fail_msg: >-
+              The migrated EVCC target could not be proven healthy. The source
+              will be restored instead of completing cutover.
+
+        - name: Disable old EVCC only after successful target validation
+          ansible.builtin.systemd_service:
+            name: "{{ evcc_migration_source_service }}"
+            enabled: false
+            state: stopped
+          register: evcc_source_service_disable
+          delegate_to: "{{ evcc_migration_source }}"
+
+        - name: Verify old EVCC was disabled after cutover
+          ansible.builtin.assert:
+            that:
+              - not evcc_source_service_disable.unreachable | default(false)
+            fail_msg: >-
+              The target is healthy, but the old EVCC service could not be
+              disabled reliably. Rolling back to one known controller.
+
+        - name: Summarize successful EVCC migration
+          ansible.builtin.debug:
+            msg:
+              - "============================================================"
+              - "EVCC migration and cutover completed"
+              - "============================================================"
+              - "Source         : {{ evcc_migration_source }} (stopped)"
+              - "Target         : {{ evcc_migration_target }} (active)"
+              - >-
+                Source version :
+                {{ evcc_source_version.stdout | default('') | trim |
+                   default('unknown', true) }}
+              - "Target version : {{ evcc_target_version.stdout | trim }}"
+              - "Database       : SHA-256 verified; SQLite quick_check ok"
+              - "Source backup  : {{ evcc_source_backup_directory }}"
+              - "Rollback       : stop target, restore/start source"
+              - "============================================================"
+
+      rescue:
+        - name: Stop and disable EVCC target after failed validation
+          ansible.builtin.systemd_service:
+            name: "{{ evcc_migration_target_service }}"
+            enabled: false
+            state: stopped
+          failed_when: false
+          delegate_to: "{{ evcc_migration_target }}"
+
+        - name: Restore original source EVCC enablement
+          ansible.builtin.systemd_service:
+            name: "{{ evcc_migration_source_service }}"
+            enabled: >-
+              {{ evcc_source_service_enablement.stdout | default('') | trim
+                 == 'enabled' }}
+          failed_when: false
+          when: evcc_source_service_enablement is defined
+          delegate_to: "{{ evcc_migration_source }}"
+
+        - name: Restore original source EVCC runtime state
+          ansible.builtin.systemd_service:
+            name: "{{ evcc_migration_source_service }}"
+            state: >-
+              {{ 'started'
+                 if evcc_source_service_activity.stdout | default('') | trim
+                    == 'active'
+                 else 'stopped' }}
+          failed_when: false
+          when: evcc_source_service_activity is defined
+          delegate_to: "{{ evcc_migration_source }}"
+
+        - name: Abort migration with rollback result
+          ansible.builtin.fail:
+            msg: >-
+              EVCC migration failed. Target shutdown and restoration of the
+              old service state were attempted. Verify both service states if
+              either host was unreachable. Any source backup already created
+              is retained at {{ evcc_source_backup_directory }}. Review the
+              task failure and target journal before retrying.
+
+      always:
+        - name: Remove protected controller staging directory
+          ansible.builtin.file:
+            path: "{{ evcc_controller_staging.path }}"
+            state: absent
+          become: false
+          when: evcc_controller_staging is defined

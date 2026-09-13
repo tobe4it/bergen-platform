@@ -22,3 +22,17 @@ all:
           ansible_host: 192.168.20.CHANGE_ME
           ansible_user: root
           ansible_python_interpreter: /usr/bin/python3
+
+    evcc_nodes:
+      hosts:
+        bergen-evcc:
+          ansible_host: NEW_EVCC_IP
+          ansible_user: root
+          ansible_python_interpreter: /usr/bin/python3
+
+    evcc_legacy_nodes:
+      hosts:
+        evcc-old:
+          ansible_host: OLD_EVCC_IP
+          ansible_user: root
+          ansible_python_interpreter: /usr/bin/python3

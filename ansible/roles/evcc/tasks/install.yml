@@ -1,0 +1,47 @@
+---
+- name: Install EVCC package prerequisites
+  ansible.builtin.apt:
+    name:
+      - ca-certificates
+      - sqlite3
+      - util-linux
+      - xz-utils
+    state: present
+    update_cache: true
+    cache_valid_time: 3600
+
+- name: Download pinned EVCC Debian package
+  ansible.builtin.get_url:
+    url: "{{ evcc_package_url }}"
+    dest: "{{ evcc_package_cache_path }}"
+    checksum: "sha256:{{ evcc_package_checksum }}"
+    owner: root
+    group: root
+    mode: "0644"
+
+- name: Install pinned EVCC Debian package without automatic service start
+  ansible.builtin.apt:
+    deb: "{{ evcc_package_cache_path }}"
+    state: present
+    policy_rc_d: 101
+
+- name: Read installed EVCC package version
+  ansible.builtin.command:
+    argv:
+      - dpkg-query
+      - --show
+      - --showformat=${Version}
+      - evcc
+  register: evcc_installed_package_version
+  changed_when: false
+
+- name: Verify installed EVCC package version
+  ansible.builtin.assert:
+    that:
+      - >-
+        evcc_installed_package_version.stdout | trim == evcc_version
+    fail_msg: >-
+      Installed EVCC package version
+      {{ evcc_installed_package_version.stdout | trim }} does not match the
+      pinned version {{ evcc_version }}.
+    success_msg: "EVCC {{ evcc_version }} is installed."

@@ -25,6 +25,7 @@ Current capabilities include:
 - Mosquitto MQTT deployment and per-client access management
 - Postfix/Dovecot mail backend with LDAP identities and explicit aliases
 - Pi-hole DNS filtering in a dedicated LXC
+- EVCC charging control with guarded configuration/history migration
 - Centralized remote Syslog forwarding
 - Provider-neutral daytrading market-data collection
 - Centralized configuration
@@ -88,6 +89,7 @@ Project documentation can be found in the **docs/** directory.
 - MAIL.md
 - MQTT.md
 - PIHOLE.md
+- EVCC.md
 - ROADMAP.md
 - UPDATE.md
 
@@ -165,6 +167,15 @@ DNS Filtering
 
 See **docs/PIHOLE.md** for deployment, stable addressing, validation and the
 later UniFi DNS cutover.
+
+Charging Control
+
+- Dedicated Debian 13 `bergen-evcc` LXC with a native, pinned EVCC package
+- Migration-safe staging with the new service initially stopped
+- Guarded transfer of `evcc.yaml` and `evcc.db` with checksums, SQLite
+  validation and automatic source-service rollback on failure
+
+See **docs/EVCC.md** for deployment, migration and cutover.
 
 Market Data
 

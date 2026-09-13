@@ -35,6 +35,10 @@ GitHub
                           |     +-- Pi-hole DNS filtering
                           |     +-- Podman / Quadlet
                           |
+                          +-- bergen-evcc
+                          |     +-- Native EVCC service
+                          |     +-- MQTT integration
+                          |
                           +-- daytrade
                           |     +-- Provider-neutral collector
                           |     +-- Alpaca / IBKR / replay adapters
@@ -133,6 +137,12 @@ DNS Filtering
 - Pi-hole v6 in a dedicated Debian 13 LXC
 - Synology DNS as the initial upstream resolver
 
+Charging Control
+- Native EVCC service in a dedicated Debian 13 LXC
+- Persistent configuration and SQLite charging history
+- Guarded single-controller migration from the legacy EVCC host
+- MQTT publishing to the central Mosquitto service
+
 Market Data
 - Provider-neutral daytrading collector
 - Site-local provider selection and Vault-backed credentials
@@ -152,4 +162,4 @@ Planned
 
 ## Version
 
-Current architecture baseline: v0.7.0
+Current architecture baseline: v0.7.0 plus unreleased EVCC service work

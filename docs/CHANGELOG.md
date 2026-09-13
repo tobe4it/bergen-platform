@@ -8,6 +8,20 @@ The project follows **Semantic Versioning (SemVer)** and the changelog format is
 
 ## [Unreleased]
 
+### Added
+
+#### EVCC
+
+- Dedicated Debian 13 `bergen-evcc` LXC definition and staged first-deploy
+  workflow
+- Native, version-pinned EVCC role with upstream SHA-256 verification
+- Protected persistence paths for configuration, SQLite history and backups
+- Guarded old-to-new migration with source-side SQLite backup, end-to-end
+  checksums, configuration/database validation and automatic source-service
+  recovery on failed cutover
+- Site-local source/target inventory examples and full deployment, migration,
+  address-transfer and rollback documentation
+
 ---
 
 ## [0.7.0] - 2026-09-13

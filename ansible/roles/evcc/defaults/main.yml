@@ -1,0 +1,38 @@
+---
+evcc_version: "0.315.0"
+
+evcc_architecture_map:
+  x86_64: amd64
+  aarch64: arm64
+  armv7l: armhf
+
+evcc_package_architecture: >-
+  {{ evcc_architecture_map.get(ansible_architecture, '') }}
+
+evcc_package_checksums:
+  amd64: "2827b1f9b9534d03c4bd0a2b56406e0253b107b055d8b8e4553158a4ed659457"
+  arm64: "8dda94b9b7cbf0fcb3cdce1ea775bea31cbdcc2df221dec92ca36a1bbb8647ab"
+  armhf: "77882870e04cb0ddc227d19efd9bafcee681b056cbe3b3c9d587d03a6e2abf66"
+
+evcc_package_checksum: >-
+  {{ evcc_package_checksums.get(evcc_package_architecture, '') }}
+
+evcc_package_url: >-
+  {{ 'https://github.com/evcc-io/evcc/releases/download/' ~
+     evcc_version ~ '/evcc_' ~ evcc_version ~ '_' ~
+     evcc_package_architecture ~ '.deb' }}
+
+evcc_package_cache_path: >-
+  /var/cache/apt/archives/evcc_{{ evcc_version }}_{{ evcc_package_architecture }}.deb
+
+evcc_service_name: evcc
+evcc_service_enabled: true
+evcc_service_state: started
+
+evcc_config_path: /etc/evcc.yaml
+evcc_database_path: /var/lib/evcc/evcc.db
+evcc_backup_directory: /var/backups/evcc
+
+evcc_web_host: 127.0.0.1
+evcc_web_port: 7070
+evcc_start_timeout: 120

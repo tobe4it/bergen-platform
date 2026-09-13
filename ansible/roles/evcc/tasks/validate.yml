@@ -1,0 +1,76 @@
+---
+- name: Inspect EVCC configuration file
+  ansible.builtin.stat:
+    path: "{{ evcc_config_path }}"
+  register: evcc_config_file
+
+- name: Validate file-based EVCC configuration without opening the database
+  ansible.builtin.command:
+    argv:
+      - /usr/sbin/runuser
+      - --user
+      - evcc
+      - --
+      - /usr/bin/evcc
+      - checkconfig
+      - --config
+      - "{{ evcc_config_path }}"
+      - --ignore-db
+  register: evcc_config_validation
+  changed_when: false
+  when: evcc_config_file.stat.exists
+
+- name: Read EVCC service activity
+  ansible.builtin.command:
+    argv:
+      - systemctl
+      - is-active
+      - "{{ evcc_service_name }}"
+  register: evcc_service_activity
+  changed_when: false
+  failed_when: false
+
+- name: Verify requested EVCC service activity
+  ansible.builtin.assert:
+    that:
+      - >-
+        (evcc_service_state == 'started' and
+         evcc_service_activity.stdout | trim == 'active')
+        or
+        (evcc_service_state == 'stopped' and
+         evcc_service_activity.stdout | trim != 'active')
+    fail_msg: >-
+      EVCC service state is {{ evcc_service_activity.stdout | trim }}, expected
+      {{ evcc_service_state }}.
+
+- name: Wait for EVCC web listener
+  ansible.builtin.wait_for:
+    host: "{{ evcc_web_host }}"
+    port: "{{ evcc_web_port }}"
+    state: started
+    timeout: "{{ evcc_start_timeout }}"
+  when: evcc_service_state == 'started'
+
+- name: Verify EVCC HTTP endpoint
+  ansible.builtin.uri:
+    url: "http://{{ evcc_web_host }}:{{ evcc_web_port }}/api/state"
+    method: GET
+    status_code:
+      - 200
+      - 401
+    return_content: false
+  when: evcc_service_state == 'started'
+
+- name: Summarize EVCC service
+  ansible.builtin.debug:
+    msg:
+      - "============================================================"
+      - "Bergen Platform EVCC service prepared"
+      - "============================================================"
+      - "Version  : {{ evcc_version }}"
+      - "Config   : {{ evcc_config_path }}"
+      - "Database : {{ evcc_database_path }}"
+      - "Web      : TCP {{ evcc_web_port }}"
+      - "Enabled  : {{ evcc_service_enabled | bool }}"
+      - "State    : {{ evcc_service_activity.stdout | trim }}"
+      - "============================================================"

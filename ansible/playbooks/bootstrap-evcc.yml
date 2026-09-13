@@ -1,0 +1,26 @@
+---
+###############################################################################
+# Bergen Platform
+#
+# Bootstrap or reconcile a dedicated EVCC charging-control node.
+###############################################################################
+
+- name: Bootstrap Bergen Platform EVCC node
+  hosts: "{{ bootstrap_evcc_target | default('evcc_nodes') }}"
+  become: true
+  gather_facts: true
+
+  roles:
+    - role: lxc_base
+      tags:
+        - base
+
+    - role: remote_syslog
+      tags:
+        - logging
+        - syslog
+
+    - role: evcc
+      tags:
+        - evcc
+        - charging

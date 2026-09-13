@@ -34,6 +34,12 @@ all:
     mail_backend_nodes:
       hosts: {}
 
+    evcc_nodes:
+      hosts: {}
+
+    evcc_legacy_nodes:
+      hosts: {}
+
     linux_lxcs:
       hosts:
         bp-controller:

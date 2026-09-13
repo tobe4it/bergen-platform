@@ -1,0 +1,16 @@
+---
+- name: Ensure EVCC database directory exists
+  ansible.builtin.file:
+    path: "{{ evcc_database_path | dirname }}"
+    state: directory
+    owner: evcc
+    group: evcc
+    mode: "0750"
+
+- name: Ensure EVCC backup directory exists
+  ansible.builtin.file:
+    path: "{{ evcc_backup_directory }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0700"

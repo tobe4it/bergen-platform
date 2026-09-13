@@ -1,0 +1,60 @@
+---
+###############################################################################
+# Bergen Platform - local EVCC configuration example
+# Copy to bergen-evcc.yml. The destination is ignored by Git.
+###############################################################################
+
+lxc_vmid: CHANGE_ME
+lxc_hostname: bergen-evcc
+
+lxc_template: local:vztmpl/debian-13-standard_13.6-1_amd64.tar.zst
+
+lxc_storage: CHANGE_ME
+lxc_rootfs_size: 8
+
+lxc_memory: 1024
+lxc_swap: 256
+lxc_cores: 1
+
+# Bridge/VLAN carrying the charger and energy devices.
+lxc_bridge: CHANGE_ME
+
+# Discover the initial address through DHCP. Reserve the resulting address
+# before the migration cutover.
+lxc_ip: dhcp
+lxc_ip6: dhcp
+
+lxc_unprivileged: true
+lxc_onboot: true
+lxc_start_order: 30
+lxc_firewall: 1
+
+lxc_ssh_public_key: >-
+  {{ lookup('file', lookup('env', 'HOME') + '/.ssh/id_ed25519.pub') }}
+lxc_root_password: "{{ vault_lxc_root_password }}"
+
+pve_node: CHANGE_ME
+pve_inventory_host: CHANGE_ME
+
+###############################################################################
+# Central logging
+###############################################################################
+
+remote_syslog_enabled: true
+remote_syslog_server: CHANGE_ME
+remote_syslog_port: 514
+remote_syslog_protocol: tcp
+remote_syslog_send_test: true
+
+###############################################################################
+# EVCC
+###############################################################################
+
+# Pin deployments to a reviewed upstream release. Upgrade deliberately in Git
+# after checking the EVCC release notes for breaking changes.
+evcc_version: "0.315.0"
+
+# These are the desired operational settings after migration. deploy-evcc.yml
+# overrides them to stopped/disabled for the initial migration staging run.
+evcc_service_enabled: true
+evcc_service_state: started

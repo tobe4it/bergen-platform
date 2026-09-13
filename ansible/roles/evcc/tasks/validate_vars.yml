@@ -1,0 +1,19 @@
+---
+- name: Validate EVCC deployment settings
+  ansible.builtin.assert:
+    that:
+      - ansible_facts['os_family'] == 'Debian'
+      - evcc_version | string | length > 0
+      - evcc_version is match('^[0-9]+\.[0-9]+\.[0-9]+$')
+      - evcc_package_architecture | string | length > 0
+      - evcc_package_checksum is match('^[0-9a-f]{64}$')
+      - evcc_service_state in ['started', 'stopped']
+      - evcc_web_port | int > 0
+      - evcc_web_port | int < 65536
+      - evcc_config_path | string | length > 0
+      - evcc_database_path | string | length > 0
+    fail_msg: >-
+      EVCC requires Debian, a supported CPU architecture, a pinned package with
+      SHA-256 checksum, valid paths and service state started or stopped.
+    success_msg: >-
+      EVCC deployment settings are valid for {{ evcc_package_architecture }}.
