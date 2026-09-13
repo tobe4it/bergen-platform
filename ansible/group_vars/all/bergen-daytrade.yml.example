@@ -1,24 +1,17 @@
 ---
 ###############################################################################
-# Bergen Platform
-#
-# Example configuration: provider-neutral daytrading LXC
-#
-# Copy this file to bergen-daytrade.yml and replace every CHANGE_ME value.
-# The destination file is ignored by Git.
+# Bergen Platform - local daytrading configuration example
+# Copy to bergen-daytrade.yml. The destination is ignored by Git.
 ###############################################################################
 
 lxc_vmid: CHANGE_ME
 lxc_hostname: daytrade
-
 lxc_template: local:vztmpl/debian-13-standard_13.6-1_amd64.tar.zst
 lxc_storage: local-zfs
 lxc_rootfs_size: 8
-
 lxc_memory: 512
 lxc_swap: 256
 lxc_cores: 1
-
 lxc_bridge: CHANGE_ME
 lxc_ip: dhcp
 lxc_ip6: dhcp
@@ -26,23 +19,58 @@ lxc_unprivileged: true
 lxc_onboot: true
 lxc_start_order: 40
 lxc_firewall: 1
-
 lxc_ssh_public_key: >-
   {{ lookup('file', lookup('env', 'HOME') + '/.ssh/id_ed25519.pub') }}
 lxc_root_password: "{{ vault_lxc_root_password }}"
-
 pve_node: venombox
 pve_inventory_host: venombox
-
-# Discovery creates or updates this host below market_collectors. The file
-# remains local and is ignored by Git.
 lxc_inventory_file: "{{ playbook_dir }}/../inventory.local.yml"
 lxc_inventory_group: market_collectors
+
+###############################################################################
+# Select exactly one local provider: replay, alpaca or ibkr
+###############################################################################
+
+daytrading_data_provider: replay
+daytrading_timer_enabled: false
+daytrading_candidate_mode: gap
+
+# Provider-independent week-1 strategy defaults.
+daytrading_market_timezone: America/New_York
+daytrading_candidate_window_start: "04:00:00"
+daytrading_opening_range_start: "09:30:00"
+daytrading_opening_range_end: "09:45:00"
+daytrading_signal_window_end: "11:30:00"
+daytrading_gap_min_pct: 2.0
+daytrading_min_price: 5.0
+daytrading_min_premarket_volume: 100000
+daytrading_min_relative_volume: 1.5
+daytrading_risk_per_trade_pct: 1.0
+
+# replay: the bundled synthetic fixture is used when this remains empty.
+daytrading_replay_source_file: ""
+
+# alpaca: set provider=alpaca, candidate_mode=gap and timer_enabled=true.
+# An empty symbol list uses Alpaca's official most-active/movers screeners.
+daytrading_alpaca_feed: iex
+daytrading_provider_symbols: []
+
+# ibkr: authenticate an IBKR Client Portal Gateway separately, then configure
+# its local URL and entitled instruments. Use candidate_mode=watchlist.
+daytrading_ibkr_base_url: https://CHANGE_ME:5000/v1/api
+daytrading_ibkr_verify_tls: false
+daytrading_ibkr_outside_rth: true
+daytrading_ibkr_instruments: []
+#  - symbol: BMW
+#    conid: CHANGE_ME
+#    description: BMW AG
+#    exchange: IBIS
 
 ###############################################################################
 # SMTP notification helper
 ###############################################################################
 
+daytrading_email_results_enabled: true
 daytrading_smtp_host: mail.thebergens.net
 daytrading_smtp_port: 587
 daytrading_smtp_starttls: true
@@ -50,6 +78,7 @@ daytrading_smtp_username: CHANGE_ME
 daytrading_email_from: CHANGE_ME
 daytrading_email_to: CHANGE_ME
 
-# Do not add a password here. Store only this variable in the encrypted
-# ansible/group_vars/all/vault.yml file:
+# Store secrets only in encrypted ansible/group_vars/all/vault.yml:
 # vault_daytrading_smtp_password: "ROTATED_PASSWORD"
+# vault_daytrading_alpaca_api_key_id: "ALPACA_KEY_ID"
+# vault_daytrading_alpaca_api_secret_key: "ALPACA_SECRET_KEY"

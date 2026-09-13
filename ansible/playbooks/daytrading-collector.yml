@@ -1,5 +1,5 @@
 ---
-- name: Configure provider-neutral daytrading notification helper
+- name: Configure provider-neutral daytrading collector
   hosts: "{{ daytrading_collector_target | default('market_collectors') }}"
   become: true
   roles:

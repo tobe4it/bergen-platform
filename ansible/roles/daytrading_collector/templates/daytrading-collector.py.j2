@@ -1,70 +1,617 @@
 #!/usr/bin/env python3
-"""Provider-neutral Bergen daytrading notification helper."""
+"""Provider-neutral Bergen daytrading signal collector.
+
+The program never places orders. Provider adapters return normalized OHLCV bars;
+the ORB/VWAP/RVOL strategy and immutable JSON output are provider independent.
+"""
 
 from __future__ import annotations
 
 import argparse
+import datetime as dt
 import email.message
+import fcntl
 import json
+import logging
+import math
+import os
 import smtplib
 import ssl
+import time
+import urllib.error
+import urllib.parse
+import urllib.request
 from pathlib import Path
 from typing import Any
+from zoneinfo import ZoneInfo
+
+LOG = logging.getLogger("bergen-daytrading")
+USER_AGENT = "BergenPlatform-Daytrading/2.0"
 
 
-def load_config(path: str) -> dict[str, Any]:
-    with open(path, "r", encoding="utf-8") as handle:
-        return json.load(handle)
+def load_json(path: str | Path) -> dict[str, Any]:
+    with open(path, "r", encoding="utf-8") as fh:
+        return json.load(fh)
 
 
-def read_password(path: str) -> str:
-    password = Path(path).read_text(encoding="utf-8").rstrip("\r\n")
-    if not password:
-        raise ValueError("SMTP password file is empty")
-    return password
+def finite_number(value: Any) -> float | None:
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return None
+    return number if math.isfinite(number) else None
+
+
+def parse_timestamp(value: Any) -> dt.datetime:
+    if isinstance(value, (int, float)):
+        divisor = 1000.0 if value > 10_000_000_000 else 1.0
+        return dt.datetime.fromtimestamp(value / divisor, tz=dt.timezone.utc)
+    parsed = dt.datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+    return parsed if parsed.tzinfo else parsed.replace(tzinfo=dt.timezone.utc)
+
+
+def normalize_bar(raw: dict[str, Any]) -> dict[str, Any] | None:
+    stamp = raw.get("t", raw.get("timestamp"))
+    if stamp is None:
+        return None
+    bar = {
+        "timestamp": parse_timestamp(stamp),
+        "open": finite_number(raw.get("o", raw.get("open"))),
+        "high": finite_number(raw.get("h", raw.get("high"))),
+        "low": finite_number(raw.get("l", raw.get("low"))),
+        "close": finite_number(raw.get("c", raw.get("close"))),
+        "volume": int(finite_number(raw.get("v", raw.get("volume"))) or 0),
+    }
+    if None in (bar["open"], bar["high"], bar["low"], bar["close"]):
+        return None
+    return bar
+
+
+def http_json(
+    url: str,
+    *,
+    headers: dict[str, str] | None = None,
+    payload: dict[str, Any] | None = None,
+    timeout: int = 15,
+    retries: int = 3,
+    verify_tls: bool = True,
+) -> Any:
+    body = None
+    request_headers = {"User-Agent": USER_AGENT, "Accept": "application/json"}
+    request_headers.update(headers or {})
+    if payload is not None:
+        body = json.dumps(payload, separators=(",", ":")).encode("utf-8")
+        request_headers["Content-Type"] = "application/json"
+    context = None if verify_tls else ssl._create_unverified_context()  # local IBKR gateway only
+    last_error: Exception | None = None
+    for attempt in range(retries):
+        try:
+            request = urllib.request.Request(
+                url, data=body, headers=request_headers, method="POST" if body else "GET"
+            )
+            with urllib.request.urlopen(request, timeout=timeout, context=context) as response:
+                return json.loads(response.read().decode("utf-8"))
+        except (urllib.error.HTTPError, urllib.error.URLError, TimeoutError, json.JSONDecodeError) as exc:
+            last_error = exc
+            if attempt + 1 < retries:
+                time.sleep(min(2**attempt, 8))
+    raise RuntimeError(f"HTTP request failed after {retries} attempts: {url}: {last_error}")
+
+
+class Provider:
+    name = "provider"
+    replay = False
+
+    def instruments(self) -> list[dict[str, Any]]:
+        raise NotImplementedError
+
+    def bars(
+        self, symbols: list[str], start: dt.datetime, end: dt.datetime, timeframe: str
+    ) -> dict[str, list[dict[str, Any]]]:
+        raise NotImplementedError
+
+    def health(self) -> dict[str, Any]:
+        instruments = self.instruments()
+        return {"provider": self.name, "instrument_count": len(instruments)}
+
+    def session_day(self, zone: ZoneInfo) -> dt.date:
+        return dt.datetime.now(zone).date()
+
+
+class AlpacaProvider(Provider):
+    name = "alpaca"
+
+    def __init__(self, cfg: dict[str, Any]):
+        provider = cfg["provider"]
+        self.cfg = provider["alpaca"]
+        credentials = load_json(provider["credentials_file"])["alpaca"]
+        self.headers = {
+            "APCA-API-KEY-ID": credentials["api_key_id"],
+            "APCA-API-SECRET-KEY": credentials["api_secret_key"],
+        }
+        self.timeout = cfg["http_timeout_seconds"]
+        self.retries = cfg["http_retries"]
+
+    def get(self, path: str, params: dict[str, Any] | None = None) -> Any:
+        url = self.cfg["base_url"].rstrip("/") + path
+        if params:
+            url += "?" + urllib.parse.urlencode(params)
+        return http_json(
+            url, headers=self.headers, timeout=self.timeout, retries=self.retries
+        )
+
+    def instruments(self) -> list[dict[str, Any]]:
+        configured = self.cfg.get("symbols") or []
+        if configured:
+            return [
+                {"symbol": str(item) if isinstance(item, str) else item["symbol"],
+                 "description": "" if isinstance(item, str) else item.get("description", ""),
+                 "exchange": "" if isinstance(item, str) else item.get("exchange", "")}
+                for item in configured
+            ]
+        limit = int(self.cfg["screener_limit"])
+        symbols: list[str] = []
+        for path, keys in (
+            ("/v1beta1/screener/stocks/most-actives", ("most_actives",)),
+            ("/v1beta1/screener/stocks/movers", ("gainers",)),
+        ):
+            raw = self.get(path, {"top": limit})
+            for key in keys:
+                for row in raw.get(key, []):
+                    symbol = row.get("symbol")
+                    if symbol and symbol not in symbols:
+                        symbols.append(symbol)
+        return [{"symbol": symbol, "description": "", "exchange": "US"} for symbol in symbols]
+
+    def bars(
+        self, symbols: list[str], start: dt.datetime, end: dt.datetime, timeframe: str
+    ) -> dict[str, list[dict[str, Any]]]:
+        result = {symbol: [] for symbol in symbols}
+        if not symbols:
+            return result
+        params: dict[str, Any] = {
+            "symbols": ",".join(symbols),
+            "timeframe": timeframe,
+            "start": start.astimezone(dt.timezone.utc).isoformat().replace("+00:00", "Z"),
+            "end": end.astimezone(dt.timezone.utc).isoformat().replace("+00:00", "Z"),
+            "feed": self.cfg["feed"],
+            "adjustment": "raw",
+            "limit": 10000,
+            "sort": "asc",
+        }
+        while True:
+            raw = self.get("/v2/stocks/bars", params)
+            for symbol, rows in raw.get("bars", {}).items():
+                result.setdefault(symbol, []).extend(
+                    bar for row in rows if (bar := normalize_bar(row)) is not None
+                )
+            token = raw.get("next_page_token")
+            if not token:
+                break
+            params["page_token"] = token
+        return result
+
+    def health(self) -> dict[str, Any]:
+        rows = self.instruments()
+        return {
+            "provider": self.name,
+            "feed": self.cfg["feed"],
+            "instrument_count": len(rows),
+            "sample_symbols": [row["symbol"] for row in rows[:5]],
+        }
+
+
+class IbkrProvider(Provider):
+    name = "ibkr"
+
+    def __init__(self, cfg: dict[str, Any]):
+        self.cfg = cfg["provider"]["ibkr"]
+        self.timeout = cfg["http_timeout_seconds"]
+        self.retries = cfg["http_retries"]
+        self.by_symbol = {row["symbol"]: row for row in self.cfg["instruments"]}
+
+    def get(self, path: str, params: dict[str, Any] | None = None) -> Any:
+        url = self.cfg["base_url"].rstrip("/") + path
+        if params:
+            url += "?" + urllib.parse.urlencode(params)
+        return http_json(
+            url,
+            timeout=self.timeout,
+            retries=self.retries,
+            verify_tls=bool(self.cfg["verify_tls"]),
+        )
+
+    def post(self, path: str, payload: dict[str, Any]) -> Any:
+        url = self.cfg["base_url"].rstrip("/") + path
+        return http_json(
+            url,
+            payload=payload,
+            timeout=self.timeout,
+            retries=self.retries,
+            verify_tls=bool(self.cfg["verify_tls"]),
+        )
+
+    def instruments(self) -> list[dict[str, Any]]:
+        return list(self.cfg["instruments"])
+
+    def bars(
+        self, symbols: list[str], start: dt.datetime, end: dt.datetime, timeframe: str
+    ) -> dict[str, list[dict[str, Any]]]:
+        result: dict[str, list[dict[str, Any]]] = {symbol: [] for symbol in symbols}
+        seconds = max(60, int((end - start).total_seconds()))
+        days = max(1, math.ceil(seconds / 86400))
+        bar = "1min" if timeframe == "1Min" else "1d"
+        period = f"{min(days + 1, 30)}d"
+        for symbol in symbols:
+            instrument = self.by_symbol[symbol]
+            raw = self.get(
+                "/iserver/marketdata/history",
+                {
+                    "conid": instrument["conid"],
+                    "period": period,
+                    "bar": bar,
+                    "outsideRth": str(bool(self.cfg["outside_rth"])).lower(),
+                    "startTime": start.astimezone(dt.timezone.utc).strftime("%Y%m%d-%H:%M:%S"),
+                },
+            )
+            for row in raw.get("data", []):
+                normalized = normalize_bar(row)
+                if normalized and start <= normalized["timestamp"] <= end:
+                    result[symbol].append(normalized)
+        return result
+
+    def health(self) -> dict[str, Any]:
+        status = self.post("/iserver/auth/status", {})
+        return {
+            "provider": self.name,
+            "authenticated": bool(status.get("authenticated")),
+            "connected": bool(status.get("connected")),
+            "instrument_count": len(self.by_symbol),
+        }
+
+
+class ReplayProvider(Provider):
+    name = "replay"
+    replay = True
+
+    def __init__(self, cfg: dict[str, Any]):
+        self.cfg = cfg["provider"]["replay"]
+        self.data = load_json(self.cfg["file"])
+
+    def instruments(self) -> list[dict[str, Any]]:
+        return [
+            {
+                "symbol": symbol,
+                "description": item.get("description", ""),
+                "exchange": item.get("exchange", "REPLAY"),
+            }
+            for symbol, item in self.data["symbols"].items()
+        ]
+
+    def bars(
+        self, symbols: list[str], start: dt.datetime, end: dt.datetime, timeframe: str
+    ) -> dict[str, list[dict[str, Any]]]:
+        key = "daily_bars" if timeframe == "1Day" else "bars"
+        result: dict[str, list[dict[str, Any]]] = {symbol: [] for symbol in symbols}
+        for symbol in symbols:
+            for row in self.data["symbols"][symbol].get(key, []):
+                normalized = normalize_bar(row)
+                if normalized and start <= normalized["timestamp"] <= end:
+                    result[symbol].append(normalized)
+        return result
+
+    def session_day(self, zone: ZoneInfo) -> dt.date:
+        return dt.date.fromisoformat(self.data["session_date"])
+
+    def health(self) -> dict[str, Any]:
+        rows = self.instruments()
+        return {
+            "provider": self.name,
+            "session_date": self.data["session_date"],
+            "instrument_count": len(rows),
+            "sample_symbols": [row["symbol"] for row in rows[:5]],
+        }
+
+
+def make_provider(cfg: dict[str, Any]) -> Provider:
+    name = cfg["provider"]["name"]
+    providers = {"alpaca": AlpacaProvider, "ibkr": IbkrProvider, "replay": ReplayProvider}
+    try:
+        return providers[name](cfg)
+    except KeyError as exc:
+        raise RuntimeError(f"Unsupported provider: {name}") from exc
+
+
+def market_clock(day: dt.date, value: str, zone: ZoneInfo) -> dt.datetime:
+    return dt.datetime.combine(day, dt.time.fromisoformat(value), tzinfo=zone)
+
+
+def sleep_until(target: dt.datetime) -> None:
+    while True:
+        remaining = (target - dt.datetime.now(target.tzinfo)).total_seconds()
+        if remaining <= 0:
+            return
+        time.sleep(min(remaining, 30.0))
+
+
+def discover_candidates(
+    cfg: dict[str, Any], provider: Provider, day: dt.date, zone: ZoneInfo
+) -> list[dict[str, Any]]:
+    instruments = provider.instruments()
+    if cfg["candidate_mode"] == "watchlist":
+        return instruments[: cfg["candidate_limit"]]
+    symbols = [row["symbol"] for row in instruments]
+    day_start = market_clock(day, "00:00:00", zone)
+    daily = provider.bars(symbols, day_start - dt.timedelta(days=30), day_start, "1Day")
+    pre_start = market_clock(day, cfg["candidate_window_start"], zone)
+    open_start = market_clock(day, cfg["opening_range_start"], zone)
+    premarket = provider.bars(symbols, pre_start, open_start, "1Min")
+    candidates: list[dict[str, Any]] = []
+    for instrument in instruments:
+        symbol = instrument["symbol"]
+        previous = [bar for bar in daily.get(symbol, []) if bar["timestamp"].astimezone(zone).date() < day]
+        pre = [
+            bar for bar in premarket.get(symbol, [])
+            if bar["timestamp"].astimezone(zone) < open_start
+        ]
+        if not previous or not pre:
+            continue
+        previous_close = previous[-1]["close"]
+        last = pre[-1]["close"]
+        gap = ((last / previous_close) - 1.0) * 100.0 if previous_close else 0.0
+        volume = sum(bar["volume"] for bar in pre)
+        if gap < cfg["gap_min_pct"] or last < cfg["min_price"] or volume < cfg["min_premarket_volume"]:
+            continue
+        candidates.append(
+            {
+                **instrument,
+                "previous_close": previous_close,
+                "premarket_close": last,
+                "premarket_change_pct": gap,
+                "premarket_volume": volume,
+            }
+        )
+    candidates.sort(key=lambda row: row.get("premarket_volume", 0), reverse=True)
+    return candidates[: cfg["candidate_limit"]]
+
+
+def opening_range(bars: list[dict[str, Any]]) -> dict[str, Any] | None:
+    if len(bars) < 14:
+        return None
+    return {
+        "high": max(bar["high"] for bar in bars),
+        "low": min(bar["low"] for bar in bars),
+        "volume": sum(bar["volume"] for bar in bars),
+        "bar_count": len(bars),
+    }
+
+
+def cumulative_metrics(bars: list[dict[str, Any]]) -> tuple[float | None, float | None, int]:
+    if not bars:
+        return None, None, 0
+    price = bars[-1]["close"]
+    weighted = 0.0
+    volume = 0
+    for bar in bars:
+        if bar["volume"] <= 0:
+            continue
+        weighted += ((bar["high"] + bar["low"] + bar["close"]) / 3.0) * bar["volume"]
+        volume += bar["volume"]
+    return price, weighted / volume if volume else None, volume
+
+
+def historical_average_volume(
+    bars: list[dict[str, Any]], day: dt.date, zone: ZoneInfo, cutoff: dt.time
+) -> float | None:
+    totals: dict[dt.date, int] = {}
+    for bar in bars:
+        local = bar["timestamp"].astimezone(zone)
+        if local.date() >= day or local.time() > cutoff:
+            continue
+        totals[local.date()] = totals.get(local.date(), 0) + bar["volume"]
+    values = list(totals.values())[-10:]
+    return sum(values) / len(values) if values else None
+
+
+def write_json_atomic(path: Path, payload: dict[str, Any]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_suffix(path.suffix + ".tmp")
+    with open(tmp, "w", encoding="utf-8") as fh:
+        json.dump(payload, fh, ensure_ascii=False, indent=2, sort_keys=True)
+        fh.write("\n")
+        fh.flush()
+        os.fsync(fh.fileno())
+    os.replace(tmp, path)
+
+
+def read_secret(path: str) -> str:
+    with open(path, "r", encoding="utf-8") as fh:
+        return fh.read().strip()
 
 
 def send_email(cfg: dict[str, Any], subject: str, payload: dict[str, Any]) -> None:
     mail = cfg["email"]
-    required = ("smtp_host", "smtp_port", "username", "password_file", "from", "to")
-    missing = [key for key in required if not mail.get(key)]
-    if missing:
-        raise ValueError(f"Missing email configuration: {', '.join(missing)}")
-
     message = email.message.EmailMessage()
     message["From"] = mail["from"]
     message["To"] = mail["to"]
     message["Subject"] = subject
     message.set_content(json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True))
-
-    timeout = int(mail.get("timeout_seconds", 15))
-    with smtplib.SMTP(mail["smtp_host"], int(mail["smtp_port"]), timeout=timeout) as smtp:
+    with smtplib.SMTP(mail["smtp_host"], int(mail["smtp_port"]), timeout=int(mail["timeout_seconds"])) as smtp:
         smtp.ehlo()
-        if mail.get("starttls"):
+        if mail["starttls"]:
             smtp.starttls(context=ssl.create_default_context())
             smtp.ehlo()
-        smtp.login(mail["username"], read_password(mail["password_file"]))
+        smtp.login(mail["username"], read_secret(mail["password_file"]))
         smtp.send_message(message)
 
 
-def command_mail_test(cfg: dict[str, Any]) -> int:
-    payload = {
-        "status": "test",
-        "message": "Mailversand vom daytrade-LXC funktioniert.",
+def evaluate_replay(
+    cfg: dict[str, Any], provider: Provider, candidates: list[dict[str, Any]], day: dt.date, zone: ZoneInfo
+) -> dict[str, Any]:
+    start = market_clock(day, cfg["opening_range_start"], zone)
+    end = market_clock(day, cfg["signal_window_end"], zone)
+    symbols = [row["symbol"] for row in candidates]
+    current = provider.bars(symbols, start, end, "1Min")
+    history = provider.bars(symbols, start - dt.timedelta(days=30), start, "1Min")
+    return evaluate_bars(cfg, provider.name, candidates, current, history, day, zone)
+
+
+def evaluate_bars(
+    cfg: dict[str, Any], provider_name: str, candidates: list[dict[str, Any]],
+    current: dict[str, list[dict[str, Any]]], history: dict[str, list[dict[str, Any]]],
+    day: dt.date, zone: ZoneInfo,
+) -> dict[str, Any]:
+    or_start = market_clock(day, cfg["opening_range_start"], zone)
+    or_end = market_clock(day, cfg["opening_range_end"], zone)
+    signal_end = market_clock(day, cfg["signal_window_end"], zone)
+    record: dict[str, Any] = {
+        "date": day.isoformat(), "status": "monitoring", "provider": provider_name,
+        "strategy": "long_only_15m_orb_vwap_rvol", "candidates": candidates,
+        "opening_ranges": {}, "signals": [],
+        "rules": {
+            "risk_per_trade_pct": cfg["risk_per_trade_pct"],
+            "opening_range": f'{cfg["opening_range_start"]}-{cfg["opening_range_end"]}',
+            "signal_window_end": cfg["signal_window_end"],
+            "min_relative_volume": cfg["min_relative_volume"],
+            "breakout_confirmations": cfg["breakout_confirmations"],
+        },
     }
+    confirmations = {row["symbol"]: 0 for row in candidates}
+    for candidate in candidates:
+        symbol = candidate["symbol"]
+        bars = sorted(current.get(symbol, []), key=lambda row: row["timestamp"])
+        opening = [bar for bar in bars if or_start <= bar["timestamp"].astimezone(zone) < or_end]
+        range_data = opening_range(opening)
+        if not range_data:
+            continue
+        record["opening_ranges"][symbol] = range_data
+        for index, bar in enumerate(bars):
+            seen_at = bar["timestamp"].astimezone(zone)
+            if seen_at < or_end or seen_at > signal_end:
+                continue
+            elapsed = [item for item in bars[: index + 1] if item["timestamp"].astimezone(zone) >= or_start]
+            price, vwap, volume = cumulative_metrics(elapsed)
+            average = historical_average_volume(history.get(symbol, []), day, zone, seen_at.time())
+            rvol = volume / average if average and average > 0 else None
+            condition = bool(
+                price is not None and vwap is not None and rvol is not None
+                and price > range_data["high"] and price > vwap and rvol >= cfg["min_relative_volume"]
+            )
+            confirmations[symbol] = confirmations[symbol] + 1 if condition else 0
+            if confirmations[symbol] >= cfg["breakout_confirmations"]:
+                record["signals"].append({
+                    "symbol": symbol, "description": candidate.get("description", ""),
+                    "signal_time": seen_at.isoformat(), "price": price,
+                    "opening_range_high": range_data["high"], "opening_range_low": range_data["low"],
+                    "vwap": vwap, "relative_volume": rvol,
+                    "premarket_change_pct": candidate.get("premarket_change_pct"),
+                    "premarket_volume": candidate.get("premarket_volume"), "source": provider_name,
+                })
+                break
+    if not record["opening_ranges"]:
+        record.update(status="data_error", stage="opening_range", reason="no_exact_1m_opening_range_available")
+    elif record["signals"]:
+        record["status"] = "signal"
+        record["signals"].sort(key=lambda row: row["relative_volume"], reverse=True)
+        record["selected_signal"] = record["signals"][0]
+    else:
+        record.update(status="no_trade", reason="no_confirmed_breakout_before_signal_window_end")
+    record["completed_at"] = dt.datetime.now(zone).isoformat()
+    return record
+
+
+def run_live(
+    cfg: dict[str, Any], provider: Provider, candidates: list[dict[str, Any]], day: dt.date, zone: ZoneInfo
+) -> dict[str, Any]:
+    or_start = market_clock(day, cfg["opening_range_start"], zone)
+    or_end = market_clock(day, cfg["opening_range_end"], zone)
+    signal_end = market_clock(day, cfg["signal_window_end"], zone)
+    sleep_until(or_end + dt.timedelta(seconds=5))
+    symbols = [row["symbol"] for row in candidates]
+    history = provider.bars(symbols, or_start - dt.timedelta(days=30), or_start, "1Min")
+    while dt.datetime.now(zone) < signal_end:
+        current = provider.bars(symbols, or_start, dt.datetime.now(zone), "1Min")
+        record = evaluate_bars(cfg, provider.name, candidates, current, history, day, zone)
+        if record["status"] == "signal":
+            return record
+        time.sleep(cfg["signal_poll_seconds"])
+    current = provider.bars(symbols, or_start, signal_end, "1Min")
+    return evaluate_bars(cfg, provider.name, candidates, current, history, day, zone)
+
+
+def run_session(cfg: dict[str, Any], provider: Provider) -> dict[str, Any]:
+    zone = ZoneInfo(cfg["market_timezone"])
+    day = provider.session_day(zone)
+    if not provider.replay and day.weekday() >= 5:
+        return {"date": day.isoformat(), "status": "skipped", "reason": "weekend", "provider": provider.name}
+    if not provider.replay:
+        discovery = market_clock(day, cfg["opening_range_start"], zone) - dt.timedelta(minutes=2)
+        sleep_until(discovery)
+    try:
+        candidates = discover_candidates(cfg, provider, day, zone)
+    except Exception as exc:
+        return {"date": day.isoformat(), "status": "data_error", "stage": "candidate_discovery",
+                "provider": provider.name, "error": str(exc)}
+    if not candidates:
+        return {"date": day.isoformat(), "status": "no_trade", "reason": "no_candidates",
+                "provider": provider.name}
+    try:
+        return evaluate_replay(cfg, provider, candidates, day, zone) if provider.replay else run_live(
+            cfg, provider, candidates, day, zone
+        )
+    except Exception as exc:
+        LOG.exception("Provider data failed")
+        return {"date": day.isoformat(), "status": "data_error", "stage": "market_data",
+                "provider": provider.name, "error": str(exc)}
+
+
+def command_run(cfg: dict[str, Any]) -> int:
+    provider = make_provider(cfg)
+    state_dir = Path(cfg["state_dir"])
+    state_dir.mkdir(parents=True, exist_ok=True)
+    with open(state_dir / ".collector.lock", "w", encoding="utf-8") as lock:
+        try:
+            fcntl.flock(lock.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            LOG.error("Another collector session is already running")
+            return 2
+        result = run_session(cfg, provider)
+        day = result.get("date", dt.date.today().isoformat())
+        write_json_atomic(state_dir / day / "entry-signal.json", result)
+        write_json_atomic(state_dir / "latest.json", result)
+        if cfg["email"]["results_enabled"]:
+            try:
+                send_email(cfg, f"Bergen Daytrading {day}: {result['status']}", result)
+            except Exception:
+                LOG.exception("Could not send result email")
+        print(json.dumps(result, indent=2, ensure_ascii=False))
+        return 1 if result["status"] == "data_error" else 0
+
+
+def command_mail_test(cfg: dict[str, Any]) -> int:
+    payload = {"status": "test", "message": "Mailversand vom daytrade-LXC funktioniert."}
     send_email(cfg, "Bergen Daytrading - Mailtest", payload)
     print(json.dumps({**payload, "recipient": cfg["email"]["to"]}, ensure_ascii=False))
+    return 0
+
+
+def command_provider_test(cfg: dict[str, Any]) -> int:
+    print(json.dumps(make_provider(cfg).health(), indent=2, ensure_ascii=False))
     return 0
 
 
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--config", required=True)
-    parser.add_argument("command", choices=["mail-test"])
+    parser.add_argument("command", choices=["run-session", "provider-test", "mail-test"])
     args = parser.parse_args()
-
-    cfg = load_config(args.config)
-    return command_mail_test(cfg)
+    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
+    cfg = load_json(args.config)
+    return {
+        "run-session": command_run,
+        "provider-test": command_provider_test,
+        "mail-test": command_mail_test,
+    }[args.command](cfg)
 
 
 if __name__ == "__main__":

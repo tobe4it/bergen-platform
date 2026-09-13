@@ -5,7 +5,49 @@ daytrading_collector_base_dir: /opt/bergen/daytrading-collector
 daytrading_collector_state_dir: /var/lib/bergen-daytrading
 daytrading_collector_config: /etc/bergen-daytrading.json
 daytrading_smtp_password_file: /etc/bergen-daytrading-smtp-password
+daytrading_provider_credentials_file: /etc/bergen-daytrading-provider.json
 
+daytrading_data_provider: replay
+daytrading_supported_providers:
+  - alpaca
+  - ibkr
+  - replay
+daytrading_candidate_mode: watchlist
+daytrading_provider_symbols: []
+
+daytrading_market_timezone: America/New_York
+daytrading_timer_enabled: false
+daytrading_timer_on_calendar: "Mon..Fri *-*-* 09:25:00 America/New_York"
+
+daytrading_candidate_window_start: "04:00:00"
+daytrading_gap_min_pct: 2.0
+daytrading_min_price: 5.0
+daytrading_min_premarket_volume: 100000
+daytrading_min_relative_volume: 1.5
+daytrading_candidate_limit: 25
+daytrading_opening_range_start: "09:30:00"
+daytrading_opening_range_end: "09:45:00"
+daytrading_signal_window_end: "11:30:00"
+daytrading_signal_poll_seconds: 10
+daytrading_breakout_confirmations: 2
+daytrading_risk_per_trade_pct: 1.0
+
+daytrading_http_timeout_seconds: 15
+daytrading_http_retries: 3
+
+daytrading_alpaca_base_url: https://data.alpaca.markets
+daytrading_alpaca_feed: iex
+daytrading_alpaca_screener_limit: 50
+
+daytrading_ibkr_base_url: https://127.0.0.1:5000/v1/api
+daytrading_ibkr_verify_tls: false
+daytrading_ibkr_outside_rth: true
+daytrading_ibkr_instruments: []
+
+daytrading_replay_file: "{{ daytrading_collector_base_dir }}/replay-example.json"
+daytrading_replay_source_file: ""
+
+daytrading_email_results_enabled: true
 daytrading_smtp_host: ""
 daytrading_smtp_port: 587
 daytrading_smtp_starttls: true

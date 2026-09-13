@@ -1,49 +1,112 @@
-# Provider-neutral daytrading LXC
+# Provider-neutral daytrading collector
 
-The former market-data integrations remain removed. This repository does not
-fetch, process or redistribute market data and does not generate trading
-signals.
+This role deploys a paper-trading signal collector with one locally selected
+market-data adapter. It never places orders. The public repository contains the
+strategy and adapters, while the selected provider, instrument mappings and all
+credentials remain local.
 
-The retained Ansible automation provisions the dedicated LXC and installs a
-small notification helper with a single `mail-test` command.
+Supported adapters:
 
-## SMTP configuration
+- `replay`: bundled synthetic data or a local JSON fixture; no network access.
+- `alpaca`: official US Market Data REST API with a selectable entitled feed.
+- `ibkr`: an authenticated IBKR Client Portal Gateway and locally entitled
+  instruments identified by `conid`.
 
-Keep host names and mail addresses in the Git-ignored local file:
+Use of an adapter does not grant data rights. The account owner must ensure that
+the configured subscription permits automated/non-display processing, intraday
+history, derived signals and retention.
 
-```yaml
-# ansible/group_vars/all/bergen-daytrade.yml
-daytrading_smtp_host: mail.thebergens.net
-daytrading_smtp_port: 587
-daytrading_smtp_starttls: true
-daytrading_smtp_username: daytrading@thebergens.net
-daytrading_email_from: daytrading@thebergens.net
-daytrading_email_to: YOUR_RECIPIENT
+## Local files
+
+`ansible/inventory.local.yml` is maintained by LXC discovery and contains only
+the effective host address. Do not put provider settings there.
+
+Create the ignored local settings file:
+
+```bash
+cp ansible/group_vars/all/bergen-daytrade.yml.example \
+  ansible/group_vars/all/bergen-daytrade.yml
+vim ansible/group_vars/all/bergen-daytrade.yml
 ```
 
-The password has exactly one Ansible source of truth and must not be placed in
-that file:
+Select exactly one provider there:
 
 ```yaml
-# Remove this obsolete plaintext variable if it still exists:
-# daytrading_smtp_password: "..."
+daytrading_data_provider: alpaca  # alpaca | ibkr | replay
 ```
+
+Secrets have exactly one source of truth:
 
 ```bash
 ansible-vault edit ansible/group_vars/all/vault.yml
 ```
 
-Add or replace the encrypted variable:
-
 ```yaml
 vault_daytrading_smtp_password: "ROTATED_PASSWORD"
+vault_daytrading_alpaca_api_key_id: "ALPACA_KEY_ID"
+vault_daytrading_alpaca_api_secret_key: "ALPACA_SECRET_KEY"
 ```
 
-During deployment Ansible writes the credential to the dedicated target file
-`/etc/bergen-daytrading-smtp-password` with mode `0400`. The JSON configuration
-contains only the file path, never the password.
+Ansible renders secrets into dedicated target files with mode `0400`. They are
+never included in `/etc/bergen-daytrading.json`.
 
-## Deploy
+## Provider examples
+
+### Offline replay
+
+```yaml
+daytrading_data_provider: replay
+daytrading_timer_enabled: false
+daytrading_candidate_mode: gap
+daytrading_replay_source_file: ""  # bundled synthetic fixture
+```
+
+Replay is deliberately manual. A local fixture may replace the synthetic file;
+it is copied to the LXC during deployment.
+
+### Alpaca US/IEX
+
+```yaml
+daytrading_data_provider: alpaca
+daytrading_candidate_mode: gap
+daytrading_timer_enabled: true
+daytrading_timer_on_calendar: "Mon..Fri *-*-* 09:25:00 America/New_York"
+daytrading_market_timezone: America/New_York
+daytrading_alpaca_feed: iex
+daytrading_provider_symbols: []
+```
+
+With an empty symbol list, the adapter combines Alpaca's official most-active
+and gainers screeners. A fixed local list such as `[AAPL, MSFT]` bypasses the
+screener. The feed must match the account's data entitlement.
+
+### IBKR/Xetra watchlist
+
+```yaml
+daytrading_data_provider: ibkr
+daytrading_candidate_mode: watchlist
+daytrading_timer_enabled: true
+daytrading_market_timezone: Europe/Berlin
+daytrading_timer_on_calendar: "Mon..Fri *-*-* 08:58:00 Europe/Berlin"
+daytrading_candidate_window_start: "09:00:00"
+daytrading_opening_range_start: "09:00:00"
+daytrading_opening_range_end: "09:15:00"
+daytrading_signal_window_end: "11:00:00"
+daytrading_ibkr_base_url: https://IBKR_GATEWAY:5000/v1/api
+daytrading_ibkr_verify_tls: false
+daytrading_ibkr_instruments:
+  - symbol: BMW
+    conid: REPLACE_WITH_CONID
+    description: BMW AG
+    exchange: IBIS
+```
+
+The Client Portal Gateway login/session is managed outside this role. Disabling
+TLS verification is intended only for its self-signed certificate on an
+isolated local network; install a trusted certificate and enable verification
+where possible.
+
+## Deploy and test
 
 ```bash
 ansible-playbook \
@@ -53,22 +116,38 @@ ansible-playbook \
   --ask-vault-pass
 ```
 
-The playbook also stops and removes obsolete collector service and timer units.
-Existing result files below `/var/lib/bergen-daytrading` remain untouched.
+For initial LXC creation, omit the not-yet-created local inventory:
 
-## Test mail delivery
+```bash
+ansible-playbook \
+  -i ansible/inventory.yml \
+  ansible/playbooks/deploy-daytrading.yml \
+  -e @ansible/group_vars/all/bergen-daytrade.yml \
+  --ask-vault-pass
+```
+
+Test the selected provider without producing a signal:
+
+```bash
+ansible -i ansible/inventory.local.yml market_collectors -b -m command -a \
+  '/usr/bin/python3 /opt/bergen/daytrading-collector/collector.py --config /etc/bergen-daytrading.json provider-test'
+```
+
+Run the synthetic replay or start a live session manually:
+
+```bash
+ansible -i ansible/inventory.local.yml market_collectors -b -m command -a \
+  '/usr/bin/python3 /opt/bergen/daytrading-collector/collector.py --config /etc/bergen-daytrading.json run-session'
+```
+
+Test SMTP independently:
 
 ```bash
 ansible -i ansible/inventory.local.yml market_collectors -b -m command -a \
   '/usr/bin/python3 /opt/bergen/daytrading-collector/collector.py --config /etc/bergen-daytrading.json mail-test'
 ```
 
-The command exits successfully only after SMTP authentication and message
-submission complete. It prints the recipient and the test payload, but never
-the credential.
-
-## Future data integration
-
-Before adding another source, obtain terms that explicitly permit automated or
-non-display processing, intraday data, derived signals, retention and any
-required exchange entitlements. Credentials belong in Ansible Vault.
+Results are written atomically to
+`/var/lib/bergen-daytrading/YYYY-MM-DD/entry-signal.json` and `latest.json`.
+The timer is disabled by default and the weekday timer is not an exchange
+holiday calendar; live operation therefore remains fail-closed on missing data.

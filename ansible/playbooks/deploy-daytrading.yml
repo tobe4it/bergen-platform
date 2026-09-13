@@ -1,10 +1,7 @@
 ---
 ###############################################################################
 # Bergen Platform
-#
-# Create, discover, inventory and bootstrap a dedicated daytrading LXC.
-# No market-data provider integration is installed. The deployed helper only
-# supplies the explicit mail-test command.
+# Create, discover, inventory and bootstrap a provider-neutral daytrading LXC.
 ###############################################################################
 
 - import_playbook: deploy-lxc.yml
