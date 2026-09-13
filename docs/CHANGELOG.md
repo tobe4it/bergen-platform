@@ -22,6 +22,11 @@ The project follows **Semantic Versioning (SemVer)** and the changelog format is
 - Site-local source/target inventory examples and full deployment, migration,
   address-transfer and rollback documentation
 
+### Fixed
+
+- First EVCC deployment now forces the migration staging state even when
+  higher-precedence site-local extra vars request normal service startup
+
 ---
 
 ## [0.7.0] - 2026-09-13

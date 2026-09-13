@@ -34,14 +34,14 @@
   ansible.builtin.assert:
     that:
       - >-
-        (evcc_service_state == 'started' and
+        (evcc_effective_service_state == 'started' and
          evcc_service_activity.stdout | trim == 'active')
         or
-        (evcc_service_state == 'stopped' and
+        (evcc_effective_service_state == 'stopped' and
          evcc_service_activity.stdout | trim != 'active')
     fail_msg: >-
       EVCC service state is {{ evcc_service_activity.stdout | trim }}, expected
-      {{ evcc_service_state }}.
+      {{ evcc_effective_service_state }}.
 
 - name: Wait for EVCC web listener
   ansible.builtin.wait_for:
@@ -49,7 +49,7 @@
     port: "{{ evcc_web_port }}"
     state: started
     timeout: "{{ evcc_start_timeout }}"
-  when: evcc_service_state == 'started'
+  when: evcc_effective_service_state == 'started'
 
 - name: Verify EVCC HTTP endpoint
   ansible.builtin.uri:
@@ -59,7 +59,7 @@
       - 200
       - 401
     return_content: false
-  when: evcc_service_state == 'started'
+  when: evcc_effective_service_state == 'started'
 
 - name: Summarize EVCC service
   ansible.builtin.debug:
@@ -71,6 +71,6 @@
       - "Config   : {{ evcc_config_path }}"
       - "Database : {{ evcc_database_path }}"
       - "Web      : TCP {{ evcc_web_port }}"
-      - "Enabled  : {{ evcc_service_enabled | bool }}"
+      - "Enabled  : {{ evcc_effective_service_enabled | bool }}"
       - "State    : {{ evcc_service_activity.stdout | trim }}"
       - "============================================================"

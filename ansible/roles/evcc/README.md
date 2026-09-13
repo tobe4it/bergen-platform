@@ -28,13 +28,16 @@ transferred by the dedicated migration playbook and remains outside Git.
 evcc_version: "0.315.0"
 evcc_service_enabled: true
 evcc_service_state: started
+evcc_migration_staging: false
 evcc_config_path: /etc/evcc.yaml
 evcc_database_path: /var/lib/evcc/evcc.db
 ```
 
-The first LXC deployment explicitly overrides the service to
-`stopped`/`disabled`. This prevents the old and new EVCC instances from
-controlling the same charger at the same time.
+The first LXC deployment sets `evcc_migration_staging: true`. This forces the
+effective service state to `stopped`/`disabled` even when site-local extra vars
+already define the normal post-migration `started`/`enabled` state. It prevents
+the old and new EVCC instances from controlling the same charger at the same
+time.
 
 ## Validation
 

@@ -29,6 +29,15 @@ evcc_service_name: evcc
 evcc_service_enabled: true
 evcc_service_state: started
 
+# A first deployment must never start a second controller before migration.
+# This separate guard remains effective when site-local extra vars request the
+# normal post-migration started/enabled state.
+evcc_migration_staging: false
+evcc_effective_service_enabled: >-
+  {{ false if evcc_migration_staging | bool else evcc_service_enabled | bool }}
+evcc_effective_service_state: >-
+  {{ 'stopped' if evcc_migration_staging | bool else evcc_service_state }}
+
 evcc_config_path: /etc/evcc.yaml
 evcc_database_path: /var/lib/evcc/evcc.db
 evcc_backup_directory: /var/backups/evcc

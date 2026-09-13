@@ -2,6 +2,6 @@
 - name: Apply requested EVCC service state
   ansible.builtin.systemd_service:
     name: "{{ evcc_service_name }}"
-    enabled: "{{ evcc_service_enabled | bool }}"
-    state: "{{ evcc_service_state }}"
+    enabled: "{{ evcc_effective_service_enabled | bool }}"
+    state: "{{ evcc_effective_service_state }}"
     daemon_reload: true

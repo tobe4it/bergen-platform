@@ -47,8 +47,7 @@
 - import_playbook: bootstrap-evcc.yml
   vars:
     bootstrap_evcc_target: discovered_lxcs
-    evcc_service_enabled: false
-    evcc_service_state: stopped
+    evcc_migration_staging: true
 
 - name: Summarize staged EVCC deployment
   hosts: "{{ bootstrap_evcc_target | default('discovered_lxcs') }}"

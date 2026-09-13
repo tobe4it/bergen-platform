@@ -7,7 +7,7 @@
       - evcc_version is match('^[0-9]+\.[0-9]+\.[0-9]+$')
       - evcc_package_architecture | string | length > 0
       - evcc_package_checksum is match('^[0-9a-f]{64}$')
-      - evcc_service_state in ['started', 'stopped']
+      - evcc_effective_service_state in ['started', 'stopped']
       - evcc_web_port | int > 0
       - evcc_web_port | int < 65536
       - evcc_config_path | string | length > 0
