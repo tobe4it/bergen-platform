@@ -4,15 +4,17 @@
 - name: Validate SMTP and Vault configuration
   ansible.builtin.assert:
     that:
+      - daytrading_smtp_password is not defined
       - daytrading_smtp_host | string | length > 0
       - daytrading_smtp_username | string | length > 0
       - daytrading_email_from | string | length > 0
       - daytrading_email_to | string | length > 0
       - (vault_daytrading_smtp_password | default('') | string | length) > 0
     fail_msg: >-
-      Configure the SMTP host, username, sender and recipient in the ignored
-      bergen-daytrade.yml file, and store vault_daytrading_smtp_password only
-      in the encrypted ansible/group_vars/all/vault.yml file.
+      Remove any legacy daytrading_smtp_password variable. Configure the SMTP
+      host, username, sender and recipient in the ignored bergen-daytrade.yml
+      file, and store vault_daytrading_smtp_password only in the encrypted
+      ansible/group_vars/all/vault.yml file.
     quiet: true
 
 - name: Install notification helper runtime packages

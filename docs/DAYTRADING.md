@@ -24,6 +24,11 @@ daytrading_email_to: YOUR_RECIPIENT
 The password has exactly one Ansible source of truth and must not be placed in
 that file:
 
+```yaml
+# Remove this obsolete plaintext variable if it still exists:
+# daytrading_smtp_password: "..."
+```
+
 ```bash
 ansible-vault edit ansible/group_vars/all/vault.yml
 ```
