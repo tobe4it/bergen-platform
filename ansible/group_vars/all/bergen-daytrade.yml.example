@@ -38,3 +38,18 @@ pve_inventory_host: venombox
 # remains local and is ignored by Git.
 lxc_inventory_file: "{{ playbook_dir }}/../inventory.local.yml"
 lxc_inventory_group: market_collectors
+
+###############################################################################
+# SMTP notification helper
+###############################################################################
+
+daytrading_smtp_host: mail.thebergens.net
+daytrading_smtp_port: 587
+daytrading_smtp_starttls: true
+daytrading_smtp_username: CHANGE_ME
+daytrading_email_from: CHANGE_ME
+daytrading_email_to: CHANGE_ME
+
+# Do not add a password here. Store only this variable in the encrypted
+# ansible/group_vars/all/vault.yml file:
+# vault_daytrading_smtp_password: "ROTATED_PASSWORD"

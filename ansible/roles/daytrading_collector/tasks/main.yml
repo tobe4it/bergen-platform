@@ -1,8 +1,43 @@
 ---
-# Compliance cleanup: the former unlicensed market-data collector is no longer
-# deployed. Historical output is intentionally preserved for local review.
+# This provider-neutral helper deliberately contains no market-data integration.
 
-- name: Stop and disable legacy daytrading timer
+- name: Validate SMTP and Vault configuration
+  ansible.builtin.assert:
+    that:
+      - daytrading_smtp_host | string | length > 0
+      - daytrading_smtp_username | string | length > 0
+      - daytrading_email_from | string | length > 0
+      - daytrading_email_to | string | length > 0
+      - (vault_daytrading_smtp_password | default('') | string | length) > 0
+    fail_msg: >-
+      Configure the SMTP host, username, sender and recipient in the ignored
+      bergen-daytrade.yml file, and store vault_daytrading_smtp_password only
+      in the encrypted ansible/group_vars/all/vault.yml file.
+    quiet: true
+
+- name: Install notification helper runtime packages
+  ansible.builtin.package:
+    name:
+      - python3
+      - ca-certificates
+    state: present
+
+- name: Create notification helper group
+  ansible.builtin.group:
+    name: "{{ daytrading_collector_group }}"
+    system: true
+    state: present
+
+- name: Create notification helper user
+  ansible.builtin.user:
+    name: "{{ daytrading_collector_user }}"
+    group: "{{ daytrading_collector_group }}"
+    system: true
+    create_home: false
+    shell: /usr/sbin/nologin
+    state: present
+
+- name: Stop and disable removed collector timer
   ansible.builtin.systemd:
     name: bergen-daytrading-collector.timer
     enabled: false
@@ -10,28 +45,62 @@
     daemon_reload: true
   failed_when: false
 
-- name: Stop legacy daytrading service
+- name: Stop removed collector service
   ansible.builtin.systemd:
     name: bergen-daytrading-collector.service
     state: stopped
   failed_when: false
 
-- name: Remove legacy collector program, configuration and units
+- name: Remove obsolete collector units
   ansible.builtin.file:
     path: "{{ item }}"
     state: absent
   loop:
-    - "{{ daytrading_collector_base_dir }}/collector.py"
-    - "{{ daytrading_collector_config }}"
     - /etc/systemd/system/bergen-daytrading-collector.service
     - /etc/systemd/system/bergen-daytrading-collector.timer
 
-- name: Reload systemd after collector removal
+- name: Create notification helper directories
+  ansible.builtin.file:
+    path: "{{ item.path }}"
+    state: directory
+    owner: "{{ item.owner }}"
+    group: "{{ item.group }}"
+    mode: "{{ item.mode }}"
+  loop:
+    - path: "{{ daytrading_collector_base_dir }}"
+      owner: root
+      group: "{{ daytrading_collector_group }}"
+      mode: "0755"
+    - path: "{{ daytrading_collector_state_dir }}"
+      owner: "{{ daytrading_collector_user }}"
+      group: "{{ daytrading_collector_group }}"
+      mode: "0750"
+
+- name: Install provider-neutral notification helper
+  ansible.builtin.template:
+    src: daytrading-collector.py.j2
+    dest: "{{ daytrading_collector_base_dir }}/collector.py"
+    owner: root
+    group: "{{ daytrading_collector_group }}"
+    mode: "0755"
+
+- name: Install SMTP configuration without credentials
+  ansible.builtin.template:
+    src: daytrading-collector.json.j2
+    dest: "{{ daytrading_collector_config }}"
+    owner: root
+    group: "{{ daytrading_collector_group }}"
+    mode: "0640"
+
+- name: Install Vault-managed SMTP password
+  ansible.builtin.copy:
+    dest: "{{ daytrading_smtp_password_file }}"
+    content: "{{ vault_daytrading_smtp_password }}\n"
+    owner: "{{ daytrading_collector_user }}"
+    group: "{{ daytrading_collector_group }}"
+    mode: "0400"
+  no_log: true
+
+- name: Reload systemd after obsolete unit removal
   ansible.builtin.systemd:
     daemon_reload: true
-
-- name: Report preserved collector state
-  ansible.builtin.debug:
-    msg: >-
-      The legacy collector has been removed and disabled. Existing local output
-      below {{ daytrading_collector_state_dir }} was preserved.

@@ -1,0 +1,12 @@
+{
+  "email": {
+    "smtp_host": {{ daytrading_smtp_host | to_json }},
+    "smtp_port": {{ daytrading_smtp_port | int }},
+    "starttls": {{ daytrading_smtp_starttls | bool | to_json }},
+    "username": {{ daytrading_smtp_username | to_json }},
+    "password_file": {{ daytrading_smtp_password_file | to_json }},
+    "timeout_seconds": {{ daytrading_smtp_timeout_seconds | int }},
+    "from": {{ daytrading_email_from | to_json }},
+    "to": {{ daytrading_email_to | to_json }}
+  }
+}

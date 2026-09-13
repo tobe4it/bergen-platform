@@ -1,5 +1,5 @@
 ---
-- name: Remove legacy daytrading market-data collector
+- name: Configure provider-neutral daytrading notification helper
   hosts: "{{ daytrading_collector_target | default('market_collectors') }}"
   become: true
   roles:

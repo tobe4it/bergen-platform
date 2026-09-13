@@ -1,4 +1,15 @@
 ---
+daytrading_collector_user: daytrade
+daytrading_collector_group: daytrade
 daytrading_collector_base_dir: /opt/bergen/daytrading-collector
 daytrading_collector_state_dir: /var/lib/bergen-daytrading
 daytrading_collector_config: /etc/bergen-daytrading.json
+daytrading_smtp_password_file: /etc/bergen-daytrading-smtp-password
+
+daytrading_smtp_host: ""
+daytrading_smtp_port: 587
+daytrading_smtp_starttls: true
+daytrading_smtp_username: ""
+daytrading_smtp_timeout_seconds: 15
+daytrading_email_from: ""
+daytrading_email_to: ""
