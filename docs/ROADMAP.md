@@ -48,7 +48,24 @@ The production cutover remains governed by the open Mail Platform work below.
 
 ---
 
-# v0.7.0
+## v0.7.0 - Platform Services and Daytrading
+
+Released 2026-09-13:
+
+- Provider-neutral daytrading collector with Alpaca, IBKR and replay adapters
+- Automated daytrading LXC deployment and site-local inventory maintenance
+- Vault-backed provider and SMTP credentials
+- Built-in provider, session and mail validation commands
+- Dedicated Pi-hole LXC with Podman/Quadlet deployment
+- Reusable queued remote Syslog forwarding for platform services
+- Postfix LDAP lookup correction through `proxymap`
+
+The future MQTT/MQ event boundary for decoupled notifications remains planned
+and is not part of this release.
+
+---
+
+# v0.8.0
 
 ## AI Platform
 
@@ -63,7 +80,7 @@ Planned:
 
 ---
 
-# v0.8.0
+# v0.9.0
 
 ## Monitoring
 
@@ -78,7 +95,7 @@ Planned:
 
 ---
 
-# v0.9.0
+# v0.10.0
 
 ## Backup & Recovery
 
@@ -93,7 +110,7 @@ Planned:
 
 ---
 
-# v0.10.0
+# v0.11.0
 
 ## Security
 

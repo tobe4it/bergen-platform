@@ -31,6 +31,14 @@ GitHub
                           |     +-- Dovecot LMTP and IMAPS
                           |     +-- LDAP authentication
                           |
+                          +-- bergen-pihole
+                          |     +-- Pi-hole DNS filtering
+                          |     +-- Podman / Quadlet
+                          |
+                          +-- daytrade
+                          |     +-- Provider-neutral collector
+                          |     +-- Alpaca / IBKR / replay adapters
+                          |
                           +-- monitoring
 
 Public Infrastructure
@@ -121,6 +129,19 @@ AI
 - Ollama
 - Open WebUI
 
+DNS Filtering
+- Pi-hole v6 in a dedicated Debian 13 LXC
+- Synology DNS as the initial upstream resolver
+
+Market Data
+- Provider-neutral daytrading collector
+- Site-local provider selection and Vault-backed credentials
+- Direct SMTP notification pending a future MQTT/MQ boundary
+
+Logging
+- Central Syslog collection
+- Queued remote forwarding for managed services
+
 Planned
 - llama.cpp
 - IBM MQ
@@ -131,4 +152,4 @@ Planned
 
 ## Version
 
-Current architecture baseline: v0.6.0
+Current architecture baseline: v0.7.0

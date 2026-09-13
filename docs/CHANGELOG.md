@@ -8,31 +8,67 @@ The project follows **Semantic Versioning (SemVer)** and the changelog format is
 
 ## [Unreleased]
 
+---
+
+## [0.7.0] - 2026-09-13
+
+This release adds deployable DNS filtering and provider-neutral daytrading
+market-data collection, extends central logging, and makes discovered LXC
+addresses maintainable in the site-local inventory. It also tightens mail and
+secret handling without publishing provider credentials.
+
 ### Added
 
-#### Central Logging
+#### Daytrading
 
-- Added a reusable remote Syslog forwarder role with queued TCP/UDP delivery,
-  configuration validation and an optional deployment test event.
-- Integrated central Syslog forwarding into the mail-backend bootstrap.
-- Integrated the same queued remote Syslog forwarding into the Pi-hole
-  bootstrap while keeping DNS query logging local to Pi-hole.
+- Dedicated Debian 13 daytrading LXC deployment and reusable collector role
+- Provider-neutral adapters for Alpaca, IBKR Client Portal and local replay
+- Local replay fixture for deterministic end-to-end validation
+- Provider health checks, session execution and a built-in mail-test command
+- Optional systemd service and timer for scheduled collection
+- Git-ignored site-local provider configuration and Vault-backed secrets
+- Opening-range breakout evaluation with relative-volume filtering
 
 #### DNS Filtering
 
-- Added a dedicated `bergen-pihole` Debian 13 LXC definition and first-deploy
-  workflow.
-- Added a Pi-hole v6 Podman/Quadlet role with persistent state, vaulted
-  administration credential, explicit upstream DNS and runtime validation.
-- Added staged DNS-cutover documentation that preserves UniFi routing/policies
-  and keeps Synology DNS as the initial internal/upstream resolver.
+- Dedicated `bergen-pihole` Debian 13 LXC definition and first-deploy workflow
+- Pi-hole v6 Podman/Quadlet role with persistent state, vaulted administration
+  credential, explicit upstream DNS and runtime validation
+- Staged DNS-cutover documentation that preserves UniFi routing and policies
+
+#### Central Logging
+
+- Reusable remote Syslog forwarder role with queued TCP/UDP delivery,
+  configuration validation and optional deployment test events
+- Remote Syslog integration for the mail backend and Pi-hole
+
+### Changed
+
+#### Inventory
+
+- Extended LXC discovery to market collectors
+- Added automatic maintenance of effective host addresses in the Git-ignored
+  `inventory.local.yml`
+
+#### Security
+
+- Restricted the daytrading SMTP password to Ansible Vault
+- Removed direct integrations that were not suitable for redistribution and
+  kept provider selection explicit and local
 
 ### Fixed
 
 #### Mail Platform
 
 - Routed chrooted Postfix LDAP mailbox and domain-alias lookups through the
-  existing unchrooted `proxymap` service.
+  existing unchrooted `proxymap` service
+
+### Verified
+
+- Provider-neutral replay session completed end to end with an ORB signal,
+  15 opening-range bars and RVOL 3.9
+- Python template syntax and repository YAML parsing completed successfully
+- No GitHub status checks are configured for this repository
 
 ---
 

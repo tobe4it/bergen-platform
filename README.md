@@ -25,6 +25,8 @@ Current capabilities include:
 - Mosquitto MQTT deployment and per-client access management
 - Postfix/Dovecot mail backend with LDAP identities and explicit aliases
 - Pi-hole DNS filtering in a dedicated LXC
+- Centralized remote Syslog forwarding
+- Provider-neutral daytrading market-data collection
 - Centralized configuration
 - Semantic Versioning
 - Complete project documentation
@@ -63,6 +65,7 @@ bergen-platform/
 |   |
 |   +-- ARCHITECTURE.md
 |   +-- CHANGELOG.md
+|   +-- DAYTRADING.md
 |   +-- MQTT.md
 |   +-- PIHOLE.md
 |   +-- ROADMAP.md
@@ -81,6 +84,7 @@ Project documentation can be found in the **docs/** directory.
 
 - ARCHITECTURE.md
 - CHANGELOG.md
+- DAYTRADING.md
 - MAIL.md
 - MQTT.md
 - PIHOLE.md
@@ -162,6 +166,16 @@ DNS Filtering
 See **docs/PIHOLE.md** for deployment, stable addressing, validation and the
 later UniFi DNS cutover.
 
+Market Data
+
+- Dedicated Debian 13 daytrading LXC deployment
+- Provider-neutral adapters for Alpaca, IBKR Client Portal and local replay
+- Vault-backed credentials and Git-ignored site-local provider configuration
+- Provider, session and mail test commands plus an optional systemd timer
+
+See **docs/DAYTRADING.md** for deployment, local provider selection and
+validation.
+
 ---
 
 ## Roadmap
@@ -184,7 +198,7 @@ The Bergen Platform follows Semantic Versioning.
 
 Current release:
 
-v0.6.0
+v0.7.0
 
 See **docs/CHANGELOG.md** for release history.
 
