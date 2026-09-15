@@ -1,0 +1,86 @@
+---
+# Prepare the Rocky evaluation template through Proxmox, before SSH discovery.
+- name: Prepare Rocky evaluation LXC for Ansible SSH access
+  hosts: "{{ pve_inventory_host | default(pve_node) }}"
+  become: true
+  gather_facts: false
+  tasks:
+    - name: Read intended LXC identity before guest changes
+      ansible.builtin.command:
+        argv: [pct, config, "{{ lxc_vmid | string }}"]
+      register: mq_lab_ssh_lxc_config
+      changed_when: false
+
+    - name: Require the intended confined evaluation container
+      ansible.builtin.assert:
+        that:
+          - not ansible_check_mode
+          - mq_lab_confirm_test_only | default(false) | bool
+          - mq_lab_license_acceptance | default('not-accepted') == 'accept'
+          - lxc_hostname == 'bergen-mq-lab'
+          - "('hostname: ' ~ lxc_hostname) in mq_lab_ssh_lxc_config.stdout_lines"
+          - "'unprivileged: 1' in mq_lab_ssh_lxc_config.stdout_lines"
+          - "'lxc.apparmor.profile: unconfined' not in mq_lab_ssh_lxc_config.stdout"
+
+    - name: Verify Rocky 9 amd64 inside the running guest
+      ansible.builtin.command:
+        argv:
+          - pct
+          - exec
+          - "{{ lxc_vmid | string }}"
+          - --
+          - bash
+          - -c
+          - 'source /etc/os-release; test "$ID" = rocky && test "${VERSION_ID%%.*}" = 9 && test "$(uname -m)" = x86_64'
+      changed_when: false
+
+    - name: Check whether the Rocky template provides OpenSSH server
+      ansible.builtin.command:
+        argv: [pct, exec, "{{ lxc_vmid | string }}", --, rpm, -q, openssh-server]
+      register: mq_lab_sshd_package
+      changed_when: false
+      failed_when: mq_lab_sshd_package.rc not in [0, 1]
+
+    - name: Install OpenSSH server only when missing
+      ansible.builtin.command:
+        argv: [pct, exec, "{{ lxc_vmid | string }}", --, dnf, -y, install, openssh-server]
+      when: mq_lab_sshd_package.rc == 1
+      changed_when: true
+
+    - name: Generate only missing SSH host keys without replacing existing keys
+      ansible.builtin.command:
+        argv: [pct, exec, "{{ lxc_vmid | string }}", --, ssh-keygen, -A]
+      register: mq_lab_host_key_generation
+      changed_when: mq_lab_host_key_generation.stdout | trim | length > 0
+
+    - name: Validate SSH configuration before starting the service
+      ansible.builtin.command:
+        argv: [pct, exec, "{{ lxc_vmid | string }}", --, /usr/sbin/sshd, -t]
+      changed_when: false
+
+    - name: Enable and start SSH only where required
+      ansible.builtin.command:
+        argv:
+          - pct
+          - exec
+          - "{{ lxc_vmid | string }}"
+          - --
+          - bash
+          - -c
+          - |
+            set -euo pipefail
+            if ! systemctl is-enabled --quiet sshd; then
+              systemctl enable sshd
+              printf 'enabled\n'
+            fi
+            if ! systemctl is-active --quiet sshd; then
+              systemctl start sshd
+              printf 'started\n'
+            fi
+      register: mq_lab_sshd_start
+      changed_when: mq_lab_sshd_start.stdout | trim | length > 0
+
+    - name: Verify SSH service is running
+      ansible.builtin.command:
+        argv: [pct, exec, "{{ lxc_vmid | string }}", --, systemctl, is-active, --quiet, sshd]
+      changed_when: false

@@ -32,6 +32,26 @@ def render(template, **extra):
 
 
 class LabContracts(unittest.TestCase):
+    def test_ssh_preparation_runs_after_start_before_discovery(self):
+        plays = yaml.safe_load((ROOT / "ansible/playbooks/deploy-mq-lab.yml").read_text())
+        imports = [p["import_playbook"] for p in plays if "import_playbook" in p]
+        self.assertLess(imports.index("restart-lxc.yml"), imports.index("prepare-mq-lxc-ssh.yml"))
+        self.assertLess(imports.index("prepare-mq-lxc-ssh.yml"), imports.index("discover-lxc.yml"))
+
+    def test_ssh_preparation_preserves_keys_and_checks_identity(self):
+        path = ROOT / "ansible/playbooks/prepare-mq-lxc-ssh.yml"
+        play = yaml.safe_load(path.read_text())[0]
+        self.assertTrue(play["become"])
+        tasks = play["tasks"]
+        self.assertIn("ansible.builtin.assert", tasks[1])
+        install = next(t for t in tasks if t["name"] == "Install OpenSSH server only when missing")
+        self.assertEqual(install["when"], "mq_lab_sshd_package.rc == 1")
+        text = path.read_text()
+        for required in ["ssh-keygen, -A", "/usr/sbin/sshd, -t", "systemctl is-active --quiet sshd", "systemctl is-enabled --quiet sshd"]:
+            self.assertIn(required, text)
+        for forbidden in ["StrictHostKeyChecking=no", "PermitRootLogin", "PasswordAuthentication", "authorized_keys", "rm -", "unconfined=true"]:
+            self.assertNotIn(forbidden, text)
+
     def test_all_new_yaml_parses(self):
         files = list(ROLE.rglob("*.yml")) + list((ROOT / "ansible/playbooks").glob("*mq*.yml"))
         for path in files:

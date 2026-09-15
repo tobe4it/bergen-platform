@@ -8,6 +8,12 @@ The project follows **Semantic Versioning (SemVer)** and the changelog format is
 
 ## [Unreleased]
 
+### Fixed
+
+- Rocky MQ evaluation deployment now prepares missing OpenSSH through Proxmox
+  before SSH discovery, preserving existing host keys and SSH security policy
+- Existing MQ evaluation LXC can resume deployment after a missing-SSH failure
+
 ---
 
 ## [0.9.0] - 2026-09-15

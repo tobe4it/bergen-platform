@@ -86,7 +86,8 @@ ansible-playbook ansible/playbooks/deploy-mq-lab.yml \
 
 This validates license/evaluation gates, cluster-wide VMID identity and template
 availability; creates the LXC, preserves unrelated runtime features while
-enabling nesting/keyctl, restarts it, discovers DHCP/SSH, writes the ignored
+enabling nesting/keyctl, restarts it, prepares OpenSSH through `pct exec`,
+discovers DHCP/SSH, writes the ignored
 `mq_lab_nodes` inventory entry and bootstraps Rocky/MQ. The **first-deployment**
 workflow is not a dry run and includes an LXC restart. For subsequent runtime
 reconciliation, use `bootstrap-mq-lab.yml` with the same inventories/vars instead
@@ -95,7 +96,14 @@ of repeating first deployment. For MQ object drift use `mq-objects.yml --check`.
 If SSH host-key verification blocks bootstrap, independently verify the new
 host's fingerprint and accept only that host through the usual controller
 process. Do not disable host-key checking. Rocky must already provide Python 3
-and sshd through its template. Reserve the discovered DHCP address afterward.
+through its template. The deployment checks Rocky 9/amd64 and LXC identity,
+installs `openssh-server` only if missing, generates only missing host keys,
+validates SSH configuration and enables/starts `sshd` before SSH discovery.
+Existing host keys, SSH login policy and Proxmox-installed authorized keys are
+preserved; firewall/security restrictions are not bypassed. A failed deployment
+at SSH discovery can be resumed by rerunning the deployment with the same VMID
+and configuration; do not delete/recreate the existing LXC.
+Reserve the discovered DHCP address afterward.
 
 ## Persistence, TLS, networking and logging
 

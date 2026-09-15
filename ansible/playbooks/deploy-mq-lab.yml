@@ -74,6 +74,7 @@
 - import_playbook: create-lxc.yml
 - import_playbook: configure-mq-lxc-runtime.yml
 - import_playbook: restart-lxc.yml
+- import_playbook: prepare-mq-lxc-ssh.yml
 - import_playbook: discover-lxc.yml
 - import_playbook: update-inventory.yml
 - import_playbook: bootstrap-mq-lab.yml
