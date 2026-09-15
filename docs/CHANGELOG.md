@@ -8,6 +8,14 @@ The project follows **Semantic Versioning (SemVer)** and the changelog format is
 
 ## [Unreleased]
 
+---
+
+## [0.8.0] - 2026-09-15
+
+This release adds a dedicated EVCC LXC and a guarded Ansible migration that
+preserves configuration, UI settings and charging history while enforcing a
+single active charging controller.
+
 ### Added
 
 #### EVCC
@@ -28,6 +36,17 @@ The project follows **Semantic Versioning (SemVer)** and the changelog format is
   higher-precedence site-local extra vars request normal service startup
 - EVCC API validation now retries while the web listener is available but the
   application routes are still initializing
+
+### Verified
+
+- Production migration from EVCC `0.314.5` to `0.315.0` completed successfully
+- Configuration and SQLite database checksums matched after transfer
+- SQLite `quick_check`, EVCC configuration parsing and HTTP API validation
+  completed successfully
+- Automatic rollback restored the legacy service after an initial transient
+  API-readiness failure
+- API retry handling completed the subsequent cutover, leaving the target
+  active and the legacy EVCC service stopped and disabled
 
 ---
 

@@ -99,7 +99,8 @@ all:
       hosts:
         evcc-old:
           ansible_host: OLD_EVCC_IP
-          ansible_user: root
+          ansible_user: CHANGE_ME
+          ansible_become: true
           ansible_python_interpreter: /usr/bin/python3
 ```
 
@@ -109,19 +110,23 @@ Verify SSH reachability from `bp-controller` before cutover:
 ansible evcc_nodes:evcc_legacy_nodes \
   -i ansible/inventory.yml \
   -i ansible/inventory.local.yml \
-  -m ping
+  -m ping \
+  --ask-vault-pass
 ```
 
 ## Migration and cutover
 
-The default source paths match a native Debian EVCC installation. Check them on
-the old host before running the cutover:
+The default source paths match a native Debian EVCC installation. The source
+may use an unprivileged SSH account when it has sudo rights. Check the source
+through Ansible before running the cutover:
 
 ```bash
-ssh root@OLD_EVCC_IP
-systemctl status evcc --no-pager
-evcc --version
-ls -lh /etc/evcc.yaml /var/lib/evcc/evcc.db
+ansible evcc_legacy_nodes \
+  -i ansible/inventory.yml \
+  -i ansible/inventory.local.yml \
+  -b -m shell \
+  -a 'systemctl status evcc --no-pager; evcc --version; ls -lh /etc/evcc.yaml /var/lib/evcc/evcc.db' \
+  --ask-vault-pass
 ```
 
 It is valid for `/etc/evcc.yaml` to be absent when the installation is managed
@@ -133,12 +138,13 @@ Choose a quiet moment with no active charging session and run:
 ansible-playbook ansible/playbooks/migrate-evcc.yml \
   -i ansible/inventory.yml \
   -i ansible/inventory.local.yml \
-  -e evcc_migration_confirm=true
+  -e evcc_migration_confirm=true \
+  --ask-vault-pass
 ```
 
 The explicit confirmation prevents an accidental stop of the production
-service. No Vault password is required unless the local inventory itself uses
-vaulted connection variables.
+service. The Vault password is required because the repository loads its
+encrypted `group_vars/all/vault.yml` during inventory processing.
 
 For a non-standard native source layout, override either path explicitly:
 
@@ -148,7 +154,8 @@ ansible-playbook ansible/playbooks/migrate-evcc.yml \
   -i ansible/inventory.local.yml \
   -e evcc_migration_confirm=true \
   -e evcc_migration_source_config_path=/custom/evcc.yaml \
-  -e evcc_migration_source_database_path=/custom/evcc.db
+  -e evcc_migration_source_database_path=/custom/evcc.db \
+  --ask-vault-pass
 ```
 
 The automated cutover currently expects the old installation to use a native
@@ -173,9 +180,24 @@ Confirm before retiring the old LXC:
 - EVCC logs arrive at the configured Syslog server;
 - no active charging plan or vehicle assignment was lost.
 
-Keep the old LXC powered off but undeleted until at least one real charging
-cycle has completed successfully. Its migration backup remains below
-`/var/backups/evcc/migration-<timestamp>`.
+Keep the old EVCC service stopped and disabled, but retain its source system
+until at least one real charging cycle has completed successfully. Its
+migration backup remains below `/var/backups/evcc/migration-<timestamp>`.
+
+## Verified production migration
+
+The guarded workflow was exercised during the production cutover on
+2026-09-13:
+
+- the legacy EVCC `0.314.5` service was reached through an unprivileged Ansible
+  SSH account with sudo;
+- configuration and charging history were transferred to EVCC `0.315.0`;
+- SHA-256 checksums, SQLite `quick_check` and EVCC configuration parsing passed;
+- an initial API-readiness race triggered the automatic rollback and restored
+  the legacy service;
+- the retry-enabled validation then completed the cutover successfully;
+- the new EVCC service remained active while the legacy service was stopped
+  and disabled.
 
 ## Reusing the old address
 

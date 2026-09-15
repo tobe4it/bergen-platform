@@ -162,4 +162,4 @@ Planned
 
 ## Version
 
-Current architecture baseline: v0.7.0 plus unreleased EVCC service work
+Current architecture baseline: v0.8.0

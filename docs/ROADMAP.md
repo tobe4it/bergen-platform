@@ -65,7 +65,21 @@ and is not part of this release.
 
 ---
 
-# v0.8.0
+## v0.8.0 - EVCC Charging Control
+
+Released 2026-09-15; production cutover verified 2026-09-13:
+
+- Dedicated Debian 13 EVCC LXC with a native, version-pinned package
+- Site-local infrastructure, inventory and central Syslog parameters
+- Migration of file configuration, UI settings and charging history
+- Source-side SQLite backup plus end-to-end SHA-256 and integrity validation
+- Single-controller cutover with automatic restoration of the legacy service
+- API-readiness retry validated during the production migration
+- Successful production upgrade from EVCC `0.314.5` to `0.315.0`
+
+---
+
+# v0.9.0
 
 ## AI Platform
 
@@ -80,7 +94,7 @@ Planned:
 
 ---
 
-# v0.9.0
+# v0.10.0
 
 ## Monitoring
 
@@ -95,7 +109,7 @@ Planned:
 
 ---
 
-# v0.10.0
+# v0.11.0
 
 ## Backup & Recovery
 
@@ -110,7 +124,7 @@ Planned:
 
 ---
 
-# v0.11.0
+# v0.12.0
 
 ## Security
 
