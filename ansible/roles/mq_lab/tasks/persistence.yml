@@ -1,0 +1,49 @@
+---
+- name: Check persistent identity marker
+  ansible.builtin.stat:
+    path: /var/lib/bergen-mq-lab/identity.json
+  register: mq_lab_identity_stat
+
+- name: Inspect existing MQ data before adoption
+  ansible.builtin.find:
+    paths: /var/lib/bergen-mq-lab/mqm
+    hidden: true
+    file_type: any
+  register: mq_lab_existing_data
+
+- name: Refuse unmarked existing MQ data
+  ansible.builtin.assert:
+    that:
+      - mq_lab_identity_stat.stat.exists or mq_lab_existing_data.matched == 0
+    fail_msg: "Existing MQ persistence has no identity marker. Explicit backup/adoption review is required."
+
+- name: Read existing persistence identity
+  ansible.builtin.slurp:
+    src: /var/lib/bergen-mq-lab/identity.json
+  register: mq_lab_existing_identity
+  when: mq_lab_identity_stat.stat.exists
+
+- name: Refuse queue manager renaming and unreviewed image upgrades
+  ansible.builtin.assert:
+    that:
+      - (mq_lab_existing_identity.content | b64decode | from_json).qmgr == mq_lab_qmgr
+      - (mq_lab_existing_identity.content | b64decode | from_json).image == mq_lab_image
+    fail_msg: "Persistent QMGR/image identity differs. No automatic rename, upgrade, downgrade or data deletion is implemented."
+  when: mq_lab_identity_stat.stat.exists
+
+- name: Create persistent MQ volume using IBM image UID/GID
+  ansible.builtin.file:
+    path: /var/lib/bergen-mq-lab/mqm
+    state: directory
+    owner: '1001'
+    group: '0'
+    mode: '2770'
+
+- name: Record immutable evaluation persistence identity
+  ansible.builtin.copy:
+    dest: /var/lib/bergen-mq-lab/identity.json
+    owner: root
+    group: root
+    mode: '0600'
+    force: false
+    content: "{{ {'qmgr': mq_lab_qmgr, 'image': mq_lab_image, 'evaluation_only': true} | to_nice_json }}\n"

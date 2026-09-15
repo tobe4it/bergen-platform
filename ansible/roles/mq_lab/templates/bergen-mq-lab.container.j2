@@ -1,0 +1,37 @@
+# EXAMPLE / EVALUATION ONLY. Clarify productive licensing with IBM.
+[Unit]
+Description=Bergen IBM MQ evaluation (not production)
+Wants=network-online.target
+After=network-online.target firewalld.service
+Requires=firewalld.service
+
+[Container]
+ContainerName=bergen-mq-lab
+Image={{ mq_lab_image }}
+Pull=never
+Network=host
+User=1001
+Group=0
+DropCapability=all
+NoNewPrivileges=true
+LogDriver=journald
+Volume=/var/lib/bergen-mq-lab/mqm:/mnt/mqm{{ ':Z' if (ansible_facts.selinux | default({})).status | default('disabled') == 'enabled' else '' }}
+Volume=/etc/bergen-mq-lab/tls:/etc/mqm/pki/keys/bergenlab:ro{{ ',Z' if (ansible_facts.selinux | default({})).status | default('disabled') == 'enabled' else '' }}
+Secret=mqAdminPassword,uid=1001,gid=0,mode=0400
+Secret=mqAppPassword,uid=1001,gid=0,mode=0400
+Environment=LICENSE=accept
+Environment=MQ_QMGR_NAME={{ mq_lab_qmgr }}
+Environment=MQ_DEV=false
+Environment=MQ_CONNAUTH_USE_HTP=true
+Environment=MQ_ENABLE_EMBEDDED_WEB_SERVER=true
+ShmSize=512m
+
+[Service]
+Environment=CONTAINERS_STORAGE_CONF=/etc/bergen-mq-lab/storage.conf
+Restart=on-failure
+RestartSec=10
+TimeoutStartSec=600
+TimeoutStopSec=120
+
+[Install]
+WantedBy=multi-user.target

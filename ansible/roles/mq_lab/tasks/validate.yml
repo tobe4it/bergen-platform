@@ -1,0 +1,36 @@
+---
+- name: Validate evaluation identity and pinned image
+  ansible.builtin.assert:
+    that:
+      - mq_lab_confirm_test_only | bool
+      - mq_lab_license_acceptance == 'accept'
+      - ansible_facts.distribution == 'Rocky'
+      - ansible_facts.distribution_major_version == '9'
+      - ansible_facts.architecture == 'x86_64'
+      - mq_lab_qmgr is match('^[A-Za-z0-9._%-]{1,48}$')
+      - mq_lab_image is match('^icr[.]io/ibm-messaging/mq:9[.]4[.].*-amd64@sha256:[a-f0-9]{64}$')
+      - ansible_host is match('^[0-9]+[.][0-9]+[.][0-9]+[.][0-9]+$')
+      - inventory_hostname is match('^[A-Za-z0-9.-]+$')
+      - mq_lab_controller_cidr is match('^[0-9]+[.][0-9]+[.][0-9]+[.][0-9]+/[0-9]+$')
+      - not mq_lab_allow_client_connections | bool or mq_lab_client_cidr is match('^[0-9]+[.][0-9]+[.][0-9]+[.][0-9]+/[0-9]+$')
+    fail_msg: "Evaluation only; use a pinned MQ 9.4 amd64 image, exact identity and authorized IPv4 source CIDRs."
+
+- name: Validate MQ evaluation passwords
+  ansible.builtin.assert:
+    that:
+      - mq_lab_admin_password | length >= 12
+      - mq_lab_app_password | length >= 12
+      - mq_lab_admin_password != mq_lab_app_password
+      - "'\n' not in mq_lab_admin_password"
+      - "'\n' not in mq_lab_app_password"
+  no_log: true
+
+- name: Validate address ranges with Python standard library
+  ansible.builtin.command:
+    argv:
+      - /usr/bin/python3
+      - -c
+      - "import ipaddress,sys; [ipaddress.ip_network(v, strict=False) for v in sys.argv[1:]]"
+      - "{{ mq_lab_controller_cidr }}"
+      - "{{ mq_lab_client_cidr if mq_lab_allow_client_connections | bool else mq_lab_controller_cidr }}"
+  changed_when: false

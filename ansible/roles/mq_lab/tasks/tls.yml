@@ -1,0 +1,107 @@
+---
+- name: Create server certificate mount directory
+  ansible.builtin.file:
+    path: /etc/bergen-mq-lab/tls
+    state: directory
+    owner: '1001'
+    group: '0'
+    mode: '0750'
+
+- name: Generate private evaluation CA key once
+  ansible.builtin.command:
+    argv: [openssl, genpkey, -algorithm, RSA, -pkeyopt, 'rsa_keygen_bits:3072', -out, /etc/bergen-mq-lab/private/ca.key]
+    creates: /etc/bergen-mq-lab/private/ca.key
+  no_log: true
+
+- name: Protect evaluation CA key
+  ansible.builtin.file:
+    path: /etc/bergen-mq-lab/private/ca.key
+    mode: '0600'
+
+- name: Generate evaluation CA certificate once
+  ansible.builtin.command:
+    argv:
+      - openssl
+      - req
+      - -new
+      - -x509
+      - -sha256
+      - -days
+      - '3650'
+      - -key
+      - /etc/bergen-mq-lab/private/ca.key
+      - -out
+      - /etc/bergen-mq-lab/ca.crt
+      - -subj
+      - /CN=Bergen MQ Evaluation CA
+      - -addext
+      - basicConstraints=critical,CA:TRUE
+      - -addext
+      - keyUsage=critical,keyCertSign,cRLSign
+    creates: /etc/bergen-mq-lab/ca.crt
+
+- name: Generate server private key once
+  ansible.builtin.command:
+    argv: [openssl, genpkey, -algorithm, RSA, -pkeyopt, 'rsa_keygen_bits:3072', -out, /etc/bergen-mq-lab/tls/tls.key]
+    creates: /etc/bergen-mq-lab/tls/tls.key
+  no_log: true
+
+- name: Protect server private key for MQ image UID
+  ansible.builtin.file:
+    path: /etc/bergen-mq-lab/tls/tls.key
+    owner: '1001'
+    group: '0'
+    mode: '0400'
+
+- name: Generate certificate signing request once
+  ansible.builtin.command:
+    argv: [openssl, req, -new, -sha256, -key, /etc/bergen-mq-lab/tls/tls.key, -out, /etc/bergen-mq-lab/private/server.csr, -subj, "/CN={{ inventory_hostname }}"]
+    creates: /etc/bergen-mq-lab/private/server.csr
+
+- name: Render evaluation certificate extensions
+  ansible.builtin.copy:
+    dest: /etc/bergen-mq-lab/private/server.ext
+    owner: root
+    group: root
+    mode: '0600'
+    content: |
+      basicConstraints=critical,CA:FALSE
+      keyUsage=critical,digitalSignature,keyEncipherment
+      extendedKeyUsage=serverAuth
+      subjectAltName=DNS:{{ inventory_hostname }},IP:{{ ansible_host }},IP:127.0.0.1
+
+- name: Sign server certificate once with distinct evaluation CA
+  ansible.builtin.command:
+    argv: [openssl, x509, -req, -sha256, -days, '365', -in, /etc/bergen-mq-lab/private/server.csr, -CA, /etc/bergen-mq-lab/ca.crt, -CAkey, /etc/bergen-mq-lab/private/ca.key, -CAcreateserial, -extfile, /etc/bergen-mq-lab/private/server.ext, -out, /etc/bergen-mq-lab/tls/tls.crt]
+    creates: /etc/bergen-mq-lab/tls/tls.crt
+
+- name: Supply CA chain to IBM image TLS importer
+  ansible.builtin.copy:
+    src: /etc/bergen-mq-lab/ca.crt
+    dest: /etc/bergen-mq-lab/tls/ca.crt
+    remote_src: true
+    owner: '1001'
+    group: '0'
+    mode: '0444'
+
+- name: Make public server certificate readable by MQ
+  ansible.builtin.file:
+    path: /etc/bergen-mq-lab/tls/tls.crt
+    owner: '1001'
+    group: '0'
+    mode: '0444'
+
+- name: Verify server certificate chain
+  ansible.builtin.command:
+    argv: [openssl, verify, -CAfile, /etc/bergen-mq-lab/ca.crt, /etc/bergen-mq-lab/tls/tls.crt]
+  changed_when: false
+
+- name: Verify reserved current address is in certificate
+  ansible.builtin.command:
+    argv: [openssl, verify, -CAfile, /etc/bergen-mq-lab/ca.crt, -verify_ip, "{{ ansible_host }}", /etc/bergen-mq-lab/tls/tls.crt]
+  changed_when: false
+
+- name: Reject expiring evaluation certificate
+  ansible.builtin.command:
+    argv: [openssl, x509, -in, /etc/bergen-mq-lab/tls/tls.crt, -noout, -checkend, '86400']
+  changed_when: false

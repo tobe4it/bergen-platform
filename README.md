@@ -23,6 +23,8 @@ Current capabilities include:
 - Ollama deployment
 - OpenLDAP authentication
 - Mosquitto MQTT deployment and per-client access management
+- IBM MQ declarative REST administration prototype ([scope and validation](docs/MQ.md), evaluation only)
+- Rocky LXC / Podman MQ [evaluation example](docs/MQ-LAB.md); clarify productive licensing with IBM
 - Postfix/Dovecot mail backend with LDAP identities and explicit aliases
 - Pi-hole DNS filtering in a dedicated LXC
 - EVCC charging control with guarded configuration/history migration
@@ -209,7 +211,7 @@ The Bergen Platform follows Semantic Versioning.
 
 Current release:
 
-v0.8.0
+v0.9.0
 
 See **docs/CHANGELOG.md** for release history.
 

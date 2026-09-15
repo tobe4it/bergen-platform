@@ -1,0 +1,36 @@
+---
+- name: Reconcile IBM MQ desired state without host access
+  hosts: localhost
+  connection: local
+  become: false
+  gather_facts: false
+  tasks:
+    - name: Validate MQ connection and desired state inputs
+      ansible.builtin.assert:
+        that:
+          - mq_rest_endpoint is defined
+          - mq_qmgr is defined
+          - mq_rest_username is defined
+          - mq_rest_password is defined
+          - mq_objects is defined
+        fail_msg: "Load a site-local MQ vars file and Vault-backed REST credentials."
+
+    - name: Compare and reconcile declared MQ objects
+      mq_objects:
+        endpoint: "{{ mq_rest_endpoint }}"
+        qmgr: "{{ mq_qmgr }}"
+        username: "{{ mq_rest_username }}"
+        password: "{{ mq_rest_password }}"
+        ca_path: "{{ mq_rest_ca_path | default(omit) }}"
+        timeout: "{{ mq_rest_timeout | default(30) }}"
+        allow_deletion: "{{ mq_allow_deletion | default(false) }}"
+        objects: "{{ mq_objects }}"
+      register: mq_reconciliation
+
+    - name: Summarize MQ reconciliation
+      ansible.builtin.debug:
+        msg:
+          - "Queue manager: {{ mq_qmgr }}"
+          - "Mode: {{ 'check (DISPLAY only)' if ansible_check_mode else 'apply with verification' }}"
+          - "Drift/changes: {{ mq_reconciliation.changed }}"
+          - "Completed mutations: {{ mq_reconciliation.applied | length }}"

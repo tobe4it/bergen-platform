@@ -1,0 +1,36 @@
+---
+# Preserve existing features; no FUSE, unconfined AppArmor or privileged LXC.
+- name: Prepare evaluation LXC for nested Podman
+  hosts: "{{ pve_inventory_host | default(pve_node) }}"
+  become: true
+  gather_facts: false
+  tasks:
+    - name: Read LXC configuration
+      ansible.builtin.command:
+        argv: [pct, config, "{{ lxc_vmid | string }}"]
+      register: mq_lab_lxc_config
+      changed_when: false
+
+    - name: Require intended unprivileged evaluation container
+      ansible.builtin.assert:
+        that:
+          - mq_lab_license_acceptance | default('not-accepted') == 'accept'
+          - mq_lab_confirm_test_only | default(false) | bool
+          - "('hostname: ' ~ lxc_hostname) in mq_lab_lxc_config.stdout_lines"
+          - "'unprivileged: 1' in mq_lab_lxc_config.stdout_lines"
+          - "'lxc.apparmor.profile: unconfined' not in mq_lab_lxc_config.stdout"
+        fail_msg: "MQ evaluation requires the intended unprivileged LXC with AppArmor confinement."
+
+    - name: Extract existing LXC features
+      ansible.builtin.set_fact:
+        mq_lab_existing_features: "{{ (mq_lab_lxc_config.stdout | regex_findall('(?m)^features: (.*)$') | first | default('')).split(',') | reject('equalto', '') | list }}"
+
+    - name: Merge required nested-runtime features
+      ansible.builtin.set_fact:
+        mq_lab_required_features: "{{ (mq_lab_existing_features | reject('match', '^(nesting|keyctl)=') | list) + ['nesting=1', 'keyctl=1'] }}"
+
+    - name: Enable nesting and keyctl without replacing unrelated features
+      ansible.builtin.command:
+        argv: [pct, set, "{{ lxc_vmid | string }}", --features, "{{ mq_lab_required_features | join(',') }}"]
+      when: mq_lab_existing_features | sort != mq_lab_required_features | sort
+      changed_when: true

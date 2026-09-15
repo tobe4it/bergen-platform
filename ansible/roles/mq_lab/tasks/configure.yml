@@ -1,0 +1,95 @@
+---
+- name: Enable firewall before starting MQ listeners
+  ansible.builtin.systemd_service:
+    name: firewalld
+    enabled: true
+    state: started
+
+- name: Require default public firewall zone
+  ansible.builtin.command:
+    argv: [firewall-cmd, --get-default-zone]
+  register: mq_lab_default_zone
+  changed_when: false
+
+- name: Refuse an unexpected existing firewall policy
+  ansible.builtin.assert:
+    that:
+      - mq_lab_default_zone.stdout | trim == 'public'
+    fail_msg: "Evaluation assumes default public zone. Review existing firewall policy before deployment."
+
+- name: Refuse unrestricted existing MQ port openings
+  ansible.builtin.command:
+    argv: [firewall-cmd, --zone=public, "--query-port={{ item }}/tcp"]
+  loop: [9443, 1414]
+  register: mq_lab_unrestricted_ports
+  changed_when: false
+  failed_when: mq_lab_unrestricted_ports.rc != 1
+
+- name: Build permitted controller/client firewall rules
+  ansible.builtin.set_fact:
+    mq_lab_firewall_rules: >-
+      {{ ['rule family="ipv4" source address="' ~ mq_lab_controller_cidr ~ '" port port="9443" protocol="tcp" accept']
+         + (['rule family="ipv4" source address="' ~ mq_lab_client_cidr ~ '" port port="1414" protocol="tcp" accept']
+            if mq_lab_allow_client_connections | bool else []) }}
+
+- name: Check previous managed firewall rules
+  ansible.builtin.stat:
+    path: /etc/bergen-mq-lab/firewall-rules.json
+  register: mq_lab_firewall_marker
+
+- name: Read previous managed firewall rules
+  ansible.builtin.slurp:
+    src: /etc/bergen-mq-lab/firewall-rules.json
+  register: mq_lab_firewall_previous
+  when: mq_lab_firewall_marker.stat.exists
+
+- name: Calculate obsolete managed firewall rules
+  ansible.builtin.set_fact:
+    mq_lab_firewall_obsolete: "{{ (mq_lab_firewall_previous.content | b64decode | from_json) | difference(mq_lab_firewall_rules) if mq_lab_firewall_marker.stat.exists else [] }}"
+
+- name: Query obsolete managed rules
+  ansible.builtin.command:
+    argv: "{{ ['firewall-cmd', '--zone=public'] + (['--permanent'] if item.0 == 'permanent' else []) + ['--query-rich-rule=' ~ item.1] }}"
+  loop: "{{ ['runtime', 'permanent'] | product(mq_lab_firewall_obsolete) | list }}"
+  register: mq_lab_firewall_obsolete_queries
+  changed_when: false
+  failed_when: mq_lab_firewall_obsolete_queries.rc not in [0, 1]
+
+- name: Revoke only obsolete rules previously managed by this role
+  ansible.builtin.command:
+    argv: "{{ ['firewall-cmd', '--zone=public'] + (['--permanent'] if item.item.0 == 'permanent' else []) + ['--remove-rich-rule=' ~ item.item.1] }}"
+  loop: "{{ mq_lab_firewall_obsolete_queries.results }}"
+  when: item.rc == 0
+  changed_when: true
+
+- name: Query evaluation firewall rules (runtime and permanent)
+  ansible.builtin.command:
+    argv: "{{ ['firewall-cmd', '--zone=public'] + (['--permanent'] if item.0 == 'permanent' else []) + ['--query-rich-rule=' ~ item.1] }}"
+  loop: "{{ ['runtime', 'permanent'] | product(mq_lab_firewall_rules) | list }}"
+  register: mq_lab_firewall_queries
+  changed_when: false
+  failed_when: mq_lab_firewall_queries.rc not in [0, 1]
+
+- name: Add authorized source-specific evaluation rules
+  ansible.builtin.command:
+    argv: "{{ ['firewall-cmd', '--zone=public'] + (['--permanent'] if item.item.0 == 'permanent' else []) + ['--add-rich-rule=' ~ item.item.1] }}"
+  loop: "{{ mq_lab_firewall_queries.results }}"
+  when: item.rc == 1
+  changed_when: true
+
+- name: Render MQ evaluation Quadlet
+  ansible.builtin.template:
+    src: bergen-mq-lab.container.j2
+    dest: /etc/containers/systemd/bergen-mq-lab.container
+    owner: root
+    group: root
+    mode: '0644'
+  register: mq_lab_quadlet
+
+- name: Record managed firewall rules for future revocation
+  ansible.builtin.copy:
+    dest: /etc/bergen-mq-lab/firewall-rules.json
+    content: "{{ mq_lab_firewall_rules | to_nice_json }}\n"
+    owner: root
+    group: root
+    mode: '0600'

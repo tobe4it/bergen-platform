@@ -1,0 +1,88 @@
+---
+- name: Wait for local evaluation web listener
+  ansible.builtin.wait_for:
+    host: 127.0.0.1
+    port: 9443
+    timeout: 180
+
+- name: Validate authenticated MQ REST readiness with verified TLS
+  ansible.builtin.uri:
+    url: "https://127.0.0.1:9443/ibmmq/rest/v3/admin/qmgr/{{ mq_lab_qmgr }}"
+    url_username: admin
+    url_password: "{{ mq_lab_admin_password }}"
+    force_basic_auth: true
+    validate_certs: true
+    ca_path: /etc/bergen-mq-lab/ca.crt
+    use_proxy: false
+    status_code: 200
+    return_content: true
+  register: mq_lab_api
+  until: mq_lab_api.status | default(0) == 200
+  retries: "{{ mq_lab_api_retries }}"
+  delay: "{{ mq_lab_api_retry_delay }}"
+  no_log: true
+
+- name: Require requested queue manager in API response
+  ansible.builtin.assert:
+    that:
+      - mq_lab_api.json.qmgr | selectattr('name', 'equalto', mq_lab_qmgr) | list | length == 1
+    fail_msg: "REST response does not identify the requested evaluation queue manager."
+
+- name: Create protected controller-local CA/vars directories
+  ansible.builtin.file:
+    path: "{{ item | dirname }}"
+    state: directory
+    mode: '0700'
+  loop: ["{{ mq_lab_controller_ca_path }}", "{{ mq_lab_controller_vars_path }}"]
+  delegate_to: localhost
+  become: false
+
+- name: Fetch public evaluation CA through authenticated SSH
+  ansible.builtin.fetch:
+    src: /etc/bergen-mq-lab/ca.crt
+    dest: "{{ mq_lab_controller_ca_path }}"
+    flat: true
+
+- name: Generate ignored connection example without overwriting user declarations
+  ansible.builtin.template:
+    src: mq-lab.local.yml.j2
+    dest: "{{ mq_lab_controller_vars_path }}"
+    mode: '0600'
+    force: false
+  delegate_to: localhost
+  become: false
+
+- name: Verify controller-to-lab authenticated REST path
+  ansible.builtin.uri:
+    url: "https://{{ ansible_host }}:9443/ibmmq/rest/v3/admin/qmgr/{{ mq_lab_qmgr }}"
+    url_username: admin
+    url_password: "{{ mq_lab_admin_password }}"
+    force_basic_auth: true
+    validate_certs: true
+    ca_path: "{{ mq_lab_controller_ca_path }}"
+    use_proxy: false
+    status_code: 200
+    return_content: true
+  delegate_to: localhost
+  become: false
+  register: mq_lab_remote_api
+  until: mq_lab_remote_api.status | default(0) == 200
+  retries: "{{ mq_lab_api_retries }}"
+  delay: "{{ mq_lab_api_retry_delay }}"
+  no_log: true
+
+- name: Require correct remote queue manager identity
+  ansible.builtin.assert:
+    that:
+      - mq_lab_remote_api.json.qmgr | selectattr('name', 'equalto', mq_lab_qmgr) | list | length == 1
+
+- name: Summarize example/evaluation endpoint
+  ansible.builtin.debug:
+    msg:
+      - "EXAMPLE / EVALUATION ONLY; no productive approval."
+      - "Before productive use, clarify the license question with IBM."
+      - "MQ REST/console: https://{{ ansible_host }}:9443"
+      - "QMGR: {{ mq_lab_qmgr }}; local and controller authenticated API readiness verified"
+      - "Persistence: /var/lib/bergen-mq-lab/mqm (never automatically deleted)"
+      - "Controller vars: {{ mq_lab_controller_vars_path }}"
+      - "Next: mq-objects.yml --check --diff, then reviewed smoke apply and second run"

@@ -1,0 +1,16 @@
+---
+# Copy to mq.local.yml; edit using vim. Credentials must remain in Vault.
+mq_rest_endpoint: https://CHANGE_ME:9443/ibmmq/rest/v3
+mq_qmgr: CHANGE_ME
+mq_rest_username: CHANGE_ME
+mq_rest_password: "{{ vault_mq_rest_password }}"
+# mq_rest_ca_path: /etc/ssl/certs/company-mq-ca.pem
+mq_allow_deletion: false
+mq_objects:
+  - name: BERGEN.EVENTS
+    type: qlocal
+    state: present
+    attributes:
+      descr: Bergen event queue
+      maxdepth: 5000
+      defpsist: "yes"

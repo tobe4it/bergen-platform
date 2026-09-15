@@ -1,0 +1,81 @@
+---
+# EXAMPLE / EVALUATION ONLY. Productive licensing must be clarified with IBM.
+- name: Validate MQ evaluation before any provisioning
+  hosts: "{{ pve_inventory_host | default(pve_node) }}"
+  become: true
+  gather_facts: false
+  tasks:
+    - name: Require explicit evaluation and license decisions
+      ansible.builtin.assert:
+        that:
+          - not ansible_check_mode
+          - mq_lab_confirm_test_only | default(false) | bool
+          - mq_lab_license_acceptance | default('not-accepted') == 'accept'
+          - lxc_unprivileged | bool
+          - lxc_hostname == 'bergen-mq-lab'
+          - lxc_vmid | int > 0
+          - lxc_template is match('^[^:]+:vztmpl/rockylinux-9-.*[.]tar[.](xz|zst|gz)$')
+          - remote_syslog_server is defined
+          - remote_syslog_server != 'CHANGE_ME'
+          - mq_lab_controller_cidr is defined
+          - mq_lab_controller_cidr != 'CHANGE_ME'
+          - mq_lab_image is match('^icr[.]io/ibm-messaging/mq:9[.]4[.].*-amd64@sha256:[a-f0-9]{64}$')
+        fail_msg: >-
+          Evaluation only. Fill site-local variables and explicitly review/accept
+          IBM terms. Productive licensing must be clarified with IBM. Initial
+          deployment is not a check-mode operation; use mq-objects.yml for drift checks.
+
+    - name: Validate secret inputs before provisioning
+      ansible.builtin.assert:
+        that:
+          - mq_lab_admin_password | length >= 12
+          - mq_lab_app_password | length >= 12
+          - mq_lab_admin_password != mq_lab_app_password
+      no_log: true
+
+    - name: Read cluster-wide VMID assignments
+      ansible.builtin.command:
+        argv: [pvesh, get, /cluster/resources, --type, vm, --output-format, json]
+      register: mq_lab_cluster_resources
+      changed_when: false
+
+    - name: Select existing resource for the requested VMID
+      ansible.builtin.set_fact:
+        mq_lab_existing_resources: "{{ mq_lab_cluster_resources.stdout | from_json | selectattr('vmid', 'equalto', lxc_vmid | int) | list }}"
+
+    - name: Refuse VMID collisions across the cluster
+      ansible.builtin.assert:
+        that:
+          - >-
+            mq_lab_existing_resources | length == 0 or
+            (mq_lab_existing_resources | length == 1 and
+             mq_lab_existing_resources[0].type == 'lxc' and
+             mq_lab_existing_resources[0].name == lxc_hostname and
+             mq_lab_existing_resources[0].node == pve_node)
+        fail_msg: "VMID belongs to another guest or node; no existing guest will be replaced."
+
+    - name: Resolve the selected Rocky template
+      ansible.builtin.command:
+        argv: [pvesm, path, "{{ lxc_template }}"]
+      register: mq_lab_template_path
+      changed_when: false
+
+    - name: Check the template is already downloaded
+      ansible.builtin.stat:
+        path: "{{ mq_lab_template_path.stdout | trim }}"
+      register: mq_lab_template_stat
+
+    - name: Require an existing Rocky 9 template archive
+      ansible.builtin.assert:
+        that:
+          - mq_lab_template_stat.stat.isreg | default(false)
+        fail_msg: "Download the selected Rocky 9 template with pveam first."
+
+- import_playbook: create-lxc.yml
+- import_playbook: configure-mq-lxc-runtime.yml
+- import_playbook: restart-lxc.yml
+- import_playbook: discover-lxc.yml
+- import_playbook: update-inventory.yml
+- import_playbook: bootstrap-mq-lab.yml
+  vars:
+    bootstrap_mq_lab_target: discovered_lxcs

@@ -1,0 +1,84 @@
+---
+- name: Install Rocky evaluation runtime and baseline
+  ansible.builtin.dnf:
+    name: [podman, openssl, firewalld, python3, bash, readline, tmux, vim-enhanced]
+    state: present
+
+- name: Read Podman version
+  ansible.builtin.command:
+    argv: [podman, --version]
+  register: mq_lab_podman_version
+  changed_when: false
+
+- name: Require Podman with Quadlet and secret replacement support
+  ansible.builtin.assert:
+    that:
+      - (mq_lab_podman_version.stdout | regex_search('[0-9]+[.][0-9]+[.][0-9]+')) is version('4.9.0', '>=')
+    fail_msg: "Use a Rocky 9 repository providing Podman >=4.9. Do not disable LXC confinement to work around runtime failures."
+
+- name: Check system Quadlet generator
+  ansible.builtin.stat:
+    path: /usr/lib/systemd/system-generators/podman-system-generator
+  register: mq_lab_quadlet_generator
+
+- name: Require the packaged Quadlet generator
+  ansible.builtin.assert:
+    that:
+      - mq_lab_quadlet_generator.stat.exists
+
+- name: Create managed runtime/configuration directories
+  ansible.builtin.file:
+    path: "{{ item.path }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "{{ item.mode }}"
+  loop:
+    - {path: /etc/bergen-mq-lab, mode: '0750'}
+    - {path: /etc/bergen-mq-lab/secrets, mode: '0700'}
+    - {path: /etc/bergen-mq-lab/private, mode: '0700'}
+    - {path: /etc/containers/systemd, mode: '0755'}
+    - {path: /var/lib/bergen-mq-lab, mode: '0750'}
+
+- name: Configure isolated VFS storage for nested evaluation
+  ansible.builtin.copy:
+    dest: /etc/bergen-mq-lab/storage.conf
+    owner: root
+    group: root
+    mode: '0644'
+    content: |
+      [storage]
+      driver = "vfs"
+      runroot = "/run/bergen-mq-lab/storage"
+      graphroot = "/var/lib/bergen-mq-lab/containers"
+
+- name: Inspect pinned image availability
+  ansible.builtin.command:
+    argv: [podman, image, exists, "{{ mq_lab_image }}"]
+  environment:
+    CONTAINERS_STORAGE_CONF: /etc/bergen-mq-lab/storage.conf
+  register: mq_lab_image_exists
+  changed_when: false
+  failed_when: mq_lab_image_exists.rc not in [0, 1]
+
+- name: Verify nested Podman exposes cgroup v2
+  ansible.builtin.command:
+    argv: [podman, info, "--format={{ '{{.Host.CgroupsVersion}}' }}"]
+  environment:
+    CONTAINERS_STORAGE_CONF: /etc/bergen-mq-lab/storage.conf
+  register: mq_lab_cgroups
+  changed_when: false
+
+- name: Require cgroup v2 for Quadlet
+  ansible.builtin.assert:
+    that:
+      - mq_lab_cgroups.stdout | trim == 'v2'
+    fail_msg: "Quadlet needs cgroup v2. A denied nested-runtime operation is a blocker, not a reason to remove confinement."
+
+- name: Pull pinned IBM evaluation image when absent
+  ansible.builtin.command:
+    argv: [podman, pull, "{{ mq_lab_image }}"]
+  environment:
+    CONTAINERS_STORAGE_CONF: /etc/bergen-mq-lab/storage.conf
+  when: mq_lab_image_exists.rc == 1
+  changed_when: true

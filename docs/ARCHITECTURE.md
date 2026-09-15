@@ -152,9 +152,18 @@ Logging
 - Central Syslog collection
 - Queued remote forwarding for managed services
 
+MQ administration prototype (evaluation only)
+- Controller-local, authenticated HTTPS JSON MQSC desired-state reconciliation
+- Bounded queues/channels/topics/namelists; check/diff and guarded deletion
+- Existing MQ required by reconciler; separate Rocky LXC/Podman evaluation target
+- Evaluation only; productive license question must be clarified with IBM
+- No daytrading message bridge or productive deployment approval
+- Real MQ acceptance, CHLAUTH/OAM and full cross-platform coverage pending
+- See [MQ administration](MQ.md)
+
 Planned
 - llama.cpp
-- IBM MQ
+- IBM MQ deployment and complete security/object lifecycle management
 - Monitoring
 - Nextcloud
 - Backup

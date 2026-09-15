@@ -1,0 +1,31 @@
+---
+- name: Verify the Quadlet generator accepts the lab definition
+  ansible.builtin.command:
+    argv: [/usr/lib/systemd/system-generators/podman-system-generator, --dryrun]
+  environment:
+    QUADLET_UNIT_DIRS: /etc/containers/systemd
+  register: mq_lab_quadlet_preview
+  changed_when: false
+
+- name: Require a generated MQ lab service
+  ansible.builtin.assert:
+    that:
+      - "'bergen-mq-lab.service' in mq_lab_quadlet_preview.stdout"
+      - "'ExecStart=' in mq_lab_quadlet_preview.stdout"
+    fail_msg: "Quadlet did not generate the expected service. Review generator output before attempting startup."
+
+- name: Reload Quadlet generator after definition changes
+  ansible.builtin.systemd_service:
+    daemon_reload: true
+  when: mq_lab_quadlet.changed
+
+# Generated Quadlet services are enabled through [Install], not systemctl enable.
+- name: Start or recreate evaluation container after managed changes
+  ansible.builtin.systemd_service:
+    name: bergen-mq-lab.service
+    state: "{{ 'restarted' if mq_lab_quadlet.changed or mq_lab_secret_updates.changed else 'started' }}"
+
+- name: Require active evaluation service
+  ansible.builtin.command:
+    argv: [systemctl, is-active, bergen-mq-lab.service]
+  changed_when: false

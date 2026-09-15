@@ -1,0 +1,11 @@
+---
+mq_lab_confirm_test_only: false
+mq_lab_license_acceptance: not-accepted
+mq_lab_qmgr: BERGENLAB
+mq_lab_image: ""
+mq_lab_allow_client_connections: false
+mq_lab_client_cidr: ""
+mq_lab_api_retries: 30
+mq_lab_api_retry_delay: 5
+mq_lab_controller_ca_path: "{{ playbook_dir }}/../reports/mq/bergen-mq-lab-ca.crt"
+mq_lab_controller_vars_path: "{{ playbook_dir }}/../vars/mq-lab.local.yml"

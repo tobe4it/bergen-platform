@@ -10,6 +10,34 @@ The project follows **Semantic Versioning (SemVer)** and the changelog format is
 
 ---
 
+## [0.9.0] - 2026-09-15
+
+This release provides an IBM MQ example / evaluation, not approval for
+productive operation. For productive operation, clarify licensing with IBM.
+The Rocky LXC / Podman rollout and acceptance against real MQ remain pending.
+
+### Added
+
+- Parametrized Rocky 9 unprivileged LXC / Podman MQ evaluation example with
+  digest-pinned developer image, persistent QMGR state, Vault-backed Podman
+  secrets, lab CA/TLS verification, source-specific firewall rules and Syslog
+- Explicit example/evaluation-only notices requiring productive licensing to
+  be clarified with IBM; no default license acceptance or productive approval
+- Bounded IBM MQ REST desired-state administration prototype for queues,
+  channels, topics and namelists, with incremental updates, check/diff,
+  deletion gates, TLS verification and post-change validation
+- Offline reconciliation and real-Ansible HTTPS mock tests; documented IBM
+  support/coverage limits and outstanding real-MQ acceptance
+
+### Verified
+
+- 41 automated tests passed; 5 real-Ansible integration tests skipped because
+  the build environment does not permit Ansible's local RPC socket
+- Deployment and bootstrap playbook syntax checked
+- No completed LXC rollout, real-MQ acceptance or productive approval claimed
+
+---
+
 ## [0.8.0] - 2026-09-15
 
 This release adds a dedicated EVCC LXC and a guarded Ansible migration that

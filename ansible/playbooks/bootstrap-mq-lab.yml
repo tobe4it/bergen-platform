@@ -1,0 +1,22 @@
+---
+# EXAMPLE / EVALUATION ONLY. Clarify productive licensing with IBM.
+- name: Bootstrap Rocky Podman MQ evaluation node
+  hosts: "{{ bootstrap_mq_lab_target | default('mq_lab_nodes') }}"
+  become: true
+  gather_facts: true
+  pre_tasks:
+    - name: Require Rocky 9 and explicit evaluation decisions
+      ansible.builtin.assert:
+        that:
+          - not ansible_check_mode
+          - ansible_facts.distribution == 'Rocky'
+          - ansible_facts.distribution_major_version == '9'
+          - ansible_facts.architecture == 'x86_64'
+          - mq_lab_confirm_test_only | default(false) | bool
+          - mq_lab_license_acceptance | default('not-accepted') == 'accept'
+          - remote_syslog_server is defined
+          - remote_syslog_server != 'CHANGE_ME'
+        fail_msg: "Example/evaluation only: requires Rocky 9 amd64, explicit IBM terms decision and local Syslog settings."
+  roles:
+    - role: remote_syslog
+    - role: mq_lab

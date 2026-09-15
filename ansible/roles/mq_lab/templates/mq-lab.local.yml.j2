@@ -1,0 +1,17 @@
+---
+# Generated connection EXAMPLE / EVALUATION ONLY, not production.
+# Clarify the license question with IBM before any productive use.
+mq_rest_endpoint: {{ ('https://' ~ ansible_host ~ ':9443/ibmmq/rest/v3') | to_json }}
+mq_qmgr: {{ mq_lab_qmgr | to_json }}
+mq_rest_username: admin
+mq_rest_password: "{{ '{{ vault_mq_lab_admin_password }}' }}"
+mq_rest_ca_path: {{ mq_lab_controller_ca_path | realpath | to_json }}
+mq_allow_deletion: false
+mq_objects:
+  - name: BERGEN.LAB.SMOKE
+    type: qlocal
+    state: present
+    attributes:
+      descr: Bergen MQ evaluation smoke queue
+      maxdepth: 100
+      defpsist: "yes"
