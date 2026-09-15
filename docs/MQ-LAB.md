@@ -107,6 +107,12 @@ Reserve the discovered DHCP address afterward.
 
 ## Persistence, TLS, networking and logging
 
+Authenticated REST readiness checks include the `ibm-mq-rest-csrf-token`
+header, required even for GET requests using HTTP Basic authentication
+([IBM authentication documentation](https://www.ibm.com/docs/en/ibm-mq/9.4.x?topic=security-using-http-basic-authentication-rest-api)).
+Omitting it can produce HTTP 401 despite valid credentials. Do not work around
+authentication failures by accepting 401 as readiness or disabling TLS checks.
+
 - MQ state/messages live in `/var/lib/bergen-mq-lab/mqm`, bind-mounted to
   `/mnt/mqm` with IBM UID 1001/GID 0. Container recreation does not delete this
   directory. Existing unmarked data, QMGR renaming and image changes are refused.

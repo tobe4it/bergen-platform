@@ -11,6 +11,8 @@
     url_username: admin
     url_password: "{{ mq_lab_admin_password }}"
     force_basic_auth: true
+    headers:
+      ibm-mq-rest-csrf-token: bergen-mq-lab
     validate_certs: true
     ca_path: /etc/bergen-mq-lab/ca.crt
     use_proxy: false
@@ -58,6 +60,8 @@
     url_username: admin
     url_password: "{{ mq_lab_admin_password }}"
     force_basic_auth: true
+    headers:
+      ibm-mq-rest-csrf-token: bergen-mq-lab
     validate_certs: true
     ca_path: "{{ mq_lab_controller_ca_path }}"
     use_proxy: false

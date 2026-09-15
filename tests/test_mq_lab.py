@@ -32,6 +32,16 @@ def render(template, **extra):
 
 
 class LabContracts(unittest.TestCase):
+    def test_all_basic_auth_readiness_requests_have_mq_csrf_header(self):
+        tasks = yaml.safe_load((ROLE / "tasks/api.yml").read_text())
+        requests = [t["ansible.builtin.uri"] for t in tasks if "ansible.builtin.uri" in t]
+        self.assertEqual(len(requests), 2)
+        for request in requests:
+            self.assertTrue(request["force_basic_auth"])
+            self.assertIn("ibm-mq-rest-csrf-token", request["headers"])
+            self.assertTrue(request["validate_certs"])
+            self.assertFalse(request["use_proxy"])
+
     def test_ssh_preparation_runs_after_start_before_discovery(self):
         plays = yaml.safe_load((ROOT / "ansible/playbooks/deploy-mq-lab.yml").read_text())
         imports = [p["import_playbook"] for p in plays if "import_playbook" in p]

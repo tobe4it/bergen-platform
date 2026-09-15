@@ -10,6 +10,8 @@ The project follows **Semantic Versioning (SemVer)** and the changelog format is
 
 ### Fixed
 
+- MQ REST readiness requests now include IBM's required CSRF header for HTTP
+  Basic authentication, both locally and from the Ansible controller
 - Rocky MQ evaluation deployment now prepares missing OpenSSH through Proxmox
   before SSH discovery, preserving existing host keys and SSH security policy
 - Existing MQ evaluation LXC can resume deployment after a missing-SSH failure
