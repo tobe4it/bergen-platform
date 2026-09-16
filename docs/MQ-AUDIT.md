@@ -40,9 +40,10 @@ Bei FAIL wird erst gespeichert, dann das Playbook abgebrochen. Bei Verbindungsab
 SIGKILL oder unklarer Bereinigung Präfix prüfen; nicht blind wiederholen oder FORCE
 verwenden. Keine Zugangsdaten in Berichte oder Git aufnehmen.
 
-Channel-Löschungen werden mit dem zuvor per DISPLAY ermittelten `CHLTYPE`
-qualifiziert. Ein fehlender oder unbekannter Typ führt vor DELETE zum sicheren
-Abbruch, damit gleichnamige Channel-Namensräume eindeutig adressiert bleiben.
+Channel-Löschungen werden anhand des zuvor per DISPLAY ermittelten `CHLTYPE` mit
+der richtigen `CHLTABLE` (`CLNTCONN` oder `QMGR`) qualifiziert. Ein fehlender oder
+unbekannter Typ führt vor DELETE zum sicheren Abbruch, damit gleichnamige
+Channel-Namensräume eindeutig adressiert bleiben.
 
 ## Noch nötige Single-QMgr-Prüfungen
 

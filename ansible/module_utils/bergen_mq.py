@@ -202,7 +202,10 @@ def plan_object(obj, current):
             chltype = str(current.get("chltype", "")).lower()
             if chltype not in CHANNEL_TYPES:
                 raise MQError("DISPLAY lacks a supported channel type required for safe deletion")
-            delete_parameters["chltype"] = chltype
+            # DELETE CHANNEL selects the repository table, not the DEFINE
+            # channel type. CLNTCONN objects live in the client table; all
+            # remaining supported types live in the queue-manager table.
+            delete_parameters["chltable"] = "clntconn" if chltype == "clntconn" else "qmgr"
         return dict(action="delete" if current is not None else "none", parameters=delete_parameters,
                     before={"state": "present" if current is not None else "absent"}, after={"state": "absent"})
     if current is None:
