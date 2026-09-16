@@ -70,6 +70,26 @@
       ansible.builtin.debug:
         msg: "{{ audit_run.report.status }} — {{ audit_directory }}; review evidence, limitations and residual objects."
 
+    - name: Submit optional audit email before final test assertion
+      mq_audit_mail:
+        recipient: "{{ mq_audit_mail_to }}"
+        sender: "{{ mq_audit_mail_from | default('ansible@bp-controller') }}"
+        sendmail_path: "{{ mq_audit_sendmail_path | default('/usr/sbin/sendmail') }}"
+        subject: "MQ evaluation {{ audit_run.report.status }} — {{ mq_qmgr }} — {{ audit_run.report.prefix }}"
+        body: "Evaluation only; clarify productive licensing with IBM. Result: {{ audit_run.report.status }}. Review attached evidence and cleanup status."
+        attachments:
+          - "{{ audit_directory }}/Pruefbericht.md"
+          - "{{ audit_directory }}/evidence.json"
+          - "{{ audit_directory }}/SHA256SUMS"
+      when: mq_audit_mail_to | default('') | length > 0
+      register: audit_mail
+      ignore_errors: true
+
+    - name: Require requested mail submission to succeed
+      ansible.builtin.assert:
+        that: [not (audit_mail.failed | default(false))]
+        fail_msg: "Audit email submission failed. Test result: {{ audit_run.report.status }}. Evidence remains at {{ audit_directory }}."
+
     - name: Require all scoped cases and cleanup to pass
       ansible.builtin.assert:
         that: [audit_run.report.status == 'PASS']

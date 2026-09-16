@@ -42,6 +42,21 @@ verwenden. Keine Zugangsdaten in Berichte oder Git aufnehmen.
 
 ## Noch nötige Single-QMgr-Prüfungen
 
+### Optionaler Mailversand
+
+Zusätzlich `-e mq_audit_mail_to=empfaenger@example.org` angeben. Ohne Parameter
+erfolgt kein Versand. Die drei Ergebnisdateien werden auch bei FAIL vor der
+abschließenden Assertion versendet. Voraussetzung: ein auf bp-controller bereits
+konfigurierter lokaler MTA mit `/usr/sbin/sendmail`. Das Playbook installiert oder
+konfiguriert keinen Mailserver und übernimmt keine SMTP-Zugangsdaten.
+Absender und Sendmail-Pfad sind mit `mq_audit_mail_from` beziehungsweise
+`mq_audit_sendmail_path` überschreibbar; Standardabsender ist `ansible@bp-controller`.
+Für externen Versand gegebenenfalls einen vom Relay zugelassenen Absender verwenden.
+Eine erfolgreiche Übergabe an den MTA ist kein Nachweis der Zustellung im Postfach.
+Ein Versandfehler lässt die Ergebnisdateien bestehen und führt zum Playbook-Fehler.
+Preflight-Abbrüche ohne Ergebnisdateien erzeugen keine Mail. Die Anhänge können
+betriebliche Metadaten enthalten; ausschließlich autorisierte Empfänger verwenden.
+
 Dieser erste automatisierte Lauf testet die implementierte Objektverwaltung, nicht
 alles, was IBM MQ auf einem einzelnen QMgr grundsätzlich kann. Separat offen:
 
