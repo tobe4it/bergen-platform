@@ -23,8 +23,9 @@ IBM documents [developer secrets](https://github.com/ibm-messaging/mq-container/
 [persistence and TLS certificate mounting](https://github.com/ibm-messaging/mq-container/blob/master/docs/usage.md),
 and [container UID 1001/GID 0 and capability removal](https://github.com/ibm-messaging/mq-container/blob/master/docs/security.md).
 The example pins MQ 9.4 LTS `9.4.0.25-r3-amd64` to the public registry manifest
-digest verified on 2026-09-15. The image has not yet been run on our Proxmox host;
-registry availability is not a runtime or security certification. Review IBM
+digest verified on 2026-09-15. The user-run evaluation deployment subsequently
+started this image successfully on Proxmox; this is not security certification.
+Review IBM
 release/security guidance and match the intended production MQ version before
 using evaluation results.
 
@@ -219,9 +220,17 @@ Prepared and checked locally: YAML/Ansible syntax, rendered Quadlet/connection
 contracts, license gates, secret/TLS settings, and actual OpenSSL certificate
 generation/chain/SAN checks against temporary test paths.
 
-**Not yet verified:** LXC creation, Rocky package/runtime behavior, actual image
-startup, cgroup/AppArmor/firewalld behavior, remote REST/MQ reconciliation,
-reboot persistence or Syslog delivery. We cannot reach the home Proxmox network
-from this workspace. Full Ansible execution here is also blocked by denied local
-RPC/IPC; opt-in integration tests must run on bp-controller. This is a prepared
-evaluation example, not a completed rollout or a productive approval.
+**User-run evaluation verified (v0.9.1):** deployment completed without failed
+or unreachable hosts, actual MQ image startup, authenticated local/controller
+REST readiness with CA/TLS verification, correct `BERGENLAB` identity and
+browser login from the authorized Intern source. Real MQ smoke test checked
+the missing `BERGEN.LAB.SMOKE` without mutations, created/verified it on apply
+and reported `changed=0`/zero mutations on the second apply.
+
+**Not yet verified:** other MQ object types, ALTER and deletion safeguards,
+CHLAUTH/OAM, reboot persistence, backup/restore and actual Syslog delivery.
+Successful startup does not qualify the complete cgroup/AppArmor/firewall
+security policy or production support. We cannot reach the home Proxmox network
+directly from this workspace. Full Ansible execution here is blocked by denied
+local RPC/IPC; the five opt-in integration tests remain skipped, not passed.
+The completed rollout is still an evaluation, not a productive approval.

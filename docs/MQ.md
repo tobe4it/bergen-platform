@@ -178,8 +178,16 @@ any module execution. The five full-runtime tests are opt-in and otherwise
 reported as skipped, not successful. Run them on bp-controller before acceptance.
 None of these mock tests prove actual IBM MQ semantics.
 
-Recorded development result: **30 tests passed, 5 opt-in Ansible runtime tests
-skipped**; syntax check, module documentation and Python compilation succeeded.
+Recorded development result for v0.9.1: **50 offline tests passed, 5 opt-in
+Ansible runtime tests skipped**, including lab/inventory contracts; inventory
+writer syntax checked. Earlier MQ-only validation also checked module docs
+and Python compilation.
+
+User-run real-MQ evaluation on `BERGENLAB` verified a missing local queue check
+with zero mutations, creation/post-state verification of `BERGEN.LAB.SMOKE`
+and an idempotent second apply with `changed=0`/zero mutations. This proves
+that bounded local-queue workflow only, not all supported object types,
+ALTER/deletion safeguards or the IBM Idea's full acceptance criteria.
 
 Before production acceptance, run the reviewed declarations on a disposable,
 authorized MQ 9.4 test QMGR: missing object check, create, second run, one-field

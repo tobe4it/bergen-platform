@@ -8,6 +8,14 @@ The project follows **Semantic Versioning (SemVer)** and the changelog format is
 
 ## [Unreleased]
 
+---
+
+## [0.9.1] - 2026-09-16
+
+This patch release records fixes from the successful Rocky LXC / Podman MQ
+evaluation rollout. Evaluation only, not productive approval; productive
+licensing must be clarified with IBM.
+
 ### Added
 
 - Optional `mq_lab_admin_cidrs` list for source-specific browser/admin HTTPS
@@ -26,6 +34,20 @@ The project follows **Semantic Versioning (SemVer)** and the changelog format is
 - Rocky MQ evaluation deployment now prepares missing OpenSSH through Proxmox
   before SSH discovery, preserving existing host keys and SSH security policy
 - Existing MQ evaluation LXC can resume deployment after a missing-SSH failure
+
+### Verified
+
+- User-run evaluation rollout completed with no failed/unreachable hosts
+- Authenticated REST readiness and queue-manager identity verified locally
+  and from bp-controller with CA/TLS verification enabled
+- Browser login confirmed after the authorized Intern HTTPS source was added
+- Real MQ `BERGENLAB` smoke test: check detected missing `BERGEN.LAB.SMOKE`
+  with zero mutations; apply created/verified it; second apply reported
+  `changed=0` and zero mutations
+- 50 offline tests passed; 5 opt-in Ansible runtime tests skipped; inventory
+  writer syntax checked
+- Other object types/ALTER/deletion safeguards, CHLAUTH/OAM, reboot persistence,
+  backup/restore and actual Syslog delivery remain outside this verification
 
 ---
 
