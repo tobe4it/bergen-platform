@@ -120,7 +120,7 @@ class ReconciliationTests(unittest.TestCase):
                               allow_deletion=True)
         self.assertTrue(result["changed"])
         deletion = next(call for call in client.calls if call[0] == "delete")
-        self.assertEqual(deletion[3], {"chltable": "clntconn"})
+        self.assertEqual(deletion[3], {"chltable": "clnttbl"})
 
     def test_non_client_channel_delete_uses_qmgr_table(self):
         name = "BERGEN.RECEIVER"
@@ -128,7 +128,7 @@ class ReconciliationTests(unittest.TestCase):
         mq.reconcile(client, [dict(name=name, type="channel", state="absent")],
                      allow_deletion=True)
         deletion = next(call for call in client.calls if call[0] == "delete")
-        self.assertEqual(deletion[3], {"chltable": "qmgr"})
+        self.assertEqual(deletion[3], {"chltable": "qmgrtbl"})
 
     def test_channel_delete_refuses_missing_type_before_mutation(self):
         name = "BERGEN.CLIENT"

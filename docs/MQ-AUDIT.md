@@ -41,9 +41,14 @@ SIGKILL oder unklarer Bereinigung Präfix prüfen; nicht blind wiederholen oder 
 verwenden. Keine Zugangsdaten in Berichte oder Git aufnehmen.
 
 Channel-Löschungen werden anhand des zuvor per DISPLAY ermittelten `CHLTYPE` mit
-der richtigen `CHLTABLE` (`CLNTCONN` oder `QMGR`) qualifiziert. Ein fehlender oder
+der richtigen `CHLTABLE` (`CLNTTBL` oder `QMGRTBL`) qualifiziert. Ein fehlender oder
 unbekannter Typ führt vor DELETE zum sicheren Abbruch, damit gleichnamige
 Channel-Namensräume eindeutig adressiert bleiben.
+
+Referenz: [IBM MQ 9.4 DELETE CHANNEL](https://www.ibm.com/docs/en/ibm-mq/9.4.x?topic=reference-delete-channel-delete-channel).
+Die früher verwendeten Werte `clntconn` und `qmgr` waren hier falsch. Die reale
+Antwort `MQWB0121E` auf `clntconn` belegt den Fehler; korrigiert wird auf `clnttbl`
+beziehungsweise `qmgrtbl`. Die erneute Live-Verifikation steht noch aus.
 
 Diagnosehinweis: Der Live-Lauf mit Commit `424cbaf` hat die Channel-Löschung
 weiterhin mit HTTP 400 abgelehnt. Die CHLTABLE-Änderung ist damit **nicht live

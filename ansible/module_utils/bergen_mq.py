@@ -248,7 +248,7 @@ def plan_object(obj, current):
             # DELETE CHANNEL selects the repository table, not the DEFINE
             # channel type. CLNTCONN objects live in the client table; all
             # remaining supported types live in the queue-manager table.
-            delete_parameters["chltable"] = "clntconn" if chltype == "clntconn" else "qmgr"
+            delete_parameters["chltable"] = "clnttbl" if chltype == "clntconn" else "qmgrtbl"
         return dict(action="delete" if current is not None else "none", parameters=delete_parameters,
                     before={"state": "present" if current is not None else "absent"}, after={"state": "absent"})
     if current is None:

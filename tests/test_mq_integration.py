@@ -192,6 +192,19 @@ class HTTPSIntegrationTests(unittest.TestCase):
             self.rest_client(ca=False).command("display", "queue", "BERGEN.TEST")
         self.assertFalse(self.requests)
 
+    def test_https_delete_channel_table_wire_values(self):
+        # IBM DELETE CHANNEL CHLTABLE accepts CLNTTBL/QMGRTBL, not channel types.
+        for channel_type, table in [('CLNTCONN', 'clnttbl'), ('RCVR', 'qmgrtbl')]:
+            name = 'BERGEN.WIRE'
+            type(self).client.objects[name] = dict(channel=name, chltype=channel_type)
+            start = len(self.requests)
+            mq.reconcile(self.rest_client(), [dict(name=name, type='channel', state='absent')],
+                         allow_deletion=True)
+            deletes = [body for _, _, body in self.requests[start:] if body['command'] == 'delete']
+            self.assertEqual(len(deletes), 1)
+            self.assertEqual(deletes[0]['parameters'], {'chltable': table})
+            self.assertNotIn(name, type(self).client.objects)
+
     def test_https_transport_auth_error_body_redacted(self):
         type(self).mode = "auth_failure"
         with self.assertRaises(mq.MQError) as caught:
