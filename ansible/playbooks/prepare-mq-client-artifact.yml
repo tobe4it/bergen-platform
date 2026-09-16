@@ -1,0 +1,74 @@
+---
+- name: Collect MQ Java client from the selected evaluation server
+  hosts: "{{ mq_client_source_host }}"
+  become: true
+  gather_facts: false
+  tasks:
+    - name: Require explicit source and evaluation decision
+      ansible.builtin.assert:
+        that:
+          - not ansible_check_mode
+          - mq_lab_confirm_test_only | default(false) | bool
+          - mq_lab_license_acceptance | default('not-accepted') == 'accept'
+          - mq_client_source_image is match('^icr[.]io/ibm-messaging/mq:9[.]4[.].*-amd64@sha256:[a-f0-9]{64}$')
+
+    - name: Read source container image identity without environment secrets
+      ansible.builtin.command:
+        argv: [podman, inspect, --format, "{{ '{{' }}.ImageName{{ '}}' }}", bergen-mq-lab]
+      environment:
+        CONTAINERS_STORAGE_CONF: /etc/bergen-mq-lab/storage.conf
+      register: mq_client_image_identity
+      changed_when: false
+
+    - name: Require the selected immutable source image
+      ansible.builtin.assert:
+        that:
+          - mq_client_image_identity.stdout | trim == mq_client_source_image
+
+    - name: Allocate source staging directory
+      ansible.builtin.tempfile:
+        state: directory
+        prefix: bergen-mq-client-
+      register: mq_client_stage
+
+    - name: Transfer library with provenance
+      block:
+        - name: Copy the client library out of the running container
+          ansible.builtin.command:
+            argv: [podman, cp, 'bergen-mq-lab:/opt/mqm/java/lib/com.ibm.mq.allclient.jar', "{{ mq_client_stage.path }}/allclient.jar"]
+          environment:
+            CONTAINERS_STORAGE_CONF: /etc/bergen-mq-lab/storage.conf
+          changed_when: true
+
+        - name: Compute source library digest
+          ansible.builtin.stat:
+            path: "{{ mq_client_stage.path }}/allclient.jar"
+            checksum_algorithm: sha256
+          register: mq_client_library_stat
+
+        - name: Protect controller artifact directory
+          ansible.builtin.file:
+            path: "{{ playbook_dir }}/../reports/mq-client/{{ lxc_hostname }}"
+            state: directory
+            mode: '0700'
+          delegate_to: localhost
+          become: false
+
+        - name: Fetch library through authenticated SSH
+          ansible.builtin.fetch:
+            src: "{{ mq_client_stage.path }}/allclient.jar"
+            dest: "{{ playbook_dir }}/../reports/mq-client/{{ lxc_hostname }}/allclient.jar"
+            flat: true
+
+        - name: Record deployment artifact facts on controller
+          ansible.builtin.set_fact:
+            mq_client_artifact_path: "{{ playbook_dir }}/../reports/mq-client/{{ lxc_hostname }}/allclient.jar"
+            mq_client_artifact_sha256: "{{ mq_client_library_stat.stat.checksum }}"
+          delegate_to: localhost
+          delegate_facts: true
+          become: false
+      always:
+        - name: Remove only this run's temporary source directory
+          ansible.builtin.file:
+            path: "{{ mq_client_stage.path }}"
+            state: absent

@@ -1,0 +1,40 @@
+---
+# EXAMPLE / EVALUATION ONLY. Not approved for productive operation.
+# Before productive use, clarify the license question with IBM.
+# Copy to ansible/vars/mq-topology/client.yml (Git-ignored), edit with vim.
+lxc_vmid: CHANGE_ME
+lxc_hostname: bergen-mq-client
+lxc_template: CHANGE_ME
+lxc_storage: CHANGE_ME
+lxc_rootfs_size: 8
+lxc_memory: 1024
+lxc_swap: 512
+lxc_cores: 1
+lxc_bridge: CHANGE_ME
+lxc_ip: dhcp
+lxc_ip6: dhcp
+lxc_unprivileged: true
+lxc_onboot: true
+lxc_start_order: 40
+lxc_firewall: 1
+lxc_features: []
+lxc_ssh_public_key: "{{ lookup('file', lookup('env', 'HOME') + '/.ssh/id_ed25519.pub') }}"
+lxc_root_password: "{{ vault_lxc_root_password }}"
+lxc_inventory_group: mq_client_nodes
+lxc_inventory_file: "{{ playbook_dir }}/../inventory.local.yml"
+pve_node: CHANGE_ME
+pve_inventory_host: CHANGE_ME
+
+remote_syslog_enabled: true
+remote_syslog_server: CHANGE_ME
+remote_syslog_port: 514
+remote_syslog_protocol: tcp
+remote_syslog_send_test: true
+
+# Explicit gates. Review IBM terms; do not accept a license automatically.
+mq_lab_confirm_test_only: false
+mq_lab_license_acceptance: "not-accepted"
+
+# Existing inventory host, reached over SSH from bp-controller.
+mq_client_source_host: bergen-mq-lab
+mq_client_source_image: icr.io/ibm-messaging/mq:9.4.0.25-r3-amd64@sha256:56f294fb083d9030ba24e972f8c66d4888f76472d7eb8f6feae8d526eee39111

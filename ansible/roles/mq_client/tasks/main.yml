@@ -1,0 +1,71 @@
+---
+- name: Require Rocky evaluation client and collected artifact
+  ansible.builtin.assert:
+    that:
+      - ansible_facts.distribution == 'Rocky'
+      - ansible_facts.distribution_major_version == '9'
+      - ansible_facts.architecture == 'x86_64'
+      - mq_lab_confirm_test_only | bool
+      - mq_lab_license_acceptance == 'accept'
+      - hostvars['localhost'].mq_client_artifact_sha256 is match('^[a-f0-9]{64}$')
+
+- name: Install Java compiler and diagnostic tools
+  ansible.builtin.dnf:
+    name: [java-17-openjdk-devel, openssl, python3]
+    state: present
+
+- name: Create unprivileged test account
+  ansible.builtin.user:
+    name: mqtest
+    system: true
+    create_home: true
+    home: /var/lib/bergen-mq-client
+    shell: /sbin/nologin
+
+- name: Create root-owned client library directory
+  ansible.builtin.file:
+    path: /opt/bergen-mq-client/lib
+    state: directory
+    owner: root
+    group: root
+    mode: '0755'
+
+- name: Install collected MQ library
+  ansible.builtin.copy:
+    src: "{{ hostvars['localhost'].mq_client_artifact_path }}"
+    dest: /opt/bergen-mq-client/lib/com.ibm.mq.allclient.jar
+    owner: root
+    group: root
+    mode: '0644'
+
+- name: Compute installed library digest
+  ansible.builtin.stat:
+    path: /opt/bergen-mq-client/lib/com.ibm.mq.allclient.jar
+    checksum_algorithm: sha256
+  register: mq_client_installed_library
+
+- name: Verify library transfer integrity
+  ansible.builtin.assert:
+    that:
+      - mq_client_installed_library.stat.checksum == hostvars['localhost'].mq_client_artifact_sha256
+
+- name: Verify Java compiler is available
+  ansible.builtin.command:
+    argv: [/usr/bin/javac, -version]
+  register: mq_client_compiler
+  changed_when: false
+
+- name: Record client runtime provenance
+  ansible.builtin.copy:
+    dest: /opt/bergen-mq-client/provenance.json
+    owner: root
+    group: root
+    mode: '0644'
+    content: "{{ {'source_host': mq_client_source_host, 'source_image': mq_client_source_image, 'library_sha256': mq_client_installed_library.stat.checksum, 'compiler': mq_client_compiler.stdout, 'messaging_tests': 'NOT_TESTED'} | to_nice_json }}\n"
+
+- name: Summarize client infrastructure
+  ansible.builtin.debug:
+    msg:
+      - "Evaluation client {{ inventory_hostname }} at {{ ansible_host }} prepared."
+      - "Java compiler and MQ library verified; unprivileged account mqtest."
+      - "Messaging, TLS, CHLAUTH/OAM and two-QMgr transport remain NOT_TESTED."

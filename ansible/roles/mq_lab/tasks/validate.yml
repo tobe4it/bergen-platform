@@ -8,6 +8,12 @@
       - ansible_facts.distribution_major_version == '9'
       - ansible_facts.architecture == 'x86_64'
       - mq_lab_qmgr is match('^[A-Za-z0-9._%-]{1,48}$')
+      - mq_lab_admin_password_var is match('^vault_[a-zA-Z0-9_]+$')
+      - >-
+        inventory_hostname == 'bergen-mq-lab' or
+        (mq_lab_qmgr != 'BERGENLAB' and
+         mq_lab_controller_ca_path == playbook_dir ~ '/../reports/mq/' ~ inventory_hostname ~ '-ca.crt' and
+         mq_lab_controller_vars_path == playbook_dir ~ '/../vars/' ~ inventory_hostname ~ '.local.yml')
       - mq_lab_image is match('^icr[.]io/ibm-messaging/mq:9[.]4[.].*-amd64@sha256:[a-f0-9]{64}$')
       - ansible_host is match('^[0-9]+[.][0-9]+[.][0-9]+[.][0-9]+$')
       - inventory_hostname is match('^[A-Za-z0-9.-]+$')
@@ -21,6 +27,7 @@
       - mq_lab_admin_password | length >= 12
       - mq_lab_app_password | length >= 12
       - mq_lab_admin_password != mq_lab_app_password
+      - mq_lab_admin_password == lookup('ansible.builtin.vars', mq_lab_admin_password_var)
       - "'\n' not in mq_lab_admin_password"
       - "'\n' not in mq_lab_app_password"
   no_log: true

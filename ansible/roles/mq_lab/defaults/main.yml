@@ -2,6 +2,7 @@
 mq_lab_confirm_test_only: false
 mq_lab_license_acceptance: not-accepted
 mq_lab_qmgr: BERGENLAB
+mq_lab_admin_password_var: vault_mq_lab_admin_password
 mq_lab_image: ""
 mq_lab_allow_client_connections: false
 mq_lab_client_cidr: ""

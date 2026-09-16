@@ -8,6 +8,21 @@ The project follows **Semantic Versioning (SemVer)** and the changelog format is
 
 ## [Unreleased]
 
+### Added
+
+- Separate second-QMgr and client-LXC site examples and deployment instructions
+  in `docs/MQ-TOPOLOGY.md`; VMIDs/network settings remain explicit site inputs.
+- Rocky Java client role with non-login test account, SSH collection of the MQ
+  library, source image check, SHA-256 transfer verification and provenance.
+
+### Changed
+
+- MQ server deployment accepts isolated named lab instances and requires separate
+  controller CA/connection paths and Vault reference for additional instances.
+- Client deployment starts a stopped LXC without restarting an already running one.
+- Messaging/security/two-QMgr tests remain NOT_TESTED pending their implementation
+  and live execution; this change is infrastructure preparation only.
+
 ---
 
 ## [0.9.1] - 2026-09-16

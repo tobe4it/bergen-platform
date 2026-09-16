@@ -1,0 +1,53 @@
+---
+# EXAMPLE / EVALUATION ONLY. Not approved for productive operation.
+# Before productive use, clarify the license question with IBM.
+# Copy to ansible/vars/mq-topology/qmgr-b.yml (Git-ignored), edit with vim.
+lxc_vmid: CHANGE_ME
+lxc_hostname: bergen-mq-lab-b
+lxc_template: CHANGE_ME
+lxc_storage: CHANGE_ME
+lxc_rootfs_size: 20
+lxc_memory: 2048
+lxc_swap: 512
+lxc_cores: 2
+lxc_bridge: CHANGE_ME
+lxc_ip: dhcp
+lxc_ip6: dhcp
+lxc_unprivileged: true
+lxc_onboot: true
+lxc_start_order: 40
+lxc_firewall: 1
+lxc_features: [nesting=1, keyctl=1]
+lxc_ssh_public_key: "{{ lookup('file', lookup('env', 'HOME') + '/.ssh/id_ed25519.pub') }}"
+lxc_root_password: "{{ vault_lxc_root_password }}"
+lxc_inventory_group: mq_lab_nodes
+lxc_inventory_file: "{{ playbook_dir }}/../inventory.local.yml"
+pve_node: CHANGE_ME
+pve_inventory_host: CHANGE_ME
+
+remote_syslog_enabled: true
+remote_syslog_server: CHANGE_ME
+remote_syslog_port: 514
+remote_syslog_protocol: tcp
+remote_syslog_send_test: true
+
+# Explicit gates. Review IBM terms; do not accept a license automatically.
+mq_lab_confirm_test_only: false
+mq_lab_license_acceptance: "not-accepted"
+mq_lab_admin_password: "{{ vault_mq_lab_b_admin_password }}"
+mq_lab_app_password: "{{ vault_mq_lab_b_app_password }}"
+# Direct controller source address/network, e.g. an authorized IPv4 /32.
+mq_lab_controller_cidr: CHANGE_ME
+# Additional browser/admin IPv4 networks for HTTPS 9443 only. Default: none.
+mq_lab_admin_cidrs: []
+# MQ listener stays blocked by host firewall unless explicitly enabled below.
+mq_lab_allow_client_connections: false
+mq_lab_client_cidr: CHANGE_ME
+
+# Verified public registry manifest on 2026-09-15; fixed amd64 MQ 9.4 LTS image.
+# Re-check IBM release/security notes before deployment. No automatic upgrades.
+mq_lab_image: icr.io/ibm-messaging/mq:9.4.0.25-r3-amd64@sha256:56f294fb083d9030ba24e972f8c66d4888f76472d7eb8f6feae8d526eee39111
+mq_lab_qmgr: BERGENLABB
+mq_lab_admin_password_var: vault_mq_lab_b_admin_password
+mq_lab_controller_ca_path: "{{ playbook_dir }}/../reports/mq/{{ lxc_hostname }}-ca.crt"
+mq_lab_controller_vars_path: "{{ playbook_dir }}/../vars/{{ lxc_hostname }}.local.yml"

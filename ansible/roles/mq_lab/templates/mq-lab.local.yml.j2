@@ -4,7 +4,7 @@
 mq_rest_endpoint: {{ ('https://' ~ ansible_host ~ ':9443/ibmmq/rest/v3') | to_json }}
 mq_qmgr: {{ mq_lab_qmgr | to_json }}
 mq_rest_username: admin
-mq_rest_password: "{{ '{{ vault_mq_lab_admin_password }}' }}"
+mq_rest_password: "{{ '{{ ' ~ (mq_lab_admin_password_var | default('vault_mq_lab_admin_password')) ~ ' }}' }}"
 mq_rest_ca_path: {{ mq_lab_controller_ca_path | realpath | to_json }}
 mq_allow_deletion: false
 mq_objects:

@@ -12,7 +12,15 @@
           - mq_lab_confirm_test_only | default(false) | bool
           - mq_lab_license_acceptance | default('not-accepted') == 'accept'
           - lxc_unprivileged | bool
-          - lxc_hostname == 'bergen-mq-lab'
+          - lxc_hostname is match('^bergen-mq-lab(-[a-z0-9]+)?$')
+          - lxc_inventory_group == 'mq_lab_nodes'
+          - mq_lab_qmgr is match('^[A-Za-z][A-Za-z0-9._%-]{0,47}$')
+          - >-
+            lxc_hostname == 'bergen-mq-lab' or
+            (mq_lab_qmgr != 'BERGENLAB' and
+             mq_lab_controller_ca_path | default('') == playbook_dir ~ '/../reports/mq/' ~ lxc_hostname ~ '-ca.crt' and
+             mq_lab_controller_vars_path | default('') == playbook_dir ~ '/../vars/' ~ lxc_hostname ~ '.local.yml' and
+             mq_lab_admin_password_var | default('') is match('^vault_mq_lab_[a-z0-9_]+_admin_password$'))
           - lxc_vmid | int > 0
           - lxc_template is match('^[^:]+:vztmpl/rockylinux-9-.*[.]tar[.](xz|zst|gz)$')
           - remote_syslog_server is defined

@@ -17,7 +17,7 @@
           - not ansible_check_mode
           - mq_lab_confirm_test_only | default(false) | bool
           - mq_lab_license_acceptance | default('not-accepted') == 'accept'
-          - lxc_hostname == 'bergen-mq-lab'
+          - lxc_hostname is match('^bergen-mq-(lab|client)(-[a-z0-9]+)?$')
           - "('hostname: ' ~ lxc_hostname) in mq_lab_ssh_lxc_config.stdout_lines"
           - "'unprivileged: 1' in mq_lab_ssh_lxc_config.stdout_lines"
           - "'lxc.apparmor.profile: unconfined' not in mq_lab_ssh_lxc_config.stdout"

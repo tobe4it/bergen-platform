@@ -131,6 +131,44 @@ class LabContracts(unittest.TestCase):
         self.assertEqual(data["mq_rest_endpoint"], "https://192.0.2.10:9443/ibmmq/rest/v3")
         self.assertFalse(data["mq_allow_deletion"])
 
+    def test_second_qmgr_connection_does_not_use_first_secret_or_ca(self):
+        text = render((ROLE / "templates/mq-lab.local.yml.j2").read_text(),
+                      mq_lab_qmgr="BERGENLABB", ansible_host="192.0.2.11",
+                      mq_lab_admin_password_var="vault_mq_lab_b_admin_password",
+                      mq_lab_controller_ca_path="/tmp/bergen-mq-lab-b-ca.crt")
+        data = yaml.safe_load(text)
+        self.assertEqual(data["mq_qmgr"], "BERGENLABB")
+        self.assertEqual(data["mq_rest_password"], "{{ vault_mq_lab_b_admin_password }}")
+        self.assertEqual(data["mq_rest_ca_path"], "/tmp/bergen-mq-lab-b-ca.crt")
+        self.assertNotIn("vault_mq_lab_admin_password", text)
+
+    def test_second_qmgr_refuses_shared_controller_artifacts(self):
+        import re
+        play = yaml.safe_load((ROOT / "ansible/playbooks/deploy-mq-lab.yml").read_text())[0]
+        guards = play["tasks"][0]["ansible.builtin.assert"]["that"]
+        guard = next(g for g in guards if "mq_lab_controller_ca_path" in g)
+        env = environment()
+        env.tests["match"] = lambda value, pattern: re.match(pattern, value) is not None
+        evaluate = env.compile_expression(guard)
+        context = dict(lxc_hostname="bergen-mq-lab-b", mq_lab_qmgr="BERGENLABB",
+                       playbook_dir="/repo/ansible/playbooks",
+                       mq_lab_controller_ca_path="/repo/ansible/playbooks/../reports/mq/bergen-mq-lab-b-ca.crt",
+                       mq_lab_controller_vars_path="/repo/ansible/playbooks/../vars/bergen-mq-lab-b.local.yml",
+                       mq_lab_admin_password_var="vault_mq_lab_b_admin_password")
+        self.assertTrue(evaluate(**context))
+        for key, bad in [("mq_lab_controller_ca_path", "/repo/ansible/playbooks/../reports/mq/bergen-mq-lab-ca.crt"),
+                         ("mq_lab_controller_vars_path", "/repo/ansible/playbooks/../vars/mq-lab.local.yml"),
+                         ("mq_lab_qmgr", "BERGENLAB"),
+                         ("mq_lab_admin_password_var", "vault_mq_lab_admin_password")]:
+            with self.subTest(key=key):
+                self.assertFalse(evaluate(**dict(context, **{key: bad})))
+
+    def test_podman_image_format_survives_ansible_templating(self):
+        plays = yaml.safe_load((ROOT / "ansible/playbooks/prepare-mq-client-artifact.yml").read_text())
+        task = plays[0]["tasks"][1]
+        argv = [render(arg) for arg in task["ansible.builtin.command"]["argv"]]
+        self.assertEqual(argv, ["podman", "inspect", "--format", "{{.ImageName}}", "bergen-mq-lab"])
+
     def test_generated_quadlet_not_enabled_with_systemctl(self):
         tasks = yaml.safe_load((ROLE / "tasks/service.yml").read_text())
         for task in tasks:
