@@ -256,6 +256,8 @@ def plan_object(obj, current):
             raise MQError("Creating a topic requires topicstr")
         if obj["type"] == "channel" and desired["chltype"] in {"sdr", "clntconn", "clussdr"} and not desired.get("conname"):
             raise MQError("Creating this channel type requires conname")
+        if obj["type"] == "channel" and desired["chltype"] == "sdr" and not desired.get("xmitq"):
+            raise MQError("Creating an SDR channel requires xmitq")
         return dict(action="define", parameters=desired, before={"state": "absent"},
                     after=dict(state="present", attributes=desired))
     before, delta = {}, {}

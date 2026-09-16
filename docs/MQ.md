@@ -63,10 +63,11 @@ All types accept `descr`. Additional supported attributes:
 | `qmodel` | `maxdepth`, `maxmsgl`, `defpsist`, `deftype`, `put`, `get` |
 | `channel` | `chltype`, `conname`, `xmitq`, `maxmsgl`, `hbint`, `kaint`, `discint`, `sslciph`, `sslcauth` |
 | `topic` | `topicstr`, `pub`, `sub`, `pubscope`, `subscope`, `defpsist` |
-| `namelist` | `names` (ordered list), `nltype` |
+| `namelist` | `names` (ordered list), `nltype` (z/OS only; omit on Linux) |
 
 Present channels require `chltype`: `sdr`, `rcvr`, `svrconn`, `clntconn`,
 `clussdr` or `clusrcvr`. Creating SDR/CLNTCONN/CLUSSDR also requires `conname`.
+Creating SDR additionally requires `xmitq`; an existing SDR can still be managed incrementally.
 Creating a topic requires `topicstr`. Channel/queue type changes and changing an
 existing topic's `topicstr` are refused; no automatic replacement is attempted.
 Integer attributes are restricted to non-negative integers (e.g. KAINT AUTO

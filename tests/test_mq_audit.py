@@ -27,7 +27,7 @@ class AuditTests(unittest.TestCase):
         self.assertEqual(report['status'], 'PASS', [t for t in report['tests'] if t['status'] != 'PASS'])
         self.assertGreater(report['passed'], 140)
         self.assertFalse(client.objects)
-        self.assertEqual(len(report['cleanup']), 12)
+        self.assertEqual(len(report['cleanup']), 13)
         self.assertTrue(all(len(o['name']) <= 20 for o in audit.declarations(report['prefix']) if o['type'] == 'channel'))
 
     def test_failed_alter_still_cleans_up(self):
@@ -48,7 +48,7 @@ class AuditTests(unittest.TestCase):
         counter = [0]
         def discover(*args):
             counter[0] += 1
-            if counter[0] == 13:
+            if counter[0] == 14:
                 raise RuntimeError('secret must not escape')
             return original(*args)
         with patch.object(audit, 'discover', discover):
@@ -67,7 +67,22 @@ class AuditTests(unittest.TestCase):
         client.command = command
         report = audit.run_audit(client, 'BERGENLAB', 'test', True)
         self.assertEqual(report['status'], 'FAIL')
-        self.assertEqual(len(report['residual_objects']), 12)
+        self.assertEqual(len(report['residual_objects']), 13)
+
+    def test_targeted_namelist_sdr_linux_fixture_and_cleanup(self):
+        client = FakeClient()
+        report = audit.run_audit(client, 'BERGENLAB', 'test', True, 'namelist_sdr')
+        self.assertEqual(report['status'], 'PASS')
+        defines = [c for c in client.calls if c[0] == 'define']
+        self.assertEqual([c[1] for c in defines], ['qlocal', 'namelist', 'channel'])
+        self.assertEqual(defines[0][3]['usage'], 'xmitq')
+        self.assertEqual(defines[2][3]['xmitq'], defines[0][2])
+        self.assertNotIn('nltype', defines[1][3])
+        self.assertIsInstance(defines[1][3]['names'], list)
+        deletes = [c for c in client.calls if c[0] == 'delete']
+        self.assertEqual(deletes[-1][2], defines[0][2])
+        self.assertFalse(client.objects)
+        self.assertEqual(report['scope'], 'namelist_sdr')
 
 
 if __name__ == '__main__':

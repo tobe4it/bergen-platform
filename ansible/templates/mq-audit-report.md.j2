@@ -7,6 +7,7 @@ Vor produktivem Betrieb ist die Lizenzfrage mit IBM zu klären.
 |---|---|
 | Ergebnis im definierten Umfang | {{ audit_run.report.status }} |
 | QMgr | {{ audit_run.report.qmgr }} |
+| Prüfumfang | {{ audit_run.report.scope | default('all') }} |
 | Beginn / Ende (UTC) | {{ audit_run.report.started }} / {{ audit_run.report.finished }} |
 | Git-Revision des Controllers | {{ audit_run.report.revision }} |
 | Isolierter Objektpräfix | {{ audit_run.report.prefix }} |

@@ -11,11 +11,12 @@ def main():
         username=dict(type='str', required=True, no_log=True),
         password=dict(type='str', required=True, no_log=True),
         ca_path=dict(type='path', required=True), revision=dict(type='str', required=True),
-        confirm=dict(type='bool', default=False)), supports_check_mode=False)
+        confirm=dict(type='bool', default=False),
+        scope=dict(type='str', choices=['all', 'namelist_sdr'], default='all')), supports_check_mode=False)
     p = module.params
     try:
         client = RestClient(p['endpoint'], p['qmgr'], p['username'], p['password'], p['ca_path'])
-        report = run_audit(client, p['qmgr'], p['revision'], p['confirm'])
+        report = run_audit(client, p['qmgr'], p['revision'], p['confirm'], p['scope'])
         module.exit_json(changed=any(e['command'] != 'display' for e in report['commands']), report=report)
     except (MQError, OSError, ValueError):
         module.fail_json(msg='Audit preflight failed before test mutations; verify consent, lab identity, names and HTTPS access', changed=False)

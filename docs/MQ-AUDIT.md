@@ -5,6 +5,23 @@ funktionales Prüfprotokoll, keine unabhängige Audit- oder Compliancefreigabe.
 
 ## Automatisierter Umfang
 
+### Gezielter NAMELIST-/SDR-Nachtest
+
+Mit `-e mq_audit_scope=namelist_sdr` werden nur die beiden Objekt-Lifecycles
+und die allgemeinen Eingabeschutztests ausgeführt. Der Bericht kennzeichnet den
+reduzierten Umfang; PASS ist keine Gesamtfreigabe.
+
+Die Linux-Testdefinition lässt `NLTYPE` weg, da dieser Parameter laut
+[IBM DEFINE NAMELIST](https://www.ibm.com/docs/fr/ibm-mq/9.4.x?topic=reference-define-namelist-define-list-names)
+nur auf z/OS gilt. Die Namensliste bleibt eine Liste; die frühere Vermutung eines
+Serialisierungsfehlers ist nicht belegt. Der SDR erhält die erforderliche `XMITQ`
+gemäß [IBM DEFINE CHANNEL](https://www.ibm.com/docs/en/ibm-mq/9.4.x?topic=reference-define-channel-define-new-channel).
+Eine eigene, kollisionsgeprüfte `BGA.*.XQ` mit `USAGE(XMITQ)` und gesperrtem PUT/GET
+wird dafür erstellt, bis zum Testende gehalten und zuletzt bereinigt.
+Kein Channel wird gestartet, kein Nachrichtenverkehr erzeugt. Ein fehlendes
+`xmitq` bei SDR-Neuanlage wird bereits vor DEFINE abgelehnt.
+Beide Korrekturen benötigen noch den gezielten Live-Nachweis.
+
 `ansible/playbooks/mq-audit.yml` führt den vorhandenen Reconciler über HTTPS mit
 CA-Prüfung und Vault-Zugang aus. Zufällige, kollisionsfrei geprüfte `BGA.*`-Namen
 isolieren die Prüfungen von bestehenden Objekten. Keine Channels werden gestartet.

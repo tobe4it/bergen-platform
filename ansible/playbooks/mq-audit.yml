@@ -22,6 +22,7 @@
 
     - name: Run guarded object lifecycle and negative cases
       mq_audit:
+        scope: "{{ mq_audit_scope | default('all') }}"
         endpoint: "{{ mq_rest_endpoint }}"
         qmgr: "{{ mq_qmgr }}"
         username: "{{ mq_rest_username }}"

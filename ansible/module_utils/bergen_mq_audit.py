@@ -38,7 +38,7 @@ def declarations(prefix):
         ('QA', 'qalias', dict(target=prefix + '.QL', put='disabled')),
         ('QM', 'qmodel', dict(maxdepth=100, deftype='tempdyn')),
         ('TP', 'topic', dict(topicstr='bergen/audit/' + prefix, pub='disabled')),
-        ('NL', 'namelist', dict(names=[prefix + '.QL'], nltype='queue')),
+        ('NL', 'namelist', dict(names=[prefix + '.QL'])),
     ]:
         result.append(dict(name=prefix + '.' + suffix, type=typ,
                            attributes=dict(descr='Bergen isolated audit', **attrs)))
@@ -46,17 +46,21 @@ def declarations(prefix):
         attrs = dict(descr='Bergen isolated audit', chltype=chltype)
         if chltype in ('sdr', 'clntconn', 'clussdr'):
             attrs['conname'] = '127.0.0.1(1)'
+        if chltype == 'sdr':
+            attrs['xmitq'] = prefix + '.XQ'
         result.append(dict(name=prefix + '.' + chltype.upper(), type='channel', attributes=attrs))
     return result
 
 
-def run_audit(client, qmgr, revision, confirm=False):
+def run_audit(client, qmgr, revision, confirm=False, scope='all'):
+    if scope not in ('all', 'namelist_sdr'):
+        raise MQError('Unsupported audit scope')
     if not confirm or qmgr != 'BERGENLAB':
         raise MQError('Audit mutations require explicit evaluation consent and BERGENLAB')
     prefix = 'BGA.' + uuid.uuid4().hex[:7].upper()
     recorded = RecordedClient(client)
     report = dict(schema_version=1, started=now(), qmgr=qmgr, revision=revision,
-                  prefix=prefix, evaluation_only=True, tests=[], cleanup=[],
+                  prefix=prefix, scope=scope, evaluation_only=True, tests=[], cleanup=[],
                   commands=recorded.events, residual_objects=[],
                   limitations=[
                       'Functional evaluation, not independent audit or productive approval; clarify licensing with IBM.',
@@ -100,14 +104,24 @@ def run_audit(client, qmgr, revision, confirm=False):
         return result
 
     objects = declarations(prefix)
+    if scope == 'namelist_sdr':
+        objects = [o for o in objects if o['type'] == 'namelist' or o['attributes'].get('chltype') == 'sdr']
+        report['limitations'].append('Targeted NAMELIST/SDR retest only; not a complete audit.')
+    xq = dict(name=prefix + '.XQ', type='qlocal', attributes=dict(usage='xmitq', put='disabled', get='disabled', maxdepth=100))
     # Validate all declarations and reserve all names before any mutation.
     # A collision aborts without claiming ownership or deleting an existing object.
-    objects = validate_objects(objects)
-    for obj in objects:
+    normalized = validate_objects([xq] + objects)
+    xq, objects = normalized[0], normalized[1:]
+    for obj in [xq] + objects:
         if discover(recorded, obj) is not None:
             raise MQError('Audit name collision: no existing object will be modified')
+    owned.append(dict(name=xq['name'], type='qlocal', state='absent'))
+    fixture_ok = case('fixture:xmitq:create', lambda: expect(reconcile(recorded, [xq]), True, 1))
     for obj in objects:
         label = obj['type'] + ':' + obj['name']
+        if obj['attributes'].get('chltype') == 'sdr' and not fixture_ok:
+            case(label + ':fixture-required', lambda: (_ for _ in ()).throw(AssertionError('Transmission queue setup failed')))
+            continue
         absent = dict(name=obj['name'], type=obj['type'], state='absent')
         if not case(label + ':check-create', lambda o=obj: expect(reconcile(recorded, [o], True), True, 0), mutation_free=True):
             continue

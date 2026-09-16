@@ -52,6 +52,13 @@ class FakeClient:
 
 
 class ReconciliationTests(unittest.TestCase):
+    def test_sdr_missing_xmitq_refused_before_mutation(self):
+        client = FakeClient()
+        with self.assertRaisesRegex(mq.MQError, 'requires xmitq'):
+            mq.reconcile(client, [dict(name='BERGEN.SDR', type='channel',
+                         attributes=dict(chltype='sdr', conname='127.0.0.1(1)'))])
+        self.assertTrue(all(c[0] == 'display' for c in client.calls))
+
     def test_safe_http_detail_allowlist_and_bounds(self):
         import json
         payload = {"error": [{"msgId": "MQWB9999E", "message": "Invalid parameter chltable for user xyz",
@@ -204,6 +211,8 @@ class ReconciliationTests(unittest.TestCase):
     def test_channels_create_and_alter_with_type_qualifier(self):
         for typ in mq.CHANNEL_TYPES:
             obj = dict(name="BERGEN.TEST", type="channel", attributes=dict(chltype=typ, conname="host.example(1414)", hbint=30))
+            if typ == 'sdr':
+                obj['attributes']['xmitq'] = 'BERGEN.XQ'
             client = FakeClient()
             self.assertTrue(mq.reconcile(client, [obj])["changed"])
             self.assertFalse(mq.reconcile(client, [obj])["changed"])
