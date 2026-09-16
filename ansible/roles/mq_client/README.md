@@ -3,7 +3,9 @@
 Dedicated Rocky 9 amd64 LXC with Java 17 JDK, OpenSSL, Python and a locked
 `mqtest` service account. No queue manager or Podman runtime is installed.
 The deployment collects `com.ibm.mq.allclient.jar` over SSH from a selected
-MQ container after checking its immutable image reference. Source and destination
+MQ container after resolving the pinned repository digest locally and comparing
+its image ID to the container's actual image ID. Tag spelling is not identity.
+Source and destination
 SHA-256 must match. This is transfer integrity, not an IBM artifact signature.
 
 Files: `/opt/bergen-mq-client/lib/com.ibm.mq.allclient.jar`,

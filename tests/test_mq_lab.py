@@ -169,6 +169,26 @@ class LabContracts(unittest.TestCase):
         argv = [render(arg) for arg in task["ansible.builtin.command"]["argv"]]
         self.assertEqual(argv, ["podman", "inspect", "--format", "{{.ImageName}}", "bergen-mq-lab"])
 
+    def test_client_source_image_uses_pinned_lookup_and_rejects_wrong_id(self):
+        import re
+        tasks = yaml.safe_load((ROOT / "ansible/playbooks/prepare-mq-client-artifact.yml").read_text())[0]["tasks"]
+        lookup = next(t for t in tasks if t["name"].startswith("Resolve the pinned"))
+        argv = [render(arg, mq_client_source_image=IMAGE) for arg in lookup["ansible.builtin.command"]["argv"]]
+        self.assertEqual(argv[:5], ["podman", "image", "inspect", "--format", "{{.Id}}"])
+        self.assertEqual(argv[-1], "icr.io/ibm-messaging/mq@" + IMAGE.split("@")[1])
+        guards = next(t for t in tasks if t["name"] == "Require the selected immutable source image")["ansible.builtin.assert"]["that"]
+        env = environment()
+        env.tests["match"] = lambda value, pattern: re.match(pattern, value) is not None
+        env.filters["regex_replace"] = lambda value, pattern, replacement: re.sub(pattern, replacement, value)
+        for actual, expected, accepted in [
+            ("a" * 64, "sha256:" + "a" * 64, True),
+            ("sha256:" + "a" * 64, "a" * 64, True),
+            ("a" * 64, "b" * 64, False),
+            ("", "", False), ("<no value>", "<no value>", False)]:
+            with self.subTest(actual=actual, expected=expected):
+                context = dict(mq_client_actual_image={"stdout": actual}, mq_client_expected_image={"stdout": expected})
+                self.assertEqual(all(env.compile_expression(g)(**context) for g in guards), accepted)
+
     def test_generated_quadlet_not_enabled_with_systemctl(self):
         tasks = yaml.safe_load((ROLE / "tasks/service.yml").read_text())
         for task in tasks:

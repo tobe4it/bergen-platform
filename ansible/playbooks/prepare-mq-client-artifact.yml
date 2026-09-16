@@ -20,10 +20,43 @@
       register: mq_client_image_identity
       changed_when: false
 
+    - name: Read the actual container image ID
+      ansible.builtin.command:
+        argv: [podman, container, inspect, --format, "{{ '{{' }}.Image{{ '}}' }}", bergen-mq-lab]
+      environment:
+        CONTAINERS_STORAGE_CONF: /etc/bergen-mq-lab/storage.conf
+      register: mq_client_actual_image
+      changed_when: false
+
+    - name: Resolve the pinned repository digest in local image storage
+      ansible.builtin.command:
+        argv:
+          - podman
+          - image
+          - inspect
+          - --format
+          - "{{ '{{' }}.Id{{ '}}' }}"
+          - "{{ mq_client_source_image.split('@')[0].split(':')[0] ~ '@' ~ mq_client_source_image.split('@')[1] }}"
+      environment:
+        CONTAINERS_STORAGE_CONF: /etc/bergen-mq-lab/storage.conf
+      register: mq_client_expected_image
+      changed_when: false
+
     - name: Require the selected immutable source image
       ansible.builtin.assert:
         that:
-          - mq_client_image_identity.stdout | trim == mq_client_source_image
+          - mq_client_actual_image.stdout | trim is match('^(sha256:)?[a-f0-9]{64}$')
+          - mq_client_expected_image.stdout | trim is match('^(sha256:)?[a-f0-9]{64}$')
+          - >-
+            (mq_client_actual_image.stdout | trim | regex_replace('^sha256:', '')) ==
+            (mq_client_expected_image.stdout | trim | regex_replace('^sha256:', ''))
+        fail_msg: >-
+          MQ source image mismatch. Selected={{ mq_client_source_image }};
+          container reference={{ mq_client_image_identity.stdout | trim }};
+          actual ID={{ mq_client_actual_image.stdout | trim }};
+          expected ID={{ mq_client_expected_image.stdout | trim }}.
+          No library copied and no client provisioned. Review the source image;
+          do not bypass digest pinning.
 
     - name: Allocate source staging directory
       ansible.builtin.tempfile:

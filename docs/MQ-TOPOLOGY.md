@@ -80,7 +80,11 @@ ansible-playbook ansible/playbooks/bootstrap-mq-lab.yml \
 Never run a shared `mq_lab_nodes` bootstrap with B's extra variables against
 both servers. Existing persistence identity checks refuse queue-manager renames.
 
-The client deployment checks the selected source container's image reference,
+The client deployment resolves the configured repository digest in local Podman
+storage and compares its image ID with the source container's actual image ID.
+It does not compare tag spelling in `ImageName` and never pulls a replacement.
+An unknown digest or different image ID stops the deployment before copying.
+It then
 copies only the Java client JAR out of it, fetches it over SSH and checks SHA-256
 after installation. A temporary source directory is removed in an `always`
 block. The source service is not restarted. Client provenance is stored in
