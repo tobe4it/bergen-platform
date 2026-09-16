@@ -38,6 +38,8 @@ mq_lab_admin_password: "{{ vault_mq_lab_admin_password }}"
 mq_lab_app_password: "{{ vault_mq_lab_app_password }}"
 # Direct controller source address/network, e.g. an authorized IPv4 /32.
 mq_lab_controller_cidr: CHANGE_ME
+# Additional browser/admin IPv4 networks for HTTPS 9443 only. Default: none.
+mq_lab_admin_cidrs: []
 # MQ listener stays blocked by host firewall unless explicitly enabled below.
 mq_lab_allow_client_connections: false
 mq_lab_client_cidr: CHANGE_ME

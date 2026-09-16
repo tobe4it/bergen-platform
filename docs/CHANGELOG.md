@@ -8,6 +8,11 @@ The project follows **Semantic Versioning (SemVer)** and the changelog format is
 
 ## [Unreleased]
 
+### Added
+
+- Optional `mq_lab_admin_cidrs` list for source-specific browser/admin HTTPS
+  access to MQ evaluation port 9443; empty by default, no client-port opening
+
 ### Fixed
 
 - Explicit evaluation-only mqweb Basic authentication and admin registry with

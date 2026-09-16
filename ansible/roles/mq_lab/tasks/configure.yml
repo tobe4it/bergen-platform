@@ -32,6 +32,11 @@
          + (['rule family="ipv4" source address="' ~ mq_lab_client_cidr ~ '" port port="1414" protocol="tcp" accept']
             if mq_lab_allow_client_connections | bool else []) }}
 
+- name: Add browser admin HTTPS sources without opening the MQ client listener
+  ansible.builtin.set_fact:
+    mq_lab_firewall_rules: "{{ (mq_lab_firewall_rules + ['rule family=\"ipv4\" source address=\"' ~ item ~ '\" port port=\"9443\" protocol=\"tcp\" accept']) | unique | list }}"
+  loop: "{{ mq_lab_admin_cidrs }}"
+
 - name: Check previous managed firewall rules
   ansible.builtin.stat:
     path: /etc/bergen-mq-lab/firewall-rules.json

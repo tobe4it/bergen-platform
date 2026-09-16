@@ -5,6 +5,7 @@ mq_lab_qmgr: BERGENLAB
 mq_lab_image: ""
 mq_lab_allow_client_connections: false
 mq_lab_client_cidr: ""
+mq_lab_admin_cidrs: []
 mq_lab_api_retries: 30
 mq_lab_api_retry_delay: 5
 mq_lab_controller_ca_path: "{{ playbook_dir }}/../reports/mq/bergen-mq-lab-ca.crt"

@@ -33,6 +33,23 @@ def render(template, **extra):
 
 
 class LabContracts(unittest.TestCase):
+    def test_admin_firewall_rules_are_https_only_and_preserve_controller(self):
+        defaults = yaml.safe_load((ROLE / "defaults/main.yml").read_text())
+        self.assertEqual(defaults["mq_lab_admin_cidrs"], [])
+        tasks = yaml.safe_load((ROLE / "tasks/configure.yml").read_text())
+        task = next(t for t in tasks if t["name"].startswith("Add browser admin HTTPS"))
+        self.assertEqual(task["loop"], "{{ mq_lab_admin_cidrs }}")
+        env = environment()
+        env.filters["unique"] = lambda values: list(dict.fromkeys(values))
+        controller = 'rule family="ipv4" source address="192.0.2.250/32" port port="9443" protocol="tcp" accept'
+        result = env.compile_expression(task["ansible.builtin.set_fact"]["mq_lab_firewall_rules"][3:-3])(
+            mq_lab_firewall_rules=[controller], item="192.168.2.0/23")
+        self.assertEqual(len(result), 2)
+        self.assertEqual(result[0], controller)
+        self.assertIn('source address="192.168.2.0/23"', result[1])
+        self.assertIn('port port="9443"', result[1])
+        self.assertNotIn("1414", result[1])
+
     def test_explicit_web_auth_does_not_enable_default_mq_objects(self):
         xml = render((ROLE / "templates/mqwebuser.xml.j2").read_text())
         root = ET.fromstring(xml)

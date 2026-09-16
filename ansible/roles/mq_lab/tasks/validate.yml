@@ -25,6 +25,20 @@
       - "'\n' not in mq_lab_app_password"
   no_log: true
 
+- name: Require a list of additional admin networks
+  ansible.builtin.assert:
+    that:
+      - mq_lab_admin_cidrs is sequence
+      - mq_lab_admin_cidrs is not string
+      - mq_lab_admin_cidrs is not mapping
+
+- name: Validate additional admin IPv4 CIDR syntax
+  ansible.builtin.assert:
+    that:
+      - item is string
+      - item is match('^[0-9]+[.][0-9]+[.][0-9]+[.][0-9]+/[0-9]+$')
+  loop: "{{ mq_lab_admin_cidrs }}"
+
 - name: Validate address ranges with Python standard library
   ansible.builtin.command:
     argv:
@@ -33,4 +47,9 @@
       - "import ipaddress,sys; [ipaddress.ip_network(v, strict=False) for v in sys.argv[1:]]"
       - "{{ mq_lab_controller_cidr }}"
       - "{{ mq_lab_client_cidr if mq_lab_allow_client_connections | bool else mq_lab_controller_cidr }}"
+  changed_when: false
+
+- name: Validate canonical admin networks and reject unrestricted access
+  ansible.builtin.command:
+    argv: "{{ ['/usr/bin/python3', '-c', 'import ipaddress,sys; nets=[ipaddress.IPv4Network(v, strict=True) for v in sys.argv[1:]]; sys.exit(1 if any(n.prefixlen == 0 for n in nets) else 0)'] + mq_lab_admin_cidrs }}"
   changed_when: false

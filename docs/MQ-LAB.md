@@ -136,6 +136,15 @@ authentication failures by accepting 401 as readiness or disabling TLS checks.
   bind there; host networking avoids Podman's nested DNAT path. Firewalld public
   zone rules allow HTTPS from the declared controller source. Client 1414 is
   allowed only when explicitly enabled for `mq_lab_client_cidr`.
+- Additional browser sources can be declared in `mq_lab_admin_cidrs` (default
+  `[]`). They receive only TCP 9443, without replacing the controller source
+  or enabling TCP 1414. Entries must be canonical IPv4 CIDRs, not `/0`.
+  For example, a site whose authorized Intern network is `192.168.2.0/23`
+  can set `mq_lab_admin_cidrs: [192.168.2.0/23]`. This covers `192.168.2.x`
+  and `192.168.3.x`. UniFi must separately allow Intern to the MQ LXC on
+  TCP 9443; this role does not change gateway rules. Browser trust requires
+  the fetched evaluation CA. Reconcile with `bootstrap-mq-lab.yml` using the
+  same local vars/inventories; removing an entry revokes its managed rule.
 - Previously role-managed firewall rules are revoked when their inputs change;
   unrelated rules are not deleted. Unexpected default zones or unrestricted MQ
   port openings block deployment. Existing interfaces/zones, other broad rules,
