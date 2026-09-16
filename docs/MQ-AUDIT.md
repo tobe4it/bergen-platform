@@ -45,6 +45,16 @@ der richtigen `CHLTABLE` (`CLNTCONN` oder `QMGR`) qualifiziert. Ein fehlender od
 unbekannter Typ führt vor DELETE zum sicheren Abbruch, damit gleichnamige
 Channel-Namensräume eindeutig adressiert bleiben.
 
+Diagnosehinweis: Der Live-Lauf mit Commit `424cbaf` hat die Channel-Löschung
+weiterhin mit HTTP 400 abgelehnt. Die CHLTABLE-Änderung ist damit **nicht live
+bestätigt**; erfolgreiche Offline-Tests ersetzen diese Bestätigung nicht.
+HTTP-400-Diagnosen geben nun ausschließlich erkannte IBM-`msgId`-Kennungen und
+gefilterte `message`-Felder aus begrenzten JSON-Antworten aus. Bekannte Zugangsdaten
+werden entfernt, sensibel erscheinende Meldungen unterdrückt; Header, Rohantwort,
+`explanation` und `action` werden nicht ausgegeben. Meldungen können weiterhin
+betriebliche Objektnamen enthalten. HTTP 401/403 bleibt ohne Antwortinhalt.
+Keine automatische Wiederholung oder zusätzliche MQ-Mutation wird dafür ausgeführt.
+
 ## Noch nötige Single-QMgr-Prüfungen
 
 ### Optionaler Mailversand

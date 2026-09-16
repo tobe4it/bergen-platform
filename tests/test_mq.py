@@ -52,6 +52,19 @@ class FakeClient:
 
 
 class ReconciliationTests(unittest.TestCase):
+    def test_safe_http_detail_allowlist_and_bounds(self):
+        import json
+        payload = {"error": [{"msgId": "MQWB9999E", "message": "Invalid parameter chltable for user xyz",
+                              "explanation": "hidden"}], "other": "hidden"}
+        result = mq.safe_http_detail(json.dumps(payload).encode(), ("xyz",))
+        self.assertIn("Invalid parameter chltable", result)
+        self.assertNotIn("xyz", result)
+        self.assertNotIn("hidden", result)
+        for raw in (b"not JSON", b"[]", b"{}", b"x" * 16385):
+            self.assertEqual(mq.safe_http_detail(raw, ()), "")
+        payload['error'][0]['message'] = 'Authorization: Basic unknown'
+        self.assertNotIn('unknown', mq.safe_http_detail(json.dumps(payload).encode(), ()))
+
     def queue_client(self, **attrs):
         return FakeClient({QUEUE["name"]: dict(queue=QUEUE["name"], type="QLOCAL", maxdepth=5000, defpsist="YES", **attrs)})
 

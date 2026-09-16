@@ -107,6 +107,38 @@ class NoRedirect(HTTPRedirectHandler):
         raise MQError("REST redirects are refused to protect administrator credentials")
 
 
+def safe_http_detail(raw, secrets):
+    """Bounded, allowlisted IBM error fields; never return raw bodies/headers."""
+    if len(raw) > 16384:
+        return ""
+    try:
+        data = json.loads(raw)
+    except (ValueError, UnicodeError):
+        return ""
+    errors = data.get("error") if isinstance(data, dict) else None
+    if not isinstance(errors, list):
+        return ""
+    details = []
+    for item in errors[:3]:
+        if not isinstance(item, dict):
+            continue
+        msg_id = item.get("msgId", "")
+        if not isinstance(msg_id, str) or not re.fullmatch(r"(?:MQWB|AMQ)[0-9]{4}[A-Z]", msg_id):
+            continue
+        message = item.get("message", "")
+        if not isinstance(message, str):
+            message = ""
+        # Suppress sensitive-looking messages entirely, not just their values.
+        if re.search(r"password|authorization|cookie|token|secret|credential|bearer|basic\s", message, re.I):
+            message = "[sensitive message suppressed]"
+        for secret in sorted(set(secrets), key=len, reverse=True):
+            if secret:
+                message = message.replace(secret, "[REDACTED]")
+        message = " ".join(message.split())[:600]
+        details.append(msg_id + ": " + message)
+    return "; ".join(details)
+
+
 class RestClient:
     def __init__(self, endpoint, qmgr, username, password, ca_path=None, timeout=30):
         parsed = urlsplit(endpoint)
@@ -120,6 +152,7 @@ class RestClient:
         self.url = endpoint.rstrip("/") + "/admin/action/qmgr/" + quote(qmgr, safe="") + "/mqsc"
         self.timeout = timeout
         self.auth = "Basic " + base64.b64encode((username + ":" + password).encode()).decode()
+        self._redact = (username, password, self.auth, self.auth[6:])
         context = ssl.create_default_context(cafile=ca_path)
         # Direct HTTPS only; never forward credentials through environment proxies.
         self.opener = build_opener(ProxyHandler({}), HTTPSHandler(context=context), NoRedirect())
@@ -138,8 +171,18 @@ class RestClient:
             with self.opener.open(req, timeout=self.timeout) as response:
                 data = json.load(response)
         except HTTPError as exc:
-            # Do not expose response bodies or authorization headers in logs.
-            raise MQError("MQ REST HTTP %s; verify endpoint, TLS, identity and authorities" % exc.code) from None
+            detail = ""
+            try:
+                # Authentication errors and non-JSON bodies remain fully hidden.
+                if exc.code == 400:
+                    detail = safe_http_detail(exc.read(16385), self._redact)
+            except (OSError, ValueError):
+                pass
+            finally:
+                exc.close()
+            message = "MQ REST HTTP %s" % exc.code
+            message += "; " + detail if detail else "; structured error details unavailable or suppressed"
+            raise MQError(message) from None
         except (URLError, TimeoutError, OSError):
             raise MQError("MQ REST connection failed; verify DNS, route, TLS CA and timeout") from None
         except (ValueError, UnicodeError):

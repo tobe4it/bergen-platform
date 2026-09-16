@@ -67,6 +67,12 @@ class HTTPSIntegrationTests(unittest.TestCase):
                     self.send_header("Location", "https://localhost:1/credential-trap")
                     self.end_headers()
                     return
+                if cls.mode == "bad_request":
+                    self.send_response(400)
+                    self.end_headers()
+                    self.wfile.write(json.dumps({"error": [{"msgId": "MQWB9999E", "message": "Invalid parameter chltable " + PASSWORD,
+                                                            "explanation": PASSWORD}], "headers": {"Authorization": expected}}).encode())
+                    return
                 if cls.mode == "invalid_json":
                     self.send_response(200)
                     self.end_headers()
@@ -192,6 +198,16 @@ class HTTPSIntegrationTests(unittest.TestCase):
             self.rest_client().command("display", "queue", "BERGEN.TEST")
         self.assertIn("401", str(caught.exception))
         self.assertNotIn(PASSWORD, str(caught.exception))
+
+    def test_https_400_keeps_error_id_and_redacts_credentials(self):
+        type(self).mode = "bad_request"
+        with self.assertRaises(mq.MQError) as caught:
+            self.rest_client().command("display", "queue", "BERGEN.TEST")
+        message = str(caught.exception)
+        self.assertIn("MQWB9999E", message)
+        self.assertNotIn(PASSWORD, message)
+        self.assertNotIn("Authorization", message)
+        self.assertEqual(len(self.requests), 1)  # no automatic retry
 
     def test_https_transport_no_redirect(self):
         type(self).mode = "redirect"
