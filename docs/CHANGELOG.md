@@ -15,6 +15,9 @@ The project follows **Semantic Versioning (SemVer)** and the changelog format is
 
 ### Fixed
 
+- Managed inventory now evaluates dynamic group/host keys instead of writing
+  literal Jinja placeholders; guarded same-address legacy repair preserves
+  unrelated entries/custom settings and backs up the inventory before changes
 - Explicit evaluation-only mqweb Basic authentication and admin registry with
   `MQ_DEV=false`; preserve disabled DEV objects and use the secret-derived
   secure password reference rather than writing passwords into XML

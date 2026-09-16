@@ -113,17 +113,60 @@
 
     - name: Verwalteten Hosteintrag aufbauen
       ansible.builtin.set_fact:
-        inventory_update_data:
-          all:
-            children:
-              "{{ lxc_inventory_group }}":
-                hosts:
-                  "{{ lxc_hostname }}":
-                    ansible_host: "{{ discovered_inventory_ipv4 }}"
-                    ansible_user: "{{ lxc_ansible_user | default('root') }}"
-                    ansible_port: "{{ lxc_ansible_port | default(22) }}"
-                    ansible_python_interpreter: /usr/bin/python3
+        inventory_update_data: >-
+          {{ {'all': {'children': {lxc_inventory_group: {'hosts': {
+               lxc_hostname: {
+                 'ansible_host': discovered_inventory_ipv4,
+                 'ansible_user': lxc_ansible_user | default('root'),
+                 'ansible_port': lxc_ansible_port | default(22),
+                 'ansible_python_interpreter': '/usr/bin/python3'
+               }
+             }}}}} }}
       when: lxc_inventory_group is defined
+
+    - name: Identify the legacy literal-placeholder entry
+      ansible.builtin.set_fact:
+        inventory_legacy_group_key: "{{ '{' ~ '{ lxc_inventory_group }' ~ '}' }}"
+        inventory_legacy_host_key: "{{ '{' ~ '{ lxc_hostname }' ~ '}' }}"
+      when: lxc_inventory_group is defined
+
+    - name: Refuse ambiguous legacy placeholder repair
+      ansible.builtin.assert:
+        that:
+          - inventory_current_data.all.children[inventory_legacy_group_key] is mapping
+          - inventory_current_data.all.children[inventory_legacy_group_key].keys() | list == ['hosts']
+          - inventory_current_data.all.children[inventory_legacy_group_key].hosts is mapping
+          - inventory_current_data.all.children[inventory_legacy_group_key].hosts.keys() | list == [inventory_legacy_host_key]
+          - inventory_current_data.all.children[inventory_legacy_group_key].hosts[inventory_legacy_host_key] is mapping
+          - inventory_current_data.all.children[inventory_legacy_group_key].hosts[inventory_legacy_host_key].ansible_host == discovered_inventory_ipv4
+        fail_msg: >-
+          Literal placeholder entry is ambiguous or belongs to another address.
+          No existing inventory data will be discarded; review it explicitly.
+      when:
+        - lxc_inventory_group is defined
+        - inventory_legacy_group_key in inventory_current_data.all.children
+
+    - name: Preserve legacy host settings under resolved names
+      ansible.builtin.set_fact:
+        inventory_update_data: >-
+          {{ {'all': {'children': {lxc_inventory_group: {'hosts': {
+               lxc_hostname: inventory_current_data.all.children[inventory_legacy_group_key].hosts[inventory_legacy_host_key]
+                 | combine(inventory_update_data.all.children[lxc_inventory_group].hosts[lxc_hostname])
+             }}}}} }}
+      when:
+        - lxc_inventory_group is defined
+        - inventory_legacy_group_key in inventory_current_data.all.children
+
+    - name: Remove only the verified legacy group while preserving other inventory data
+      ansible.builtin.set_fact:
+        inventory_current_data: >-
+          {{ inventory_current_data | combine({'all': inventory_current_data.all | combine({
+               'children': inventory_current_data.all.children | dict2items
+                 | rejectattr('key', 'equalto', inventory_legacy_group_key) | list | items2dict
+             })}) }}
+      when:
+        - lxc_inventory_group is defined
+        - inventory_legacy_group_key in inventory_current_data.all.children
 
     - name: Verwalteten Hosteintrag zusammenführen
       ansible.builtin.set_fact:
@@ -137,6 +180,7 @@
     - name: Verwalteten Hosteintrag persistent speichern
       ansible.builtin.copy:
         dest: "{{ inventory_file_path }}"
+        backup: true
         content: >-
           {{ inventory_merged_data | to_nice_yaml(indent=2, sort_keys=false) }}
       register: inventory_structured_update
@@ -182,4 +226,3 @@
               else 'unverändert'
             }}
           - "============================================================"
-

@@ -113,6 +113,25 @@ at SSH discovery can be resumed by rerunning the deployment with the same VMID
 and configuration; do not delete/recreate the existing LXC.
 Reserve the discovered DHCP address afterward.
 
+If an older deployment wrote literal `{{ lxc_inventory_group }}` and
+`{{ lxc_hostname }}` keys, the inventory writer now repairs that exact legacy
+entry only when its sole host matches the supplied discovered IPv4 address.
+Unrelated groups, host settings and inventory variables are preserved; ambiguous
+entries are refused. Changed inventory files are backed up. To repair a known
+MQ lab address without restarting the LXC, run on the controller (replace the
+example address with the actual current MQ address):
+
+```bash
+ansible-playbook ansible/playbooks/update-inventory.yml \
+  -i ansible/inventory.yml -i ansible/inventory.local.yml \
+  -i 'bergen-mq-lab,' \
+  -e @ansible/group_vars/all/bergen-mq-lab.yml \
+  -e ansible_host=192.0.2.212 --ask-vault-pass
+```
+
+Then run `bootstrap-mq-lab.yml` using the repaired local inventory and same
+site-local variables to apply runtime/firewall changes.
+
 ## Persistence, TLS, networking and logging
 
 Authenticated REST readiness checks include the `ibm-mq-rest-csrf-token`
