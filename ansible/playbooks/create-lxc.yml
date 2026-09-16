@@ -144,6 +144,9 @@
           net0: "name=eth0,bridge={{ lxc_bridge }},ip={{ lxc_ip }},ip6={{ lxc_ip6 }},firewall={{ lxc_firewall | default(1) }}"
 
         state: present
+        # Creation only: preserve existing net0/MAC and other guest settings.
+        # community.proxmox >= 1.0 defaults update to true.
+        update: false
         timeout: 300
 
       register: lxc_create_result

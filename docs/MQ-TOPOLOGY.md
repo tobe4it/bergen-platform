@@ -67,6 +67,11 @@ ansible-playbook ansible/playbooks/deploy-mq-client.yml \
 ```
 
 VMID collisions with different guests/nodes fail before creation. The server
+creation step explicitly uses `update: false`, preserving an existing guest's
+network/MAC configuration across repeat runs regardless of collection defaults.
+DHCP itself does not guarantee a permanent address; use local DHCP reservations
+for stable TLS endpoints and firewall sources.
+The server
 deployment includes the existing explicit stop/start step for its selected LXC;
 do not point B's site file at A. To reconfigure B without that step:
 
