@@ -77,6 +77,15 @@
   when: item.rc == 1
   changed_when: true
 
+- name: Configure explicit lab web authentication independently of MQ_DEV
+  ansible.builtin.template:
+    src: mqwebuser.xml.j2
+    dest: /etc/bergen-mq-lab/web/mqwebuser.xml
+    owner: root
+    group: root
+    mode: '0444'
+  register: mq_lab_web_config
+
 - name: Render MQ evaluation Quadlet
   ansible.builtin.template:
     src: bergen-mq-lab.container.j2

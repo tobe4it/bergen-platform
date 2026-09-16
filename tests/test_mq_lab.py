@@ -7,6 +7,7 @@ import ssl
 import subprocess
 import tempfile
 import unittest
+import xml.etree.ElementTree as ET
 
 import yaml
 from jinja2 import Environment, StrictUndefined
@@ -32,6 +33,20 @@ def render(template, **extra):
 
 
 class LabContracts(unittest.TestCase):
+    def test_explicit_web_auth_does_not_enable_default_mq_objects(self):
+        xml = render((ROLE / "templates/mqwebuser.xml.j2").read_text())
+        root = ET.fromstring(xml)
+        self.assertIn("basicAuthenticationMQ-1.0", [f.text for f in root.findall("featureManager/feature")])
+        users = root.findall("basicRegistry/user")
+        self.assertEqual([u.attrib["name"] for u in users], ["admin"])
+        self.assertEqual(users[0].attrib["password"], "${env.MQ_ADMIN_PASSWORD_SECURE}")
+        self.assertEqual(len(root.findall("enterpriseApplication/application-bnd/security-role[@name='MQWebAdmin']")), 2)
+        quadlet = render((ROLE / "templates/bergen-mq-lab.container.j2").read_text())
+        self.assertIn("Environment=MQ_DEV=false", quadlet)
+        self.assertIn("/servers/mqweb/mqwebuser.xml:ro", quadlet)
+        self.assertNotIn("MQ_ADMIN_PASSWORD=", quadlet)
+        self.assertIn("mq_lab_web_config.changed", (ROLE / "tasks/service.yml").read_text())
+
     def test_all_basic_auth_readiness_requests_have_mq_csrf_header(self):
         tasks = yaml.safe_load((ROLE / "tasks/api.yml").read_text())
         requests = [t["ansible.builtin.uri"] for t in tasks if "ansible.builtin.uri" in t]

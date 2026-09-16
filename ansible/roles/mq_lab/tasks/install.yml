@@ -37,6 +37,7 @@
     - {path: /etc/bergen-mq-lab, mode: '0750'}
     - {path: /etc/bergen-mq-lab/secrets, mode: '0700'}
     - {path: /etc/bergen-mq-lab/private, mode: '0700'}
+    - {path: /etc/bergen-mq-lab/web, mode: '0755'}
     - {path: /etc/containers/systemd, mode: '0755'}
     - {path: /var/lib/bergen-mq-lab, mode: '0750'}
 

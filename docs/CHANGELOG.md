@@ -10,6 +10,9 @@ The project follows **Semantic Versioning (SemVer)** and the changelog format is
 
 ### Fixed
 
+- Explicit evaluation-only mqweb Basic authentication and admin registry with
+  `MQ_DEV=false`; preserve disabled DEV objects and use the secret-derived
+  secure password reference rather than writing passwords into XML
 - MQ REST readiness requests now include IBM's required CSRF header for HTTP
   Basic authentication, both locally and from the Ansible controller
 - Rocky MQ evaluation deployment now prepares missing OpenSSH through Proxmox

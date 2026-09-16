@@ -71,7 +71,15 @@ explicitly set `mq_lab_confirm_test_only: true` and
 The role's `admin` is the dedicated **lab** administrator from the developer
 image, not a production least-privilege recommendation. `MQ_DEV=false` avoids
 creating the optional default DEV objects/channels; it does not certify the
-remaining QMGR security policy as production-hardened. MQ application secrets
+remaining QMGR security policy as production-hardened. With `MQ_DEV=false`,
+the image also selects its non-developer web configuration without the default
+Basic-auth registry. Therefore this role explicitly mounts a read-only
+`mqwebuser.xml` enabling `basicAuthenticationMQ-1.0` and binding only the lab
+`admin` to REST/console `MQWebAdmin`. Its password references the image's
+secret-derived `${env.MQ_ADMIN_PASSWORD_SECURE}`; no plaintext password is
+rendered into XML. Web configuration changes recreate the container without
+deleting QMGR persistence. This is not a production security recommendation.
+MQ application secrets
 are mounted via Podman secrets rather than deprecated password environment
 variables. Protected root-only input files and Podman's local secret store
 remain sensitive at rest; include them in backup/access policy.

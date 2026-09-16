@@ -18,6 +18,7 @@ LogDriver=journald
 Volume=/var/lib/bergen-mq-lab/mqm:/mnt/mqm{{ ':Z' if (ansible_facts.selinux | default({})).status | default('disabled') == 'enabled' else '' }}
 Volume=/etc/bergen-mq-lab/tls:/etc/mqm/pki/keys/bergenlab:ro{{ ',Z' if (ansible_facts.selinux | default({})).status | default('disabled') == 'enabled' else '' }}
 Secret=mqAdminPassword,uid=1001,gid=0,mode=0400
+Volume=/etc/bergen-mq-lab/web/mqwebuser.xml:/etc/mqm/web/installations/Installation1/servers/mqweb/mqwebuser.xml:ro{{ ',Z' if (ansible_facts.selinux | default({})).status | default('disabled') == 'enabled' else '' }}
 Secret=mqAppPassword,uid=1001,gid=0,mode=0400
 Environment=LICENSE=accept
 Environment=MQ_QMGR_NAME={{ mq_lab_qmgr }}
