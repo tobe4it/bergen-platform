@@ -197,7 +197,13 @@ def discover(client, obj):
 def plan_object(obj, current):
     desired = obj["attributes"]
     if obj["state"] == "absent":
-        return dict(action="delete" if current is not None else "none", parameters={},
+        delete_parameters = {}
+        if obj["type"] == "channel" and current is not None:
+            chltype = str(current.get("chltype", "")).lower()
+            if chltype not in CHANNEL_TYPES:
+                raise MQError("DISPLAY lacks a supported channel type required for safe deletion")
+            delete_parameters["chltype"] = chltype
+        return dict(action="delete" if current is not None else "none", parameters=delete_parameters,
                     before={"state": "present" if current is not None else "absent"}, after={"state": "absent"})
     if current is None:
         if obj["type"] == "topic" and not desired.get("topicstr"):

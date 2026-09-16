@@ -100,6 +100,23 @@ class ReconciliationTests(unittest.TestCase):
         deletion = next(c for c in client.calls if c[0] == "delete")
         self.assertEqual(deletion[3], {})  # no PURGE or FORCE
 
+    def test_channel_delete_is_qualified_with_discovered_type(self):
+        name = "BERGEN.CLIENT"
+        client = FakeClient({name: dict(channel=name, chltype="CLNTCONN")})
+        result = mq.reconcile(client, [dict(name=name, type="channel", state="absent")],
+                              allow_deletion=True)
+        self.assertTrue(result["changed"])
+        deletion = next(call for call in client.calls if call[0] == "delete")
+        self.assertEqual(deletion[3], {"chltype": "clntconn"})
+
+    def test_channel_delete_refuses_missing_type_before_mutation(self):
+        name = "BERGEN.CLIENT"
+        client = FakeClient({name: dict(channel=name)})
+        with self.assertRaisesRegex(mq.MQError, "channel type"):
+            mq.reconcile(client, [dict(name=name, type="channel", state="absent")],
+                         allow_deletion=True)
+        self.assertFalse(any(call[0] == "delete" for call in client.calls))
+
     def test_check_delete_does_not_mutate(self):
         client = self.queue_client()
         obj = dict(name=QUEUE["name"], type="qlocal", state="absent")
