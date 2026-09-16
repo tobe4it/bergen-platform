@@ -1,0 +1,76 @@
+---
+- name: Collect isolated single-QMgr evaluation evidence
+  hosts: localhost
+  connection: local
+  become: false
+  gather_facts: false
+  tasks:
+    - name: Require explicit consent and lab identity
+      ansible.builtin.assert:
+        that:
+          - mq_audit_confirm_test_mutations | default(false) | bool
+          - mq_qmgr == 'BERGENLAB'
+          - not ansible_check_mode
+        fail_msg: "Evaluation only. This creates, alters and deletes isolated test objects on BERGENLAB."
+
+    - name: Record controller source revision
+      ansible.builtin.command:
+        argv: [git, rev-parse, HEAD]
+        chdir: "{{ playbook_dir }}/../.."
+      changed_when: false
+      register: audit_revision
+
+    - name: Run guarded object lifecycle and negative cases
+      mq_audit:
+        endpoint: "{{ mq_rest_endpoint }}"
+        qmgr: "{{ mq_qmgr }}"
+        username: "{{ mq_rest_username }}"
+        password: "{{ mq_rest_password }}"
+        ca_path: "{{ mq_rest_ca_path }}"
+        revision: "{{ audit_revision.stdout }}"
+        confirm: true
+      register: audit_run
+
+    - name: Set unique evidence directory
+      ansible.builtin.set_fact:
+        audit_directory: "{{ playbook_dir }}/../reports/mq-audit/{{ audit_run.report.prefix }}"
+
+    - name: Protect evidence directory
+      ansible.builtin.file:
+        path: "{{ audit_directory }}"
+        state: directory
+        mode: '0700'
+
+    - name: Save machine-readable evidence before assessing outcome
+      ansible.builtin.copy:
+        content: "{{ audit_run.report | to_nice_json }}\n"
+        dest: "{{ audit_directory }}/evidence.json"
+        mode: '0600'
+
+    - name: Render scoped audit report
+      ansible.builtin.template:
+        src: "{{ playbook_dir }}/../templates/mq-audit-report.md.j2"
+        dest: "{{ audit_directory }}/Pruefbericht.md"
+        mode: '0600'
+
+    - name: Hash evidence and report
+      ansible.builtin.command:
+        argv: [sha256sum, evidence.json, Pruefbericht.md]
+        chdir: "{{ audit_directory }}"
+      changed_when: false
+      register: audit_hashes
+
+    - name: Save integrity manifest
+      ansible.builtin.copy:
+        content: "{{ audit_hashes.stdout }}\n"
+        dest: "{{ audit_directory }}/SHA256SUMS"
+        mode: '0600'
+
+    - name: Show report location
+      ansible.builtin.debug:
+        msg: "{{ audit_run.report.status }} — {{ audit_directory }}; review evidence, limitations and residual objects."
+
+    - name: Require all scoped cases and cleanup to pass
+      ansible.builtin.assert:
+        that: [audit_run.report.status == 'PASS']
+        fail_msg: "Tests failed or objects remain. Evidence has been saved; do not blindly retry or FORCE-delete."

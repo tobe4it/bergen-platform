@@ -1,0 +1,58 @@
+# Single-QMgr-Prüfung (Beispiel / Evaluation)
+
+Für produktiven Betrieb ist die Lizenzfrage mit IBM zu klären. Dies ist ein
+funktionales Prüfprotokoll, keine unabhängige Audit- oder Compliancefreigabe.
+
+## Automatisierter Umfang
+
+`ansible/playbooks/mq-audit.yml` führt den vorhandenen Reconciler über HTTPS mit
+CA-Prüfung und Vault-Zugang aus. Zufällige, kollisionsfrei geprüfte `BGA.*`-Namen
+isolieren die Prüfungen von bestehenden Objekten. Keine Channels werden gestartet.
+
+| Bereich | Prüfungen |
+|---|---|
+| QLOCAL, QREMOTE, QALIAS, QMODEL, TOPIC, NAMELIST | Check-Erstellung, DEFINE, Idempotenz, Check-ALTER, inkrementelles ALTER, Attributerhalt, Check-DELETE, DELETE, Abwesenheitsprüfung |
+| SDR, RCVR, SVRCONN, CLNTCONN, CLUSSDR, CLUSRCVR | Definitions-Lifecycle; keine Kommunikations- oder Clusterfreigabe |
+| Schutzmechanismen | Typkonflikte, unveränderlicher TOPICSTR, Löschfreigabe, SYSTEM-Namen, Wildcards, unbekannte Attribute, ungültige Enums, doppelte Identitäten |
+| Nachweise | UTC-Zeit, Git-Revision, Erwartungen/Resultate, strukturierte Befehle und Codes, Bereinigung, SHA-256-Manifest |
+
+Cluster-Definitionen können an vom Reconciler nicht unterstützten Pflichtattributen
+scheitern. Das ist ein dokumentierter FAIL, kein unterdrückter Fehler.
+
+## Ausführung auf bp-controller
+
+Vorher neuen Code bereitstellen und `git status --short` prüfen; lokale Änderungen
+im Prüfkontext dokumentieren. Die Suite ist kein Ansible-Check-Mode-Playbook.
+
+```bash
+python -m unittest discover -s tests -v
+ansible-playbook ansible/playbooks/mq-audit.yml \
+  -i ansible/inventory.yml -i ansible/inventory.local.yml \
+  -e @ansible/vars/mq-lab.local.yml \
+  -e mq_audit_confirm_test_mutations=true \
+  --ask-vault-pass
+```
+
+Die Zustimmung erlaubt gezielte Testobjekt-Erstellung, ALTER und DELETE ausschließlich
+auf BERGENLAB. Ergebnisdateien unter `ansible/reports/mq-audit/BGA.*/` sind ignoriert
+und restriktiv berechtigt: `evidence.json`, `Pruefbericht.md`, `SHA256SUMS`.
+Bei FAIL wird erst gespeichert, dann das Playbook abgebrochen. Bei Verbindungsabbruch,
+SIGKILL oder unklarer Bereinigung Präfix prüfen; nicht blind wiederholen oder FORCE
+verwenden. Keine Zugangsdaten in Berichte oder Git aufnehmen.
+
+## Noch nötige Single-QMgr-Prüfungen
+
+Dieser erste automatisierte Lauf testet die implementierte Objektverwaltung, nicht
+alles, was IBM MQ auf einem einzelnen QMgr grundsätzlich kann. Separat offen:
+
+- PUT/GET/Browse, Persistenz, Commit/Rollback und nicht-leere Queue-Löschsperre.
+- Authentifizierung mit falschem Passwort, TLS-Negativfälle, CHLAUTH/OAM und Rollen.
+- Lokales Publish/Subscribe und dynamische Queues (nicht implementierte Funktionen).
+- Dienst-/Container-Wiederanlauf, Host-Neustart, Backup/Restore und tatsächliche
+  Syslog-Zustellung; dafür muss ein abgestimmtes Unterbrechungsfenster bestehen.
+- Attribut-Grenzwerte und vollständige Matrix der erlaubten Attribute.
+
+Nicht geprüfte Punkte bleiben NOT TESTED. Zwei-QMgr-Routing, HA und aktive Cluster
+sind mit dieser Topologie nicht nachweisbar. Offline-Tests sind ausdrücklich keine
+realen IBM-MQ-Kompatibilitätsnachweise. Ein endgültiger Prüfbericht benötigt die
+tatsächlichen Ergebnisdateien und die organisatorische Prüferfreigabe.

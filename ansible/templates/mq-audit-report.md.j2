@@ -1,0 +1,51 @@
+# Prüfbericht: Single-QMgr-Objektverwaltung
+
+Beispiel / Evaluation, keine Produktions-, Compliance- oder unabhängige Auditfreigabe.
+Vor produktivem Betrieb ist die Lizenzfrage mit IBM zu klären.
+
+| Nachweis | Wert |
+|---|---|
+| Ergebnis im definierten Umfang | {{ audit_run.report.status }} |
+| QMgr | {{ audit_run.report.qmgr }} |
+| Beginn / Ende (UTC) | {{ audit_run.report.started }} / {{ audit_run.report.finished }} |
+| Git-Revision des Controllers | {{ audit_run.report.revision }} |
+| Isolierter Objektpräfix | {{ audit_run.report.prefix }} |
+| Bestanden / fehlgeschlagen | {{ audit_run.report.passed }} / {{ audit_run.report.failed }} |
+
+## Einzelprüfungen
+
+PASS bedeutet, dass die programmierte Erwartung im realen Lauf erfüllt wurde.
+Negative Fälle bestehen nur bei der erwarteten Ablehnung. Die Befehlsbereiche
+verweisen auf `commands` in evidence.json (nullbasiert, Ende exklusiv).
+
+| Test | Ergebnis | Befehlsbereich | Abweichung / erwartete Ablehnung |
+|---|---|---|---|
+{% for test in audit_run.report.tests %}
+| {{ test.id }} | {{ test.status }} | {{ test.command_range }} | {{ test.error | default('—') | replace('|', '\\|') | replace('\n', ' ') }} |
+{% endfor %}
+
+## Bereinigung
+
+Nur die vorab kollisionsfrei geprüften Testidentitäten werden bereinigt.
+Kein FORCE, PURGE oder Channel-Start. Bei Prozessabbruch müssen Objekte anhand
+des Präfixes geprüft werden; auch diese Suite kann bei SIGKILL keinen Cleanup garantieren.
+
+| Objekt | Ergebnis | Abweichung |
+|---|---|---|
+{% for item in audit_run.report.cleanup %}
+| {{ item.type }}:{{ item.name }} | {{ item.status }} | {{ item.error | default('—') | replace('|', '\\|') }} |
+{% endfor %}
+
+Verbliebene / nicht sicher bereinigte Identitäten: {{ audit_run.report.residual_objects | to_json }}
+
+## Grenzen und offene Nachweise
+
+{% for limitation in audit_run.report.limitations %}
+- {{ limitation }}
+{% endfor %}
+
+Nicht geprüfte Bereiche sind **nicht bestanden**, sondern **nicht geprüft**.
+Der SHA-256-Nachweis erkennt nachträgliche Änderungen bei vertrauenswürdig
+aufbewahrtem Manifest; er ersetzt keine Signatur oder unabhängige Bezeugung.
+Git-Revision allein beweist keinen sauberen Worktree. Prüfer, Freigabe und
+Aufbewahrung sind organisatorisch festzulegen.
