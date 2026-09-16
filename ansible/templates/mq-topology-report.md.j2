@@ -1,0 +1,45 @@
+# MQ Zweiknoten-Prüfbericht — {{ topology_run.report.prefix }}
+
+Status: **{{ topology_run.report.status }}**
+
+Revision: `{{ topology_run.report.revision }}`
+
+UTC: {{ topology_run.report.started }} bis {{ topology_run.report.finished }}
+
+PASS: {{ topology_run.report.passed }} · FAIL: {{ topology_run.report.failed }} · NOT_TESTED: {{ topology_run.report.not_tested }}
+
+Evaluation, keine unabhängige Auditbescheinigung oder Produktionsfreigabe.
+NOT_TESTED ist keine bestandene Prüfung. Ein erfolgreicher PUT beweist keine
+Zustellung; Transportfälle prüfen GET, Nutzdaten, MsgId und Persistenz am Ziel.
+
+| Test | Ergebnis | Hinweis / MQ-Code |
+| --- | --- | --- |
+{% for t in topology_run.report.tests %}
+| {{ t.id }} | {{ t.status }} | {{ t.detail | default('') }} {{ t.evidence.reason if t.evidence is defined else '' }} |
+{% endfor %}
+
+## Objektprüfungen
+
+{% for side, report in topology_run.report.object_reports.items() %}
+- {{ side }} / {{ report.qmgr }}: {{ report.status }}, {{ report.passed }} PASS,
+  {{ report.failed }} FAIL. Vollständige Einzeltests und MQSC-Ereignisse in evidence.json.
+{% endfor %}
+
+## Bereinigung
+
+{% for item in topology_run.report.cleanup %}
+- {{ item.side }} / {{ item.name }}: {{ item.status }} — {{ item.detail | default('') }}
+{% endfor %}
+
+Verbleibende Objekte: {{ topology_run.report.residual_objects | length }}.
+Keine Queue wird geleert oder mit FORCE gelöscht. Nach Timeout bleibt der
+Ausgang ungewiss; zuerst Clientprozess und Nachrichtenbestand prüfen.
+
+## Grenzen
+
+{% for limitation in topology_run.report.limitations %}
+- {{ limitation }}
+{% endfor %}
+
+SHA256SUMS erkennt Änderungen relativ zum Manifest, ist aber keine digitale
+Signatur und kein unabhängiger Zeitstempel. Mailannahme ist kein Zustellnachweis.

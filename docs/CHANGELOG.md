@@ -10,6 +10,13 @@ The project follows **Semantic Versioning (SemVer)** and the changelog format is
 
 ### Added
 
+- Guarded two-QMgr/client audit harness with Java MQI probes for TLS/password
+  negatives, local PUT/GET, message integrity, transactions, queue limits and
+  bidirectional remote-queue transport; produces hashed JSON/Markdown evidence
+  and optional mail submission.
+- Explicit audit inventory of deferred disruptive/infrastructure-dependent cases;
+  clean implemented coverage reports `PARTIAL`, never a misleading full PASS.
+
 - Separate second-QMgr and client-LXC site examples and deployment instructions
   in `docs/MQ-TOPOLOGY.md`; VMIDs/network settings remain explicit site inputs.
 - Rocky Java client role with non-login test account, SSH collection of the MQ

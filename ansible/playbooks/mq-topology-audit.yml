@@ -1,0 +1,159 @@
+---
+- name: Validate topology test consent before preparing client
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  tasks:
+    - name: Require complete isolated test selection
+      ansible.builtin.assert:
+        that:
+          - not ansible_check_mode
+          - mq_topology_confirm_test_mutations | default(false) | bool
+          - mq_topology_nodes.a.qmgr == 'BERGENLAB'
+          - mq_topology_nodes.b.qmgr == 'BERGENLABB'
+          - mq_topology_client_host | default('bergen-mq-client') in groups.get('mq_client_nodes', [])
+          - mq_topology_nodes.a.endpoint != mq_topology_nodes.b.endpoint
+
+- name: Install test probe on the dedicated client
+  hosts: "{{ mq_topology_client_host | default('bergen-mq-client') }}"
+  become: true
+  gather_facts: false
+  tasks:
+    - name: Create root-owned test and public trust directories
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: directory
+        owner: root
+        group: root
+        mode: '0755'
+      loop: [/opt/bergen-mq-client/tests, /opt/bergen-mq-client/trust]
+
+    - name: Install Java probe source
+      ansible.builtin.copy:
+        src: "{{ playbook_dir }}/../../tools/mq-tests/BergenMQProbe.java"
+        dest: /opt/bergen-mq-client/tests/BergenMQProbe.java
+        owner: root
+        group: root
+        mode: '0644'
+      register: topology_source
+
+    - name: Inspect compiled probe
+      ansible.builtin.stat:
+        path: /opt/bergen-mq-client/tests/BergenMQProbe.class
+      register: topology_class
+
+    - name: Compile probe without bundling IBM libraries
+      ansible.builtin.command:
+        argv: [/usr/bin/javac, -d, /opt/bergen-mq-client/tests, /opt/bergen-mq-client/tests/BergenMQProbe.java]
+      when: topology_source.changed or not topology_class.stat.exists
+      changed_when: true
+
+    - name: Install explicitly selected public messaging CA certificates
+      ansible.builtin.copy:
+        src: "{{ mq_topology_nodes[item].tls_ca_source }}"
+        dest: "/opt/bergen-mq-client/trust/{{ item }}.crt"
+        owner: root
+        group: root
+        mode: '0644'
+      loop: [a, b]
+      no_log: true
+
+    - name: Record test source and client library checksums
+      ansible.builtin.stat:
+        path: "{{ item }}"
+        checksum_algorithm: sha256
+      loop:
+        - /opt/bergen-mq-client/tests/BergenMQProbe.java
+        - /opt/bergen-mq-client/lib/com.ibm.mq.allclient.jar
+      register: topology_client_artifacts
+
+- name: Collect two-QMgr and client audit evidence
+  hosts: localhost
+  connection: local
+  become: false
+  gather_facts: false
+  tasks:
+    - name: Record controller revision
+      ansible.builtin.command:
+        argv: [git, rev-parse, HEAD]
+        chdir: "{{ playbook_dir }}/../.."
+      changed_when: false
+      register: topology_revision
+
+    - name: Run scoped messaging and object tests
+      mq_topology_audit:
+        nodes: "{{ mq_topology_nodes }}"
+        ssh:
+          host: "{{ hostvars[mq_topology_client_host | default('bergen-mq-client')].ansible_host }}"
+          port: "{{ hostvars[mq_topology_client_host | default('bergen-mq-client')].ansible_port | default(22) }}"
+        revision: "{{ topology_revision.stdout }}"
+        confirm: "{{ mq_topology_confirm_test_mutations }}"
+        include_objects: "{{ mq_topology_include_objects | default(true) }}"
+      register: topology_run
+
+    - name: Include executed client artifact identities in evidence
+      ansible.builtin.set_fact:
+        topology_run: "{{ topology_run | combine({'report': topology_run.report | combine({'client_artifacts': hostvars[mq_topology_client_host | default('bergen-mq-client')].topology_client_artifacts.results | map(attribute='stat') | list})}) }}"
+
+    - name: Select distinct immutable report directory
+      ansible.builtin.set_fact:
+        topology_directory: "{{ playbook_dir }}/../reports/mq-topology/{{ topology_run.report.prefix }}"
+
+    - name: Protect report directory
+      ansible.builtin.file:
+        path: "{{ topology_directory }}"
+        state: directory
+        mode: '0700'
+
+    - name: Save evidence before evaluating result
+      ansible.builtin.copy:
+        content: "{{ topology_run.report | to_nice_json }}\n"
+        dest: "{{ topology_directory }}/evidence.json"
+        mode: '0600'
+
+    - name: Render topology audit report
+      ansible.builtin.template:
+        src: "{{ playbook_dir }}/../templates/mq-topology-report.md.j2"
+        dest: "{{ topology_directory }}/Pruefbericht.md"
+        mode: '0600'
+
+    - name: Hash evidence and report
+      ansible.builtin.command:
+        argv: [sha256sum, evidence.json, Pruefbericht.md]
+        chdir: "{{ topology_directory }}"
+      register: topology_hashes
+      changed_when: false
+
+    - name: Save integrity manifest
+      ansible.builtin.copy:
+        content: "{{ topology_hashes.stdout }}\n"
+        dest: "{{ topology_directory }}/SHA256SUMS"
+        mode: '0600'
+
+    - name: Show outcome and evidence location
+      ansible.builtin.debug:
+        msg: "{{ topology_run.report.status }}: {{ topology_directory }}; NOT_TESTED is not PASS."
+
+    - name: Submit optional report email before final assertion
+      mq_audit_mail:
+        recipient: "{{ mq_audit_mail_to }}"
+        sender: "{{ mq_audit_mail_from | default('ansible@bp-controller') }}"
+        sendmail_path: "{{ mq_audit_sendmail_path | default('/usr/sbin/sendmail') }}"
+        subject: "MQ topology {{ topology_run.report.status }} — {{ topology_run.report.prefix }}"
+        body: "Evaluation only. Review failures, NOT_TESTED cases and residual objects. Partial coverage is not full audit approval."
+        attachments:
+          - "{{ topology_directory }}/Pruefbericht.md"
+          - "{{ topology_directory }}/evidence.json"
+          - "{{ topology_directory }}/SHA256SUMS"
+      when: mq_audit_mail_to | default('') | length > 0
+      register: topology_mail
+      ignore_errors: true
+
+    - name: Require requested email submission
+      ansible.builtin.assert:
+        that: [not (topology_mail.failed | default(false))]
+
+    - name: Require complete success rather than silently approving partial coverage
+      ansible.builtin.assert:
+        that: [topology_run.report.status == 'PASS']
+        fail_msg: "{{ topology_run.report.status }}: evidence saved. Review NOT_TESTED/FAIL and residual objects; do not blindly rerun or FORCE-delete."

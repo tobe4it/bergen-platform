@@ -55,8 +55,8 @@ def declarations(prefix):
 def run_audit(client, qmgr, revision, confirm=False, scope='all'):
     if scope not in ('all', 'namelist_sdr'):
         raise MQError('Unsupported audit scope')
-    if not confirm or qmgr != 'BERGENLAB':
-        raise MQError('Audit mutations require explicit evaluation consent and BERGENLAB')
+    if not confirm or qmgr not in ('BERGENLAB', 'BERGENLABB'):
+        raise MQError('Audit mutations require explicit evaluation consent and a permitted lab QMgr')
     prefix = 'BGA.' + uuid.uuid4().hex[:7].upper()
     recorded = RecordedClient(client)
     report = dict(schema_version=1, started=now(), qmgr=qmgr, revision=revision,

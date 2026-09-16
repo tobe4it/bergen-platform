@@ -1,0 +1,44 @@
+---
+# Copy to ansible/vars/mq-topology/audit.yml; local and Git-ignored.
+# Requires preconfigured dedicated TLS SVRCONN and authorized non-admin identities.
+mq_topology_confirm_test_mutations: false
+mq_topology_client_host: bergen-mq-client
+mq_topology_include_objects: true
+mq_topology_nodes:
+  a:
+    qmgr: BERGENLAB
+    endpoint: CHANGE_ME
+    admin_user: admin
+    admin_password: "{{ vault_mq_lab_admin_password }}"
+    admin_ca: "{{ playbook_dir }}/../reports/mq/bergen-mq-lab-ca.crt"
+    host: CHANGE_ME
+    port: 1414
+    channel: BGT.CLIENT
+    username: CHANGE_ME
+    password: "{{ vault_mq_test_a_password }}"
+    cipher: TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384
+    peer: CN=bergen-mq-lab
+    tls_ca_source: "{{ playbook_dir }}/../reports/mq/bergen-mq-lab-ca.crt"
+    ca: /opt/bergen-mq-client/trust/a.crt
+    # Existing fixtures, optional; NOT_TESTED if absent. Do not use business objects.
+    denied_queue: ''
+    sender_channel: ''
+    xmitq: ''
+  b:
+    qmgr: BERGENLABB
+    endpoint: CHANGE_ME
+    admin_user: admin
+    admin_password: "{{ vault_mq_lab_b_admin_password }}"
+    admin_ca: "{{ playbook_dir }}/../reports/mq/bergen-mq-lab-b-ca.crt"
+    host: CHANGE_ME
+    port: 1414
+    channel: BGT.CLIENT
+    username: CHANGE_ME
+    password: "{{ vault_mq_test_b_password }}"
+    cipher: TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384
+    peer: CN=bergen-mq-lab-b
+    tls_ca_source: "{{ playbook_dir }}/../reports/mq/bergen-mq-lab-b-ca.crt"
+    ca: /opt/bergen-mq-client/trust/b.crt
+    denied_queue: ''
+    sender_channel: ''
+    xmitq: ''
