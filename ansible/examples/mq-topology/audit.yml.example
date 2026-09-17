@@ -16,7 +16,8 @@ mq_topology_nodes:
     channel: BGT.CLIENT
     username: CHANGE_ME
     password: "{{ vault_mq_test_a_password }}"
-    cipher: TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384
+    protocol: TLSv1.3
+    cipher: TLS_AES_256_GCM_SHA384
     peer: CN=bergen-mq-lab
     tls_ca_source: "{{ playbook_dir }}/../reports/mq/bergen-mq-lab-ca.crt"
     ca: /opt/bergen-mq-client/trust/a.crt
@@ -35,7 +36,8 @@ mq_topology_nodes:
     channel: BGT.CLIENT
     username: CHANGE_ME
     password: "{{ vault_mq_test_b_password }}"
-    cipher: TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384
+    protocol: TLSv1.3
+    cipher: TLS_AES_256_GCM_SHA384
     peer: CN=bergen-mq-lab-b
     tls_ca_source: "{{ playbook_dir }}/../reports/mq/bergen-mq-lab-b-ca.crt"
     ca: /opt/bergen-mq-client/trust/b.crt

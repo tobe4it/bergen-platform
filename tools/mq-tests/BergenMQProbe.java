@@ -61,7 +61,7 @@ public final class BergenMQProbe {
             public void checkClientTrusted(X509Certificate[] chain, String auth) throws CertificateException { throw new CertificateException("audit rejection"); }
             public void checkServerTrusted(X509Certificate[] chain, String auth) throws CertificateException { throw new CertificateException("audit rejection"); }
         }};
-        SSLContext ssl = SSLContext.getInstance("TLSv1.2");
+        SSLContext ssl = SSLContext.getInstance(value(side + ".protocol"));
         ssl.init(null, managers, new SecureRandom());
         props.put((String)constant("SSL_SOCKET_FACTORY_PROPERTY"), ssl.getSocketFactory());
         try {

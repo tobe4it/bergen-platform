@@ -24,6 +24,8 @@ The project follows **Semantic Versioning (SemVer)** and the changelog format is
 
 ### Changed
 
+- Two-QMgr/client messaging probes now require TLS 1.3 with a TLS 1.3 cipher;
+  TLS 1.2 configuration is rejected before any live test mutation.
 - MQ server deployment accepts isolated named lab instances and requires separate
   controller CA/connection paths and Vault reference for additional instances.
 - Client deployment starts a stopped LXC without restarting an already running one.

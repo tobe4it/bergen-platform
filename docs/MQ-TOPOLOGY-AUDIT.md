@@ -9,7 +9,7 @@ development. The earlier 158-PASS single-QMgr evidence remains separate.
 | Area | Checks | Prerequisites |
 | --- | --- | --- |
 | Objects on A and B | Existing lifecycle/idempotency/negative/cleanup suite on each QMgr | Verified HTTPS REST administration |
-| Client security | Positive TLS+peer+password connection, invalid password (2035), explicit certificate trust rejection, positive reconnection | Dedicated TLS SVRCONN, non-admin account |
+| Client security | Positive TLS 1.3+peer+password connection, invalid password (2035), explicit certificate trust rejection, positive reconnection | Dedicated TLS 1.3 SVRCONN, non-admin account |
 | Message content | Persistent/nonpersistent, zero bytes, binary 4 KiB, MsgId, CorrelId | Isolated BGT.* queues and scoped OAM |
 | Queue behavior | Alias, browse without removal, FIFO at equal priority, priority ordering, expiry | BGT.* fixtures |
 | Transactions | PUT commit/backout, uncommitted invisibility to a second connection, disconnect rollback, GET commit/backout and BackoutCount | Same-QMgr local units of work; not XA |
@@ -42,9 +42,10 @@ start/stop services, or automatically open firewall ports.
 
 Prepare and review on **both** QMgr:
 
-1. Dedicated `BGT.CLIENT` SVRCONN with TLS, configured peer identity, and a
-   non-administrator principal authenticated through MQCSP. The present probe
-   supports server-authenticated TLS 1.2; mutual TLS is not implemented.
+1. Dedicated `BGT.CLIENT` SVRCONN with TLS 1.3, configured peer identity, and a
+   non-administrator principal authenticated through MQCSP. The probe requires
+   `TLSv1.3` and a `TLS_AES_*` cipher suite; TLS 1.2 is deliberately rejected.
+   Server authentication is covered; mutual TLS is not implemented.
 2. Minimum QMGR CONNECT and test-object permissions: PUT/GET/BROWSE as needed
    only on `BGT.**`; no MQM/admin/all-object authority. The wildcard authorization
    is scoped to the reserved audit namespace, not business objects. REST admin
@@ -78,7 +79,7 @@ cp -n ansible/examples/mq-topology/audit.yml.example ansible/vars/mq-topology/au
 vim ansible/vars/mq-topology/audit.yml
 ```
 
-Set local endpoints/IPs and reviewed channel/cipher/peer parameters. Add separate
+Set local endpoints/IPs and reviewed channel/protocol/cipher/peer parameters. Add separate
 Vault client secrets; never use REST admin credentials as MQ client credentials.
 Set `mq_topology_confirm_test_mutations: true` only after reviewing setup.
 All site values stay in the ignored local directory. No VMID/IP is embedded.
@@ -120,3 +121,7 @@ Compilation is checked using Java 17's compiler and standard APIs. IBM classes
 are resolved through reflection at runtime to avoid bundling proprietary JARs.
 The API preflight checks classes/constants, but actual MQ call compatibility
 still needs live acceptance. Offline fake REST/probe tests are not live evidence.
+
+The current IBM MQ 9.4/Java-client topology does not claim post-quantum TLS.
+Quantum-safe negotiation remains a separately versioned MQ 10/C-client test
+fixture and is not silently substituted for the enforced TLS 1.3 coverage.

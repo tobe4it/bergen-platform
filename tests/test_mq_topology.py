@@ -23,7 +23,7 @@ def nodes():
                     admin_user='admin', admin_password='hidden-admin', admin_ca='/tmp/ca',
                     host=s, port=1414, channel='BGT.CLIENT', username='mqtest',
                     password='hidden-client', ca='/tmp/ca', peer='CN=' + s,
-                    cipher='TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384')
+                    protocol='TLSv1.3', cipher='TLS_AES_256_GCM_SHA384')
             for s, q in (('a', 'BERGENLAB'), ('b', 'BERGENLABB'))}
 
 
@@ -40,6 +40,14 @@ class TopologyTests(unittest.TestCase):
         with self.assertRaises(ValueError): topology.validate(bad, {'host': 'client'}, True)
         bad = nodes(); bad['a']['username'] = 'mqm'
         with self.assertRaises(ValueError): topology.validate(bad, {'host': 'client'}, True)
+
+    def test_tls_12_and_non_tls_13_cipher_are_rejected(self):
+        bad = nodes(); bad['a']['protocol'] = 'TLSv1.2'
+        with self.assertRaisesRegex(ValueError, 'TLSv1.3'):
+            topology.validate(bad, {'host': 'client'}, True)
+        bad = nodes(); bad['a']['cipher'] = 'TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384'
+        with self.assertRaisesRegex(ValueError, 'TLS 1.3 cipher'):
+            topology.validate(bad, {'host': 'client'}, True)
 
     def test_working_subset_never_claims_full_pass(self):
         clients = dict(a=FakeClient(), b=FakeClient())
@@ -83,6 +91,7 @@ class TopologyTests(unittest.TestCase):
         properties = dict(line.split('=', 1) for line in execute.call_args.kwargs['input'].splitlines())
         self.assertEqual(base64.b64decode(properties['size']), b'4096')
         self.assertEqual(base64.b64decode(properties['a.password']), b'hidden-client')
+        self.assertEqual(base64.b64decode(properties['a.protocol']), b'TLSv1.3')
         self.assertEqual(execute.call_args.kwargs['timeout'], 45)
 
     def test_malformed_probe_output_is_not_a_pass(self):

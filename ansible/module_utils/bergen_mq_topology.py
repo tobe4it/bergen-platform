@@ -49,9 +49,13 @@ def validate(nodes, ssh, confirm):
     if nodes['a'].get('endpoint') == nodes['b'].get('endpoint'):
         raise ValueError('Distinct REST endpoints required')
     for node in nodes.values():
-        for key in ('endpoint', 'admin_user', 'admin_password', 'admin_ca', 'host', 'channel', 'username', 'password', 'ca', 'peer', 'cipher'):
+        for key in ('endpoint', 'admin_user', 'admin_password', 'admin_ca', 'host', 'channel', 'username', 'password', 'ca', 'peer', 'protocol', 'cipher'):
             if not isinstance(node.get(key), str) or not node[key] or 'CHANGE_ME' in node[key]:
                 raise ValueError('Complete REST, TLS and dedicated client identity settings required')
+        if node['protocol'] != 'TLSv1.3':
+            raise ValueError('Topology audit requires TLSv1.3; TLSv1.2 is not accepted')
+        if not node['cipher'].startswith('TLS_AES_'):
+            raise ValueError('Topology audit requires a TLS 1.3 cipher suite')
         if not re.fullmatch(r'BGT\.[A-Z0-9.]{1,16}', node['channel']):
             raise ValueError('Dedicated BGT.* client channel required')
         if not 1 <= int(node.get('port', 1414)) <= 65535:
@@ -75,7 +79,7 @@ class Probe:
                           persistence=1, seed=uuid.uuid4().int % (2**63))
         properties.update(settings)
         for label, node in self.nodes.items():
-            for key in ('host', 'port', 'qmgr', 'channel', 'username', 'password', 'ca', 'peer', 'cipher'):
+            for key in ('host', 'port', 'qmgr', 'channel', 'username', 'password', 'ca', 'peer', 'protocol', 'cipher'):
                 properties[label + '.' + key] = node.get(key, 1414 if key == 'port' else '')
         # Stdin only; no secrets in process argv, command output or evidence.
         payload = '\n'.join(k + '=' + base64.b64encode(str(v).encode()).decode() for k, v in properties.items())
@@ -120,7 +124,7 @@ def run(nodes, ssh, revision, confirm=False, include_objects=True, clients=None,
     prefix = 'BGT.' + uuid.uuid4().hex[:7].upper()
     report = dict(schema_version=1, prefix=prefix, revision=revision, started=now(),
                   evaluation_only=True, tests=[], cleanup=[], residual_objects=[], object_reports={},
-                  targets={s: {k: n.get(k) for k in ('qmgr', 'host', 'port', 'channel')} for s, n in nodes.items()},
+                  targets={s: {k: n.get(k) for k in ('qmgr', 'host', 'port', 'channel', 'protocol', 'cipher')} for s, n in nodes.items()},
                   limitations=['Not an independent audit or production approval.',
                                'No claim to all possible MQ product configurations; deferred cases remain NOT_TESTED.',
                                'Infrastructure/backup/HA availability is not established by two independent QMgr.'])
