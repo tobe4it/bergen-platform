@@ -1,0 +1,113 @@
+---
+# Trust preparation only: does not switch CONNAUTH or grant authorities.
+- name: Add LDAP CA trust to existing evaluation queue managers
+  hosts: 'bergen-mq-lab:bergen-mq-lab-b'
+  serial: 1
+  any_errors_fatal: true
+  become: true
+  gather_facts: true
+  environment:
+    CONTAINERS_STORAGE_CONF: /etc/bergen-mq-lab/storage.conf
+  tasks:
+    - name: Require an actual run for restart and import verification
+      ansible.builtin.assert:
+        that: not ansible_check_mode
+        fail_msg: 'Use --syntax-check for offline validation; this play verifies the live imported CA.'
+
+    - name: Require an existing active MQ service
+      ansible.builtin.command:
+        argv: [systemctl, is-active, bergen-mq-lab.service]
+      changed_when: false
+
+    - name: Read existing Quadlet
+      ansible.builtin.slurp:
+        src: /etc/containers/systemd/bergen-mq-lab.container
+      register: ldap_existing_quadlet
+
+    - name: Require the expected evaluation container definition
+      ansible.builtin.assert:
+        that:
+          - "'ContainerName=bergen-mq-lab' in (ldap_existing_quadlet.content | b64decode)"
+          - "'Image=icr.io/ibm-messaging/mq' in (ldap_existing_quadlet.content | b64decode)"
+
+    - name: Record current queue manager authentication and key repository
+      ansible.builtin.command:
+        argv: [podman, exec, -i, bergen-mq-lab, /opt/mqm/bin/runmqsc]
+        stdin: 'DISPLAY QMGR QMNAME CONNAUTH SSLKEYR'
+      register: ldap_qmgr_before
+      changed_when: false
+
+    - name: Require the observed IBM image key repository
+      ansible.builtin.assert:
+        that:
+          - "'SSLKEYR(/run/runmqserver/tls/key)' in ldap_qmgr_before.stdout"
+
+    - name: Install the persistent public CA using the MQ role
+      ansible.builtin.include_role:
+        name: mq_lab
+        tasks_from: ldap-trust
+      vars:
+        mq_lab_install_ldap_trust: true
+
+    - name: Check the installed public certificate fingerprint
+      ansible.builtin.command:
+        argv: [openssl, x509, -in, /etc/bergen-mq-lab/trust/ldap/tls.crt, -noout, -fingerprint, -sha256]
+      register: ldap_root_fingerprint
+      changed_when: false
+
+    - name: Require the reviewed self-signed ISRG Root X2
+      ansible.builtin.assert:
+        that:
+          - "'69:72:9B:8E:15:A8:6E:FC:17:7A:57:AF:B7:17:1D:FC:64:AD:D2:8C:2F:CA:8C:F1:50:7E:34:45:3C:CB:14:70' in ldap_root_fingerprint.stdout"
+
+    - name: Add the LDAP trust mount to the existing Quadlet
+      ansible.builtin.lineinfile:
+        path: /etc/containers/systemd/bergen-mq-lab.container
+        regexp: '^Volume=/etc/bergen-mq-lab/trust/ldap:'
+        insertafter: '^ContainerName=bergen-mq-lab$'
+        line: "Volume=/etc/bergen-mq-lab/trust/ldap:/etc/mqm/pki/trust/ldap:ro{{ ',Z' if (ansible_facts.selinux | default({})).status | default('disabled') == 'enabled' else '' }}"
+        backup: true
+      register: ldap_trust_mount
+
+    - name: Read the current imported certificate list
+      ansible.builtin.command:
+        argv: [podman, exec, bergen-mq-lab, /opt/mqm/bin/runmqakm, -cert, -list, -db, /run/runmqserver/tls/key.kdb, -stashed]
+      register: ldap_trust_before
+      changed_when: false
+
+    - name: Recreate this container when the trust input or import changed
+      ansible.builtin.systemd_service:
+        name: bergen-mq-lab.service
+        daemon_reload: true
+        state: restarted
+      when: mq_lab_ldap_trust_copy.changed or ldap_trust_mount.changed or 'ISRG Root X2' not in ldap_trust_before.stdout
+
+    - name: Wait for the LDAP CA to appear in the MQ key repository
+      ansible.builtin.command:
+        argv: [podman, exec, bergen-mq-lab, /opt/mqm/bin/runmqakm, -cert, -list, -db, /run/runmqserver/tls/key.kdb, -stashed]
+      register: ldap_trust_after
+      changed_when: false
+      until: ldap_trust_after.rc == 0 and 'ISRG Root X2' in ldap_trust_after.stdout
+      retries: 30
+      delay: 5
+
+    - name: Wait for queue manager command processing
+      ansible.builtin.command:
+        argv: [podman, exec, -i, bergen-mq-lab, /opt/mqm/bin/runmqsc]
+        stdin: 'DISPLAY QMGR QMNAME CONNAUTH SSLKEYR'
+      register: ldap_qmgr_after
+      changed_when: false
+      until: ldap_qmgr_after.rc == 0
+      retries: 30
+      delay: 5
+
+    - name: Verify queue manager identity authentication and repository were preserved
+      ansible.builtin.assert:
+        that:
+          - >-
+            (ldap_qmgr_before.stdout | regex_findall('(?:QMNAME|CONNAUTH|SSLKEYR)\([^)]+\)')) ==
+            (ldap_qmgr_after.stdout | regex_findall('(?:QMNAME|CONNAUTH|SSLKEYR)\([^)]+\)'))
+
+    - name: Show imported public certificate labels
+      ansible.builtin.debug:
+        var: ldap_trust_after.stdout_lines

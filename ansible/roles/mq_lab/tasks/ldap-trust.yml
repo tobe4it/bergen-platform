@@ -1,0 +1,19 @@
+---
+# Public CA only. The deployed file is retained on ordinary role reruns.
+- name: Create persistent LDAP trust mount directory
+  ansible.builtin.file:
+    path: /etc/bergen-mq-lab/trust/ldap
+    state: directory
+    owner: root
+    group: root
+    mode: '0755'
+
+- name: Install explicitly requested LDAP trust anchor
+  ansible.builtin.copy:
+    src: isrg-root-x2.crt
+    dest: /etc/bergen-mq-lab/trust/ldap/tls.crt
+    owner: root
+    group: root
+    mode: '0444'
+  when: mq_lab_install_ldap_trust | default(false) | bool
+  register: mq_lab_ldap_trust_copy

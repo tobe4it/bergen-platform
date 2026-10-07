@@ -3,6 +3,7 @@
 - import_tasks: install.yml
 - import_tasks: persistence.yml
 - import_tasks: tls.yml
+- import_tasks: ldap-trust.yml
 - import_tasks: secrets.yml
 - import_tasks: configure.yml
 - import_tasks: service.yml
