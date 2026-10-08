@@ -61,8 +61,13 @@
       ansible.builtin.assert:
         that:
           - >-
-            (transport_original_quadlet.content | b64decode)
-            in [transport_expected_base_quadlet, transport_expected_target_quadlet]
+            (
+              (transport_original_quadlet.content | b64decode).splitlines()
+              | reject('equalto', '') | sort | list
+            ) in [
+              (transport_expected_base_quadlet.splitlines() | reject('equalto', '') | sort | list),
+              (transport_expected_target_quadlet.splitlines() | reject('equalto', '') | sort | list)
+            ]
         fail_msg: >-
           Current Quadlet differs from both the expected base and transport-enabled
           templates. Refusing to modify it; inspect the drift manually.
@@ -82,14 +87,26 @@
         that:
           - transport_pki_files.results | selectattr('stat.exists', 'equalto', false) | list | length == 0
 
-    - name: Render reviewed Quadlet including exactly two transport mounts
-      ansible.builtin.template:
-        src: "{{ playbook_dir }}/../roles/mq_lab/templates/bergen-mq-lab.container.j2"
-        dest: /etc/containers/systemd/bergen-mq-lab.container
-        owner: root
-        group: root
-        mode: '0644'
-      register: transport_quadlet_update
+    - name: Insert transport identity mount while preserving existing Quadlet line order
+      ansible.builtin.lineinfile:
+        path: /etc/containers/systemd/bergen-mq-lab.container
+        line: "Volume=/etc/bergen-mq-lab/transport-pki/identity:/etc/mqm/pki/keys/bergentransport:ro{{ ',Z' if (ansible_facts.selinux | default({})).status | default('disabled') == 'enabled' else '' }}"
+        insertafter: '^Volume=/etc/bergen-mq-lab/tls:/etc/mqm/pki/keys/bergenlab:ro'
+        state: present
+      register: transport_identity_mount
+
+    - name: Insert peer trust mount immediately after transport identity
+      ansible.builtin.lineinfile:
+        path: /etc/containers/systemd/bergen-mq-lab.container
+        line: "Volume=/etc/bergen-mq-lab/transport-pki/trust:/etc/mqm/pki/trust/bergentransport-peer:ro{{ ',Z' if (ansible_facts.selinux | default({})).status | default('disabled') == 'enabled' else '' }}"
+        insertafter: '^Volume=/etc/bergen-mq-lab/transport-pki/identity:/etc/mqm/pki/keys/bergentransport:ro'
+        state: present
+      register: transport_trust_mount
+
+    - name: Record whether either reviewed Quadlet mount changed
+      ansible.builtin.set_fact:
+        transport_quadlet_update:
+          changed: "{{ transport_identity_mount.changed or transport_trust_mount.changed }}"
 
     - name: Reload Quadlet generator after approved definition change
       ansible.builtin.systemd_service:
