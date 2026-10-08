@@ -62,7 +62,7 @@ ansible-playbook -i ansible/inventory.yml -i ansible/inventory.local.yml \
 Only after reviewing the exact Quadlet diff and scheduling the impact of
 restarting each MQ evaluation service may the same command be executed
 without `--check`. It executes serially, verifies the existing pinned
-image, checks prepared files, adds **only two read-only mounts**, restarts
+image, checks prepared files, validates all existing nonblank Quadlet lines irrespective of their order (including the legacy LDAP-mount placement), inserts **only two read-only mount lines** without rewriting the original Quadlet, restarts
 each MQ service if the Quadlet changed, and checks labels imported into
 the running MQ key store. The standard `bergenlab` label must remain
 unchanged; verify this by `DISPLAY QMGR CERTLABL` after activation.
