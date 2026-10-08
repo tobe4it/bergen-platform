@@ -8,6 +8,7 @@ import uuid
 from datetime import datetime, timezone
 from ansible.module_utils.bergen_mq import MQError, RestClient, discover, reconcile
 from ansible.module_utils.bergen_mq_audit import run_audit
+from ansible.module_utils.bergen_mq_transport import TransientTransport
 
 
 def now():
@@ -119,8 +120,14 @@ def summarize(report):
     return report
 
 
-def run(nodes, ssh, revision, confirm=False, include_objects=True, clients=None, probe=None):
+def run(nodes, ssh, revision, confirm=False, include_objects=True, clients=None, probe=None,
+        transient_transport=False, transport_peer_firewall_verified=False,
+        transport_cross_ca_verified=False, transport_channel_security_verified=False):
     validate(nodes, ssh, confirm)
+    if transient_transport and not (transport_peer_firewall_verified and
+                                    transport_cross_ca_verified and
+                                    transport_channel_security_verified):
+        raise ValueError('Transient transport requires explicit peer firewall, CA trust and channel security review')
     prefix = 'BGT.' + uuid.uuid4().hex[:7].upper()
     report = dict(schema_version=1, prefix=prefix, revision=revision, started=now(),
                   evaluation_only=True, tests=[], cleanup=[], residual_objects=[], object_reports={},
@@ -136,6 +143,8 @@ def run(nodes, ssh, revision, confirm=False, include_objects=True, clients=None,
     for name, reason in DEFERRED.items():
         report['tests'].append(dict(id=name, status='NOT_TESTED', detail=reason))
     owned, uncertain = [], False
+    transient = None
+    transient_ready = False
     clients = clients or {s: RestClient(n['endpoint'], n['qmgr'], n['admin_user'], n['admin_password'], n['admin_ca']) for s, n in nodes.items()}
     probe = probe or Probe(nodes, ssh)
 
@@ -223,9 +232,31 @@ def run(nodes, ssh, revision, confirm=False, include_objects=True, clients=None,
                 case(side + ':oam-denied', no_authority, expected=2035)
             else:
                 report['tests'].append(dict(id=side + ':oam-denied', status='NOT_TESTED', detail='Needs an existing denied queue fixture'))
+        if transient_transport:
+            if uncertain or not all(ready.get(s, False) for s in ('a', 'b')):
+                report['tests'].append(dict(id='transport:prerequisites', status='FAIL',
+                    detail='Transient transport requested but client connections were not verified'))
+            else:
+                transient = TransientTransport(clients, nodes, prefix)
+                transient_ready = case('transport:temporary-fixtures',
+                                       lambda: (transient.create(), None)[1])
+                if transient_ready:
+                    transient_ready = case('transport:tls13-channel-start',
+                                           lambda: (transient.start(), None)[1])
+                    if transient_ready:
+                        report['transport'] = {
+                            'type': 'temporary', 'prefix': prefix,
+                            'directions': {s: {'sender': transient.specs[s]['sender'],
+                                               'xmitq': transient.specs[s]['xmitq']}
+                                           for s in ('a', 'b')},
+                            'tls13_channels_verified': True}
         for side, dest in (('a', 'b'), ('b', 'a')):
-            channel, xmitq = nodes[side].get('sender_channel', ''), nodes[side].get('xmitq', '')
-            if uncertain or not all(ready.values()) or not channel or not xmitq:
+            if transient_transport:
+                channel = transient.specs[side]['sender'] if transient and transient_ready else ''
+                xmitq = transient.specs[side]['xmitq'] if transient and transient_ready else ''
+            else:
+                channel, xmitq = nodes[side].get('sender_channel', ''), nodes[side].get('xmitq', '')
+            if uncertain or not all(ready.get(s, False) for s in ('a', 'b')) or not channel or not xmitq:
                 report['tests'].append(dict(id=side + ':remote-transport', status='NOT_TESTED', detail='Needs both positive connections and dedicated TLS SDR/RCVR/XMITQ fixtures'))
                 continue
             def transport(s=side, d=dest, ch=channel, xq=xmitq, variant='persistent'):
@@ -264,4 +295,8 @@ def run(nodes, ssh, revision, confirm=False, include_objects=True, clients=None,
                 entry['detail'] = 'Retained for review; no FORCE, CLEAR or drain was attempted'
                 report['residual_objects'].append(dict(side=side, **obj))
             report['cleanup'].append(entry)
+        if transient is not None:
+            channel_cleanup, channel_residuals = transient.cleanup(uncertain=uncertain)
+            report['cleanup'].extend(channel_cleanup)
+            report['residual_objects'].extend(channel_residuals)
     return summarize(report)
