@@ -34,49 +34,54 @@ ansible-playbook -i ansible/inventory.yml -i ansible/inventory.local.yml \
 Review the two QMgr plans, object-name collisions and existing attributes.
 Do not apply if an existing `BGT.*` name is owned by another workload.
 
-## Preconditions before any apply
+## Pending redesign: per-run transport fixtures
 
-1. Verify that both MQ server certificates/peer trust chains work for the
-   intended **SDR/RCVR** TLS handshake. Independent CA certificates are in
-   use on A and B; trusting only the local CA or merely copying a CA to the
-   controller does **not** configure the peer queue manager's MQ trust store.
-2. Verify source-specific TCP/1414 firewall access from A to B and B to A,
-   **both** runtime and permanent, plus any Proxmox/UniFi policy. Existing
-   firewall automation currently adds only the client source, not the peer.
-3. Review channel CHLAUTH/MCAUSER and minimum authorities for the receiving
-   destination queues. Do not disable CHLAUTH or use privileged MCA identities.
-4. Obtain explicit change authorization for creating the six objects.
-   This playbook does **not** start the new sender channels.
+The initial PR proposed persistent `BGT.A2B`/`BGT.B2A` channels and XMITQs.
+That is not the desired audit model. **The current playbook is now restricted
+to Ansible check mode and must not be used for live deployment.**
 
-Only after these independent checks, a live run requires all three opt-ins:
-`mq_transport_confirm_apply=true`,
-`mq_transport_peer_firewall_verified=true` and
-`mq_transport_cross_ca_verified=true`. These are **operator attestations**,
-not automated proof. Run the same playbook without `--check` and rerun
-`--check --diff` to verify idempotence.
+The next implementation must integrate fixture ownership into
+`bergen_mq_topology.run()` and its evidence:
 
-## Audit integration
+1. Preflight exact lab identities, TLS peer CA trust, source-specific A↔B
+   TCP/1414 connectivity and reviewed CHLAUTH/OAM. Do not change global rules.
+2. Generate unique bounded `BGT.<RUN_ID>.*` channel and XMITQ names for
+   each direction. Refuse *any* pre-existing object collision.
+3. On each queue manager, DEFINE only owned XMITQ, SDR and matching RCVR,
+   with TLS 1.3 cipher and explicit peer endpoint. Track each successfully
+   created identity immediately so partial failures remain visible.
+4. START only the run-owned sender channels and verify channel state and
+   negotiated TLS before sending test messages.
+5. Create run-owned QREMOTE and QLOCAL fixtures; verify message payload,
+   ID, persistence, commit and rollback from A→B and B→A.
+6. In a bounded finalizer, STOP only owned senders with QUIESCE, verify no
+   active channel and no outstanding/in-doubt messages, delete only empty
+   run-owned queues and run-owned channels, and verify absence.
+7. If channel stop times out, message delivery is uncertain or a queue is
+   nonempty/in use: fail the audit and **retain** unsafe objects for manual
+   investigation. Never use FORCE/PURGE/CLEAR or auto-retry the unknown
+   outcome.
 
-After both channels are securely established and running, the site-local,
-Git-ignored `ansible/vars/mq-topology/audit.yml` must contain:
+All temporary object identities, transport results, cleanup attempts and
+residuals belong in `evidence.json` and `Pruefbericht.md`.
+`PARTIAL` may indicate deferred *unimplemented* cases, not successful
+transport where transport was never exercised.
 
-```yaml
-# mq_topology_nodes.a:
-sender_channel: BGT.A2B
-xmitq: BGT.XMIT.A2B
+Reference: IBM MQ JSON MQSC REST supports `start` and `stop` commands,
+but channel-state transitions need explicit, bounded verification.
+No live inter-QMgr tests have been run using this PR.
 
-# mq_topology_nodes.b:
-sender_channel: BGT.B2A
-xmitq: BGT.XMIT.B2A
+## Read-only planning
+
+The available draft playbook can only generate a desired-object preview:
+
+```bash
+ansible-playbook -i ansible/inventory.yml -i ansible/inventory.local.yml \\
+  ansible/playbooks/mq-transport-objects.yml \\
+  -e @ansible/vars/mq-topology/audit.yml \\
+  --check --diff --ask-vault-pass
 ```
 
-These are **nested** values under the respective node, not top-level keys.
-The `denied_queue` settings are independent: leave empty until a verified
-`BGT.DENIED*` negative-authorization fixture exists; otherwise OAM negative
-coverage remains NOT_TESTED.
-
-The topology audit creates unique temporary local/remote queues and deletes
-only its owned objects when safe. It does not create or activate these
-persistent channel/XMITQ fixtures. Review actual A→B and B→A results (five
-remote variants per side) rather than accepting a generic PARTIAL status as
-proof of routing.
+Its static object names are **not** suitable for live audit use. Do not
+merge this draft until the per-run lifecycle and regression tests replace
+this prototype.
