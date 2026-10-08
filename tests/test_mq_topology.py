@@ -13,6 +13,10 @@ from test_mq_audit import audit
 ROOT = Path(__file__).resolve().parents[1]
 sys.modules['ansible.module_utils.bergen_mq'] = mq
 sys.modules['ansible.module_utils.bergen_mq_audit'] = audit
+spec_transport = importlib.util.spec_from_file_location('bergen_mq_transport', ROOT / 'ansible/module_utils/bergen_mq_transport.py')
+transport_module = importlib.util.module_from_spec(spec_transport)
+sys.modules['ansible.module_utils.bergen_mq_transport'] = transport_module
+spec_transport.loader.exec_module(transport_module)
 spec = importlib.util.spec_from_file_location('topology', ROOT / 'ansible/module_utils/bergen_mq_topology.py')
 topology = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(topology)
