@@ -157,6 +157,20 @@
           - "'TLS Web Client Authentication' in transport_eku.stdout"
           - "'TLS Web Server Authentication' in transport_eku.stdout"
 
+# Only exchange public CAs after BOTH QMgr finished key generation.
+- name: Exchange and verify dedicated peer transport CA certificates
+  hosts: bergen-mq-lab:bergen-mq-lab-b
+  become: true
+  gather_facts: false
+  serial: 1
+  any_errors_fatal: true
+  tasks:
+    - name: Require explicit certificate preparation approval
+      ansible.builtin.assert:
+        that:
+          - mq_transport_pki_prepare | default(false) | bool
+          - not ansible_check_mode
+
     - name: Read peer's public transport CA over authenticated SSH
       ansible.builtin.slurp:
         src: /etc/bergen-mq-lab/transport-pki/ca.crt
