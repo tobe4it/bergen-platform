@@ -1,5 +1,5 @@
 ---
-- name: Run connection probe as unprivileged mqtest with password only on stdin
+- name: Run MQ probe as unprivileged mqtest with password only on stdin
   ansible.builtin.command:
     argv:
       - /usr/bin/timeout
@@ -15,6 +15,10 @@
     stdin: |
       operation={{ smoke_case.operation | b64encode }}
       side={{ 'a' | b64encode }}
+      queue={{ mq_message_queue | default('') | b64encode }}
+      size={{ '4096' | b64encode }}
+      seed={{ '1729' | b64encode }}
+      persistence={{ '1' | b64encode }}
       a.qmgr={{ mq_smoke_target.qmgr | b64encode }}
       a.host={{ hostvars[mq_smoke_server].ansible_host | b64encode }}
       a.port={{ '1414' | b64encode }}
@@ -26,7 +30,7 @@
       a.peer={{ mq_smoke_peer | b64encode }}
       a.ca={{ ('/opt/bergen-mq-client/trust/auth-smoke-' ~ mq_smoke_side ~ '.crt') | b64encode }}
   register: smoke_probe
-  changed_when: false
+  changed_when: smoke_case.operation not in ['connect', 'bad_password', 'bad_trust', 'api']
   failed_when: false
   no_log: true
 
@@ -57,4 +61,4 @@
       - smoke_safe.ok == smoke_case.ok
       - smoke_safe.reason == smoke_case.reason
       - not smoke_safe.tls_failure
-    fail_msg: "Authentication smoke case failed; stop before further login attempts."
+    fail_msg: "MQ smoke case failed; stop before further test operations."
