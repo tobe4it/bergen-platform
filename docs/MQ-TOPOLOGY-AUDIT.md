@@ -84,6 +84,17 @@ Vault client secrets; never use REST admin credentials as MQ client credentials.
 Set `mq_topology_confirm_test_mutations: true` only after reviewing setup.
 All site values stay in the ignored local directory. No VMID/IP is embedded.
 
+For a deliberately accepted **partial** audit, optionally set
+`mq_topology_accept_partial: true` in the ignored local audit variables.
+The default is `false`. This option changes only the final Ansible
+acceptance gate, never the evidence status or test selection. The audit must
+have zero failed checks, zero residual objects, at least one passed check,
+and PASS for the client API preflight and both TLS-authenticated connections.
+Unconfigured or skipped remote transports and other NOT_TESTED items remain
+explicit in the report, even if Ansible completes successfully.
+For a bidirectional transport acceptance, check that all ten
+`a:remote-*` and `b:remote-*` cases are PASS before treating routing as tested.
+
 ```bash
 ansible-playbook ansible/playbooks/mq-topology-audit.yml \
   -i ansible/inventory.yml -i ansible/inventory.local.yml \
@@ -101,8 +112,11 @@ and `SHA256SUMS` under ignored `ansible/reports/mq-topology/`. Git revision,
 UTC case times, client source/JAR checksums and exact MQ reason results are
 included. Unknown error text is suppressed rather than leaking credentials.
 
-The final assertion fails for FAIL **and PARTIAL**, after saving/mail submission.
-Do not mistake this for a need to rerun repeatedly: inspect the report first.
+The final assertion always fails for FAIL, residual objects or a missing
+client/API/TLS baseline. It also fails for PARTIAL unless explicitly allowed
+with `mq_topology_accept_partial: true`. Accepting PARTIAL is **not** evidence
+of full audit coverage or bidirectional delivery. Inspect the report before
+rerunning or treating any optional fixture as tested.
 Mail submission is not independently verified mailbox delivery. Hashes are not
 signatures or independent timestamps. Provisioning/compilation failures before
 the audit module starts do not produce a messaging audit report.
