@@ -24,30 +24,48 @@
         src: /etc/containers/systemd/bergen-mq-lab.container
       register: transport_original_quadlet
 
-    - name: Extract existing pinned image without using a new image version
+    - name: Extract pinned Image= line from existing Quadlet without regex escaping ambiguity
       ansible.builtin.set_fact:
         mq_lab_image: >-
-          {{ (transport_original_quadlet.content | b64decode |
-              regex_findall('(?m)^Image=(\\S+)$')) | first | default('') }}
+          {{
+            (
+              (transport_original_quadlet.content | b64decode).splitlines()
+              | select('match', '^Image=')
+              | list | first | default('')
+            ) | regex_replace('^Image=', '')
+          }}
 
     - name: Refuse missing or unpinned existing image
       ansible.builtin.assert:
         that:
           - mq_lab_image is match('^icr[.]io/ibm-messaging/mq:9[.]4[.].*-amd64@sha256:[a-f0-9]{64}$')
+        fail_msg: "Existing Quadlet has no recognized pinned MQ image; no changes applied."
 
-    - name: Require existing base Quadlet to match repository-managed template
+    - name: Render base Quadlet in memory for drift validation
+      ansible.builtin.set_fact:
+        transport_expected_base_quadlet: >-
+          {{ lookup('ansible.builtin.template',
+              playbook_dir ~ '/../roles/mq_lab/templates/bergen-mq-lab.container.j2') }}
+      vars:
+        mq_lab_transport_pki_enabled: false
+
+    - name: Render activated Quadlet in memory for drift validation
+      ansible.builtin.set_fact:
+        transport_expected_target_quadlet: >-
+          {{ lookup('ansible.builtin.template',
+              playbook_dir ~ '/../roles/mq_lab/templates/bergen-mq-lab.container.j2') }}
+      vars:
+        mq_lab_transport_pki_enabled: true
+
+    - name: Require unmodified current Quadlet before any change
       ansible.builtin.assert:
         that:
           - >-
             (transport_original_quadlet.content | b64decode)
-            == lookup('ansible.builtin.template',
-              playbook_dir ~ '/../roles/mq_lab/templates/bergen-mq-lab.container.j2')
+            in [transport_expected_base_quadlet, transport_expected_target_quadlet]
         fail_msg: >-
-          Existing Quadlet differs from reviewed template; refuse changes.
-          Review the actual diff before restarting.
-      vars:
-        mq_lab_transport_pki_enabled: false
-      when: "'Volume=/etc/bergen-mq-lab/transport-pki/identity:' not in (transport_original_quadlet.content | b64decode)"
+          Current Quadlet differs from both the expected base and transport-enabled
+          templates. Refusing to modify it; inspect the drift manually.
 
     - name: Check prepared key material exists before writing Quadlet
       ansible.builtin.stat:
