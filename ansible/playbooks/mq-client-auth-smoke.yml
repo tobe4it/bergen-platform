@@ -4,11 +4,8 @@
   hosts: bergen-mq-client
   gather_facts: false
   become: true
-  vars_prompt:
-    - name: mq_smoke_password
-      prompt: LDAP password for bgtaudita
-      private: true
   vars:
+    mq_smoke_password: "{{ vault_mq_test_a_password }}"
     mq_smoke_server: bergen-mq-lab
     mq_smoke_peer: CN=bergen-mq-lab
   tasks:
