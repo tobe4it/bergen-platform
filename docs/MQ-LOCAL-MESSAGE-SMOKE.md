@@ -21,7 +21,7 @@ Each run creates one new BGT.LOCAL.<random> queue without REPLACE, records
 its name in output, and grants PUT/GET/BROWSE/INQ only to the selected LDAP
 group for that exact queue. Persistent 4096-byte messages exercise:
 payload and message-ID roundtrip, PUT commit visibility, PUT rollback,
-disconnect rollback, GET commit, GET rollback/backout count, browse,
+normal-disconnect commit, GET commit, GET rollback/backout count, browse,
 correlation selection, FIFO and expiry.
 
 An always block deletes only the queue successfully created by this run,

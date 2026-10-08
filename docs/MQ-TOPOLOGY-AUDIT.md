@@ -12,7 +12,7 @@ development. The earlier 158-PASS single-QMgr evidence remains separate.
 | Client security | Positive TLS 1.3+peer+password connection, invalid password (2035), explicit certificate trust rejection, positive reconnection | Dedicated TLS 1.3 SVRCONN, non-admin account |
 | Message content | Persistent/nonpersistent, zero bytes, binary 4 KiB, MsgId, CorrelId | Isolated BGT.* queues and scoped OAM |
 | Queue behavior | Alias, browse without removal, FIFO at equal priority, priority ordering, expiry | BGT.* fixtures |
-| Transactions | PUT commit/backout, uncommitted invisibility to a second connection, disconnect rollback, GET commit/backout and BackoutCount | Same-QMgr local units of work; not XA |
+| Transactions | PUT commit/backout, uncommitted invisibility to a second connection, normal-disconnect commit, GET commit/backout and BackoutCount | Same-QMgr local units of work; not XA |
 | Negative MQI | Empty 2033, PUT inhibited 2051, GET inhibited 2016, depth limit 2053, oversize 2030 | Generated dedicated queues |
 | Authorization | Existing denied queue PUT must fail with 2035, not unknown-object/network failure | Explicit BGT.DENIED* fixture |
 | A → B and B → A | Persistent, nonpersistent, 4 KiB, remote PUT commit and rollback | Existing dedicated TLS SDR/RCVR and XMITQ per direction |

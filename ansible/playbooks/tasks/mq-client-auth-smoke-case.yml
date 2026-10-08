@@ -49,6 +49,7 @@
       ok: "{{ (smoke_probe.stdout | from_json).ok | bool }}"
       reason: "{{ (smoke_probe.stdout | from_json).reason | int }}"
       tls_failure: "{{ (smoke_probe.stdout | from_json).tls_failure | bool }}"
+      category: "{{ (smoke_probe.stdout | from_json).category | default('none') }}"
   no_log: true
 
 - name: Show connection result without credentials

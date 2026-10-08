@@ -15,7 +15,7 @@ def now():
 
 
 LOCAL_CASES = ('roundtrip', 'nonpersistent', 'zero-length', 'binary-4k', 'alias', 'browse', 'correlation',
-               'put_commit', 'put_rollback', 'disconnect_rollback', 'get_commit', 'get_rollback',
+               'put_commit', 'put_rollback', 'disconnect_commit', 'get_commit', 'get_rollback',
                'expiry', 'priority', 'fifo', 'empty', 'put_denied', 'get_denied', 'full', 'oversize')
 TRANSPORT_CASES = ('persistent', 'nonpersistent', 'binary4k', 'commit', 'rollback')
 

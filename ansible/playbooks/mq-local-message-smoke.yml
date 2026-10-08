@@ -61,7 +61,7 @@
             - {name: payload_and_message_id, operation: roundtrip, ok: true, reason: 0}
             - {name: put_commit_visibility, operation: put_commit, ok: true, reason: 0}
             - {name: put_rollback, operation: put_rollback, ok: true, reason: 0}
-            - {name: disconnect_rollback, operation: disconnect_rollback, ok: true, reason: 0}
+            - {name: disconnect_commit, operation: disconnect_commit, ok: true, reason: 0}
             - {name: get_commit, operation: get_commit, ok: true, reason: 0}
             - {name: get_rollback_backout_count, operation: get_rollback, ok: true, reason: 0}
             - {name: browse_without_consumption, operation: browse, ok: true, reason: 0}

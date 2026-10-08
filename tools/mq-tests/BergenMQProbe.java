@@ -164,13 +164,19 @@ public final class BergenMQProbe {
                 if (op.equals("browse")) check(Arrays.equals(data,body(get(dest,target,id,null,false,false,0))));
                 empty(dest,target,id); return;
             }
-            if (op.equals("put_commit") || op.equals("put_rollback") || op.equals("disconnect_rollback")) {
+            if (op.equals("put_commit") || op.equals("put_rollback") || op.equals("disconnect_commit")) {
                 second=connect(side, "");
                 byte[] id=put(qm,q,data,true,persistent,0,-1,null);
                 empty(second,q,id);
-                if (op.equals("disconnect_rollback")) { disconnect(qm); qm=null; }
+                if (op.equals("disconnect_commit")) { disconnect(qm); qm=null; }
                 else call(qm,op.equals("put_commit") ? "commit" : "backout");
-                if (op.equals("put_commit")) check(Arrays.equals(data,body(get(second,q,id,null,false,false,10000))));
+                // Normal disconnect commits a pending local UOW; it is not a crash.
+                if (op.equals("put_commit") || op.equals("disconnect_commit")) {
+                    Object got = get(second,q,id,null,false,false,10000);
+                    check(Arrays.equals(data,body(got)));
+                    check(Arrays.equals(id,(byte[])field(got,"messageId")));
+                    empty(second,q,id);
+                }
                 else empty(second,q,id);
                 return;
             }
