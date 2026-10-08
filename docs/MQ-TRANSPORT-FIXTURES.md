@@ -73,6 +73,50 @@ The pending service restarts and actual TLS 1.3 interoperability have
 **not** been executed. Treat any import discrepancy as a stop condition,
 not permission to weaken TLS.
 
+## Entscheidung: getrennte, nicht privilegierte Transportidentitäten
+
+Die Audit-Benutzer `bgtaudita` und `bgtauditb` behalten ihre bisherigen
+Clientrechte. Die Queue-Manager verwenden `AUTHORMD(SEARCHGRP)` über LDAP
+und sollen eigene Transport-Dienstidentitäten bekommen:
+
+| Ziel-QMgr | Geplante MCA-Identität | Geplante LDAP-Gruppe | Erwartetes Peer-Zertifikat |
+| --- | --- | --- | --- |
+| BERGENLAB (A) | `bgttransa` | `MQBGTTRANSA` | `CN=bergen-mq-lab-b transport`; Issuer `CN=Bergen MQ Transport CA BERGENLABB` |
+| BERGENLABB (B) | `bgttransb` | `MQBGTTRANSB` | `CN=bergen-mq-lab transport`; Issuer `CN=Bergen MQ Transport CA BERGENLAB` |
+
+**Entwurf, noch nicht angewandt.** LDAP-Konten und Gruppen dürfen nur mit
+bekannter Directory-Provisionierungsstrategie angelegt werden; keine
+Passwörter, Bind-DNs oder Secrets ins Repository schreiben. Eigene
+Gruppen gewährleisten die Trennung von den Java-Audit-Benutzern.
+
+Vor einem Transport-Start sind folgende unabhängige Sicherheitsnachweise
+erforderlich:
+
+1. LDAP-Identitäten und Gruppen existieren; die vorgesehenen `MCAUSER`
+   sind auf den Ziel-QMgrn als nicht administrativ verifiziert; keine
+   Mitgliedschaft in `mqm` oder administrativen LDAP-MQ-Gruppen.
+2. `CHLAUTH TYPE(SSLPEERMAP)` stimmt auf dem empfangenden Queue-Manager
+   mit *Kanalmaske*, Quelladresse, `SSLPEER` (peer subject) und
+   `SSLCERTI` (peer issuer) überein. Vor dem Start ist
+   `DISPLAY CHLAUTH(... ) MATCH(RUNCHECK)` in Positiv- und Negativfällen
+   zu prüfen. `BGT.CLIENT` darf nicht betroffen sein.
+3. Receiver `SSLCAUTH(REQUIRED)`, `SSLCIPH(TLS_AES_256_GCM_SHA384)`,
+   `CERTLABL(bergentransport)` und dedizierte nicht privilegierte
+   `MCAUSER` sind per `DISPLAY CHANNEL` nachgewiesen.
+4. `PUTAUT(DEF)` wird belassen. Für den Receiver-MCA erforderliche
+   `+connect/+inq/+setall` auf dem Ziel-QMgr und `+put/+setall` auf
+   **exakt laufbezogenen Zielqueues** müssen gesondert geprüft werden.
+   Keine pauschale `BGT.*`-Freigabe, kein `+alladm`, kein `mqm`.
+   OAM-Lifecycle: vor dem Routing erteilen, mit eigener Eigentumsprüfung
+   und beweisbar sicherer Rücknahme; bei Ungewissheit FAIL und Retain.
+5. Das derzeitige temporäre Transportmodul setzt noch keine CHLAUTH- oder
+   OAM-Fixtures um; `mq_topology_channel_security_verified` darf deshalb
+   noch **nicht** als belegt gelten.
+
+Die genaue Implementierung wird erst nach Prüfung der LDAP-Provisionierung
+und des Ansible/MQSC-Autorisierungsmodells hinzugefügt. Es werden
+keine Transportkanäle vorab gestartet oder produktive MQ-Objekte verändert.
+
 ## Unveränderliche Infrastruktur / Vorbedingungen
 
 Die Testautomatisierung **ändert nicht** Firewall, CA-Trust, CHLAUTH,
