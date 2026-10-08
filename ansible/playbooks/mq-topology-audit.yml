@@ -153,7 +153,36 @@
       ansible.builtin.assert:
         that: [not (topology_mail.failed | default(false))]
 
-    - name: Require complete success rather than silently approving partial coverage
+    - name: Require sound evidence and explicit consent for partial audit acceptance
       ansible.builtin.assert:
-        that: [topology_run.report.status == 'PASS']
-        fail_msg: "{{ topology_run.report.status }}: evidence saved. Review NOT_TESTED/FAIL and residual objects; do not blindly rerun or FORCE-delete."
+        that:
+          - topology_run.report.failed | int == 0
+          - topology_run.report.residual_objects | length == 0
+          - topology_run.report.passed | int > 0
+          - >-
+            topology_run.report.tests
+            | selectattr('id', 'equalto', 'client:api-preflight')
+            | selectattr('status', 'equalto', 'PASS')
+            | list | length == 1
+          - >-
+            topology_run.report.tests
+            | selectattr('id', 'equalto', 'a:tls-authenticated-connect')
+            | selectattr('status', 'equalto', 'PASS')
+            | list | length == 1
+          - >-
+            topology_run.report.tests
+            | selectattr('id', 'equalto', 'b:tls-authenticated-connect')
+            | selectattr('status', 'equalto', 'PASS')
+            | list | length == 1
+          - >-
+            topology_run.report.status == 'PASS'
+            or (mq_topology_accept_partial | default(false) | bool
+                and topology_run.report.status == 'PARTIAL')
+        fail_msg: >-
+          {{ topology_run.report.status }}: audit evidence saved. FAIL, residual objects
+          or missing required client/TLS baseline cannot be accepted.
+          PARTIAL requires mq_topology_accept_partial=true and remains incomplete;
+          review every NOT_TESTED case before accepting it.
+        success_msg: >-
+          {{ topology_run.report.status }} accepted for this run.
+          PARTIAL is not a full-scope PASS; review remaining NOT_TESTED cases.
