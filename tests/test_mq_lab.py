@@ -54,6 +54,32 @@ class LabContracts(unittest.TestCase):
         self.assertIn('port port="9443"', result[1])
         self.assertNotIn("1414", result[1])
 
+    def test_transport_mounts_are_opt_in_and_default_identity_is_preserved(self):
+        template = (ROLE / "templates/bergen-mq-lab.container.j2").read_text()
+        default_quadlet = render(template, mq_lab_transport_pki_enabled=False)
+        staged_quadlet = render(template, mq_lab_transport_pki_enabled=True)
+        self.assertNotIn("transport-pki", default_quadlet)
+        self.assertIn("Volume=/etc/bergen-mq-lab/tls:/etc/mqm/pki/keys/bergenlab:ro",
+                      default_quadlet)
+        self.assertIn("/etc/mqm/pki/keys/bergentransport:ro", staged_quadlet)
+        self.assertIn("/etc/mqm/pki/trust/bergentransport-peer:ro", staged_quadlet)
+        self.assertIn("/etc/mqm/pki/keys/bergenlab:ro", staged_quadlet)
+        self.assertNotIn("Environment=MQ_DEV=true", staged_quadlet)
+
+    def test_transport_pki_prepare_and_activation_are_separate(self):
+        prepare = yaml.safe_load((ROOT / "ansible/playbooks/mq-transport-pki-prepare.yml").read_text())
+        self.assertEqual(len(prepare), 2)
+        self.assertEqual(len(prepare[0]["tasks"]) > 5, True)
+        self.assertIn("mq_transport_pki_prepare", str(prepare[0]["tasks"][0]))
+        self.assertIn("delegate_to", str(prepare[1]["tasks"]))
+        activate = yaml.safe_load((ROOT / "ansible/playbooks/mq-transport-pki-activate.yml").read_text())
+        self.assertEqual(len(activate), 1)
+        self.assertIn("mq_transport_restart_approved", str(activate[0]["tasks"][0]))
+        self.assertEqual(activate[0]["serial"], 1)
+        self.assertIn("ansible.builtin.template", str(activate))
+        self.assertIn("state: restarted", (ROOT / "ansible/playbooks/mq-transport-pki-activate.yml").read_text())
+        self.assertNotIn("ansible.builtin.systemd_service", str(prepare))
+
     def test_explicit_web_auth_does_not_enable_default_mq_objects(self):
         xml = render((ROLE / "templates/mqwebuser.xml.j2").read_text())
         root = ET.fromstring(xml)
