@@ -91,7 +91,7 @@
       ansible.builtin.replace:
         path: /etc/containers/systemd/bergen-mq-lab.container
         regexp: '(?m)^(Volume=/etc/bergen-mq-lab/tls:/etc/mqm/pki/keys/bergenlab:ro(?:,Z)?)$'
-        replace: |
+        replace: |-
           \g<1>
           Volume=/etc/bergen-mq-lab/transport-pki/identity:/etc/mqm/pki/keys/bergentransport:ro{{ ',Z' if (ansible_facts.selinux | default({})).status | default('disabled') == 'enabled' else '' }}
           Volume=/etc/bergen-mq-lab/transport-pki/trust:/etc/mqm/pki/trust/bergentransport-peer:ro{{ ',Z' if (ansible_facts.selinux | default({})).status | default('disabled') == 'enabled' else '' }}
