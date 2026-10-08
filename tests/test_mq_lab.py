@@ -36,8 +36,12 @@ class LabContracts(unittest.TestCase):
     def test_admin_firewall_rules_are_https_only_and_preserve_controller(self):
         defaults = yaml.safe_load((ROLE / "defaults/main.yml").read_text())
         self.assertEqual(defaults["mq_lab_admin_cidrs"], [])
-        tasks = yaml.safe_load((ROLE / "tasks/configure.yml").read_text())
-        task = next(t for t in tasks if t["name"].startswith("Add browser admin HTTPS"))
+        # configure.yml imports firewall.yml; inspect the defining role tasks.
+        configure = yaml.safe_load((ROLE / "tasks/configure.yml").read_text())
+        self.assertTrue(any(t.get("ansible.builtin.import_tasks") == "firewall.yml"
+                            for t in configure))
+        tasks = yaml.safe_load((ROLE / "tasks/firewall.yml").read_text())
+        task = next(t for t in tasks if t.get("name", "").startswith("Add browser admin HTTPS"))
         self.assertEqual(task["loop"], "{{ mq_lab_admin_cidrs }}")
         env = environment()
         env.filters["unique"] = lambda values: list(dict.fromkeys(values))
