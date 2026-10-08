@@ -18,7 +18,7 @@ LogDriver=journald
 Volume=/var/lib/bergen-mq-lab/mqm:/mnt/mqm{{ ':Z' if (ansible_facts.selinux | default({})).status | default('disabled') == 'enabled' else '' }}
 Volume=/etc/bergen-mq-lab/tls:/etc/mqm/pki/keys/bergenlab:ro{{ ',Z' if (ansible_facts.selinux | default({})).status | default('disabled') == 'enabled' else '' }}
 Volume=/etc/bergen-mq-lab/trust/ldap:/etc/mqm/pki/trust/ldap:ro{{ ',Z' if (ansible_facts.selinux | default({})).status | default('disabled') == 'enabled' else '' }}
-{% if mq_lab_transport_pki_enabled | default(false) | bool %}
+{% if (mq_lab_transport_pki_enabled | default(false)) is sameas true %}
 Volume=/etc/bergen-mq-lab/transport-pki/identity:/etc/mqm/pki/keys/bergentransport:ro{{ ',Z' if (ansible_facts.selinux | default({})).status | default('disabled') == 'enabled' else '' }}
 Volume=/etc/bergen-mq-lab/transport-pki/trust:/etc/mqm/pki/trust/bergentransport-peer:ro{{ ',Z' if (ansible_facts.selinux | default({})).status | default('disabled') == 'enabled' else '' }}
 {% endif %}
