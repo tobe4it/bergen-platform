@@ -1,0 +1,60 @@
+---
+- name: Run connection probe as unprivileged mqtest with password only on stdin
+  ansible.builtin.command:
+    argv:
+      - /usr/bin/timeout
+      - '45'
+      - /usr/sbin/runuser
+      - -u
+      - mqtest
+      - --
+      - /usr/bin/java
+      - -cp
+      - '/opt/bergen-mq-client/tests:/opt/bergen-mq-client/lib/*'
+      - BergenMQProbe
+    stdin: |
+      operation={{ smoke_case.operation | b64encode }}
+      side={{ 'a' | b64encode }}
+      a.qmgr={{ 'BERGENLAB' | b64encode }}
+      a.host={{ hostvars[mq_smoke_server].ansible_host | b64encode }}
+      a.port={{ '1414' | b64encode }}
+      a.channel={{ 'BGT.CLIENT' | b64encode }}
+      a.username={{ 'bgtaudita' | b64encode }}
+      a.password={{ mq_smoke_password | b64encode }}
+      a.protocol={{ 'TLSv1.3' | b64encode }}
+      a.cipher={{ 'TLS_AES_256_GCM_SHA384' | b64encode }}
+      a.peer={{ mq_smoke_peer | b64encode }}
+      a.ca={{ '/opt/bergen-mq-client/trust/auth-smoke-a.crt' | b64encode }}
+  register: smoke_probe
+  changed_when: false
+  failed_when: false
+  no_log: true
+
+- name: Require probe completion and structured result
+  ansible.builtin.assert:
+    that:
+      - smoke_probe.rc == 0
+      - smoke_probe.stdout is match('^\{.*\}$')
+    fail_msg: "Probe failed or timed out; no authentication conclusion. Check Java, mqtest and MQ JAR dependencies."
+  no_log: true
+
+- name: Extract allowlisted diagnostics only
+  ansible.builtin.set_fact:
+    smoke_safe:
+      case: "{{ smoke_case.name }}"
+      ok: "{{ (smoke_probe.stdout | from_json).ok | bool }}"
+      reason: "{{ (smoke_probe.stdout | from_json).reason | int }}"
+      tls_failure: "{{ (smoke_probe.stdout | from_json).tls_failure | bool }}"
+  no_log: true
+
+- name: Show connection result without credentials
+  ansible.builtin.debug:
+    var: smoke_safe
+
+- name: Require exact expected result
+  ansible.builtin.assert:
+    that:
+      - smoke_safe.ok == smoke_case.ok
+      - smoke_safe.reason == smoke_case.reason
+      - not smoke_safe.tls_failure
+    fail_msg: "Authentication smoke case failed; stop before further login attempts."

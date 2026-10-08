@@ -1,0 +1,80 @@
+---
+# Connection-only smoke test; does not create MQ objects or send messages.
+- name: Test LDAP client authentication on BERGENLAB
+  hosts: bergen-mq-client
+  gather_facts: false
+  become: true
+  vars_prompt:
+    - name: mq_smoke_password
+      prompt: LDAP password for bgtaudita
+      private: true
+  vars:
+    mq_smoke_server: bergen-mq-lab
+    mq_smoke_peer: CN=bergen-mq-lab
+  tasks:
+    - name: Require a real test and a nonempty password
+      ansible.builtin.assert:
+        that:
+          - not ansible_check_mode
+          - mq_smoke_password | length > 0
+          - mq_smoke_server in hostvars
+      no_log: true
+
+    - name: Read public MQ CA through authenticated SSH
+      ansible.builtin.slurp:
+        src: /etc/bergen-mq-lab/ca.crt
+      delegate_to: "{{ mq_smoke_server }}"
+      register: smoke_ca
+
+    - name: Prepare root-owned probe directories
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: directory
+        owner: root
+        group: root
+        mode: '0755'
+      loop:
+        - /opt/bergen-mq-client/tests
+        - /opt/bergen-mq-client/trust
+
+    - name: Install public MQ CA
+      ansible.builtin.copy:
+        content: "{{ smoke_ca.content | b64decode }}"
+        dest: /opt/bergen-mq-client/trust/auth-smoke-a.crt
+        owner: root
+        group: root
+        mode: '0644'
+
+    - name: Install existing connection probe
+      ansible.builtin.copy:
+        src: "{{ playbook_dir }}/../../tools/mq-tests/BergenMQProbe.java"
+        dest: /opt/bergen-mq-client/tests/BergenMQProbe.java
+        owner: root
+        group: root
+        mode: '0644'
+      register: smoke_source
+
+    - name: Inspect compiled probe
+      ansible.builtin.stat:
+        path: /opt/bergen-mq-client/tests/BergenMQProbe.class
+      register: smoke_class
+
+    - name: Compile probe
+      ansible.builtin.command:
+        argv: [/usr/bin/javac, -d, /opt/bergen-mq-client/tests, /opt/bergen-mq-client/tests/BergenMQProbe.java]
+      when: smoke_source.changed or not smoke_class.stat.exists
+      changed_when: true
+
+    - name: Run and assess each connection before proceeding
+      ansible.builtin.include_tasks: tasks/mq-client-auth-smoke-case.yml
+      loop:
+        - {name: correct_password, operation: connect, ok: true, reason: 0}
+        - {name: wrong_password, operation: bad_password, ok: false, reason: 2035}
+        - {name: correct_password_again, operation: connect, ok: true, reason: 0}
+      loop_control:
+        loop_var: smoke_case
+        label: "{{ smoke_case.name }}"
+
+    - name: Report limited authentication result
+      ansible.builtin.debug:
+        msg: "PASS: BERGENLAB client login, wrong-password rejection, and repeat login. TLSv1.3 context and TLS_AES_256_GCM_SHA384 configured; CA and peer checked. No message, routing, mTLS, TLS downgrade or PQC test."
