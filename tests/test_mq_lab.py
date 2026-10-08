@@ -92,12 +92,31 @@ class LabContracts(unittest.TestCase):
         self.assertEqual(len(activate), 1)
         self.assertIn("mq_transport_restart_approved", str(activate[0]["tasks"][0]))
         self.assertEqual(activate[0]["serial"], 1)
-        self.assertIn("ansible.builtin.lineinfile", str(activate))
+        self.assertIn("ansible.builtin.replace", str(activate))
         self.assertNotIn("ansible.builtin.template", str(activate[0]["tasks"][-9:]))
         activation_text = (ROOT / "ansible/playbooks/mq-transport-pki-activate.yml").read_text()
         self.assertIn("splitlines()", activation_text)
         self.assertIn("sort | list", activation_text)
-        self.assertIn("transport_identity_mount.changed or transport_trust_mount.changed", activation_text)
+        self.assertIn("transport_mount_update.changed", activation_text)
+        mount_task = next(task for task in activate[0]["tasks"]
+                          if task["name"].startswith("Insert both transport mounts atomically"))
+        import re
+        pattern = mount_task["ansible.builtin.replace"]["regexp"]
+        replacement = render(mount_task["ansible.builtin.replace"]["replace"])
+        base = render((ROLE / "templates/bergen-mq-lab.container.j2").read_text())
+        preview, count = re.subn(pattern, lambda match:
+                                 replacement.replace(r"\g<1>", match.group(1)),
+                                 base)
+        self.assertEqual(count, 1)
+        self.assertRegex(preview,
+                         r"(?m)^Volume=/etc/bergen-mq-lab/transport-pki/identity:.*$")
+        self.assertRegex(preview,
+                         r"(?m)^Volume=/etc/bergen-mq-lab/transport-pki/trust:.*$")
+        self.assertIn("Volume=/etc/bergen-mq-lab/transport-pki/trust:"
+                      "/etc/mqm/pki/trust/bergentransport-peer:ro\nSecret=mqAdminPassword",
+                      preview)
+        self.assertIn("Volume=/etc/bergen-mq-lab/tls:/etc/mqm/pki/keys/bergenlab:ro",
+                      preview)
         self.assertIn("state: restarted", (ROOT / "ansible/playbooks/mq-transport-pki-activate.yml").read_text())
         self.assertNotIn("ansible.builtin.systemd_service", str(prepare))
 
