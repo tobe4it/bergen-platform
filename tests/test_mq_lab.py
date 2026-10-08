@@ -112,12 +112,12 @@ class LabContracts(unittest.TestCase):
                          r"(?m)^Volume=/etc/bergen-mq-lab/transport-pki/identity:.*$")
         self.assertRegex(preview,
                          r"(?m)^Volume=/etc/bergen-mq-lab/transport-pki/trust:.*$")
-        container_section = preview.split("[Container]\\n", 1)[1].split("[Service]\\n", 1)[0]
+        container_section = preview.split("[Container]\n", 1)[1].split("[Service]\n", 1)[0]
         existing_mount = "Volume=/etc/bergen-mq-lab/tls:/etc/mqm/pki/keys/bergenlab:ro"
         identity_mount = "Volume=/etc/bergen-mq-lab/transport-pki/identity:/etc/mqm/pki/keys/bergentransport:ro"
         peer_mount = "Volume=/etc/bergen-mq-lab/transport-pki/trust:/etc/mqm/pki/trust/bergentransport-peer:ro"
-        self.assertIn(existing_mount + "\\n" + identity_mount + "\\n" + peer_mount, container_section)
-        self.assertNotIn("Volume=/etc/bergen-mq-lab/transport-pki/", preview.split("[Install]\\n", 1)[1])
+        self.assertIn(existing_mount + "\n" + identity_mount + "\n" + peer_mount, container_section)
+        self.assertNotIn("Volume=/etc/bergen-mq-lab/transport-pki/", preview.split("[Install]\n", 1)[1])
         self.assertIn("Volume=/etc/bergen-mq-lab/tls:/etc/mqm/pki/keys/bergenlab:ro",
                       preview)
         self.assertIn("state: restarted", (ROOT / "ansible/playbooks/mq-transport-pki-activate.yml").read_text())
