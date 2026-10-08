@@ -36,7 +36,7 @@ def declarations(prefix, nodes):
                                  descr="Bergen audit temporary transmission queue")),
             dict(name=channel, type="channel", state="present",
                  attributes=dict(chltype="sdr", conname="%s(%s)" % (peer["host"], port),
-                                 xmitq=xmitq, sslciph=CIPHER,
+                                 xmitq=xmitq, sslciph=CIPHER, hbint=5,
                                  descr="Bergen audit temporary TLS sender")),
         ])
     # Each receiver is defined on the opposite queue manager.
@@ -44,7 +44,7 @@ def declarations(prefix, nodes):
         channel = result[side]["sender"]
         result[destination]["objects"].append(
             dict(name=channel, type="channel", state="present",
-                 attributes=dict(chltype="rcvr", sslciph=CIPHER,
+                 attributes=dict(chltype="rcvr", sslciph=CIPHER, hbint=5,
                                  sslcauth="optional",
                                  descr="Bergen audit temporary TLS receiver")))
     return result
