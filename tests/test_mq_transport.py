@@ -66,6 +66,13 @@ class TransientTransportTests(unittest.TestCase):
         self.assertEqual(obj["a"]["xmitq"], PREFIX + ".AX")
         self.assertEqual(obj["b"]["xmitq"], PREFIX + ".BX")
         for side in ("a", "b"):
+            channels = [o for o in obj[side]["objects"] if o["type"] == "channel"]
+            self.assertEqual(len(channels), 2)
+            self.assertTrue(all(c["attributes"]["certlabl"] == "bergentransport"
+                                for c in channels))
+            self.assertEqual(
+                {c["attributes"]["chltype"] for c in channels}, {"sdr", "rcvr"})
+        for side in ("a", "b"):
             self.assertEqual(len(obj[side]["objects"]), 3)
             self.assertEqual({o["type"] for o in obj[side]["objects"]},
                              {"qlocal", "channel"})
