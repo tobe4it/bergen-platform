@@ -1,87 +1,98 @@
-# Bergen MQ bidirectional transport fixtures (evaluation only)
+# Temporärer MQ-Zwei-Knoten-Transportaudit (Evaluation)
 
-This playbook prepares **only** the isolated MQ objects needed by the existing
-topology audit. It does **not** start MQ channels, grant authority, import
-trust anchors, open TCP ports or run a live audit.
+Die Transportprüfung erstellt pro Lauf ausschließlich eigene MQ-Objekte mit
+eindeutigem Prefix `BGT.<7-HEX-ZEICHEN>`. Kanäle und XMITQs werden **nicht**
+als dauerhafter Sollzustand bereitgestellt. Das statische
+`mq-transport-objects.yml` wurde entfernt.
 
-## Dedicated topology
+## Laufbezogene Objekte
 
-| Queue manager | Transmission queue | Sender | Receiver for opposite direction |
-| --- | --- | --- | --- |
-| BERGENLAB (A) | `BGT.XMIT.A2B` | `BGT.A2B` → B | `BGT.B2A` |
-| BERGENLABB (B) | `BGT.XMIT.B2A` | `BGT.B2A` → A | `BGT.A2B` |
+Pro Lauf erzeugt `bergen_mq_topology.py` über den bestehenden,
+TLS-authentifizierten JSON-MQSC-REST-Reconciler:
 
-Both channel pairs declare `TLS_AES_256_GCM_SHA384`. The server certificate
-and receiving CA trust must already be configured and verified; declaring
-`SSLCIPH` does not establish a successful TLS connection. The audit requires
-the sender channel to be running for each transport case.
+| Auf A (BERGENLAB) | Auf B (BERGENLABB) |
+| --- | --- |
+| QLOCAL `<prefix>.AX` mit `USAGE(XMITQ)` | QLOCAL `<prefix>.BX` mit `USAGE(XMITQ)` |
+| SDR `<prefix>.A2B` | RCVR `<prefix>.A2B` |
+| RCVR `<prefix>.B2A` | SDR `<prefix>.B2A` |
 
-The bounded `mq_objects` REST reconciler never prunes omitted objects,
-refuses channel/queue type conversion, and verifies post-change DISPLAY.
-It cannot perform MQ channel start/stop or CHLAUTH/OAM changes.
+Sender und Receiver verlangen `TLS_AES_256_GCM_SHA384` und die Audit-Prüfung
+verifiziert zur Laufzeit `DISPLAY CHSTATUS` mit `RUNNING`, `SECPROT(TLSV13)`
+und dem ausgehandelten CipherSpec auf beiden Enden. Anschließend folgen je
+Richtung fünf Transportvarianten mit zeitlich begrenzten MQ-GETs; die QREMOTE-
+und Ziel-QLOCAL-Fixtures sind ebenfalls laufbezogen.
 
-## Read-only preview (mandatory first step)
+## Unveränderliche Infrastruktur / Vorbedingungen
 
-Use the existing **ignored local** audit variables and encrypted Vault:
+Die Testautomatisierung **ändert nicht** Firewall, CA-Trust, CHLAUTH,
+CONNAUTH, MQM-Benutzer, Queue-Manager-weite DLQ oder bestehende Kanäle.
+
+Vor Live-Ausführung sind separat nachzuweisen:
+
+1. A↔B TCP/1414 mit beidseitig quelladressbeschränkter Freigabe auf den
+   tatsächlich aktiven Firewall-Schichten (firewalld, Proxmox, ggf. UniFi).
+   Die vorhandene Regel für `192.168.20.108/32` gestattet nur den Clientzugriff.
+2. Die beiden QMgr benutzen unabhängige CAs. **Jeder QMgr muss dem
+   Messaging-Zertifikat beziehungsweise dessen CA des anderen QMgr vertrauen.**
+   Die CA-Dateien auf `bp-controller` oder dem Java-Testclient allein genügen
+   nicht. Die aktive MQ-Key-Repository-Konfiguration ist separat zu prüfen.
+3. CHLAUTH-Regeln und OAM-Berechtigungen müssen für die eigens gestarteten
+   Sender-/Receiver-Kanäle und die temporären BGT-Zielqueues minimal
+   autorisiert sein. Keine pauschale CHLAUTH-Deaktivierung und kein `mqm`
+   als MCAUSER.
+4. Ausdrückliche Testfreigabe und Prüfung des aktuellen (lokalen,
+   Git-ignorierten) `ansible/vars/mq-topology/audit.yml`.
+
+## Ausführung (erst nach Sicherheitsprüfung)
+
+Neuer Opt-in-Schalter im lokalen vars-File:
+
+```yaml
+mq_topology_transient_transport: true
+mq_topology_peer_firewall_verified: true
+mq_topology_cross_ca_verified: true
+mq_topology_channel_security_verified: true
+mq_topology_accept_partial: true
+```
+
+**Die drei `_verified`-Angaben sind Operatorbestätigungen**, keine
+automatischen Firewall-, TLS-Trust- oder CHLAUTH-Nachweise. Sie dürfen nur
+nach unabhängigem Nachweis auf `true` gesetzt werden.
 
 ```bash
 ansible-playbook -i ansible/inventory.yml -i ansible/inventory.local.yml \
-  ansible/playbooks/mq-transport-objects.yml \
+  ansible/playbooks/mq-topology-audit.yml \
   -e @ansible/vars/mq-topology/audit.yml \
-  --check --diff --ask-vault-pass
+  --syntax-check --ask-vault-pass
 ```
 
-Review the two QMgr plans, object-name collisions and existing attributes.
-Do not apply if an existing `BGT.*` name is owned by another workload.
+Live-Ausführung ohne `--check` nur im ausdrücklich freigegebenen Testfenster;
+das Playbook legt dann temporäre Objekte an. Ohne
+`mq_topology_transient_transport: true` bleibt das vorherige Auditverhalten
+erhalten. Statische `sender_channel`- und `xmitq`-Einträge sind für den
+temporären Modus nicht erforderlich und sollen leer bleiben.
 
-## Pending redesign: per-run transport fixtures
+## Fehlerschutz und Cleanup
 
-The initial PR proposed persistent `BGT.A2B`/`BGT.B2A` channels and XMITQs.
-That is not the desired audit model. **The current playbook is now restricted
-to Ansible check mode and must not be used for live deployment.**
+- Vor einer Mutation wird auf beiden Queue-Managern die Abwesenheit
+  **aller** geplanten Testobjekte kontrolliert. Namenskollisionen stoppen den
+  Test ohne Definitionen.
+- Auch ein nicht eindeutig bestätigter DEFINE- oder START-Versuch wird als
+  möglicher eigener Restbestand protokolliert.
+- Nach den Nachrichtenprüfungen werden die laufbezogenen QREMOTE-/Zielqueues
+  unter den bestehenden Vorsichtsregeln bereinigt.
+- Danach werden nur gestartete Senderkanäle mit
+  `STOP CHANNEL ... MODE(QUIESCE)` geordnet beendet. Für jedes Kanalpaar muss
+  `DISPLAY CHSTATUS CURRENT` die Inaktivität nachweisen.
+- Jede XMITQ muss als `USAGE(XMITQ)` mit `CURDEPTH=0` nachgewiesen sein.
+  Erst dann sind DELETE für die eigenen, leeren XMITQs und inaktiven Kanäle
+  zulässig. Status- oder Kommunikationsunsicherheit führt zum **Retain**.
+- Keine FORCE-, PURGE-, CLEAR-, Timeout-Blind-Retry- oder Fremdobjekt-Löschung.
+  Reste gehen in `evidence.json` und den Prüfbericht ein; sie ergeben `FAIL`.
 
-The next implementation must integrate fixture ownership into
-`bergen_mq_topology.run()` and its evidence:
-
-1. Preflight exact lab identities, TLS peer CA trust, source-specific A↔B
-   TCP/1414 connectivity and reviewed CHLAUTH/OAM. Do not change global rules.
-2. Generate unique bounded `BGT.<RUN_ID>.*` channel and XMITQ names for
-   each direction. Refuse *any* pre-existing object collision.
-3. On each queue manager, DEFINE only owned XMITQ, SDR and matching RCVR,
-   with TLS 1.3 cipher and explicit peer endpoint. Track each successfully
-   created identity immediately so partial failures remain visible.
-4. START only the run-owned sender channels and verify channel state and
-   negotiated TLS before sending test messages.
-5. Create run-owned QREMOTE and QLOCAL fixtures; verify message payload,
-   ID, persistence, commit and rollback from A→B and B→A.
-6. In a bounded finalizer, STOP only owned senders with QUIESCE, verify no
-   active channel and no outstanding/in-doubt messages, delete only empty
-   run-owned queues and run-owned channels, and verify absence.
-7. If channel stop times out, message delivery is uncertain or a queue is
-   nonempty/in use: fail the audit and **retain** unsafe objects for manual
-   investigation. Never use FORCE/PURGE/CLEAR or auto-retry the unknown
-   outcome.
-
-All temporary object identities, transport results, cleanup attempts and
-residuals belong in `evidence.json` and `Pruefbericht.md`.
-`PARTIAL` may indicate deferred *unimplemented* cases, not successful
-transport where transport was never exercised.
-
-Reference: IBM MQ JSON MQSC REST supports `start` and `stop` commands,
-but channel-state transitions need explicit, bounded verification.
-No live inter-QMgr tests have been run using this PR.
-
-## Read-only planning
-
-The available draft playbook can only generate a desired-object preview:
-
-```bash
-ansible-playbook -i ansible/inventory.yml -i ansible/inventory.local.yml \\
-  ansible/playbooks/mq-transport-objects.yml \\
-  -e @ansible/vars/mq-topology/audit.yml \\
-  --check --diff --ask-vault-pass
-```
-
-Its static object names are **not** suitable for live audit use. Do not
-merge this draft until the per-run lifecycle and regression tests replace
-this prototype.
+Das lokale Testmodul prüft den Objekt-Lifecycle mit Fake-MQ-REST-Antworten.
+Es ist **kein** Live-Nachweis der MQ-Web-REST-Kommandos, der
+Zertifikatsvertrauensstellung oder der Kanalberechtigungen. Für einen
+erfolgreich akzeptierten transienten Audit müssen alle zehn
+`a:remote-*`/`b:remote-*`-Tests `PASS` haben.
+Andere ausdrücklich verschobene Fälle bleiben `NOT_TESTED`.
