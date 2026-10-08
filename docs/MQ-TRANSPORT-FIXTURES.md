@@ -22,6 +22,57 @@ und dem ausgehandelten CipherSpec auf beiden Enden. Anschließend folgen je
 Richtung fünf Transportvarianten mit zeitlich begrenzten MQ-GETs; die QREMOTE-
 und Ziel-QLOCAL-Fixtures sind ebenfalls laufbezogen.
 
+## Separate transport PKI preparation and activation
+
+The pinned IBM MQ container imports extra certificates from
+`/etc/mqm/pki/keys/<label>` and peer CA anchors from
+`/etc/mqm/pki/trust/<label>` when starting. The existing default
+`bergenlab` stays lexicographically ahead of `bergentransport`.
+The transport channel declarations now explicitly set
+`CERTLABL(bergentransport)` and the receivers require
+`SSLCAUTH(REQUIRED)` (mutual TLS).
+
+**Phase 1: certificate preparation (no service restart):**
+
+```bash
+ansible-playbook -i ansible/inventory.yml -i ansible/inventory.local.yml \
+  ansible/playbooks/mq-transport-pki-prepare.yml \
+  -e mq_transport_pki_prepare=true --ask-vault-pass
+```
+
+This creates independently signed transport keys and two unique CAs on the
+two MQ hosts, each with `serverAuth` + `clientAuth`; then exchanges ONLY
+the public peer CA using delegated SSH. Private CA and identity keys remain
+on their respective hosts. No existing `bergenlab` files are rewritten.
+Ansible does not automatically attach the prepared files to a running
+container.
+
+**Phase 2: reviewed activation, separate change window:**
+
+Preview before approval:
+
+```bash
+ansible-playbook -i ansible/inventory.yml -i ansible/inventory.local.yml \
+  ansible/playbooks/mq-transport-pki-activate.yml \
+  -e mq_transport_pki_activate=true \
+  -e mq_transport_restart_approved=true \
+  --check --diff --ask-vault-pass
+```
+
+Only after reviewing the exact Quadlet diff and scheduling the impact of
+restarting each MQ evaluation service may the same command be executed
+without `--check`. It executes serially, verifies the existing pinned
+image, checks prepared files, adds **only two read-only mounts**, restarts
+each MQ service if the Quadlet changed, and checks labels imported into
+the running MQ key store. The standard `bergenlab` label must remain
+unchanged; verify this by `DISPLAY QMGR CERTLABL` after activation.
+Restarts interrupt existing MQ connections and are never authorized by
+certificate preparation itself.
+
+The pending service restarts and actual TLS 1.3 interoperability have
+**not** been executed. Treat any import discrepancy as a stop condition,
+not permission to weaken TLS.
+
 ## Unveränderliche Infrastruktur / Vorbedingungen
 
 Die Testautomatisierung **ändert nicht** Firewall, CA-Trust, CHLAUTH,
