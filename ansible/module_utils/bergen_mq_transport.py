@@ -46,7 +46,7 @@ def declarations(prefix, nodes):
         result[destination]["objects"].append(
             dict(name=channel, type="channel", state="present",
                  attributes=dict(chltype="rcvr", sslciph=CIPHER, certlabl=TRANSPORT_CERTLABL, hbint=5,
-                                 sslcauth="optional",
+                                 sslcauth="required",
                                  descr="Bergen audit temporary TLS receiver")))
     return result
 
