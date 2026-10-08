@@ -34,10 +34,6 @@
       ansible.builtin.assert:
         that:
           - mq_lab_image is match('^icr[.]io/ibm-messaging/mq:9[.]4[.].*-amd64@sha256:[a-f0-9]{64}$')
-          - "(transport_original_quadlet.content | b64decode) == lookup('ansible.builtin.template', playbook_dir ~ '/../roles/mq_lab/templates/bergen-mq-lab.container.j2')"
-            # Comparison temporarily uses mq_lab_transport_pki_enabled=true, so
-            # the next task must instead verify only the two known mount deltas.
-      when: false
 
     - name: Require existing base Quadlet to match repository-managed template
       ansible.builtin.assert:
@@ -51,7 +47,7 @@
           Review the actual diff before restarting.
       vars:
         mq_lab_transport_pki_enabled: false
-      when: not transport_original_quadlet.content | b64decode is search('Volume=/etc/bergen-mq-lab/transport-pki/identity:')
+      when: "'Volume=/etc/bergen-mq-lab/transport-pki/identity:' not in (transport_original_quadlet.content | b64decode)"
 
     - name: Check prepared key material exists before writing Quadlet
       ansible.builtin.stat:
