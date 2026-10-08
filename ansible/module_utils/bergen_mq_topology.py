@@ -85,7 +85,7 @@ class Probe:
         payload = '\n'.join(k + '=' + base64.b64encode(str(v).encode()).decode() for k, v in properties.items())
         remote = ['/usr/sbin/runuser', '-u', 'mqtest', '--', '/usr/bin/java',
                   '-Dcom.ibm.mq.cfg.useIBMCipherMappings=false', '-cp',
-                  '/opt/bergen-mq-client/tests:/opt/bergen-mq-client/lib/com.ibm.mq.allclient.jar', 'BergenMQProbe']
+                  '/opt/bergen-mq-client/tests:/opt/bergen-mq-client/lib/*', 'BergenMQProbe']
         argv = ['ssh', '-T', '-o', 'BatchMode=yes', '-o', 'StrictHostKeyChecking=yes',
                 '-o', 'ConnectTimeout=10', '-p', str(self.ssh.get('port', 22)),
                 'root@' + self.ssh['host'], shlex.join(remote)]

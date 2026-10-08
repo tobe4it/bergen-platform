@@ -1,0 +1,4 @@
+---
+# Preserve the existing HTTPS firewall policy for queue manager B.
+# Additional browser/admin networks are not authorized here.
+mq_lab_admin_cidrs: []

@@ -16,7 +16,7 @@ public final class BergenMQProbe {
     static Properties input = new Properties();
     static String value(String key) { return input.getProperty(key, ""); }
     static Object constant(String name) throws Exception {
-        return Class.forName(MQ + "constants.MQConstants").getField(name).get(null);
+        return Class.forName(MQ + "constants.CMQC").getField(name).get(null);
     }
     static int number(String name) throws Exception { return ((Number)constant(name)).intValue(); }
     static Object make(String name) throws Exception { return Class.forName(MQ + name).getConstructor().newInstance(); }

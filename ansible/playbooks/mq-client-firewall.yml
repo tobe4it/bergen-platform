@@ -1,0 +1,22 @@
+---
+- name: Manage MQ lab client firewall access
+  hosts: "{{ mq_firewall_target | default('bergen-mq-lab:bergen-mq-lab-b') }}"
+  become: true
+  gather_facts: false
+  serial: 1
+  any_errors_fatal: true
+
+  tasks:
+    - name: Require explicit client firewall configuration
+      ansible.builtin.assert:
+        that:
+          - mq_lab_allow_client_connections | bool
+          - mq_lab_client_cidr == '192.168.20.108/32'
+          - mq_lab_controller_cidr is defined
+          - mq_lab_admin_cidrs is defined
+        fail_msg: "Client access and existing administrative sources must be explicitly configured."
+
+    - name: Apply existing MQ firewall policy
+      ansible.builtin.include_role:
+        name: mq_lab
+        tasks_from: firewall
