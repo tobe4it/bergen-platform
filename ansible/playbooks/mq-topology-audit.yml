@@ -13,6 +13,11 @@
           - mq_topology_nodes.b.qmgr == 'BERGENLABB'
           - mq_topology_client_host | default('bergen-mq-client') in groups.get('mq_client_nodes', [])
           - mq_topology_nodes.a.endpoint != mq_topology_nodes.b.endpoint
+          - >-
+            not (mq_topology_transient_transport | default(false) | bool)
+            or (mq_topology_peer_firewall_verified | default(false) | bool
+                and mq_topology_cross_ca_verified | default(false) | bool
+                and mq_topology_channel_security_verified | default(false) | bool)
 
 - name: Install test probe on the dedicated client
   hosts: "{{ mq_topology_client_host | default('bergen-mq-client') }}"
@@ -89,6 +94,10 @@
         revision: "{{ topology_revision.stdout }}"
         confirm: "{{ mq_topology_confirm_test_mutations }}"
         include_objects: "{{ mq_topology_include_objects | default(true) }}"
+        transient_transport: "{{ mq_topology_transient_transport | default(false) }}"
+        transport_peer_firewall_verified: "{{ mq_topology_peer_firewall_verified | default(false) }}"
+        transport_cross_ca_verified: "{{ mq_topology_cross_ca_verified | default(false) }}"
+        transport_channel_security_verified: "{{ mq_topology_channel_security_verified | default(false) }}"
       register: topology_run
 
     - name: Include executed client artifact identities in evidence
@@ -159,6 +168,13 @@
           - topology_run.report.failed | int == 0
           - topology_run.report.residual_objects | length == 0
           - topology_run.report.passed | int > 0
+          - >-
+            not (mq_topology_transient_transport | default(false) | bool)
+            or (['a', 'b'] | product(['persistent', 'nonpersistent', 'binary4k', 'commit', 'rollback'])
+                | map('join', ':remote-') | list
+                | difference(topology_run.report.tests
+                             | selectattr('status', 'equalto', 'PASS')
+                             | map(attribute='id') | list) | length == 0)
           - >-
             topology_run.report.tests
             | selectattr('id', 'equalto', 'client:api-preflight')
