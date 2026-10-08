@@ -72,6 +72,13 @@ def depth(client, name):
     value = current.get("curdepth")
     if value is None or str(value).strip() not in ("0",):
         raise MQError("Transmission queue not proven empty")
+    rows = responses(client.command("display", "qstatus", name,
+                                    response_parameters=["uncom"]))
+    if len(rows) != 1 or not isinstance(rows[0].get("parameters"), dict):
+        raise MQError("Unable to determine pending XMITQ units of work")
+    status = {k.lower(): v for k, v in rows[0]["parameters"].items()}
+    if str(status.get("uncom", "")).lower() not in ("0", "no"):
+        raise MQError("Transmission queue has uncommitted changes or unknown UNCOM")
     return 0
 
 
@@ -159,6 +166,9 @@ class TransientTransport:
         safe_sides = {"a": True, "b": True}
         for side, channel in reversed(self.started):
             try:
+                state = channel_status(self.clients[side], channel)
+                if state is None or state.get("indoubt") != "no":
+                    raise MQError("Sender channel in-doubt state not proven clear")
                 responses(self.clients[side].command("stop", "channel", channel,
                                                     parameters={"mode": "quiesce"}))
                 wait_inactive(self.clients[side], channel,
