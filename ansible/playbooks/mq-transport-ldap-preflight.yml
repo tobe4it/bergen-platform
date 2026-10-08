@@ -92,9 +92,14 @@
     - name: Fail closed on any existing account, group or numeric ID
       ansible.builtin.assert:
         that:
-          - (transport_existing_users.results | selectattr('stdout', 'search', '(?m)^dn: ') | list | length) == 0
-          - (transport_existing_groups.results | selectattr('stdout', 'search', '(?m)^dn: ') | list | length) == 0
-          - transport_existing_ids.stdout is not search('(?m)^dn: ')
+          - >-
+            (transport_existing_users.results |
+             selectattr('stdout', 'search', '(?m)^dn: ') | list | length) == 0
+          - >-
+            (transport_existing_groups.results |
+             selectattr('stdout', 'search', '(?m)^dn: ') | list | length) == 0
+          - >-
+            transport_existing_ids.stdout is not search('(?m)^dn: ')
         fail_msg: >-
           LDAP object/ID collision or a previously provisioned identity was found.
           Inspect explicitly; never overwrite or reuse a directory ID.
