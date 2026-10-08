@@ -8,6 +8,7 @@ import time
 from ansible.module_utils.bergen_mq import MQError, discover, reconcile, responses
 
 CIPHER = "TLS_AES_256_GCM_SHA384"
+TRANSPORT_CERTLABL = "bergentransport"
 SIDES = (("a", "b"), ("b", "a"))
 CHANNEL_NAME = re.compile(r"^BGT\.[A-F0-9]{7}\.[AB]2[AB]$")
 ACTIVE_TIMEOUT = 25
@@ -36,7 +37,7 @@ def declarations(prefix, nodes):
                                  descr="Bergen audit temporary transmission queue")),
             dict(name=channel, type="channel", state="present",
                  attributes=dict(chltype="sdr", conname="%s(%s)" % (peer["host"], port),
-                                 xmitq=xmitq, sslciph=CIPHER, hbint=5,
+                                 xmitq=xmitq, sslciph=CIPHER, certlabl=TRANSPORT_CERTLABL, hbint=5,
                                  descr="Bergen audit temporary TLS sender")),
         ])
     # Each receiver is defined on the opposite queue manager.
@@ -44,7 +45,7 @@ def declarations(prefix, nodes):
         channel = result[side]["sender"]
         result[destination]["objects"].append(
             dict(name=channel, type="channel", state="present",
-                 attributes=dict(chltype="rcvr", sslciph=CIPHER, hbint=5,
+                 attributes=dict(chltype="rcvr", sslciph=CIPHER, certlabl=TRANSPORT_CERTLABL, hbint=5,
                                  sslcauth="optional",
                                  descr="Bergen audit temporary TLS receiver")))
     return result
