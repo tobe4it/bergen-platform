@@ -65,6 +65,22 @@ class LabContracts(unittest.TestCase):
         self.assertIn("/etc/mqm/pki/trust/bergentransport-peer:ro", staged_quadlet)
         self.assertIn("/etc/mqm/pki/keys/bergenlab:ro", staged_quadlet)
         self.assertNotIn("Environment=MQ_DEV=true", staged_quadlet)
+        # Existing installations can have the LDAP volume earlier in [Container].
+        # Equal nonempty line multisets are equivalent; other changes must fail.
+        legacy = default_quadlet.replace(
+            "Volume=/etc/bergen-mq-lab/trust/ldap:/etc/mqm/pki/trust/ldap:ro\n", "")
+        legacy = legacy.replace("ContainerName=bergen-mq-lab\n",
+                                "ContainerName=bergen-mq-lab\n"
+                                "Volume=/etc/bergen-mq-lab/trust/ldap:/etc/mqm/pki/trust/ldap:ro\n")
+        normalize = lambda s: sorted(line for line in s.splitlines() if line)
+        self.assertEqual(normalize(default_quadlet), normalize(legacy))
+        self.assertNotEqual(normalize(default_quadlet),
+                            normalize(legacy.replace("Network=host", "Network=bridge")))
+        self.assertNotEqual(normalize(default_quadlet),
+                            normalize(legacy.replace("DropCapability=all", "DropCapability=none")))
+        self.assertEqual(
+            len([line for line in staged_quadlet.splitlines()
+                 if line.startswith("Volume=/etc/bergen-mq-lab/transport-pki/")]), 2)
 
     def test_transport_pki_prepare_and_activation_are_separate(self):
         prepare = yaml.safe_load((ROOT / "ansible/playbooks/mq-transport-pki-prepare.yml").read_text())
@@ -76,7 +92,12 @@ class LabContracts(unittest.TestCase):
         self.assertEqual(len(activate), 1)
         self.assertIn("mq_transport_restart_approved", str(activate[0]["tasks"][0]))
         self.assertEqual(activate[0]["serial"], 1)
-        self.assertIn("ansible.builtin.template", str(activate))
+        self.assertIn("ansible.builtin.lineinfile", str(activate))
+        self.assertNotIn("ansible.builtin.template", str(activate[0]["tasks"][-9:]))
+        activation_text = (ROOT / "ansible/playbooks/mq-transport-pki-activate.yml").read_text()
+        self.assertIn("splitlines()", activation_text)
+        self.assertIn("sort | list", activation_text)
+        self.assertIn("transport_identity_mount.changed or transport_trust_mount.changed", activation_text)
         self.assertIn("state: restarted", (ROOT / "ansible/playbooks/mq-transport-pki-activate.yml").read_text())
         self.assertNotIn("ansible.builtin.systemd_service", str(prepare))
 
