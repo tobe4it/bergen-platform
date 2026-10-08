@@ -1,18 +1,24 @@
 ---
 # Connection-only smoke test; does not create MQ objects or send messages.
-- name: Test LDAP client authentication on BERGENLAB
+- name: Test LDAP client authentication on the selected evaluation queue manager
   hosts: bergen-mq-client
   gather_facts: false
   become: true
   vars:
-    mq_smoke_password: "{{ vault_mq_test_a_password }}"
-    mq_smoke_server: bergen-mq-lab
-    mq_smoke_peer: CN=bergen-mq-lab
+    mq_smoke_side: a
+    mq_smoke_targets:
+      a: {server: bergen-mq-lab, qmgr: BERGENLAB, username: bgtaudita}
+      b: {server: bergen-mq-lab-b, qmgr: BERGENLABB, username: bgtauditb}
+    mq_smoke_target: "{{ mq_smoke_targets[mq_smoke_side] }}"
+    mq_smoke_password: "{{ lookup('vars', 'vault_mq_test_' ~ mq_smoke_side ~ '_password') }}"
+    mq_smoke_server: "{{ mq_smoke_target.server }}"
+    mq_smoke_peer: "CN={{ mq_smoke_target.server }}"
   tasks:
     - name: Require a real test and a nonempty password
       ansible.builtin.assert:
         that:
           - not ansible_check_mode
+          - mq_smoke_side in ['a', 'b']
           - mq_smoke_password | length > 0
           - mq_smoke_server in hostvars
       no_log: true
@@ -37,7 +43,7 @@
     - name: Install public MQ CA
       ansible.builtin.copy:
         content: "{{ smoke_ca.content | b64decode }}"
-        dest: /opt/bergen-mq-client/trust/auth-smoke-a.crt
+        dest: "/opt/bergen-mq-client/trust/auth-smoke-{{ mq_smoke_side }}.crt"
         owner: root
         group: root
         mode: '0644'
@@ -74,4 +80,4 @@
 
     - name: Report limited authentication result
       ansible.builtin.debug:
-        msg: "PASS: BERGENLAB client login, wrong-password rejection, and repeat login. TLSv1.3 context and TLS_AES_256_GCM_SHA384 configured; CA and peer checked. No message, routing, mTLS, TLS downgrade or PQC test."
+        msg: "PASS: {{ mq_smoke_target.qmgr }} client login, wrong-password rejection, and repeat login. TLSv1.3 context and TLS_AES_256_GCM_SHA384 configured; CA and peer checked. No message, routing, mTLS, TLS downgrade or PQC test."

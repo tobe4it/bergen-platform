@@ -15,16 +15,16 @@
     stdin: |
       operation={{ smoke_case.operation | b64encode }}
       side={{ 'a' | b64encode }}
-      a.qmgr={{ 'BERGENLAB' | b64encode }}
+      a.qmgr={{ mq_smoke_target.qmgr | b64encode }}
       a.host={{ hostvars[mq_smoke_server].ansible_host | b64encode }}
       a.port={{ '1414' | b64encode }}
       a.channel={{ 'BGT.CLIENT' | b64encode }}
-      a.username={{ 'bgtaudita' | b64encode }}
+      a.username={{ mq_smoke_target.username | b64encode }}
       a.password={{ mq_smoke_password | b64encode }}
       a.protocol={{ 'TLSv1.3' | b64encode }}
       a.cipher={{ 'TLS_AES_256_GCM_SHA384' | b64encode }}
       a.peer={{ mq_smoke_peer | b64encode }}
-      a.ca={{ '/opt/bergen-mq-client/trust/auth-smoke-a.crt' | b64encode }}
+      a.ca={{ ('/opt/bergen-mq-client/trust/auth-smoke-' ~ mq_smoke_side ~ '.crt') | b64encode }}
   register: smoke_probe
   changed_when: false
   failed_when: false
