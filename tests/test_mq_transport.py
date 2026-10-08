@@ -28,8 +28,12 @@ class FakeTransportClient(FakeClient):
             if name not in self.active:
                 return mq_res_missing()
             return success({"channel": name, "status": "RUNNING",
+                            "indoubt": "NO",
                             "secprot": self.protocol_override,
                             "sslciph": transport.CIPHER})
+        if command == "display" and typ == "qstatus":
+            self.calls.append((command, typ, name, parameters, response_parameters))
+            return success({"queue": name, "uncom": 0})
         if command == "start" and typ == "channel":
             self.calls.append((command, typ, name, parameters, response_parameters))
             self.active.add(name)
@@ -120,6 +124,25 @@ class TransientTransportTests(unittest.TestCase):
         self.assertTrue(any(c.objects for c in clients.values()))
         self.assertFalse(any(call[0] == "delete" for c in clients.values()
                              for call in c.calls))
+
+    def test_unknown_indoubt_state_blocks_cleanup(self):
+        clients = self.factory()
+        run = transport.TransientTransport(clients, configured_nodes(), PREFIX,
+                                           sleeper=lambda n: None)
+        run.create()
+        run.start()
+        original = clients["a"].command
+        def ambiguous(command, typ, name, parameters=None, response_parameters=None):
+            result = original(command, typ, name, parameters, response_parameters)
+            if command == "display" and typ == "chstatus" and name == PREFIX + ".A2B":
+                if result["commandResponse"][0].get("parameters"):
+                    result["commandResponse"][0]["parameters"]["indoubt"] = "YES"
+            return result
+        clients["a"].command = ambiguous
+        cleanup, residuals = run.cleanup()
+        self.assertTrue(residuals)
+        self.assertFalse(any(call[0] == "delete" for client in clients.values()
+                             for call in client.calls))
 
     def test_uncertain_probe_retains_all(self):
         clients = self.factory()
