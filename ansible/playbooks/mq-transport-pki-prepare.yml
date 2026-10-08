@@ -196,7 +196,7 @@
       ansible.builtin.assert:
         that:
           - "('CN = Bergen MQ Transport CA ' ~ ('BERGENLABB' if inventory_hostname == 'bergen-mq-lab' else 'BERGENLAB')) in transport_peer_subject.stdout"
-      fail_msg: "Peer CA does not match the OTHER queue manager; stop before mounting."
+        fail_msg: "Peer CA does not match the OTHER queue manager; stop before mounting."
 
     - name: Report preparation without activating the MQ service
       ansible.builtin.debug:
