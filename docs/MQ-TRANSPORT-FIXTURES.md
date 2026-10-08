@@ -32,6 +32,11 @@ Vor Live-Ausführung sind separat nachzuweisen:
 1. A↔B TCP/1414 mit beidseitig quelladressbeschränkter Freigabe auf den
    tatsächlich aktiven Firewall-Schichten (firewalld, Proxmox, ggf. UniFi).
    Die vorhandene Regel für `192.168.20.108/32` gestattet nur den Clientzugriff.
+   Die neue Rolle erlaubt zusätzliche QMgr-Quellen nur als kanonische `/32`
+   auf TCP/1414. Die Hostvariablen lösen A bzw. B aus dem Inventory auf.
+   Vor einer Anwendung: `ansible/playbooks/mq-client-firewall.yml --check --diff`,
+   Ausgabe der beiden Queueserver vergleichen, dann nach Freigabe ohne Check-Modus
+   ausführen und Runtime/Permanent/Proxmox gegenprüfen.
 2. Die beiden QMgr benutzen unabhängige CAs. **Jeder QMgr muss dem
    Messaging-Zertifikat beziehungsweise dessen CA des anderen QMgr vertrauen.**
    Die CA-Dateien auf `bp-controller` oder dem Java-Testclient allein genügen
@@ -84,7 +89,9 @@ temporären Modus nicht erforderlich und sollen leer bleiben.
 - Danach werden nur gestartete Senderkanäle mit
   `STOP CHANNEL ... MODE(QUIESCE)` geordnet beendet. Für jedes Kanalpaar muss
   `DISPLAY CHSTATUS CURRENT` die Inaktivität nachweisen.
-- Jede XMITQ muss als `USAGE(XMITQ)` mit `CURDEPTH=0` nachgewiesen sein.
+- Der Sender muss vor dem STOP `INDOUBT(NO)` melden. Jede XMITQ muss
+  `USAGE(XMITQ)`, `CURDEPTH=0` und `DISPLAY QSTATUS UNCOM(0)` bzw.
+  `UNCOM(NO)` nachweisen.
   Erst dann sind DELETE für die eigenen, leeren XMITQs und inaktiven Kanäle
   zulässig. Status- oder Kommunikationsunsicherheit führt zum **Retain**.
 - Keine FORCE-, PURGE-, CLEAR-, Timeout-Blind-Retry- oder Fremdobjekt-Löschung.
