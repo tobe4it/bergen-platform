@@ -1,6 +1,6 @@
 ---
 # Evaluation only. Reconcile dedicated transport objects; never start a channel.
-# Run with --check --diff first. Applying requires explicit consent.
+# Preview only. Persistent transport objects must NOT be applied; per-run lifecycle pending.
 - name: Reconcile dedicated TLS transport objects between BERGENLAB and BERGENLABB
   hosts: localhost
   connection: local
@@ -24,16 +24,15 @@
           - mq_topology_nodes.b.protocol == 'TLSv1.3'
           - mq_topology_nodes.a.cipher == 'TLS_AES_256_GCM_SHA384'
           - mq_topology_nodes.b.cipher == 'TLS_AES_256_GCM_SHA384'
-          - ansible_check_mode or mq_transport_confirm_apply | default(false) | bool
+          - ansible_check_mode
         fail_msg: >-
-          Only the two dedicated evaluation QMgr are allowed. Live changes require
-          mq_transport_confirm_apply=true after reviewing the check-mode plan.
+          This prototype is preview-only. Audit transport fixtures must be
+          per-run owned and cleaned up, not installed as persistent objects.
 
     - name: Require explicit peer network and certificate trust review for live changes
       ansible.builtin.assert:
         that:
-          - ansible_check_mode or mq_transport_peer_firewall_verified | default(false) | bool
-          - ansible_check_mode or mq_transport_cross_ca_verified | default(false) | bool
+          - ansible_check_mode
         fail_msg: >-
           Verify reciprocal source-specific TCP/1414 firewall access and that each
           queue manager trusts the OTHER queue manager's messaging CA before apply.
