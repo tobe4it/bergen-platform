@@ -172,7 +172,8 @@
         - name: Ensure primary POSIX group is present
           ansible.builtin.assert:
             that:
-              - transport_ldap_primary_group.stdout is search('(?m)^dn: ')
+              - >-
+                transport_ldap_primary_group.stdout is search('(?m)^dn: ')
             fail_msg: "Primary POSIX group GID 1000001 is not visible; refuse provisioning."
           no_log: "{{ transport_ldap_apply }}"
 
