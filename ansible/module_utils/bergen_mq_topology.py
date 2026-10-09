@@ -10,7 +10,7 @@ from ansible.module_utils.bergen_mq import MQError, RestClient, discover, reconc
 from ansible.module_utils.bergen_mq_audit import run_audit
 from ansible.module_utils.bergen_mq_transport import TransientTransport
 from ansible.module_utils.bergen_mq_audit_names import (
-    local_queue, alias_queue, remote_queue, transmission_queue,
+    local_queue, alias_queue, remote_queue,
 )
 
 
