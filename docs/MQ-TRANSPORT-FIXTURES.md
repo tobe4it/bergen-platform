@@ -432,8 +432,11 @@ Readbacks, Review und gesonderte Freigabe ermöglichen später
 weitere Schritte. Neun neue Tests in
 `tests/test_mq_chlauth_recovery_triage.py` simulieren insbesondere
 Objektersetzung unter gleichem Namen, veränderte `MCAUSER`, fremde
-Regeln und nachträgliche Drift. **68 Tests sind nun geplant, aber
-die neun neuen Tests noch nicht auf dem Controller bestätigt.**
+Regeln und nachträgliche Drift. Die neun Triage-Tests sind noch nicht auf dem Controller bestätigt.
+Hinzu kommen vier neue Namensraumtests in
+`tests/test_mq_chlauth_audit_names.py`. Damit sind für
+die CHLAUTH-Offline-Suite nun **72 Tests** vorgesehen, deren
+Ergebnis nach der Namensraum-Migration erneut nachzuweisen ist.
 
 **Namensraum-Migration (Branchstand):** Der in
 `bergen_mq_audit_names.py` zentral geprüfte Namespace
