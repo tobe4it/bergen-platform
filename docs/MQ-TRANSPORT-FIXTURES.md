@@ -162,6 +162,47 @@ jeweils erfolgreich; A und B meldeten jeweils
 Der Nachweis betrifft nur die Gruppenauflösung, nicht die späteren
 `+setall`-/`+put`-Rechte oder die TLS-CHLAUTH-Zuordnung.
 
+## CHLAUTH-Planung: offline, noch nicht angewendet (09.10.2026)
+
+`ansible/module_utils/bergen_mq_chlauth.py` erzeugt einen **reinen
+MQSC-Plan** für die beiden exakten, laufbezogenen Receiverkanäle
+`BGT.<7HEX>.B2A` auf BERGENLAB und `BGT.<7HEX>.A2B` auf BERGENLABB.
+Der Plan benutzt die geprüften IPv4-Adressen der beiden Hosts, die
+zertifikatsspezifischen Subjects/Issuers und als `MCAUSER` die
+dedizierten LDAP-Benutzer. Unbekannte Hosts, Portänderungen, freie
+Kanalnamenmuster und unzulässige Präfixe werden verweigert.
+
+Pro Receiver sind zwei CHLAUTH-Datensätze vorgesehen: eine
+`ADDRESSMAP ADDRESS('*') USERSRC(NOACCESS)` als Rückfallsperre
+sowie eine enge `SSLPEERMAP` mit `SSLPEER`, `SSLCERTI`, Peer-IP,
+`USERSRC(MAP)` und `MCAUSER`. Der Plan sieht vier
+`MATCH(RUNCHECK)`-Fälle vor: richtiges Zertifikat, falscher Subject,
+falscher Issuer und falsche Quell-IP. Das Prüfmodul wertet nur
+eindeutige MQSC-Ergebnisse als bestanden.
+
+**Wichtig:** `MATCH(RUNCHECK)` mit nicht vorhandenem Receiver
+ergibt `AMQ9519E`; das ist am 09.10.2026 lesend auf beiden QMgrn
+nachgewiesen. Die Receiver müssen vor einer Live-RUNCHECK-Prüfung
+kontrolliert definiert sein. Geplante `DEFINE`-, `SET CHLAUTH`-
+und `ACTION(REMOVE)`-Befehle werden vom Modul **nicht ausgeführt**.
+Es gibt derzeit keinen freigegebenen Live-Apply-Pfad: Vor Anwendung
+müssen DIT/PKI-Daten, MQSC-Parameter, Priorität zwischen
+`SSLPEERMAP` und `ADDRESSMAP`, bestehende Kanäle/Regeln
+und die exakten Rückbauschritte geprüft werden. Insbesondere
+wäre es unzulässig, eine unbekannte bestehende Regel als
+"run-owned" zu entfernen.
+
+Offline-Prüfung auf `bp-controller` nach Pull des Branches:
+
+```bash
+PYTHONPATH=ansible python3 -m unittest discover -s tests -p 'test_mq_chlauth.py' -v
+```
+
+Die Tests `tests/test_mq_chlauth.py` prüfen Namen, Richtung,
+identitätsgebundene Zulassung, alle vier Probevarianten, verweigerte
+abweichende Topologien und den begrenzten Rückbauplan. Noch kein
+Ergebnis aus einer tatsächlichen MQSC-Laufzeitprüfung behaupten.
+
 ## Unveränderliche Infrastruktur / Vorbedingungen
 
 Die Testautomatisierung **ändert nicht** Firewall, CA-Trust, CHLAUTH,
