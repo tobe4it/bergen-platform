@@ -9,7 +9,7 @@ as a standalone MQ mutator before an approved, reviewed adapter exists.
 """
 from dataclasses import dataclass, field
 
-from ansible.module_utils.bergen_mq_chlauth import ChlauthPlanError
+from .bergen_mq_chlauth import ChlauthPlanError
 
 
 @dataclass
