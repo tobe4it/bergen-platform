@@ -301,6 +301,32 @@ identitätsgebundene Zulassung, alle vier Probevarianten, verweigerte
 abweichende Topologien und den begrenzten Rückbauplan. Noch kein
 Ergebnis aus einer tatsächlichen MQSC-Laufzeitprüfung behaupten.
 
+## Schreibzyklus: reine Offline-Vorbereitung (09.10.2026)
+
+`ansible/module_utils/bergen_mq_chlauth_write_contract.py` begrenzt
+mögliche künftige MQSC-Mutationen auf genau sechs Befehle je QMgr
+(Anlage der Sperre, Definition des Receivers, Zertifikatsfreigabe,
+Entfernung der Freigabe, Entfernung des Receivers, Entfernung der Sperre).
+Die Befehle und Identitäten müssen dem geprüften Plan exakt entsprechen.
+Der enthaltene `OfflineOnlyMutationAdapter` verweigert **auch korrekt
+geformte Schreibbefehle**: Er ist keine Live-Ausführung.
+
+`ansible/playbooks/mq-transport-chlauth-write-review.yml` führt
+ausschließlich lokale Tests aus und verweigert die Flags
+`mq_chlauth_live_apply` sowie `mq_chlauth_write_approved`.
+Für eine echte Schreibfreigabe fehlen weiterhin eine belastbare
+Eigentums-/Sperrstrategie, ein dauerhaftes Änderungsjournal,
+MQSC-Readbacks nach jeder Mutation und reproduzierbarer Rückbau
+bei Teilfehlern. Der bisherige lesende Audit bleibt unverändert.
+
+```bash
+ansible-playbook -i ansible/inventory.yml -i ansible/inventory.local.yml \
+  ansible/playbooks/mq-transport-chlauth-write-review.yml --syntax-check
+```
+
+Diese Syntaxprüfung ändert keine MQ-Objekte und gibt keine Freigabe
+für einen späteren Live-Lauf.
+
 ## Unveränderliche Infrastruktur / Vorbedingungen
 
 Die Testautomatisierung **ändert nicht** Firewall, CA-Trust, CHLAUTH,
