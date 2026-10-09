@@ -347,6 +347,20 @@ keine Eigentümerschaft gegenüber anderen MQ-Administratoren.
 Der Review-Playbook-Output zeigt nach erfolgreichem Testlauf
 die konkrete `Ran N tests`-Zeile.
 
+**Offline-Integration von Journal und Lifecycle:** Die neue Datei
+`ansible/module_utils/bergen_mq_chlauth_journaled_offline.py` verbindet
+den getesteten Lifecycle, die feste Befehlsfreigabe und das fsync-Journal
+nur mit einem ausdrücklich gekennzeichneten In-Memory-Fake. Vor jeder
+simulierten Mutation wird `INTENT` geschrieben, danach `RESULT`.
+Ein Fehler erhält `UNKNOWN`; auch bei anschließender erfolgreicher
+Bereinigung bleibt das Journal bewusst unvollständig, damit der
+Fall unabhängig geprüft werden kann. Nur ein vollständig erfolgreicher
+Test mit bestätigtem Cleanup beider Seiten erhält `CLEAN`.
+`tests/test_mq_chlauth_journaled_offline.py` prüft diesen Ablauf
+einschließlich Abbruch, RUNCHECK-Fehler und Verweigerung nicht
+gekennzeichneter Runner. **Kein Live-MQSC-Writer wird angeschlossen.**
+Die fünf neuen Tests sind noch auf dem Controller auszuführen.
+
 ## Unveränderliche Infrastruktur / Vorbedingungen
 
 Die Testautomatisierung **ändert nicht** Firewall, CA-Trust, CHLAUTH,
