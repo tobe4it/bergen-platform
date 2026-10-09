@@ -1,0 +1,136 @@
+---
+# Read-only runtime baseline for CHLAUTH fixtures. No grants, DEFINE or SET.
+# The sample channel names are intentionally absent and must stay absent.
+- name: Inspect MQ CHLAUTH baseline before any scoped transport fixture creation
+  hosts: bergen-mq-lab:bergen-mq-lab-b
+  gather_facts: false
+  become: true
+  serial: 1
+  any_errors_fatal: true
+  environment:
+    CONTAINERS_STORAGE_CONF: /etc/bergen-mq-lab/storage.conf
+  vars:
+    mq_chlauth_expected:
+      bergen-mq-lab:
+        qmgr: BERGENLAB
+        receiver: BGT.A1B2C3D.B2A
+        peer_ip: 192.168.20.156
+        subject: CN=bergen-mq-lab-b transport
+        issuer: CN=Bergen MQ Transport CA BERGENLABB
+        user: bgttransa
+      bergen-mq-lab-b:
+        qmgr: BERGENLABB
+        receiver: BGT.A1B2C3D.A2B
+        peer_ip: 192.168.20.212
+        subject: CN=bergen-mq-lab transport
+        issuer: CN=Bergen MQ Transport CA BERGENLAB
+        user: bgttransb
+    mq_chlauth_current: "{{ mq_chlauth_expected[inventory_hostname] }}"
+  tasks:
+    - name: Require exact two known lab hosts before inspecting runtime
+      ansible.builtin.assert:
+        that:
+          - inventory_hostname in ['bergen-mq-lab', 'bergen-mq-lab-b']
+          - not ansible_check_mode
+
+    - name: Read active default queue-manager TLS and CHLAUTH configuration
+      ansible.builtin.command:
+        argv:
+          - podman
+          - exec
+          - -i
+          - bergen-mq-lab
+          - /opt/mqm/bin/runmqsc
+        stdin: |
+          DISPLAY QMGR CHLAUTH CERTLABL
+      register: mq_chlauth_qmgr_output
+      changed_when: false
+
+    - name: Require CHLAUTH enabled and default certificate label unchanged
+      ansible.builtin.assert:
+        that:
+          - "'CHLAUTH(ENABLED)' in mq_chlauth_qmgr_output.stdout"
+          - "'CERTLABL(bergenlab)' in mq_chlauth_qmgr_output.stdout"
+          - "'No commands have a syntax error.' in mq_chlauth_qmgr_output.stdout"
+          - "'All valid MQSC commands were processed.' in mq_chlauth_qmgr_output.stdout"
+
+    - name: Read exact preflight receiver definition with expected missing-channel result
+      ansible.builtin.command:
+        argv:
+          - podman
+          - exec
+          - -i
+          - bergen-mq-lab
+          - /opt/mqm/bin/runmqsc
+        stdin: "DISPLAY CHANNEL({{ mq_chlauth_current.receiver }}) ALL\n"
+      register: mq_chlauth_receiver_output
+      changed_when: false
+      failed_when: false
+
+    - name: Require no preexisting fixture receiver and no other MQSC errors
+      ansible.builtin.assert:
+        that:
+          - mq_chlauth_receiver_output.rc != 0
+          - "'AMQ8147E' in mq_chlauth_receiver_output.stdout or 'AMQ8414E' in mq_chlauth_receiver_output.stdout"
+          - "'No commands have a syntax error.' in mq_chlauth_receiver_output.stdout"
+        fail_msg: >-
+          Receiver lookup did not return the strictly expected missing-object response;
+          refuse any transport fixture creation. Inspect the MQSC output.
+
+    - name: Read all active channel authentication rules
+      ansible.builtin.command:
+        argv:
+          - podman
+          - exec
+          - -i
+          - bergen-mq-lab
+          - /opt/mqm/bin/runmqsc
+        stdin: "DISPLAY CHLAUTH(*) ALL\n"
+      register: mq_chlauth_rules_output
+      changed_when: false
+
+    - name: Require no existing exact fixture rule and preserve known client map
+      ansible.builtin.assert:
+        that:
+          - "'CHLAUTH(' ~ mq_chlauth_current.receiver ~ ')' not in mq_chlauth_rules_output.stdout"
+          - "'CHLAUTH(BGT.CLIENT)' in mq_chlauth_rules_output.stdout"
+          - "'USERSRC(NOACCESS)' in mq_chlauth_rules_output.stdout"
+          - "'USERLIST(*MQADMIN)' in mq_chlauth_rules_output.stdout"
+          - "'No commands have a syntax error.' in mq_chlauth_rules_output.stdout"
+          - "'All valid MQSC commands were processed.' in mq_chlauth_rules_output.stdout"
+        fail_msg: >-
+          CHLAUTH baseline changed, or intended fixture namespace already exists.
+          Stop before applying any channel or authorization changes.
+
+    - name: Verify local transport certificate DN matches reviewed plan
+      ansible.builtin.command:
+        argv:
+          - openssl
+          - x509
+          - -in
+          - /etc/bergen-mq-lab/transport-pki/identity/tls.crt
+          - -noout
+          - -subject
+          - -issuer
+          - -nameopt
+          - RFC2253
+      register: mq_chlauth_cert
+      changed_when: false
+
+    - name: Require the exact expected certificate on each host
+      ansible.builtin.assert:
+        that:
+          - >-
+            ('subject=CN=' ~ ('bergen-mq-lab transport' if inventory_hostname == 'bergen-mq-lab'
+             else 'bergen-mq-lab-b transport')) in mq_chlauth_cert.stdout
+          - >-
+            ('issuer=CN=Bergen MQ Transport CA ' ~ mq_chlauth_current.qmgr)
+            in mq_chlauth_cert.stdout
+
+    - name: Report read-only CHLAUTH preflight
+      ansible.builtin.debug:
+        msg: >-
+          PASS: {{ mq_chlauth_current.qmgr }} CHLAUTH enabled, default cert
+          unchanged, {{ mq_chlauth_current.receiver }} not defined, no exact
+          fixture CHLAUTH rule, BGT.CLIENT remains defined, and host transport
+          certificate identity agrees with the reviewed plan. Nothing changed.
