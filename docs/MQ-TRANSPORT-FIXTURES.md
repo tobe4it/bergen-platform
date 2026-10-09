@@ -142,6 +142,12 @@ lieferten jeweils `rc=0`, ohne Berechtigungseinträge. Das bestätigt die
 Konfiguration, noch **nicht** die erfolgreiche MQ-Gruppenrechteauflösung.
 Eine kontrollierte OAM-Positiv-/Negativprobe steht aus.
 
+LDAP-Gruppenabfrage vom 09.10.2026 mit OR-Filter auf beide
+Transportbenutzer ergab genau `MQBGTTRANSA` → `bgttransa` und
+`MQBGTTRANSB` → `bgttransb` über `member`. Kein weiterer
+passender Gruppen-DN im lesbaren Suchergebnis. Das ist noch kein
+MQ-OAM-Positivnachweis; ohne diesen keine Channel-Security-Freigabe.
+
 ## Unveränderliche Infrastruktur / Vorbedingungen
 
 Die Testautomatisierung **ändert nicht** Firewall, CA-Trust, CHLAUTH,
