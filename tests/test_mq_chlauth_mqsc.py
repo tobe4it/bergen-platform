@@ -16,7 +16,7 @@ INTRO = (
     "5724-H72 (C) Copyright IBM Corp. 1994, 2026.\n"
     "Starting MQSC for queue manager BERGENLAB.\n\n"
 )
-PLAN = make_plan("BGT.A1B2C3D", {
+PLAN = make_plan("AUDIT.A1B2C3D", {
     side: {"host": entry["host"], "qmgr": entry["qmgr"], "port": 1414}
     for side, entry in LAB.items()
 })
