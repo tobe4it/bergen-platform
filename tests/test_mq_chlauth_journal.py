@@ -2,6 +2,8 @@
 import hashlib
 import json
 import os
+import subprocess
+import sys
 from pathlib import Path
 import tempfile
 import unittest
@@ -187,6 +189,45 @@ class JournalTests(unittest.TestCase):
             lambda rows: rows[0]["data"].update({"prefix": "BGT.B2B2B2B"}))
         with self.assertRaisesRegex(JournalError, "BEGIN must bind"):
             read_journal(audit.path)
+
+
+    def test_recovery_cli_clean_is_read_only(self):
+        with LockedFixtureJournal(self.root, self.prefix) as audit:
+            audit.mark_clean({"a": "VERIFIED_CLEAN", "b": "VERIFIED_CLEAN"})
+        original = audit.path.read_bytes()
+        cli = Path(__file__).resolve().parents[1] / "scripts" / "mq_chlauth_journal_inspect.py"
+        run = subprocess.run(
+            [sys.executable, str(cli), str(audit.path)],
+            capture_output=True, text=True, check=False,
+        )
+        self.assertEqual(run.returncode, 0, run.stderr)
+        self.assertEqual(json.loads(run.stdout)["state"], "CLEAN_RECORDED")
+        self.assertEqual(audit.path.read_bytes(), original)
+
+    def test_recovery_cli_unfinished_returns_nonzero(self):
+        with LockedFixtureJournal(self.root, self.prefix) as audit:
+            audit.intent("b", "add_deny")
+        cli = Path(__file__).resolve().parents[1] / "scripts" / "mq_chlauth_journal_inspect.py"
+        run = subprocess.run(
+            [sys.executable, str(cli), str(audit.path)],
+            capture_output=True, text=True, check=False,
+        )
+        self.assertEqual(run.returncode, 2, run.stderr)
+        self.assertEqual(
+            json.loads(run.stdout)["state"], "MANUAL_REVIEW_REQUIRED"
+        )
+
+    def test_recovery_cli_corrupted_returns_error(self):
+        with LockedFixtureJournal(self.root, self.prefix) as audit:
+            pass
+        audit.path.write_text("corrupted\\n")
+        cli = Path(__file__).resolve().parents[1] / "scripts" / "mq_chlauth_journal_inspect.py"
+        run = subprocess.run(
+            [sys.executable, str(cli), str(audit.path)],
+            capture_output=True, text=True, check=False,
+        )
+        self.assertEqual(run.returncode, 3)
+        self.assertEqual(json.loads(run.stdout)["state"], "INVALID_JOURNAL")
 
 
 if __name__ == "__main__":
