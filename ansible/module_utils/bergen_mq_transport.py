@@ -7,7 +7,7 @@ import re
 import time
 from ansible.module_utils.bergen_mq import MQError, discover, reconcile, responses
 from ansible.module_utils.bergen_mq_audit_names import (
-    validate_run, channel_name, transmission_queue,
+    channel_name, transmission_queue,
 )
 
 CIPHER = "TLS_AES_256_GCM_SHA384"
