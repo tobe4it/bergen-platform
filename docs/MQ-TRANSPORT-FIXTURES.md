@@ -200,6 +200,12 @@ wurden bestätigt. Das ist keine erfolgreiche CHLAUTH-Verbindungsprüfung.
 
 Die rein lokale Befehlsvorschau `scripts/mq_chlauth_plan.py` gibt beide
 Richtungen einschließlich der geplanten positiven/negativen Prüfungen aus.
+Die Aktivierungsreihenfolge wurde nach Review explizit auf
+**ADDRESSMAP NOACCESS → DEFINE RCVR → SSLPEERMAP-Freigabe**
+festgelegt. Damit gibt es kein Zeitfenster mit einem ungesperrten,
+neu angelegten Receiver. Die Offline-Vorschau gibt diese Reihenfolge aus;
+noch kein Live-Apply.
+
 Der Rückbauplan wurde am 09.10.2026 fail-closed nachgeschärft:
 **zuerst SSLPEERMAP entfernen, dann Receiver löschen, erst danach
 ADDRESSMAP-NOACCESS entfernen**. Kann der Receiver nicht sicher gelöscht
