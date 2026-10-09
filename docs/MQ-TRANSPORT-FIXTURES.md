@@ -327,6 +327,26 @@ ansible-playbook -i ansible/inventory.yml -i ansible/inventory.local.yml \
 Diese Syntaxprüfung ändert keine MQ-Objekte und gibt keine Freigabe
 für einen späteren Live-Lauf.
 
+**Dauerhaftes Offline-Journal (Vorbereitung):** Das Modul
+`ansible/module_utils/bergen_mq_chlauth_journal.py` schreibt
+`BEGIN`/`INTENT`/`RESULT`/`CLEAN` als verkettete JSONL-Datensätze
+mit `fsync` pro Datensatz in ein ausschließlich dem ausführenden
+Benutzer gehörendes 0700-Verzeichnis (Dateien 0600). Ein exklusives
+POSIX-`flock` schützt kooperative Prozesse **nur auf demselben
+Controller**. Jeder unvollständige, beschädigte oder mit unbekanntem
+Ausgang beendete Lauf blockiert neue Journals und erfordert manuelle
+Prüfung. Ein `CLEAN` darf nur nach unabhängigen, erfolgreich
+bestätigten Readbacks **beider** Queue-Manager protokolliert werden.
+Die Prüfsumme erkennt unbeabsichtigte Beschädigungen, ist jedoch
+kein Manipulationsschutz. Die neun isolierten Tests in
+`tests/test_mq_chlauth_journal.py` simulieren Abbrüche, Sperrkonflikte,
+ungültige Zustände und Journalbeschädigung.
+Das Journal ist bislang **nicht an einen MQ-Schreiber angeschlossen**,
+stellt keine globale MQ-Objektsperre dar und garantiert daher
+keine Eigentümerschaft gegenüber anderen MQ-Administratoren.
+Der Review-Playbook-Output zeigt nach erfolgreichem Testlauf
+die konkrete `Ran N tests`-Zeile.
+
 ## Unveränderliche Infrastruktur / Vorbedingungen
 
 Die Testautomatisierung **ändert nicht** Firewall, CA-Trust, CHLAUTH,
