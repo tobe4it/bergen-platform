@@ -115,7 +115,7 @@ class JournalTests(unittest.TestCase):
             encoded = json.dumps(core, sort_keys=True, separators=(",", ":")).encode()
             previous = hashlib.sha256(encoded).hexdigest()
             record["digest"] = previous
-        path.write_text("".join(json.dumps(r) + "\\n" for r in records))
+        path.write_text("".join(json.dumps(r) + "\n" for r in records))
 
     def test_recovery_report_unanswered_intent_is_not_cleanup_authority(self):
         with LockedFixtureJournal(self.root, self.prefix) as audit:
