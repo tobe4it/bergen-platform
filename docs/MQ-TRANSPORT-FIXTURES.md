@@ -232,6 +232,19 @@ Erfolge, Fehler beim Anlegen/Prüfen/Löschen und Unsicherheit.
 Der Receiver erhält zusätzlich explizit den dedizierten
 `MCAUSER`; die CHLAUTH-Regel muss auf dieselbe Identität abbilden.
 
+Die strikt offline arbeitende MQSC-Auswertung
+`ansible/module_utils/bergen_mq_chlauth_mqsc.py` fordert pro
+Abfrage genau einen vollständig und fehlerfrei verarbeiteten MQSC-Befehl
+und wertet echte `DISPLAY CHLAUTH(*) ALL`-Daten nur bei eindeutigen
+Datensätzen aus. Beim Receiver-Readback fordert sie `RCVR`,
+`TLS_AES_256_GCM_SHA384`, `SSLCAUTH(REQUIRED)`,
+`CERTLABL(bergentransport)` und den erwarteten nichtadministrativen
+`MCAUSER`. Fehlende, doppelte und unerwartete Angaben führen zum
+Abbruch; diese Prüfroutinen haben **keinen** MQSC-Ausführungspfad.
+`tests/test_mq_chlauth_mqsc.py` simuliert passende und fehlerhafte
+MQSC-Antworten. Die tatsächliche MQSC-Kompatibilität und die
+CHLAUTH-RUNCHECK-Auswertung sind noch nicht live nachgewiesen.
+
 **Der Lifecycle-Controller ist noch nicht mit einem Live-MQSC-Adapter
 verdrahtet und ändert selbst keine MQ-Objekte.** Besonders die
 RUNCHECK-Auswertung bei NOACCESS und die Abwesenheit/eindeutige
