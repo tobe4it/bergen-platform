@@ -382,9 +382,36 @@ durch dieses Werkzeug.
 
 Die zehn zusätzlichen Offline-Tests in
 `tests/test_mq_chlauth_journal.py` prüfen diese semantischen Regeln,
-Wiederherstellungsberichte und die CLI-Exitcodes. Die nun geplanten
-**59 Offline-Tests** müssen nach Pull des Branches erneut auf dem
-Controller bestätigt werden.
+Wiederherstellungsberichte und die CLI-Exitcodes. Am 09.10.2026
+wurden auf dem Controller sämtliche **59 Offline-Tests** erfolgreich
+ausgeführt (`Ran 59 tests`, `ok=4 changed=0 failed=0`).
+
+**Wiederherstellungs-Triage ohne Löschbefugnis:** Das neue Modul
+`ansible/module_utils/bergen_mq_chlauth_recovery_triage.py` korreliert
+ein formal gültiges Journal mit **vom Operator bereitgestellten,
+strukturierten** Receiver- und CHLAUTH-Snapshots beider QMgr.
+Dabei unterscheiden wir zwischen (a) laut Snapshot abwesenden
+Fixture-Objekten, (b) abweichenden oder möglichen Fremdobjekten,
+(c) fehlenden bzw. widersprüchlichen Angaben und (d) Datensätzen
+mit passenden Attributen, deren **Eigentümerschaft trotzdem
+unbewiesen** bleibt. Ein erneutes Auftauchen eines Receivers oder
+einer Regel nach einem Journalabschluss `CLEAN` gilt als
+mögliche Kollision/Drift, nicht als Aufforderung zum Rückbau.
+
+Weder der gleiche Objektname noch passende Zertifikats-/MCAUSER-
+Attribute oder das lokale Journal geben die Berechtigung, einen
+MQ-Eintrag automatisch zu löschen. Das Modul führt keine MQSC-
+Befehle aus, kann die Herkunft oder Aktualität übergebener
+Snapshots nicht selbst beweisen und liefert ausnahmslos
+`can_auto_cleanup=false`,
+`can_delete_matching_objects=false` und
+`can_authorize_live_apply=false`. Erst externe unabhängige
+Readbacks, Review und gesonderte Freigabe ermöglichen später
+weitere Schritte. Neun neue Tests in
+`tests/test_mq_chlauth_recovery_triage.py` simulieren insbesondere
+Objektersetzung unter gleichem Namen, veränderte `MCAUSER`, fremde
+Regeln und nachträgliche Drift. **68 Tests sind nun geplant, aber
+die neun neuen Tests noch nicht auf dem Controller bestätigt.**
 
 ## Unveränderliche Infrastruktur / Vorbedingungen
 
