@@ -14,7 +14,6 @@ import hashlib
 import json
 import os
 from pathlib import Path
-import re
 import stat
 
 from .bergen_mq_audit_names import RUN
