@@ -49,7 +49,7 @@ class JournaledIntegrationTests(unittest.TestCase):
         fake = InMemoryMQ(fail=("a", "apply", "create_receiver"))
         with self.assertRaises(Exception):
             run_offline_journaled_fixture(self.plan, fake, self.root)
-        entries = read_journal(self.root / "BGT.A1B2C3D.jsonl")
+        entries = read_journal(self.root / "AUDIT.A1B2C3D.jsonl")
         self.assertTrue(any(
             e["kind"] == "RESULT" and e["data"]["status"] == "UNKNOWN"
             for e in entries))
@@ -62,7 +62,7 @@ class JournaledIntegrationTests(unittest.TestCase):
         fake = InMemoryMQ(fail=("b", "check", "wrong_issuer"))
         with self.assertRaises(Exception):
             run_offline_journaled_fixture(self.plan, fake, self.root)
-        entries = read_journal(self.root / "BGT.A1B2C3D.jsonl")
+        entries = read_journal(self.root / "AUDIT.A1B2C3D.jsonl")
         self.assertFalse(any(e["kind"] == "CLEAN" for e in entries))
         self.assertEqual(
             len([e for e in entries if e["kind"] == "INTENT"]), 12)
