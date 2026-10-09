@@ -135,8 +135,10 @@ def make_plan(prefix, nodes):
                 {"name": "wrong_source_ip", "expect": "NOACCESS",
                  "command": runcheck(reject_address, subject, issuer)},
             ],
-            "cleanup": [remove_allow, remove_deny,
-                        "DELETE CHANNEL(%s)" % c],
+            # Never remove the deny rule while the receiver still exists:
+            # authorization must fail closed if receiver deletion fails.
+            "cleanup": [remove_allow, "DELETE CHANNEL(%s)" % c,
+                        remove_deny],
         }
     return result
 
