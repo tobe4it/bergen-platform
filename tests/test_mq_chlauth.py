@@ -26,6 +26,8 @@ class ChlauthPlanTests(unittest.TestCase):
         self.assertEqual((b["receiver"], b["mcauser"], b["peer_ip"]),
                          ("BGT.A1B2C3D.A2B", "bgttransb", "192.168.20.212"))
         self.assertIn("SSLCAUTH(REQUIRED)", a["define_receiver"])
+        self.assertIn("MCAUSER(\'bgttransa\')", a["define_receiver"])
+        self.assertIn("MCAUSER(\'bgttransb\')", b["define_receiver"])
         self.assertIn("CERTLABL('bergentransport')", b["define_receiver"])
 
     def test_each_direction_has_reject_fallback_and_certificate_bound_allow(self):
