@@ -126,6 +126,17 @@ class RecoveryTriageTests(unittest.TestCase):
         # A second, completed journal simulates a past fully cleaned fixture.
         with LockedFixtureJournal(
                 Path(self.temp.name) / "clean", "AUDIT.A1B2C3D") as journal:
+            sequence = (
+                ("a", ("add_deny", "define_receiver", "add_allow")),
+                ("b", ("add_deny", "define_receiver", "add_allow")),
+                ("b", ("remove_allow", "delete_receiver", "remove_deny")),
+                ("a", ("remove_allow", "delete_receiver", "remove_deny")),
+            )
+            for side, operations in sequence:
+                for operation in operations:
+                    journal.intent(side, operation)
+                    journal.result(side, operation, "ACKED")
+
             journal.mark_clean({"a": "VERIFIED_CLEAN", "b": "VERIFIED_CLEAN"})
             clean_path = journal.path
         snapshots = self.snapshot()
