@@ -192,10 +192,26 @@ und die exakten Rückbauschritte geprüft werden. Insbesondere
 wäre es unzulässig, eine unbekannte bestehende Regel als
 "run-owned" zu entfernen.
 
+Der lesende Live-Preflight vom 09.10.2026 war auf A und B erfolgreich:
+`ok=10 changed=0 failed=0` jeweils; `CHLAUTH(ENABLED)`,
+`CERTLABL(bergenlab)`, nicht vorhandene reservierte Receiver,
+unveränderte `BGT.CLIENT`-Regeln und exakte lokale Transport-Subject-/Issuer-DNs
+wurden bestätigt. Das ist keine erfolgreiche CHLAUTH-Verbindungsprüfung.
+
+Die rein lokale Befehlsvorschau `scripts/mq_chlauth_plan.py` gibt beide
+Richtungen einschließlich der geplanten positiven/negativen Prüfungen aus.
+Der Rückbauplan wurde am 09.10.2026 fail-closed nachgeschärft:
+**zuerst SSLPEERMAP entfernen, dann Receiver löschen, erst danach
+ADDRESSMAP-NOACCESS entfernen**. Kann der Receiver nicht sicher gelöscht
+werden, muss die Sperrregel bestehen bleiben. Für eine Live-Implementierung
+sind zusätzlich eigene Eigentumsprüfung und unterbrechungssicheres
+Residual-Reporting erforderlich.
+
 Offline-Prüfung auf `bp-controller` nach Pull des Branches:
 
 ```bash
 PYTHONPATH=ansible python3 -m unittest discover -s tests -p 'test_mq_chlauth.py' -v
+python3 scripts/mq_chlauth_plan.py
 ```
 
 Die Tests `tests/test_mq_chlauth.py` prüfen Namen, Richtung,
