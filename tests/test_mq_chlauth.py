@@ -47,6 +47,16 @@ class ChlauthPlanTests(unittest.TestCase):
                              {"valid_certificate", "wrong_subject",
                               "wrong_issuer", "wrong_source_ip"})
 
+    def test_receiver_never_exists_without_default_deny(self):
+        for fixture in self.plan.values():
+            deny, define, allow = fixture["apply_order"]
+            self.assertEqual(deny, fixture["add_rules"][0])
+            self.assertEqual(define, fixture["define_receiver"])
+            self.assertEqual(allow, fixture["add_rules"][1])
+            self.assertIn("USERSRC(NOACCESS)", deny)
+            self.assertIn("CHLTYPE(RCVR)", define)
+            self.assertIn("TYPE(SSLPEERMAP)", allow)
+
     def test_all_cleanup_references_exact_owned_receiver(self):
         for fixture in self.plan.values():
             self.assertEqual(len(fixture["cleanup"]), 3)
