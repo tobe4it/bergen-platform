@@ -8,7 +8,9 @@ SYSTEM.* are permitted. The receiver must exist before MATCH(RUNCHECK).
 import ipaddress
 import re
 
-PREFIX = re.compile(r"^BGT\.[A-F0-9]{7}$")
+from .bergen_mq_audit_names import RUN, channel_name
+
+PREFIX = RUN
 CIPHER = "TLS_AES_256_GCM_SHA384"
 CERTLABL = "bergentransport"
 
@@ -67,11 +69,11 @@ def make_plan(prefix, nodes):
     are NOT permission to delete unowned or active objects.
     """
     if not isinstance(prefix, str) or not PREFIX.fullmatch(prefix):
-        raise ChlauthPlanError("Prefix must be BGT.<exactly seven uppercase hexadecimal digits>")
+        raise ChlauthPlanError("Prefix must be AUDIT.<exactly seven uppercase hexadecimal digits>")
     _validated_nodes(nodes)
     result = {}
     for destination, sender, suffix in (("a", "b", "B2A"), ("b", "a", "A2B")):
-        channel = prefix + "." + suffix
+        channel = channel_name(prefix, sender, destination)
         peer_ip = LAB[sender]["host"]
         peer_qmgr = LAB[sender]["qmgr"]
         peer_subject = SUBJECT[sender]
