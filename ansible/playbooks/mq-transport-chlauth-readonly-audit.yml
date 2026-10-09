@@ -46,14 +46,14 @@
     - name: Hold strictly scoped evidence in host facts for controller validation
       ansible.builtin.set_fact:
         mq_chlauth_readonly_evidence:
-          "DISPLAY QMGR CHLAUTH CERTLABL":
-            rc: "{{ mq_chlauth_qmgr_evidence.rc }}"
+          qmgr:
+            rc: "{{ mq_chlauth_qmgr_evidence.rc | int }}"
             stdout: "{{ mq_chlauth_qmgr_evidence.stdout }}"
-          "DISPLAY CHANNEL('{{ mq_chlauth_fixture_receiver }}') ALL":
-            rc: "{{ mq_chlauth_receiver_evidence.rc }}"
+          receiver:
+            rc: "{{ mq_chlauth_receiver_evidence.rc | int }}"
             stdout: "{{ mq_chlauth_receiver_evidence.stdout }}"
-          "DISPLAY CHLAUTH(*) ALL":
-            rc: "{{ mq_chlauth_all_evidence.rc }}"
+          rules:
+            rc: "{{ mq_chlauth_all_evidence.rc | int }}"
             stdout: "{{ mq_chlauth_all_evidence.stdout }}"
       no_log: true
 
