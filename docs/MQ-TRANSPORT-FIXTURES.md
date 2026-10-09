@@ -134,6 +134,14 @@ Identitäten begrenzten MQ-OAM- und CHLAUTH-Freigaben; bis dahin keine
 Transportkanäle starten oder `mq_topology_channel_security_verified=true`
 setzen. Keine Rechtevergabe auf Verdacht.
 
+MQ-Konfiguration nach LDAP-Anlage (lesend geprüft): Beide QMgr melden
+`AUTHORMD(SEARCHGRP)`, `CLASSGRP(posixGroup)`, `FINDGRP(member)`,
+`GRPFIELD(cn)` und `BASEDNG(cn=groups,dc=bergen,dc=intern)`.
+`dspmqaut -t qmgr -p bgttransa` auf A und `-p bgttransb` auf B
+lieferten jeweils `rc=0`, ohne Berechtigungseinträge. Das bestätigt die
+Konfiguration, noch **nicht** die erfolgreiche MQ-Gruppenrechteauflösung.
+Eine kontrollierte OAM-Positiv-/Negativprobe steht aus.
+
 ## Unveränderliche Infrastruktur / Vorbedingungen
 
 Die Testautomatisierung **ändert nicht** Firewall, CA-Trust, CHLAUTH,
