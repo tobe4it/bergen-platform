@@ -12,8 +12,8 @@
     CONTAINERS_STORAGE_CONF: /etc/bergen-mq-lab/storage.conf
   vars:
     mq_chlauth_fixture_receiver: >-
-      {{ 'BGT.A1B2C3D.B2A' if inventory_hostname == 'bergen-mq-lab'
-         else 'BGT.A1B2C3D.A2B' }}
+      {{ 'AUDIT.A1B2C3D.B2A' if inventory_hostname == 'bergen-mq-lab'
+         else 'AUDIT.A1B2C3D.A2B' }}
   tasks:
     - name: Refuse unknown inventory host or Ansible check mode
       ansible.builtin.assert:
