@@ -1,0 +1,275 @@
+---
+# Explicitly approved, temporary +inq-only LDAP group mapping test.
+# Does not create queues/channels or grant +connect, +setall or admin rights.
+# One MQ node at a time; always attempt rollback after a possible grant.
+- name: Verify exact isolated transport group memberships before OAM test
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  vars:
+    mq_oam_ldap_groups:
+      - {name: MQBGTTRANSA, member: bgttransa}
+      - {name: MQBGTTRANSB, member: bgttransb}
+  tasks:
+    - name: Require explicit approval for temporary MQ authorization changes
+      ansible.builtin.assert:
+        that:
+          - mq_transport_oam_smoke_approved | default(false) | bool
+          - not ansible_check_mode
+        fail_msg: "Approval flag required. This test grants and then revokes +inq on both MQ evaluation queue managers."
+
+    - name: Read both exact LDAP group memberships through LDAPS
+      ansible.builtin.command:
+        argv:
+          - ldapsearch
+          - -LLL
+          - -o
+          - ldif-wrap=no
+          - -x
+          - -H
+          - ldaps://ldap.thebergens.net:636
+          - -b
+          - "cn={{ item.name }},cn=groups,dc=bergen,dc=intern"
+          - -s
+          - base
+          - "(objectClass=posixGroup)"
+          - dn
+          - cn
+          - member
+          - memberUid
+      loop: "{{ mq_oam_ldap_groups }}"
+      loop_control:
+        label: "{{ item.name }}"
+      register: mq_oam_ldap_group_results
+      changed_when: false
+
+    - name: Require one exact member and memberUid per intended group
+      ansible.builtin.assert:
+        that:
+          - >-
+            (item.stdout | regex_findall('(?m)^dn: (.+)$')) ==
+            ['cn=' ~ item.item.name ~ ',cn=groups,dc=bergen,dc=intern']
+          - >-
+            (item.stdout | regex_findall('(?m)^member: (.+)$')) ==
+            ['uid=' ~ item.item.member ~ ',cn=users,dc=bergen,dc=intern']
+          - >-
+            (item.stdout | regex_findall('(?m)^memberUid: (.+)$')) ==
+            [item.item.member]
+        fail_msg: "Transport LDAP group membership mismatch. Refuse MQ authorization test."
+      loop: "{{ mq_oam_ldap_group_results.results }}"
+      loop_control:
+        label: "{{ item.item.name }}"
+
+- name: Temporarily test group-based authorization and restore baseline
+  hosts: bergen-mq-lab:bergen-mq-lab-b
+  serial: 1
+  any_errors_fatal: true
+  gather_facts: false
+  become: true
+  environment:
+    CONTAINERS_STORAGE_CONF: /etc/bergen-mq-lab/storage.conf
+  vars:
+    mq_oam_qmgr: "{{ 'BERGENLAB' if inventory_hostname == 'bergen-mq-lab' else 'BERGENLABB' }}"
+    mq_oam_group: "{{ 'MQBGTTRANSA' if inventory_hostname == 'bergen-mq-lab' else 'MQBGTTRANSB' }}"
+    mq_oam_user: "{{ 'bgttransa' if inventory_hostname == 'bergen-mq-lab' else 'bgttransb' }}"
+    mq_oam_other_user: "{{ 'bgttransb' if inventory_hostname == 'bergen-mq-lab' else 'bgttransa' }}"
+    mq_oam_bin: /opt/mqm/bin
+    mq_oam_pod: bergen-mq-lab
+  tasks:
+    - name: Initialize mutation guard
+      ansible.builtin.set_fact:
+        mq_oam_may_have_granted: false
+
+    - name: Require exact known MQ lab host and queue-manager identity
+      ansible.builtin.assert:
+        that:
+          - inventory_hostname in ['bergen-mq-lab', 'bergen-mq-lab-b']
+          - mq_oam_qmgr in ['BERGENLAB', 'BERGENLABB']
+          - mq_transport_oam_smoke_approved | default(false) | bool
+          - not ansible_check_mode
+
+    - name: Inspect effective group and both user authorities before changes
+      ansible.builtin.command:
+        argv:
+          - podman
+          - exec
+          - "{{ mq_oam_pod }}"
+          - "{{ mq_oam_bin }}/dspmqaut"
+          - -m
+          - "{{ mq_oam_qmgr }}"
+          - -t
+          - qmgr
+          - "{{ item.flag }}"
+          - "{{ item.entity }}"
+      loop:
+        - {flag: '-g', entity: "{{ mq_oam_group }}"}
+        - {flag: '-p', entity: "{{ mq_oam_user }}"}
+        - {flag: '-p', entity: "{{ mq_oam_other_user }}"}
+      loop_control:
+        label: "{{ item.entity }}"
+      register: mq_oam_initial_authorities
+      changed_when: false
+
+    - name: Require a blank baseline for group and both principals
+      ansible.builtin.assert:
+        that:
+          - item.rc == 0
+          - item.stdout is search('^Entity ')
+          - item.stdout_lines | length == 1
+        fail_msg: "Baseline contains MQ authorities or cannot be parsed; test refused."
+      loop: "{{ mq_oam_initial_authorities.results }}"
+      loop_control:
+        label: "{{ item.item.entity }}"
+
+    - name: Capture direct group authority records for rollback comparison
+      ansible.builtin.command:
+        argv:
+          - podman
+          - exec
+          - "{{ mq_oam_pod }}"
+          - "{{ mq_oam_bin }}/dmpmqaut"
+          - -m
+          - "{{ mq_oam_qmgr }}"
+          - -t
+          - qmgr
+          - -g
+          - "{{ mq_oam_group }}"
+      register: mq_oam_records_before
+      changed_when: false
+
+    - name: Test exactly one group authority with mandatory rollback
+      block:
+        - name: Arm the rollback guard before any possible grant
+          ansible.builtin.set_fact:
+            mq_oam_may_have_granted: true
+
+        - name: Grant only temporary queue-manager inquiry to own transport group
+          ansible.builtin.command:
+            argv:
+              - podman
+              - exec
+              - "{{ mq_oam_pod }}"
+              - "{{ mq_oam_bin }}/setmqaut"
+              - -m
+              - "{{ mq_oam_qmgr }}"
+              - -t
+              - qmgr
+              - -g
+              - "{{ mq_oam_group }}"
+              - +inq
+          register: mq_oam_grant
+          changed_when: mq_oam_grant.rc == 0
+
+        - name: Read effective authorities after temporary grant
+          ansible.builtin.command:
+            argv:
+              - podman
+              - exec
+              - "{{ mq_oam_pod }}"
+              - "{{ mq_oam_bin }}/dspmqaut"
+              - -m
+              - "{{ mq_oam_qmgr }}"
+              - -t
+              - qmgr
+              - "{{ item.flag }}"
+              - "{{ item.entity }}"
+          loop:
+            - {flag: '-g', entity: "{{ mq_oam_group }}"}
+            - {flag: '-p', entity: "{{ mq_oam_user }}"}
+            - {flag: '-p', entity: "{{ mq_oam_other_user }}"}
+          loop_control:
+            label: "{{ item.entity }}"
+          register: mq_oam_authorities_after_grant
+          changed_when: false
+
+        - name: Prove the own LDAP group resolves but the other user is denied
+          ansible.builtin.assert:
+            that:
+              - >-
+                mq_oam_authorities_after_grant.results[0].stdout is
+                search('(?m)^\\s*inq\\s*$')
+              - >-
+                mq_oam_authorities_after_grant.results[1].stdout is
+                search('(?m)^\\s*inq\\s*$')
+              - >-
+                mq_oam_authorities_after_grant.results[2].stdout is not
+                search('(?m)^\\s*inq\\s*$')
+            fail_msg: "MQ LDAP group inheritance or cross-user isolation failed; revoke immediately."
+      always:
+        - name: Revoke only the authority this test may have granted
+          ansible.builtin.command:
+            argv:
+              - podman
+              - exec
+              - "{{ mq_oam_pod }}"
+              - "{{ mq_oam_bin }}/setmqaut"
+              - -m
+              - "{{ mq_oam_qmgr }}"
+              - -t
+              - qmgr
+              - -g
+              - "{{ mq_oam_group }}"
+              - -inq
+          when: mq_oam_may_have_granted | bool
+          register: mq_oam_revoke
+          changed_when: mq_oam_revoke.rc == 0
+          failed_when: false
+
+        - name: Verify all three effective authorities after attempted rollback
+          ansible.builtin.command:
+            argv:
+              - podman
+              - exec
+              - "{{ mq_oam_pod }}"
+              - "{{ mq_oam_bin }}/dspmqaut"
+              - -m
+              - "{{ mq_oam_qmgr }}"
+              - -t
+              - qmgr
+              - "{{ item.flag }}"
+              - "{{ item.entity }}"
+          loop:
+            - {flag: '-g', entity: "{{ mq_oam_group }}"}
+            - {flag: '-p', entity: "{{ mq_oam_user }}"}
+            - {flag: '-p', entity: "{{ mq_oam_other_user }}"}
+          loop_control:
+            label: "{{ item.entity }}"
+          register: mq_oam_authorities_after_revoke
+          changed_when: false
+
+        - name: Compare final direct group authority records with original baseline
+          ansible.builtin.command:
+            argv:
+              - podman
+              - exec
+              - "{{ mq_oam_pod }}"
+              - "{{ mq_oam_bin }}/dmpmqaut"
+              - -m
+              - "{{ mq_oam_qmgr }}"
+              - -t
+              - qmgr
+              - -g
+              - "{{ mq_oam_group }}"
+          register: mq_oam_records_after
+          changed_when: false
+
+        - name: Require complete OAM authority rollback or stop the play
+          ansible.builtin.assert:
+            that:
+              - mq_oam_revoke.rc | default(1) == 0
+              - >-
+                (mq_oam_authorities_after_revoke.results |
+                 map(attribute='stdout') | list) ==
+                (mq_oam_initial_authorities.results |
+                 map(attribute='stdout') | list)
+              - mq_oam_records_after.stdout == mq_oam_records_before.stdout
+            fail_msg: >-
+              OAM rollback did not restore the exact observed baseline.
+              Do not run any other MQ changes; investigate group authority records.
+
+    - name: Report positive and negative group resolution with complete rollback
+      ansible.builtin.debug:
+        msg: >-
+          PASS: {{ mq_oam_qmgr }} resolved {{ mq_oam_group }} to {{ mq_oam_user }},
+          denied +inq to {{ mq_oam_other_user }}, and restored the original
+          effective authorities and direct group authority record.
