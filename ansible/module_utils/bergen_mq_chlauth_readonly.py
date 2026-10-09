@@ -10,6 +10,7 @@ guarantee. A future mutating adapter must revalidate and solve that separately.
 import re
 
 from .bergen_mq_chlauth import ChlauthPlanError, LAB
+from .bergen_mq_audit_names import CHANNEL
 from .bergen_mq_chlauth_mqsc import (
     require_success, channel_auth_records, exact_records,
 )
@@ -46,7 +47,7 @@ class ReadOnlyChlauthAdapter:
         receiver = spec.get("receiver")
         suffix = ".B2A" if side == "a" else ".A2B"
         if not isinstance(receiver, str) or not re.fullmatch(
-                r"BGT\.[A-F0-9]{7}" + re.escape(suffix), receiver):
+                r"AUDIT\.[A-F0-9]{7}" + re.escape(suffix), receiver):
             raise ChlauthPlanError("Unsafe CHLAUTH receiver name")
 
         rc, qm = self._display(side, "DISPLAY QMGR CHLAUTH CERTLABL")
