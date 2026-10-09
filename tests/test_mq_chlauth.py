@@ -90,6 +90,7 @@ class ChlauthPlanTests(unittest.TestCase):
             "CHLAUTH(%s) TYPE(SSLPEERMAP)\n" % rcvr +
             "USERSRC(MAP) MCAUSER(bgttransa)\n"
             "No commands have a syntax error.\n"
+            "All valid MQSC commands were processed.\n"
         )
         self.assertTrue(verify_runcheck(sample, rcvr, "MAP", "bgttransa"))
         with self.assertRaises(ChlauthPlanError):
@@ -109,6 +110,7 @@ class ChlauthPlanTests(unittest.TestCase):
             "CHLAUTH(%s) TYPE(ADDRESSMAP)\n" % rcvr +
             "ADDRESS(*) USERSRC(NOACCESS)\n"
             "No commands have a syntax error.\n"
+            "All valid MQSC commands were processed.\n"
         )
         self.assertTrue(verify_runcheck(sample, rcvr, "NOACCESS"))
         with self.assertRaises(ChlauthPlanError):
