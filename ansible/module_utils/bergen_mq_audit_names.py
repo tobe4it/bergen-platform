@@ -43,21 +43,21 @@ def _queue(name, required_prefix):
 
 def local_queue(prefix, suffix):
     validate_run(prefix)
-    if not isinstance(suffix, str) or not re.fullmatch(r"[A-Z0-9.]+", suffix):
+    if not isinstance(suffix, str) or not re.fullmatch(r"[A-Z0-9]+(?:\.[A-Z0-9]+)*", suffix):
         raise ValueError("Invalid audit queue suffix")
     return _queue("LQ." + prefix + "." + suffix, "LQ.AUDIT.")
 
 
 def alias_queue(prefix, suffix):
     validate_run(prefix)
-    if not isinstance(suffix, str) or not re.fullmatch(r"[A-Z0-9.]+", suffix):
+    if not isinstance(suffix, str) or not re.fullmatch(r"[A-Z0-9]+(?:\.[A-Z0-9]+)*", suffix):
         raise ValueError("Invalid audit queue suffix")
     return _queue(prefix + "." + suffix, "AUDIT.")
 
 
 def remote_queue(prefix, suffix):
     validate_run(prefix)
-    if not isinstance(suffix, str) or not re.fullmatch(r"[A-Z0-9.]+", suffix):
+    if not isinstance(suffix, str) or not re.fullmatch(r"[A-Z0-9]+(?:\.[A-Z0-9]+)*", suffix):
         raise ValueError("Invalid audit queue suffix")
     return _queue("RQ." + prefix + "." + suffix, "RQ.AUDIT.")
 
