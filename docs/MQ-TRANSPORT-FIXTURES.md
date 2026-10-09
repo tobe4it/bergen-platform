@@ -1,7 +1,7 @@
 # Temporärer MQ-Zwei-Knoten-Transportaudit (Evaluation)
 
 Die Transportprüfung erstellt pro Lauf ausschließlich eigene MQ-Objekte mit
-eindeutigem Prefix `BGT.<7-HEX-ZEICHEN>`. Kanäle und XMITQs werden **nicht**
+eindeutigem Prefix `AUDIT.<7-HEX-ZEICHEN>`. Kanäle und XMITQs werden **nicht**
 als dauerhafter Sollzustand bereitgestellt. Das statische
 `mq-transport-objects.yml` wurde entfernt.
 
@@ -12,7 +12,7 @@ TLS-authentifizierten JSON-MQSC-REST-Reconciler:
 
 | Auf A (BERGENLAB) | Auf B (BERGENLABB) |
 | --- | --- |
-| QLOCAL `<prefix>.AX` mit `USAGE(XMITQ)` | QLOCAL `<prefix>.BX` mit `USAGE(XMITQ)` |
+| QLOCAL `XQ.<prefix>.AX` mit `USAGE(XMITQ)` | QLOCAL `XQ.<prefix>.BX` mit `USAGE(XMITQ)` |
 | SDR `<prefix>.A2B` | RCVR `<prefix>.A2B` |
 | RCVR `<prefix>.B2A` | SDR `<prefix>.B2A` |
 
@@ -21,6 +21,28 @@ verifiziert zur Laufzeit `DISPLAY CHSTATUS` mit `RUNNING`, `SECPROT(TLSV13)`
 und dem ausgehandelten CipherSpec auf beiden Enden. Anschließend folgen je
 Richtung fünf Transportvarianten mit zeitlich begrenzten MQ-GETs; die QREMOTE-
 und Ziel-QLOCAL-Fixtures sind ebenfalls laufbezogen.
+
+**AUDIT-Objektnamen (neu, zunächst nur Branch-Stand):** Normale lokale
+Audit-Queues tragen den Präfix `LQ.AUDIT.<Laufkennung>.*`, ihr
+Anwendungsalias `AUDIT.<Laufkennung>.*` zeigt auf die physische
+Queue (`QALIAS TARGET(...)`). Remote-Queues liegen unter
+`RQ.AUDIT.<Laufkennung>.*`, Transmission-Queues unter
+`XQ.AUDIT.<Laufkennung>.*`. Die SDR/RCVR-Kanäle heißen
+`AUDIT.<Laufkennung>.A2B` beziehungsweise `.B2A`.
+Der Kanalname bleibt unter 20 Zeichen; Queue-Namen bleiben unter 48.
+Der Remote-Eintrag verweist künftig auf den Alias am Ziel-QMgr.
+Sowohl lokale Queue als auch Alias erhalten eine laufbezogene Kennung,
+sodass keine gemeinsamen festen Test-Aliase angelegt werden.
+
+**Bestand bleibt erhalten:** Der bereits konfigurierte Clientkanal
+`BGT.CLIENT`, die LDAP-Identitäten `bgttransa`/`bgttransb`
+und die Transport-Zertifikate werden **nicht** umbenannt.
+Diese Umstellung ändert bislang keine MQ-Objekte. Für Alias- und
+Remote-Zugriff sind die später erforderlichen MQ-OAM-Rechte
+gesondert zu prüfen; insbesondere folgt aus einem Alias keine
+automatische Berechtigung auf seine Zielqueue. Die laufbezogenen
+MQ-REST-Fixtures bleiben auch nach der Namensänderung ohne
+Eigentumsnachweis bei unbekannten Änderungen konservativ zu behandeln.
 
 ## Separate transport PKI preparation and activation
 
@@ -166,7 +188,7 @@ Der Nachweis betrifft nur die Gruppenauflösung, nicht die späteren
 
 `ansible/module_utils/bergen_mq_chlauth.py` erzeugt einen **reinen
 MQSC-Plan** für die beiden exakten, laufbezogenen Receiverkanäle
-`BGT.<7HEX>.B2A` auf BERGENLAB und `BGT.<7HEX>.A2B` auf BERGENLABB.
+`AUDIT.<7HEX>.B2A` auf BERGENLAB und `AUDIT.<7HEX>.A2B` auf BERGENLABB.
 Der Plan benutzt die geprüften IPv4-Adressen der beiden Hosts, die
 zertifikatsspezifischen Subjects/Issuers und als `MCAUSER` die
 dedizierten LDAP-Benutzer. Unbekannte Hosts, Portänderungen, freie
@@ -260,7 +282,7 @@ validiert: `verification=PASS`, `read_only=true`, `changed=false`,
 `failed=false`. Ansible-Recap: BERGENLAB `ok=5 changed=0 failed=0`,
 BERGENLABB `ok=5 changed=0 failed=0`, localhost
 `ok=2 changed=0 failed=0`. Die exakt geprüften Test-Receiver waren
-`BGT.A1B2C3D.B2A` auf A und `BGT.A1B2C3D.A2B` auf B; beide sind
+`AUDIT.A1B2C3D.B2A` auf A und `AUDIT.A1B2C3D.A2B` auf B; beide sind
 weiterhin nicht definiert. Die Prüfung bestätigt das aktuelle
 MQSC-Parser-Verhalten, **nicht** die spätere CHLAUTH-Wirksamkeit nach
 Anlage der Regeln oder einen erfolgreichen mTLS-Transport.
@@ -412,6 +434,17 @@ weitere Schritte. Neun neue Tests in
 Objektersetzung unter gleichem Namen, veränderte `MCAUSER`, fremde
 Regeln und nachträgliche Drift. **68 Tests sind nun geplant, aber
 die neun neuen Tests noch nicht auf dem Controller bestätigt.**
+
+**Namensraum-Migration (Branchstand):** Der in
+`bergen_mq_audit_names.py` zentral geprüfte Namespace
+`AUDIT.<7HEX>` ersetzt ausschließlich laufbezogene Testobjektnamen.
+CHLAUTH-Planer, Read-only-Preflight, Befehlsfreigabe,
+Journal-Validierung, Recovery-Triage sowie die
+transienten Topologie-Falltests folgen demselben Muster.
+Bereits bestehende `BGT.CLIENT`-CHLAUTH-Regeln bleiben
+unverändert und werden weiterhin als Sicherheitsbaseline geprüft.
+Die zugehörigen neuen Offline- und Topologie-Regressionsprüfungen
+müssen **nach Git-Pull erneut auf dem Controller bestätigt** werden.
 
 ## Unveränderliche Infrastruktur / Vorbedingungen
 
