@@ -18,11 +18,11 @@ def main():
         supports_check_mode=True,
     )
     responses = module.params["responses"]
-    commands = (
-        "DISPLAY QMGR CHLAUTH CERTLABL",
-        "DISPLAY CHANNEL('{receiver}') ALL",
-        "DISPLAY CHLAUTH(*) ALL",
-    )
+    commands = {
+        "qmgr": "DISPLAY QMGR CHLAUTH CERTLABL",
+        "receiver": "DISPLAY CHANNEL('{receiver}') ALL",
+        "rules": "DISPLAY CHLAUTH(*) ALL",
+    }
     expected_sides = {"a", "b"}
     if not isinstance(responses, dict) or set(responses) != expected_sides:
         module.fail_json(msg="Require exactly two MQ host evidence groups a/b")
@@ -33,16 +33,16 @@ def main():
     )
     collected = {}
     for side in ("a", "b"):
-        expected = {command.format(receiver=plan[side]["receiver"])
-                    for command in commands}
+        expected = set(commands)
         evidence = responses[side]
         if not isinstance(evidence, dict) or set(evidence) != expected:
             module.fail_json(msg="Unexpected or incomplete DISPLAY command set on " + side)
-        for command, result in evidence.items():
+        for key, result in evidence.items():
             if (not isinstance(result, dict)
                     or type(result.get("rc")) is not int
                     or not isinstance(result.get("stdout"), str)):
                 module.fail_json(msg="Invalid MQSC rc/stdout evidence on " + side)
+            command = commands[key].format(receiver=plan[side]["receiver"])
             collected[(side, command)] = (result["rc"], result["stdout"])
 
     def runner(side, command):
