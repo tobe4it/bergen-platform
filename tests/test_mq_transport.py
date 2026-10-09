@@ -63,8 +63,8 @@ class TransientTransportTests(unittest.TestCase):
         obj = transport.declarations(PREFIX, configured_nodes())
         self.assertEqual(obj["a"]["sender"], PREFIX + ".A2B")
         self.assertEqual(obj["b"]["sender"], PREFIX + ".B2A")
-        self.assertEqual(obj["a"]["xmitq"], PREFIX + ".AX")
-        self.assertEqual(obj["b"]["xmitq"], PREFIX + ".BX")
+        self.assertEqual(obj["a"]["xmitq"], "XQ." + PREFIX + ".AX")
+        self.assertEqual(obj["b"]["xmitq"], "XQ." + PREFIX + ".BX")
         for side in ("a", "b"):
             channels = [o for o in obj[side]["objects"] if o["type"] == "channel"]
             self.assertEqual(len(channels), 2)
@@ -77,11 +77,19 @@ class TransientTransportTests(unittest.TestCase):
             self.assertEqual({o["type"] for o in obj[side]["objects"]},
                              {"qlocal", "channel"})
         with self.assertRaises(mq.MQError):
-            transport.declarations("BGT.BADPREFIX", configured_nodes())
+            transport.declarations("AUDIT.BADPREFIX", configured_nodes())
+
+    def test_channel_and_xmitq_name_lengths(self):
+        obj = transport.declarations(PREFIX, configured_nodes())
+        for side in ("a", "b"):
+            self.assertLessEqual(len(obj[side]["sender"]), 20)
+            self.assertTrue(obj[side]["sender"].startswith("AUDIT."))
+            self.assertLessEqual(len(obj[side]["xmitq"]), 48)
+            self.assertTrue(obj[side]["xmitq"].startswith("XQ.AUDIT."))
 
     def test_collision_refuses_every_mutation(self):
         clients = self.factory()
-        name = PREFIX + ".BX"
+        name = "XQ." + PREFIX + ".BX"
         clients["b"].objects[name] = {"queue": name, "type": "QLOCAL",
                                      "usage": "xmitq"}
         run = transport.TransientTransport(clients, configured_nodes(), PREFIX)
