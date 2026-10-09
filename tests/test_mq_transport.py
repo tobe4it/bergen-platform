@@ -6,7 +6,7 @@ import unittest
 from test_mq import FakeClient, mq, success
 from test_mq_topology import topology, transport_module as transport
 
-PREFIX = "BGT.ABC1234"
+PREFIX = "AUDIT.ABC1234"
 
 
 def configured_nodes():
