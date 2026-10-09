@@ -15,7 +15,7 @@ class RecoveryTriageTests(unittest.TestCase):
         self.addCleanup(self.temp.cleanup)
         self.plan = canonical_plan()
         with LockedFixtureJournal(
-                Path(self.temp.name) / "log", "BGT.A1B2C3D") as journal:
+                Path(self.temp.name) / "log", "AUDIT.A1B2C3D") as journal:
             journal.intent("a", "add_deny")
             journal.result("a", "add_deny", "ACKED")
             self.path = journal.path
@@ -125,7 +125,7 @@ class RecoveryTriageTests(unittest.TestCase):
     def test_clean_marker_does_not_permit_object_reappearance(self):
         # A second, completed journal simulates a past fully cleaned fixture.
         with LockedFixtureJournal(
-                Path(self.temp.name) / "clean", "BGT.A1B2C3D") as journal:
+                Path(self.temp.name) / "clean", "AUDIT.A1B2C3D") as journal:
             journal.mark_clean({"a": "VERIFIED_CLEAN", "b": "VERIFIED_CLEAN"})
             clean_path = journal.path
         snapshots = self.snapshot()
