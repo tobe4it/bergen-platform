@@ -128,25 +128,39 @@ LDAP-Preflight `ok=6 changed=0 failed=0`, lesender Provisionierungscheck
 mit `MUST(cn,gidNumber)` aus. Die Gruppen-LDIF nutzt `memberUid`
 (laut `posixGroup` optional) und `member` mit `extensibleObject`
 wie die bestehende MQ-Gruppe. Der anschließende LDAP-Schreiblauf und
-Read-back waren erfolgreich; die IDs sind damit belegt. **Ein MQ-SEARCHGRP-
-Nachweis steht weiterhin aus.** Ebenso offen sind die auf transportseitige
-Identitäten begrenzten MQ-OAM- und CHLAUTH-Freigaben; bis dahin keine
-Transportkanäle starten oder `mq_topology_channel_security_verified=true`
-setzen. Keine Rechtevergabe auf Verdacht.
+Read-back waren erfolgreich; die IDs sind damit belegt. Der nachfolgende
+kontrollierte `+inq`-Gruppentest hat die MQ-SEARCHGRP-Auflösung für beide
+Transportidentitäten positiv nachgewiesen (siehe unten). Die für den
+Nachrichtentransport benötigten MQ-OAM- und CHLAUTH-Freigaben sind dennoch
+weiterhin offen; bis dahin keine Transportkanäle starten oder
+`mq_topology_channel_security_verified=true` setzen.
 
 MQ-Konfiguration nach LDAP-Anlage (lesend geprüft): Beide QMgr melden
 `AUTHORMD(SEARCHGRP)`, `CLASSGRP(posixGroup)`, `FINDGRP(member)`,
 `GRPFIELD(cn)` und `BASEDNG(cn=groups,dc=bergen,dc=intern)`.
 `dspmqaut -t qmgr -p bgttransa` auf A und `-p bgttransb` auf B
 lieferten jeweils `rc=0`, ohne Berechtigungseinträge. Das bestätigt die
-Konfiguration, noch **nicht** die erfolgreiche MQ-Gruppenrechteauflösung.
-Eine kontrollierte OAM-Positiv-/Negativprobe steht aus.
+ursprüngliche Konfiguration ohne Berechtigungen. Die Gruppenrechteauflösung
+wurde anschließend im befristeten OAM-Test nachgewiesen.
 
 LDAP-Gruppenabfrage vom 09.10.2026 mit OR-Filter auf beide
 Transportbenutzer ergab genau `MQBGTTRANSA` → `bgttransa` und
 `MQBGTTRANSB` → `bgttransb` über `member`. Kein weiterer
-passender Gruppen-DN im lesbaren Suchergebnis. Das ist noch kein
-MQ-OAM-Positivnachweis; ohne diesen keine Channel-Security-Freigabe.
+passender Gruppen-DN im lesbaren Suchergebnis.
+
+**Erfolgreicher OAM-Positiv-/Negativtest vom 09.10.2026:**
+`ansible/playbooks/mq-transport-oam-group-smoke.yml` hat auf jedem
+Queue-Manager nach vorausgehendem Baseline-Check einmal `+inq` für
+`MQBGTTRANSA` (A) beziehungsweise `MQBGTTRANSB` (B) vergeben.
+`dspmqaut` zeigte das Recht beim zugehörigen Benutzer und verweigerte
+es dem fremden Transportbenutzer. Der `always`-Block hat `-inq`
+auf beiden QMgrn ausgeführt. Ein Vergleich der effektiven Rechte
+und der direkten `dmpmqaut`-Gruppeneinträge vor/nach dem Test war
+jeweils erfolgreich; A und B meldeten jeweils
+`ok=14 changed=2 failed=0`, localhost `ok=3 changed=0 failed=0`.
+**Keine dauerhaften OAM-Freigaben aus diesem Test.**
+Der Nachweis betrifft nur die Gruppenauflösung, nicht die späteren
+`+setall`-/`+put`-Rechte oder die TLS-CHLAUTH-Zuordnung.
 
 ## Unveränderliche Infrastruktur / Vorbedingungen
 
