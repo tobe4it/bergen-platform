@@ -162,6 +162,45 @@ if __name__ == '__main__': unittest.main()
                 self.assertLessEqual(len(attrs['target']), 48)
             self.assertFalse(client.objects)
 
+    def test_transient_remote_queues_route_via_audit_target_alias(self):
+        # Entire test uses REST fakes: no MQ credentials or real channel start.
+        from test_mq_transport import FakeTransportClient
+        active = set()
+        clients = {s: FakeTransportClient(active) for s in ('a', 'b')}
+        report = topology.run(
+            nodes(), {'host': 'client'}, 'test', True,
+            include_objects=False, clients=clients, probe=success_probe,
+            transient_transport=True,
+            transport_peer_firewall_verified=True,
+            transport_cross_ca_verified=True,
+            transport_channel_security_verified=True,
+        )
+        self.assertEqual(report['failed'], 0, report['tests'])
+        self.assertEqual(report['residual_objects'], [])
+        for side in ('a', 'b'):
+            self.assertTrue(all(
+                row['status'] == 'PASS'
+                for row in report['tests']
+                if row['id'].startswith(side + ':remote-')))
+            remote_definitions = [
+                call for call in clients[side].calls
+                if call[0] == 'define' and call[1] == 'qremote'
+                and call[2].startswith('RQ.AUDIT.')
+            ]
+            self.assertEqual(len(remote_definitions), len(topology.TRANSPORT_CASES))
+            destination = 'b' if side == 'a' else 'a'
+            destination_aliases = {
+                call[2]: call[3]['target']
+                for call in clients[destination].calls
+                if call[0] == 'define' and call[1] == 'qalias'
+                and call[2].startswith('AUDIT.')
+            }
+            for call in remote_definitions:
+                remote_target = call[3]['rname']
+                self.assertIn(remote_target, destination_aliases)
+                self.assertTrue(destination_aliases[remote_target].startswith('LQ.AUDIT.'))
+            self.assertFalse(clients[side].objects)
+
     def test_negative_connection_does_not_accept_network_error(self):
         def probe(op, *args, **kwargs):
             if op == 'bad_password': return dict(ok=False, reason=2538, tls_failure=False)
