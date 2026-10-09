@@ -45,8 +45,7 @@
 
     - name: Show unittest summary and confirm no MQ mutation
       ansible.builtin.debug:
-        msg: >-
-          {{ mq_chlauth_offline_tests.stderr.splitlines()
-          | select('match', '^(Ran [0-9]+ tests? in|OK)
-) | list }}
-          — Offline only; no MQ objects changed and no live writer enabled.
+        msg:
+          test_summary: "{{ mq_chlauth_offline_tests.stderr.splitlines() | select('search', '^Ran [0-9]+ tests? in') | list }}"
+          test_status: "{{ mq_chlauth_offline_tests.stderr.splitlines() | select('equalto', 'OK') | list }}"
+          mode: "Offline only; no MQ objects changed and no live writer enabled."
