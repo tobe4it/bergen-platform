@@ -359,7 +359,32 @@ Test mit bestätigtem Cleanup beider Seiten erhält `CLEAN`.
 `tests/test_mq_chlauth_journaled_offline.py` prüft diesen Ablauf
 einschließlich Abbruch, RUNCHECK-Fehler und Verweigerung nicht
 gekennzeichneter Runner. **Kein Live-MQSC-Writer wird angeschlossen.**
-Die fünf neuen Tests sind noch auf dem Controller auszuführen.
+Die Integration wurde am 09.10.2026 auf dem Controller erfolgreich
+mit allen damaligen 49 Offline-Tests geprüft (`Ran 49 tests`,
+`ok=4 changed=0 failed=0`).
+
+**Rein lesende Journal-Wiederherstellungsanalyse (Vorbereitung):**
+`bergen_mq_chlauth_journal.py` validiert zusätzlich zur SHA-256-Kette
+die semantische Reihenfolge und die exakte Zugehörigkeit von
+`BEGIN`/`INTENT`/`RESULT`/`CLEAN`. Ein beschädigter Eintrag,
+falscher Fixture-Präfix, unpassendes `RESULT` oder ein `CLEAN`
+nach `FAILED`/`UNKNOWN` wird abgelehnt. `recovery_report()`
+meldet aus dem Journal alle möglicherweise ausgeführten Operationen,
+unbeantwortete Schreibversuche und die betroffenen Seiten, ohne
+daraus eine Berechtigung zur Löschung abzuleiten.
+`scripts/mq_chlauth_journal_inspect.py` gibt den Bericht als JSON aus:
+Exitcode 0 nur bei vorhandenem gültigem `CLEAN`-Marker,
+2 bei offenen Journalen und 3 bei beschädigten Daten.
+Auch Exitcode 0 **ist keine Live-Freigabe und kein Beweis des aktuellen
+MQ-Zustands**; ein tatsächliches Readback ist weiterhin erforderlich.
+Es gibt ausdrücklich **keinen automatischen MQ-Cleanup oder Restart**
+durch dieses Werkzeug.
+
+Die zehn zusätzlichen Offline-Tests in
+`tests/test_mq_chlauth_journal.py` prüfen diese semantischen Regeln,
+Wiederherstellungsberichte und die CLI-Exitcodes. Die nun geplanten
+**59 Offline-Tests** müssen nach Pull des Branches erneut auf dem
+Controller bestätigt werden.
 
 ## Unveränderliche Infrastruktur / Vorbedingungen
 
