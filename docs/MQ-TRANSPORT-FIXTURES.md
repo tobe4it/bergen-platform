@@ -232,6 +232,18 @@ Erfolge, Fehler beim Anlegen/Prüfen/Löschen und Unsicherheit.
 Der Receiver erhält zusätzlich explizit den dedizierten
 `MCAUSER`; die CHLAUTH-Regel muss auf dieselbe Identität abbilden.
 
+**Lesender Adapter (Stand 09.10.2026):**
+`ansible/module_utils/bergen_mq_chlauth_readonly.py` akzeptiert nur
+einzelne `DISPLAY`-MQSC-Abfragen über einen injizierten Runner. Er
+prüft die Abwesenheit des exakt zugehörigen Receivers, einen leeren
+CHLAUTH-Namensraum für die Fixture sowie den bestehenden QMGR-,
+Client- und Admin-Regelzustand. Die Methoden für Mutationen und
+Lifecycle-Verifikation verweigern jeden Aufruf. Die dazugehörigen
+`tests/test_mq_chlauth_readonly.py` prüfen auch Ablehnungen bei
+Kollisionen und mehrdeutigen MQSC-Rückmeldungen.
+**Kein Live-MQSC-Runner ist angeschlossen; die Bestandsaufnahme ist
+nur ein Snapshot und keine exklusive Eigentumssicherung.**
+
 Die strikt offline arbeitende MQSC-Auswertung
 `ansible/module_utils/bergen_mq_chlauth_mqsc.py` fordert pro
 Abfrage genau einen vollständig und fehlerfrei verarbeiteten MQSC-Befehl
