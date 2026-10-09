@@ -220,6 +220,30 @@ PYTHONPATH=ansible python3 -m unittest discover -s tests -p 'test_mq_chlauth.py'
 python3 scripts/mq_chlauth_plan.py
 ```
 
+**Stand 09.10.2026 (nach 9 bestandenen CHLAUTH-Planungstests):**
+Der isolierte Lifecycle-Controller
+`ansible/module_utils/bergen_mq_chlauth_lifecycle.py` sichert vor
+jeder Mutation beide Preflight-Prüfungen ab, protokolliert ungewisse
+Schreibversuche schon vor der Ausführung und versucht den Rückbau auf
+beiden Seiten selbst bei Fehlern. Er behält die `NOACCESS`-Sperre,
+wenn die Abwesenheit von Receiver oder Freigaberegel nicht positiv
+nachgewiesen ist. `tests/test_mq_chlauth_lifecycle.py` simuliert
+Erfolge, Fehler beim Anlegen/Prüfen/Löschen und Unsicherheit.
+Der Receiver erhält zusätzlich explizit den dedizierten
+`MCAUSER`; die CHLAUTH-Regel muss auf dieselbe Identität abbilden.
+
+**Der Lifecycle-Controller ist noch nicht mit einem Live-MQSC-Adapter
+verdrahtet und ändert selbst keine MQ-Objekte.** Besonders die
+RUNCHECK-Auswertung bei NOACCESS und die Abwesenheit/eindeutige
+Eigentümerschaft der CHLAUTH-Einträge müssen am echten MQ
+ausgewertet werden, bevor eine Schreibfreigabe überhaupt möglich ist.
+
+Offline-Lifecycle-Test nach `git pull`:
+
+```bash
+PYTHONPATH=ansible python3 -m unittest discover -s tests -p 'test_mq_chlauth*.py' -v
+```
+
 Die Tests `tests/test_mq_chlauth.py` prüfen Namen, Richtung,
 identitätsgebundene Zulassung, alle vier Probevarianten, verweigerte
 abweichende Topologien und den begrenzten Rückbauplan. Noch kein
