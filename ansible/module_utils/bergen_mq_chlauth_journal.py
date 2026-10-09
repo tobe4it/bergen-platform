@@ -17,8 +17,10 @@ from pathlib import Path
 import re
 import stat
 
+from .bergen_mq_audit_names import RUN
 
-_RUN = re.compile(r"\ABGT\.[A-F0-9]{7}\Z")
+
+_RUN = RUN
 _OPS = frozenset((
     "add_deny", "define_receiver", "add_allow",
     "remove_allow", "delete_receiver", "remove_deny",
@@ -204,7 +206,7 @@ class LockedFixtureJournal:
                 fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
             except BlockingIOError as exc:
                 raise JournalError("Another CHLAUTH journal session is active") from exc
-            for existing in sorted(self.root.glob("BGT.*.jsonl")):
+            for existing in sorted(self.root.glob("*.jsonl")):
                 entries = _read_events(existing)
                 if entries[-1]["kind"] != "CLEAN":
                     raise JournalError(
