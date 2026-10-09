@@ -1,4 +1,5 @@
 """Offline crash-recovery and journal-integrity checks; no MQ access."""
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -6,7 +7,7 @@ import tempfile
 import unittest
 
 from module_utils.bergen_mq_chlauth_journal import (
-    JournalError, LockedFixtureJournal, read_journal,
+    JournalError, LockedFixtureJournal, read_journal, recovery_report,
 )
 
 
@@ -99,6 +100,93 @@ class JournalTests(unittest.TestCase):
             with self.subTest(prefix=prefix):
                 with self.assertRaises(JournalError):
                     LockedFixtureJournal(self.root, prefix)
+
+
+    @staticmethod
+    def _forge_valid_digests(path, mutate):
+        """Adversarial event semantics with valid SHA-256 chain."""
+        records = [json.loads(row) for row in path.read_text().splitlines()]
+        mutate(records)
+        previous = "0" * 64
+        for seq, record in enumerate(records, 1):
+            record["seq"] = seq
+            record["prev"] = previous
+            core = {key: record[key] for key in ("seq", "prev", "kind", "data")}
+            encoded = json.dumps(core, sort_keys=True, separators=(",", ":")).encode()
+            previous = hashlib.sha256(encoded).hexdigest()
+            record["digest"] = previous
+        path.write_text("".join(json.dumps(r) + "\\n" for r in records))
+
+    def test_recovery_report_unanswered_intent_is_not_cleanup_authority(self):
+        with LockedFixtureJournal(self.root, self.prefix) as audit:
+            audit.intent("a", "add_deny")
+        report = recovery_report(audit.path)
+        self.assertEqual(report["state"], "MANUAL_REVIEW_REQUIRED")
+        self.assertTrue(report["has_unanswered_intent"])
+        self.assertEqual(report["possible_residual_sides"], ["a"])
+        self.assertEqual(report["attempts"][0]["status"], "NO_RESULT")
+        self.assertFalse(report["can_auto_cleanup"])
+        self.assertFalse(report["can_authorize_live_apply"])
+
+    def test_recovery_report_after_uncertain_write(self):
+        with LockedFixtureJournal(self.root, self.prefix) as audit:
+            audit.intent("b", "add_allow")
+            audit.result("b", "add_allow", "UNKNOWN")
+        report = recovery_report(audit.path)
+        self.assertFalse(report["has_unanswered_intent"])
+        self.assertEqual(report["attempts"][0]["status"], "UNKNOWN")
+        self.assertEqual(report["possible_residual_sides"], ["b"])
+        self.assertTrue(report["requires_independent_mq_readback"])
+
+    def test_recovery_report_clean_still_not_live_authorization(self):
+        with LockedFixtureJournal(self.root, self.prefix) as audit:
+            audit.mark_clean({"a": "VERIFIED_CLEAN", "b": "VERIFIED_CLEAN"})
+        report = recovery_report(audit.path)
+        self.assertEqual(report["state"], "CLEAN_RECORDED")
+        self.assertEqual(report["possible_residual_sides"], [])
+        self.assertFalse(report["can_auto_cleanup"])
+        self.assertFalse(report["can_authorize_live_apply"])
+
+    def test_reject_rehashed_unmatched_result(self):
+        with LockedFixtureJournal(self.root, self.prefix) as audit:
+            audit.intent("a", "add_deny")
+            audit.result("a", "add_deny", "ACKED")
+        self._forge_valid_digests(
+            audit.path, lambda rows: rows[2]["data"].update({"side": "b"}))
+        with self.assertRaisesRegex(JournalError, "Unmatched"):
+            read_journal(audit.path)
+
+    def test_reject_rehashed_forged_clean_after_failure(self):
+        with LockedFixtureJournal(self.root, self.prefix) as audit:
+            audit.intent("a", "add_deny")
+            audit.result("a", "add_deny", "UNKNOWN")
+        self._forge_valid_digests(
+            audit.path,
+            lambda rows: rows.append({
+                "seq": 0, "prev": "", "kind": "CLEAN",
+                "data": {"verified_sides": {
+                    "a": "VERIFIED_CLEAN", "b": "VERIFIED_CLEAN"}},
+                "digest": ""
+            }))
+        with self.assertRaisesRegex(JournalError, "Invalid clean"):
+            read_journal(audit.path)
+
+    def test_reject_rehashed_second_begin(self):
+        with LockedFixtureJournal(self.root, self.prefix) as audit:
+            audit.intent("a", "add_deny")
+        self._forge_valid_digests(
+            audit.path, lambda rows: rows[1].update({"kind": "BEGIN"}))
+        with self.assertRaisesRegex(JournalError, "Unknown"):
+            read_journal(audit.path)
+
+    def test_reject_journal_prefix_mismatch(self):
+        with LockedFixtureJournal(self.root, self.prefix) as audit:
+            pass
+        self._forge_valid_digests(
+            audit.path,
+            lambda rows: rows[0]["data"].update({"prefix": "BGT.B2B2B2B"}))
+        with self.assertRaisesRegex(JournalError, "BEGIN must bind"):
+            read_journal(audit.path)
 
 
 if __name__ == "__main__":
