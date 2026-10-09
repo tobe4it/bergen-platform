@@ -54,7 +54,7 @@ class ChlauthFixtureLifecycle:
         if not isinstance(plan, dict) or set(plan) != {"a", "b"}:
             raise ChlauthPlanError("Exactly two receiver plans required")
         for side, spec in plan.items():
-            if (spec.get("receiver", "").startswith("BGT.") is not True
+            if (spec.get("receiver", "").startswith("AUDIT.") is not True
                     or len(spec.get("apply_order", [])) != 3
                     or len(spec.get("cleanup", [])) != 3
                     or len(spec.get("cases", [])) != 4):
