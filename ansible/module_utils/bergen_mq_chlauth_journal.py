@@ -82,16 +82,89 @@ def _read_events(path):
             raise JournalError("Journal checksum mismatch")
         previous = actual
         entries.append(record)
-    if entries[0]["kind"] != "BEGIN":
-        raise JournalError("Journal lacks initial BEGIN event")
-    if any(row["kind"] == "CLEAN" for row in entries[:-1]):
-        raise JournalError("Journal has events after CLEAN")
+    _validate_event_sequence(entries, path)
     return entries
+
+
+def _validate_event_sequence(entries, path):
+    """Validate meanings and transitions, not just record digests.
+
+    The event chain is evidence of local attempted operations. Even a
+    valid CLEAN marker cannot replace independent MQ object readbacks.
+    """
+    filename = path.name
+    if not filename.endswith(".jsonl") or not _RUN.fullmatch(filename[:-6]):
+        raise JournalError("Journal filename has unsafe fixture identity")
+    begin = entries[0]
+    if (begin["kind"] != "BEGIN"
+            or begin["data"] != {"prefix": filename[:-6]}):
+        raise JournalError("BEGIN must bind journal to its fixture prefix")
+    pending = None
+    unsuccessful = False
+    for row in entries[1:]:
+        kind, data = row["kind"], row["data"]
+        if kind == "INTENT":
+            if (pending is not None or set(data) != {"side", "operation"}
+                    or data["side"] not in ("a", "b")
+                    or data["operation"] not in _OPS):
+                raise JournalError("Unexpected or overlapping CHLAUTH intent")
+            pending = (data["side"], data["operation"])
+        elif kind == "RESULT":
+            if (pending is None
+                    or set(data) != {"side", "operation", "status"}
+                    or (data["side"], data["operation"]) != pending
+                    or data["status"] not in _RESULT):
+                raise JournalError("Unmatched CHLAUTH result")
+            unsuccessful |= data["status"] != "ACKED"
+            pending = None
+        elif kind == "CLEAN":
+            if (row is not entries[-1] or pending is not None
+                    or unsuccessful
+                    or data != {"verified_sides": {
+                        "a": "VERIFIED_CLEAN", "b": "VERIFIED_CLEAN"
+                    }}):
+                raise JournalError("Invalid clean marker or unresolved operations")
+        else:
+            raise JournalError("Unknown CHLAUTH journal event")
+    return pending
 
 
 def read_journal(path):
     """Read and validate a previously created journal; no side effects."""
     return _read_events(Path(path))
+
+
+def recovery_report(path):
+    """Report possible residual mutations; NEVER authorize cleanup.
+
+    Every attempted command remains a possible residual until live MQ
+    readbacks independently prove absence. This report is local only.
+    """
+    entries = read_journal(path)
+    attempts = []
+    pending = None
+    for row in entries[1:]:
+        data = row["data"]
+        if row["kind"] == "INTENT":
+            pending = {"side": data["side"], "operation": data["operation"],
+                       "status": "NO_RESULT"}
+            attempts.append(pending)
+        elif row["kind"] == "RESULT":
+            pending["status"] = data["status"]
+            pending = None
+    complete = entries[-1]["kind"] == "CLEAN"
+    return {
+        "fixture": entries[0]["data"]["prefix"],
+        "state": "CLEAN_RECORDED" if complete else "MANUAL_REVIEW_REQUIRED",
+        "has_unanswered_intent": pending is not None,
+        "attempts": attempts,
+        "possible_residual_sides": [] if complete else sorted(
+            {item["side"] for item in attempts}
+        ),
+        "can_auto_cleanup": False,
+        "can_authorize_live_apply": False,
+        "requires_independent_mq_readback": True,
+    }
 
 
 class LockedFixtureJournal:
