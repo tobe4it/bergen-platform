@@ -12,7 +12,7 @@ from module_utils.bergen_mq_chlauth import LAB, make_plan  # noqa: E402
 def main():
     # Only the reserved offline fixture ID; production run IDs are generated
     # elsewhere. This preview never passes commands to a shell or MQ.
-    prefix = "BGT.A1B2C3D"
+    prefix = "AUDIT.A1B2C3D"
     nodes = {side: {"host": attrs["host"], "qmgr": attrs["qmgr"], "port": 1414}
              for side, attrs in LAB.items()}
     plan = make_plan(prefix, nodes)
