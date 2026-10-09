@@ -9,7 +9,7 @@ from module_utils.bergen_mq_chlauth_lifecycle import (
 
 def plan():
     return make_plan(
-        "BGT.A1B2C3D",
+        "AUDIT.A1B2C3D",
         {side: {"host": attrs["host"], "qmgr": attrs["qmgr"], "port": 1414}
          for side, attrs in LAB.items()},
     )
