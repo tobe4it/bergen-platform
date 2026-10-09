@@ -10,7 +10,6 @@ guarantee. A future mutating adapter must revalidate and solve that separately.
 import re
 
 from .bergen_mq_chlauth import ChlauthPlanError, LAB
-from .bergen_mq_audit_names import CHANNEL
 from .bergen_mq_chlauth_mqsc import (
     require_success, channel_auth_records, exact_records,
 )
