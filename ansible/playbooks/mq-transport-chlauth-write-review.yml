@@ -1,0 +1,41 @@
+---
+# Deliberately non-mutating review gate for a future CHLAUTH fixture lifecycle.
+# No execution of SET/DEFINE/DELETE. "OK" is not permission for live apply.
+- name: Review transient CHLAUTH write contract offline only
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  become: false
+  tasks:
+    - name: Refuse live CHLAUTH writes regardless of requested flags
+      ansible.builtin.assert:
+        that:
+          - not (mq_chlauth_live_apply | default(false) | bool)
+          - not (mq_chlauth_write_approved | default(false) | bool)
+        fail_msg: >-
+          This playbook is strictly offline. It does not implement a
+          production-safe live writer, exclusive ownership or durable rollback.
+
+    - name: Run all CHLAUTH planning, lifecycle, readback and command-contract tests
+      ansible.builtin.command:
+        argv:
+          - "{{ ansible_playbook_python }}"
+          - -m
+          - unittest
+          - discover
+          - -s
+          - tests
+          - -p
+          - "test_mq_chlauth*.py"
+          - -v
+        chdir: "{{ playbook_dir }}/../.."
+      environment:
+        PYTHONPATH: "{{ playbook_dir }}/../module_utils/.."
+      register: mq_chlauth_offline_tests
+      changed_when: false
+
+    - name: Confirm only offline validation was performed
+      ansible.builtin.debug:
+        msg: >-
+          PASS: CHLAUTH offline tests completed without altering any MQ
+          object. There is NO live CHLAUTH writer or authorization to apply.
