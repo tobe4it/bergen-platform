@@ -121,9 +121,9 @@ def make_plan(prefix, nodes):
             ],
             "define_receiver": (
                 "DEFINE CHANNEL(%s) CHLTYPE(RCVR) "
-                "SSLCIPH(%s) SSLCAUTH(REQUIRED) CERTLABL(%s) HBINT(5) "
+                "SSLCIPH(%s) SSLCAUTH(REQUIRED) CERTLABL(%s) HBINT(5) MCAUSER(%s) "
                 "DESCR('Bergen transient mTLS CHLAUTH fixture')" %
-                (c, _quote(CIPHER), _quote(CERTLABL))),
+                (c, _quote(CIPHER), _quote(CERTLABL), _quote(user))),
             "add_rules": [deny, allow],
             "cases": [
                 {"name": "valid_certificate", "expect": "MAP",
