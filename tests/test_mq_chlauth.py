@@ -17,14 +17,14 @@ def nodes():
 
 class ChlauthPlanTests(unittest.TestCase):
     def setUp(self):
-        self.plan = make_plan("BGT.A1B2C3D", nodes())
+        self.plan = make_plan("AUDIT.A1B2C3D", nodes())
 
     def test_receivers_map_opposite_peer_exactly(self):
         a, b = self.plan["a"], self.plan["b"]
         self.assertEqual((a["receiver"], a["mcauser"], a["peer_ip"]),
-                         ("BGT.A1B2C3D.B2A", "bgttransa", "192.168.20.156"))
+                         ("AUDIT.A1B2C3D.B2A", "bgttransa", "192.168.20.156"))
         self.assertEqual((b["receiver"], b["mcauser"], b["peer_ip"]),
-                         ("BGT.A1B2C3D.A2B", "bgttransb", "192.168.20.212"))
+                         ("AUDIT.A1B2C3D.A2B", "bgttransb", "192.168.20.212"))
         self.assertIn("SSLCAUTH(REQUIRED)", a["define_receiver"])
         self.assertIn("MCAUSER(\'bgttransa\')", a["define_receiver"])
         self.assertIn("MCAUSER(\'bgttransb\')", b["define_receiver"])
@@ -73,8 +73,8 @@ class ChlauthPlanTests(unittest.TestCase):
 
     def test_invalid_prefix_and_injection_rejected(self):
         for prefix in ("BGT.*", "BGT.CLIENT", "BGT.abcdef0",
-                       "BGT.A1B2C3D'; DELETE QMGR", "BGT.A1B2C3",
-                       "BGT.A1B2C3D\n"):
+                       "AUDIT.A1B2C3D'; DELETE QMGR", "BGT.A1B2C3",
+                       "AUDIT.A1B2C3D\n"):
             with self.subTest(prefix=prefix):
                 with self.assertRaises(ChlauthPlanError):
                     make_plan(prefix, nodes())
@@ -84,11 +84,11 @@ class ChlauthPlanTests(unittest.TestCase):
             changed = copy.deepcopy(nodes())
             changed[side]["host"] = "192.168.20.1"
             with self.assertRaises(ChlauthPlanError):
-                make_plan("BGT.A1B2C3D", changed)
+                make_plan("AUDIT.A1B2C3D", changed)
             changed = copy.deepcopy(nodes())
             changed[side]["qmgr"] = "UNREVIEWED"
             with self.assertRaises(ChlauthPlanError):
-                make_plan("BGT.A1B2C3D", changed)
+                make_plan("AUDIT.A1B2C3D", changed)
 
     def test_no_live_mq_mutation_or_network_code_in_module(self):
         import inspect
