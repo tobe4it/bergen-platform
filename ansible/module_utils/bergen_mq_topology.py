@@ -128,7 +128,7 @@ def run(nodes, ssh, revision, confirm=False, include_objects=True, clients=None,
                                     transport_cross_ca_verified and
                                     transport_channel_security_verified):
         raise ValueError('Transient transport requires explicit peer firewall, CA trust and channel security review')
-    prefix = 'BGT.' + uuid.uuid4().hex[:7].upper()
+    prefix = 'AUDIT.' + uuid.uuid4().hex[:7].upper()
     report = dict(schema_version=1, prefix=prefix, revision=revision, started=now(),
                   evaluation_only=True, tests=[], cleanup=[], residual_objects=[], object_reports={},
                   targets={s: {k: n.get(k) for k in ('qmgr', 'host', 'port', 'channel', 'protocol', 'cipher')} for s, n in nodes.items()},
