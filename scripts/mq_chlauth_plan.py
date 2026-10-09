@@ -23,8 +23,7 @@ def main():
         for statement in entry["preflight"]:
             print("  " + statement)
         print("PROPOSED WRITES (NOT EXECUTED):")
-        print("  " + entry["define_receiver"])
-        for statement in entry["add_rules"]:
+        for statement in entry["apply_order"]:
             print("  " + statement)
         print("RUNCHECK CASES (NOT EXECUTED):")
         for case in entry["cases"]:
