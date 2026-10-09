@@ -220,7 +220,7 @@ class JournalTests(unittest.TestCase):
     def test_recovery_cli_corrupted_returns_error(self):
         with LockedFixtureJournal(self.root, self.prefix) as audit:
             pass
-        audit.path.write_text("corrupted\\n")
+        audit.path.write_text("corrupted\n")
         cli = Path(__file__).resolve().parents[1] / "scripts" / "mq_chlauth_journal_inspect.py"
         run = subprocess.run(
             [sys.executable, str(cli), str(audit.path)],
