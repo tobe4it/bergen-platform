@@ -13,7 +13,7 @@ MISSING_TAIL = ("One MQSC command read.\n"
 
 
 def fixture():
-    return make_plan("BGT.A1B2C3D", {
+    return make_plan("AUDIT.A1B2C3D", {
         side: {"qmgr": data["qmgr"], "host": data["host"], "port": 1414}
         for side, data in LAB.items()
     })
@@ -82,7 +82,7 @@ class ReadOnlyAdapterTests(unittest.TestCase):
         def runner(side, command):
             if command == "DISPLAY CHLAUTH(*) ALL":
                 entry = ("AMQ8878I: Display channel authentication record details.\n"
-                         "   CHLAUTH(BGT.A1B2C3D.B2A) TYPE(ADDRESSMAP)\n"
+                         "   CHLAUTH(AUDIT.A1B2C3D.B2A) TYPE(ADDRESSMAP)\n"
                          "   ADDRESS(*) USERSRC(NOACCESS)\n")
                 return 0, rules(entry)
             return mock_run(side, command)
