@@ -154,8 +154,10 @@ def verify_runcheck(output, receiver, expected, user=None):
             receiver.rsplit(".", 1)[0] + ".A2B"):
         raise ChlauthPlanError("Not a run-owned receiver name")
     upper = output.upper()
-    if "NO COMMANDS HAVE A SYNTAX ERROR." not in upper or "AMQ9519E" in upper:
-        raise ChlauthPlanError("MQSC failed or receiver channel is absent")
+    if ("NO COMMANDS HAVE A SYNTAX ERROR." not in upper
+            or "ALL VALID MQSC COMMANDS WERE PROCESSED." not in upper
+            or "AMQ9519E" in upper):
+        raise ChlauthPlanError("MQSC failed, was incomplete or receiver channel is absent")
     if "AMQ8878I" not in upper or ("CHLAUTH(%s)" % receiver) not in upper:
         raise ChlauthPlanError("No exact channel authentication match evidence")
     if len(re.findall(r"\bTYPE\((SSLPEERMAP|ADDRESSMAP)\)", upper)) != 1:
