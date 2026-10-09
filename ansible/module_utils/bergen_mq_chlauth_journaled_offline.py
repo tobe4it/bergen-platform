@@ -20,6 +20,7 @@ class JournaledOfflineAdapter:
         self.fake = fake
         self.journal = journal
         self.contract = contract
+        self._write_uncertain = False
 
     def preflight(self, side, spec):
         return self.fake.preflight(side, spec)
@@ -31,16 +32,33 @@ class JournaledOfflineAdapter:
         return self.fake.check(side, case)
 
     def apply(self, side, command):
+        if self._write_uncertain:
+            raise ChlauthPlanError(
+                "Uncertain CHLAUTH write: further mutations forbidden; "
+                "manual recovery required"
+            )
+
         operation = self.contract.classify(side, command)
-        self.journal.intent(side, operation)
+
+        try:
+            self.journal.intent(side, operation)
+        except BaseException:
+            self._write_uncertain = True
+            raise
+
         try:
             outcome = self.fake.apply(side, command)
         except BaseException:
-            # Even an exception from a fake can represent a write that reached
-            # MQ before the response was lost. Record UNKNOWN, not FAILED.
+            self._write_uncertain = True
             self.journal.result(side, operation, "UNKNOWN")
             raise
-        self.journal.result(side, operation, "ACKED")
+
+        try:
+            self.journal.result(side, operation, "ACKED")
+        except BaseException:
+            self._write_uncertain = True
+            raise
+
         return outcome
 
 

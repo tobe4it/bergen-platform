@@ -58,6 +58,33 @@ class JournaledIntegrationTests(unittest.TestCase):
             run_offline_journaled_fixture(
                 self.plan, InMemoryMQ(), self.root)
 
+    def test_unknown_write_blocks_followup_mutations(self):
+        fake = InMemoryMQ(fail=("a", "apply", "create_receiver"))
+
+        with self.assertRaises(Exception):
+            run_offline_journaled_fixture(self.plan, fake, self.root)
+
+        writes = [
+            event for event in fake.events
+            if event[1] == "apply"
+        ]
+        self.assertEqual(writes, [
+            ("a", "apply", "add_deny"),
+            ("a", "apply", "create_receiver"),
+        ])
+
+        entries = read_journal(
+            self.root / "AUDIT.A1B2C3D.jsonl"
+        )
+        intents = [
+            row["data"]["operation"]
+            for row in entries if row["kind"] == "INTENT"
+        ]
+        self.assertEqual(
+            intents, ["add_deny", "define_receiver"]
+        )
+        self.assertNotEqual(entries[-1]["kind"], "CLEAN")
+
     def test_negative_runcheck_causes_rollback_and_unfinished_journal(self):
         fake = InMemoryMQ(fail=("b", "check", "wrong_issuer"))
         with self.assertRaises(Exception):
