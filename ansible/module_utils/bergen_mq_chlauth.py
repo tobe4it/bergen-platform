@@ -140,6 +140,10 @@ def make_plan(prefix, nodes):
             "cleanup": [remove_allow, "DELETE CHANNEL(%s)" % c,
                         remove_deny],
         }
+        # Deny MUST exist before the receiver: there must be no open window.
+        result[destination]["apply_order"] = [
+            deny, result[destination]["define_receiver"], allow,
+        ]
     return result
 
 
