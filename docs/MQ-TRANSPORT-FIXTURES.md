@@ -253,6 +253,19 @@ zunächst separat per `--syntax-check` zu prüfen und erst dann lesend
 auszuführen. **Der Istzustand ist nur ein Snapshot, keine exklusive
 Eigentumssicherung; ein Live-Apply ist weiterhin gesperrt.**
 
+**Lesende Laufzeitprüfung am 09.10.2026 bestanden:** Auf den beiden
+MQ-Hosts wurden jeweils drei reine DISPLAY-Aufrufe erfolgreich erfasst
+und die Ergebnisse anschließend vom Controller mit dem Read-only-Adapter
+validiert: `verification=PASS`, `read_only=true`, `changed=false`,
+`failed=false`. Ansible-Recap: BERGENLAB `ok=5 changed=0 failed=0`,
+BERGENLABB `ok=5 changed=0 failed=0`, localhost
+`ok=2 changed=0 failed=0`. Die exakt geprüften Test-Receiver waren
+`BGT.A1B2C3D.B2A` auf A und `BGT.A1B2C3D.A2B` auf B; beide sind
+weiterhin nicht definiert. Die Prüfung bestätigt das aktuelle
+MQSC-Parser-Verhalten, **nicht** die spätere CHLAUTH-Wirksamkeit nach
+Anlage der Regeln oder einen erfolgreichen mTLS-Transport.
+
+
 ```bash
 ansible-playbook -i ansible/inventory.yml -i ansible/inventory.local.yml \
   ansible/playbooks/mq-transport-chlauth-readonly-audit.yml --syntax-check
