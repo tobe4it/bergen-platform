@@ -446,8 +446,27 @@ Journal-Validierung, Recovery-Triage sowie die
 transienten Topologie-Falltests folgen demselben Muster.
 Bereits bestehende `BGT.CLIENT`-CHLAUTH-Regeln bleiben
 unverändert und werden weiterhin als Sicherheitsbaseline geprüft.
-Die zugehörigen neuen Offline- und Topologie-Regressionsprüfungen
-müssen **nach Git-Pull erneut auf dem Controller bestätigt** werden.
+Die ebenfalls bereits konfigurierte negative OAM-Testqueue
+`BGT.DENIED*` bleibt bis zu einer getrennten Migration unverändert.
+
+Prüfungen nach dem Git-Pull (noch keine Live-Schreibfreigabe):
+```bash
+ansible-playbook -i ansible/inventory.yml -i ansible/inventory.local.yml \
+  ansible/playbooks/mq-transport-chlauth-readonly-audit.yml --syntax-check
+ansible-playbook -i ansible/inventory.yml -i ansible/inventory.local.yml \
+  ansible/playbooks/mq-transport-chlauth-write-review.yml --syntax-check
+ansible-playbook -i ansible/inventory.yml -i ansible/inventory.local.yml \
+  ansible/playbooks/mq-transport-chlauth-write-review.yml --ask-vault-pass
+PYTHONPATH=ansible python3 -m unittest discover -s tests \
+  -p 'test_mq_transport.py' -v
+PYTHONPATH=ansible python3 -m unittest discover -s tests \
+  -p 'test_mq_topology.py' -v
+```
+Die erste Playbook-Syntaxprüfung kontrolliert den neuen
+`AUDIT.<7HEX>`-Sample-Receiver; anschließend müssen alle
+72 CHLAUTH-Offline-Tests sowie die gesonderten Transport- und
+Topologie-Fakes bestehen. Kein Befehl hier verändert MQ-Objekte.
+
 
 ## Unveränderliche Infrastruktur / Vorbedingungen
 
