@@ -84,10 +84,16 @@ und sollen eigene Transport-Dienstidentitäten bekommen:
 | BERGENLAB (A) | `bgttransa` | `MQBGTTRANSA` | `CN=bergen-mq-lab-b transport`; Issuer `CN=Bergen MQ Transport CA BERGENLABB` |
 | BERGENLABB (B) | `bgttransb` | `MQBGTTRANSB` | `CN=bergen-mq-lab transport`; Issuer `CN=Bergen MQ Transport CA BERGENLAB` |
 
-**Entwurf, noch nicht angewandt.** LDAP-Konten und Gruppen dürfen nur mit
-bekannter Directory-Provisionierungsstrategie angelegt werden; keine
-Passwörter, Bind-DNs oder Secrets ins Repository schreiben. Eigene
-Gruppen gewährleisten die Trennung von den Java-Audit-Benutzern.
+**LDAP-Identitäten am 09.10.2026 angelegt und zurückgelesen.** Beide Konten
+(`bgttransa` UID 1000016, `bgttransb` UID 1000017) und die eigenen Gruppen
+(`MQBGTTRANSA` GID 1000016, `MQBGTTRANSB` GID 1000017) wurden über das
+explizit freigegebene Ansible-Provisionierungsplaybook angelegt. Ausführung:
+`ok=20 changed=5 failed=0 skipped=1`; vier `ldapadd`-Aufrufe wurden
+als `changed` gemeldet, außerdem die Entfernung der kurzlebigen
+LDAP-Bind-Passwortdatei. Der authentifizierte LDAP-Read-back und die
+Prüfung der POSIX-IDs sowie `member`/`memberUid` bestanden. MQ-OAM,
+CHLAUTH und MQ-Transport wurden dabei nicht konfiguriert.
+Keine Passwörter oder Bind-Secrets ins Repository aufnehmen.
 
 Vor einem Transport-Start sind folgende unabhängige Sicherheitsnachweise
 erforderlich:
@@ -121,15 +127,12 @@ LDAP-Preflight `ok=6 changed=0 failed=0`, lesender Provisionierungscheck
 `MUST(cn,uid,uidNumber,gidNumber,homeDirectory)` sowie `posixGroup`
 mit `MUST(cn,gidNumber)` aus. Die Gruppen-LDIF nutzt `memberUid`
 (laut `posixGroup` optional) und `member` mit `extensibleObject`
-wie die bestehende MQ-Gruppe. Die vorgeschlagenen Zahlen 1000016 und
-1000017 sind **nicht reserviert**. Keine erfolgreiche Schreib- oder
-MQ-SEARCHGRP-Probe behaupten. Vor Apply Schema-/ACL-Kompatibilität,
-ID-Kollisionen, Mitgliedschaft und selektive Gruppenauflösung separat
-verifizieren; keine Rechtevergabe auf Verdacht.
-
-Die genaue Implementierung wird erst nach Prüfung der LDAP-Provisionierung
-und des Ansible/MQSC-Autorisierungsmodells hinzugefügt. Es werden
-keine Transportkanäle vorab gestartet oder produktive MQ-Objekte verändert.
+wie die bestehende MQ-Gruppe. Der anschließende LDAP-Schreiblauf und
+Read-back waren erfolgreich; die IDs sind damit belegt. **Ein MQ-SEARCHGRP-
+Nachweis steht weiterhin aus.** Ebenso offen sind die auf transportseitige
+Identitäten begrenzten MQ-OAM- und CHLAUTH-Freigaben; bis dahin keine
+Transportkanäle starten oder `mq_topology_channel_security_verified=true`
+setzen. Keine Rechtevergabe auf Verdacht.
 
 ## Unveränderliche Infrastruktur / Vorbedingungen
 
