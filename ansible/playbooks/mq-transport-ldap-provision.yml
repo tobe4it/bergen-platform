@@ -30,11 +30,11 @@
           - transport_ldap_accounts | length == 2
           - (transport_ldap_accounts | map(attribute='uid') | list) == ['bgttransa', 'bgttransb']
           - (transport_ldap_accounts | map(attribute='group') | list) == ['MQBGTTRANSA', 'MQBGTTRANSB']
-          - not transport_ldap_apply or (mq_transport_ldap_write_approved | default(false) | bool)
-          - not transport_ldap_apply or not ansible_check_mode
-          - not transport_ldap_apply or (mq_transport_ldap_schema_approved | default(false) | bool)
-          - not transport_ldap_apply or (mq_transport_ldap_bind_dn | default('') | length > 0)
-          - not transport_ldap_apply or (mq_transport_ldap_bind_password | default('') | length > 0)
+          - not (transport_ldap_apply | bool) or (mq_transport_ldap_write_approved | default(false) | bool)
+          - not (transport_ldap_apply | bool) or not ansible_check_mode
+          - not (transport_ldap_apply | bool) or (mq_transport_ldap_schema_approved | default(false) | bool)
+          - not (transport_ldap_apply | bool) or (mq_transport_ldap_bind_dn | default('') | length > 0)
+          - not (transport_ldap_apply | bool) or (mq_transport_ldap_bind_password | default('') | length > 0)
         fail_msg: >-
           Preview only by default. Creating LDAP identities requires separately
           approved Synology schema, vaulted admin credentials and explicit write
@@ -45,7 +45,7 @@
         state: directory
         prefix: bgt-transport-ldap-
       register: transport_ldap_secret_dir
-      when: transport_ldap_apply
+      when: transport_ldap_apply | bool
       no_log: true
 
     - name: Perform guarded provisioning and cleanup secret even on failure
@@ -55,13 +55,13 @@
             dest: "{{ transport_ldap_secret_dir.path }}/bind.pw"
             content: "{{ mq_transport_ldap_bind_password }}"
             mode: '0600'
-          when: transport_ldap_apply
+          when: transport_ldap_apply | bool
           no_log: true
 
         - name: Establish the privileged LDAP bind before any write
           ansible.builtin.command:
             argv: "{{ ['ldapwhoami', '-x', '-H', transport_ldap_uri, '-D', mq_transport_ldap_bind_dn, '-y', transport_ldap_secret_dir.path ~ '/bind.pw'] }}"
-          when: transport_ldap_apply
+          when: transport_ldap_apply | bool
           changed_when: false
           no_log: true
 
@@ -69,7 +69,7 @@
           ansible.builtin.command:
             argv: >-
               {{ ['ldapsearch', '-LLL', '-x', '-H', transport_ldap_uri] +
-                 (['-D', mq_transport_ldap_bind_dn, '-y', transport_ldap_secret_dir.path ~ '/bind.pw'] if transport_ldap_apply else []) +
+                 (['-D', mq_transport_ldap_bind_dn, '-y', transport_ldap_secret_dir.path ~ '/bind.pw'] if (transport_ldap_apply | bool) else []) +
                  ['-b', 'cn=users,' ~ transport_ldap_base, '-s', 'one',
                   '(uid=' ~ item.uid ~ ')',
                   'dn', 'objectClass', 'uid', 'cn', 'sn', 'uidNumber', 'gidNumber',
@@ -79,13 +79,13 @@
             label: "{{ item.uid }}"
           register: transport_ldap_user_check
           changed_when: false
-          no_log: "{{ transport_ldap_apply }}"
+          no_log: "{{ transport_ldap_apply | bool }}"
 
         - name: Inspect each intended LDAP group without changing it
           ansible.builtin.command:
             argv: >-
               {{ ['ldapsearch', '-LLL', '-x', '-H', transport_ldap_uri] +
-                 (['-D', mq_transport_ldap_bind_dn, '-y', transport_ldap_secret_dir.path ~ '/bind.pw'] if transport_ldap_apply else []) +
+                 (['-D', mq_transport_ldap_bind_dn, '-y', transport_ldap_secret_dir.path ~ '/bind.pw'] if (transport_ldap_apply | bool) else []) +
                  ['-b', 'cn=groups,' ~ transport_ldap_base, '-s', 'one',
                   '(cn=' ~ item.group ~ ')',
                   'dn', 'objectClass', 'cn', 'gidNumber', 'member', 'memberUid'] }}
@@ -94,19 +94,19 @@
             label: "{{ item.group }}"
           register: transport_ldap_group_check
           changed_when: false
-          no_log: "{{ transport_ldap_apply }}"
+          no_log: "{{ transport_ldap_apply | bool }}"
 
         - name: Check numerical ID collisions throughout the directory
           ansible.builtin.command:
             argv: >-
               {{ ['ldapsearch', '-LLL', '-x', '-H', transport_ldap_uri] +
-                 (['-D', mq_transport_ldap_bind_dn, '-y', transport_ldap_secret_dir.path ~ '/bind.pw'] if transport_ldap_apply else []) +
+                 (['-D', mq_transport_ldap_bind_dn, '-y', transport_ldap_secret_dir.path ~ '/bind.pw'] if (transport_ldap_apply | bool) else []) +
                  ['-b', transport_ldap_base, '-s', 'sub',
                   '(|(uidNumber=1000016)(uidNumber=1000017)(gidNumber=1000016)(gidNumber=1000017))',
                   'dn', 'uidNumber', 'gidNumber'] }}
           register: transport_ldap_id_check
           changed_when: false
-          no_log: "{{ transport_ldap_apply }}"
+          no_log: "{{ transport_ldap_apply | bool }}"
 
         - name: Require existing users to match the exact intended immutable attributes
           ansible.builtin.assert:
@@ -128,7 +128,7 @@
           loop: "{{ transport_ldap_user_check.results }}"
           loop_control:
             label: "{{ item.item.uid }}"
-          no_log: "{{ transport_ldap_apply }}"
+          no_log: "{{ transport_ldap_apply | bool }}"
 
         - name: Require existing groups to match the exact intended transport membership
           ansible.builtin.assert:
@@ -146,7 +146,7 @@
           loop: "{{ transport_ldap_group_check.results }}"
           loop_control:
             label: "{{ item.item.group }}"
-          no_log: "{{ transport_ldap_apply }}"
+          no_log: "{{ transport_ldap_apply | bool }}"
 
         - name: Reject any numerical ID used by another DN
           ansible.builtin.assert:
@@ -156,18 +156,18 @@
                    regex_findall('(?m)^dn: (.+)$')) |
                  difference(transport_ldap_expected_dns) | length) == 0
             fail_msg: "Numeric LDAP identity collision; abort without modifying existing entries."
-          no_log: "{{ transport_ldap_apply }}"
+          no_log: "{{ transport_ldap_apply | bool }}"
 
         - name: Confirm existing primary POSIX group
           ansible.builtin.command:
             argv: >-
               {{ ['ldapsearch', '-LLL', '-x', '-H', transport_ldap_uri] +
-                 (['-D', mq_transport_ldap_bind_dn, '-y', transport_ldap_secret_dir.path ~ '/bind.pw'] if transport_ldap_apply else []) +
+                 (['-D', mq_transport_ldap_bind_dn, '-y', transport_ldap_secret_dir.path ~ '/bind.pw'] if (transport_ldap_apply | bool) else []) +
                  ['-b', 'cn=groups,' ~ transport_ldap_base, '-s', 'one',
                   '(gidNumber=1000001)', 'dn', 'gidNumber'] }}
           register: transport_ldap_primary_group
           changed_when: false
-          no_log: "{{ transport_ldap_apply }}"
+          no_log: "{{ transport_ldap_apply | bool }}"
 
         - name: Ensure primary POSIX group is present
           ansible.builtin.assert:
@@ -175,7 +175,7 @@
               - >-
                 transport_ldap_primary_group.stdout is search('(?m)^dn: ')
             fail_msg: "Primary POSIX group GID 1000001 is not visible; refuse provisioning."
-          no_log: "{{ transport_ldap_apply }}"
+          no_log: "{{ transport_ldap_apply | bool }}"
 
         - name: Create only absent LDAP transport user entries
           ansible.builtin.command:
@@ -207,7 +207,7 @@
             index_var: transport_index
             label: "{{ item.uid }}"
           when:
-            - transport_ldap_apply
+            - transport_ldap_apply | bool
             - (transport_ldap_user_check.results[transport_index].stdout | trim) == ''
           no_log: true
 
@@ -236,7 +236,7 @@
             index_var: transport_index
             label: "{{ item.group }}"
           when:
-            - transport_ldap_apply
+            - transport_ldap_apply | bool
             - (transport_ldap_group_check.results[transport_index].stdout | trim) == ''
           no_log: true
 
@@ -246,7 +246,103 @@
               READ-ONLY PASS: LDAP transport candidates were examined;
               existing entries (if any) match exactly, and no unrelated
               DN uses the planned numeric IDs. No LDAP or MQ change.
-          when: not transport_ldap_apply
+          when: not (transport_ldap_apply | bool)
+
+        - name: Read back provisioned users by exact DN
+          ansible.builtin.command:
+            argv:
+              - ldapsearch
+              - -LLL
+              - -x
+              - -H
+              - "{{ transport_ldap_uri }}"
+              - -D
+              - "{{ mq_transport_ldap_bind_dn }}"
+              - -y
+              - "{{ transport_ldap_secret_dir.path }}/bind.pw"
+              - -b
+              - "uid={{ item.uid }},cn=users,{{ transport_ldap_base }}"
+              - -s
+              - base
+              - "(objectClass=*)"
+              - dn
+              - uid
+              - uidNumber
+              - gidNumber
+              - loginShell
+          loop: "{{ transport_ldap_accounts }}"
+          loop_control:
+            label: "{{ item.uid }}"
+          register: transport_ldap_users_after
+          changed_when: false
+          when: transport_ldap_apply | bool
+          no_log: true
+
+        - name: Read back provisioned groups by exact DN
+          ansible.builtin.command:
+            argv:
+              - ldapsearch
+              - -LLL
+              - -x
+              - -H
+              - "{{ transport_ldap_uri }}"
+              - -D
+              - "{{ mq_transport_ldap_bind_dn }}"
+              - -y
+              - "{{ transport_ldap_secret_dir.path }}/bind.pw"
+              - -b
+              - "cn={{ item.group }},cn=groups,{{ transport_ldap_base }}"
+              - -s
+              - base
+              - "(objectClass=*)"
+              - dn
+              - gidNumber
+              - member
+              - memberUid
+          loop: "{{ transport_ldap_accounts }}"
+          loop_control:
+            label: "{{ item.group }}"
+          register: transport_ldap_groups_after
+          changed_when: false
+          when: transport_ldap_apply | bool
+          no_log: true
+
+        - name: Require all created LDAP users match their intended POSIX identities
+          ansible.builtin.assert:
+            that:
+              - >-
+                ('dn: uid=' ~ item.item.uid ~ ',cn=users,' ~ transport_ldap_base) in item.stdout_lines
+              - >-
+                ('uid: ' ~ item.item.uid) in item.stdout_lines
+              - >-
+                ('uidNumber: ' ~ (item.item.uid_number | string)) in item.stdout_lines
+              - >-
+                ('gidNumber: ' ~ (transport_ldap_primary_gid | string)) in item.stdout_lines
+              - "'loginShell: /bin/false' in item.stdout_lines"
+            fail_msg: "LDAP user post-creation verification failed; do not configure MQ."
+          loop: "{{ transport_ldap_users_after.results | default([]) }}"
+          loop_control:
+            label: "{{ item.item.uid }}"
+          when: transport_ldap_apply | bool
+          no_log: true
+
+        - name: Require all created LDAP groups match isolated memberships
+          ansible.builtin.assert:
+            that:
+              - >-
+                ('dn: cn=' ~ item.item.group ~ ',cn=groups,' ~ transport_ldap_base) in item.stdout_lines
+              - >-
+                ('gidNumber: ' ~ (item.item.group_gid | string)) in item.stdout_lines
+              - >-
+                ('member: uid=' ~ item.item.uid ~ ',cn=users,' ~ transport_ldap_base) in item.stdout_lines
+              - >-
+                ('memberUid: ' ~ item.item.uid) in item.stdout_lines
+            fail_msg: "LDAP group membership post-creation verification failed; do not configure MQ."
+          loop: "{{ transport_ldap_groups_after.results | default([]) }}"
+          loop_control:
+            label: "{{ item.item.group }}"
+          when: transport_ldap_apply | bool
+          no_log: true
 
         - name: Report completed LDAP creation requires independent verification
           ansible.builtin.debug:
@@ -254,13 +350,13 @@
               LDAP add requests completed. Independently verify the two users,
               group memberships and MQ SEARCHGRP resolution before CHLAUTH
               or OAM grants. Partial failure requires manual inspection.
-          when: transport_ldap_apply
+          when: transport_ldap_apply | bool
       always:
         - name: Remove temporary LDAP administrative bind secret
           ansible.builtin.file:
             path: "{{ transport_ldap_secret_dir.path }}"
             state: absent
           when:
-            - transport_ldap_apply
+            - transport_ldap_apply | bool
             - transport_ldap_secret_dir.path is defined
           no_log: true
