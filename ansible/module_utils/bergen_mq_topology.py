@@ -9,6 +9,9 @@ from datetime import datetime, timezone
 from ansible.module_utils.bergen_mq import MQError, RestClient, discover, reconcile
 from ansible.module_utils.bergen_mq_audit import run_audit
 from ansible.module_utils.bergen_mq_transport import TransientTransport
+from ansible.module_utils.bergen_mq_audit_names import (
+    local_queue, alias_queue, remote_queue, transmission_queue,
+)
 
 
 def now():
@@ -205,12 +208,14 @@ def run(nodes, ssh, revision, confirm=False, include_objects=True, clients=None,
             for index, op in enumerate(LOCAL_CASES):
                 if uncertain:
                     break
-                name = prefix + '.' + side.upper() + str(index)
+                name = local_queue(prefix, side.upper() + str(index))
                 def execute(s=side, q=name, operation=op):
                     attrs = dict(maxdepth=1 if operation == 'full' else 10, maxmsgl=4096, defpsist='yes')
                     if operation == 'put_denied': attrs['put'] = 'disabled'
                     if operation == 'get_denied': attrs['get'] = 'disabled'
                     fixture(s, q, **attrs)
+                    alias = alias_queue(prefix, s.upper() + str(index))
+                    fixture(s, alias, 'qalias', target=q)
                     settings = dict(queue=q)
                     action = operation
                     if operation in ('nonpersistent', 'zero-length', 'binary-4k'):
@@ -219,8 +224,7 @@ def run(nodes, ssh, revision, confirm=False, include_objects=True, clients=None,
                                         persistence=0 if operation == 'nonpersistent' else 1)
                     if operation == 'oversize': settings['size'] = 4097
                     if operation == 'alias':
-                        fixture(s, q + '.AL', 'qalias', target=q)
-                        settings.update(queue=q + '.AL', other_queue=q)
+                        settings.update(queue=alias, other_queue=q)
                     return probe(action, s, **settings)
                 expected = {'empty': 2033, 'put_denied': 2051, 'get_denied': 2016, 'oversize': 2030}.get(op, 0)
                 case(side + ':' + op, execute, expected=expected)
@@ -260,17 +264,22 @@ def run(nodes, ssh, revision, confirm=False, include_objects=True, clients=None,
                 report['tests'].append(dict(id=side + ':remote-transport', status='NOT_TESTED', detail='Needs both positive connections and dedicated TLS SDR/RCVR/XMITQ fixtures'))
                 continue
             def transport(s=side, d=dest, ch=channel, xq=xmitq, variant='persistent'):
-                assert re.fullmatch(r'BGT\.[A-Z0-9.]{1,16}', ch)
-                assert re.fullmatch(r'BGT\.[A-Z0-9.]{1,44}', xq)
+                assert (re.fullmatch(r'BGT\.[A-Z0-9.]{1,16}', ch)
+                        or re.fullmatch(r'AUDIT\.[A-F0-9]{7}\.[AB]2[AB]', ch))
+                assert (re.fullmatch(r'BGT\.[A-Z0-9.]{1,44}', xq)
+                        or re.fullmatch(r'XQ\.AUDIT\.[A-F0-9]{7}\.[AB]X', xq))
                 sender = discover(clients[s], dict(name=ch, type='channel', state='present', attributes={'chltype': 'sdr'}))
                 receiver = discover(clients[d], dict(name=ch, type='channel', state='present', attributes={'chltype': 'rcvr'}))
                 assert sender and receiver and sender.get('sslciph') and receiver.get('sslciph')
                 assert sender.get('xmitq') == xq
                 suffix = variant.upper()
-                q = prefix + '.' + d.upper() + '.' + suffix + '.IN'
-                remote = prefix + '.' + s.upper() + '.' + suffix + '.REMOTE'
+                logical_suffix = d.upper() + '.' + suffix + '.IN'
+                q = local_queue(prefix, logical_suffix)
+                alias = alias_queue(prefix, logical_suffix)
+                remote = remote_queue(prefix, s.upper() + '.' + suffix + '.REMOTE')
                 fixture(d, q, maxdepth=10, maxmsgl=4096, defpsist='yes')
-                fixture(s, remote, 'qremote', rname=q, rqmname=nodes[d]['qmgr'], xmitq=xq)
+                fixture(d, alias, 'qalias', target=q)
+                fixture(s, remote, 'qremote', rname=alias, rqmname=nodes[d]['qmgr'], xmitq=xq)
                 result = probe('route_' + variant if variant in ('commit', 'rollback') else 'route', s,
                                queue=remote, other_queue=q, destination=d,
                                persistence=0 if variant == 'nonpersistent' else 1,
