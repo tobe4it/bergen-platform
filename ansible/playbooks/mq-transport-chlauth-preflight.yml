@@ -13,14 +13,14 @@
     mq_chlauth_expected:
       bergen-mq-lab:
         qmgr: BERGENLAB
-        receiver: BGT.A1B2C3D.B2A
+        receiver: AUDIT.A1B2C3D.B2A
         peer_ip: 192.168.20.156
         subject: CN=bergen-mq-lab-b transport
         issuer: CN=Bergen MQ Transport CA BERGENLABB
         user: bgttransa
       bergen-mq-lab-b:
         qmgr: BERGENLABB
-        receiver: BGT.A1B2C3D.A2B
+        receiver: AUDIT.A1B2C3D.A2B
         peer_ip: 192.168.20.212
         subject: CN=bergen-mq-lab transport
         issuer: CN=Bergen MQ Transport CA BERGENLAB
