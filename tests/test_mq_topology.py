@@ -87,7 +87,7 @@ class TopologyTests(unittest.TestCase):
         clients = dict(a=FakeClient(), b=FakeClient())
         report = topology.run(nodes(), {'host': 'client'}, 'test', True, False, clients, probe)
         self.assertEqual(report['status'], 'FAIL')
-        self.assertEqual(len(report['residual_objects']), 1)
+        self.assertEqual(len(report['residual_objects']), 2)  # physical LQ plus alias
         self.assertFalse(any(c[0] == 'delete' for c in clients['a'].calls))
         self.assertFalse(clients['b'].calls)
 
