@@ -27,7 +27,7 @@ def main():
     if not isinstance(responses, dict) or set(responses) != expected_sides:
         module.fail_json(msg="Require exactly two MQ host evidence groups a/b")
     plan = make_plan(
-        "BGT.A1B2C3D",
+        "AUDIT.A1B2C3D",
         {side: {"host": data["host"], "qmgr": data["qmgr"], "port": 1414}
          for side, data in LAB.items()},
     )
