@@ -241,8 +241,22 @@ Client- und Admin-Regelzustand. Die Methoden für Mutationen und
 Lifecycle-Verifikation verweigern jeden Aufruf. Die dazugehörigen
 `tests/test_mq_chlauth_readonly.py` prüfen auch Ablehnungen bei
 Kollisionen und mehrdeutigen MQSC-Rückmeldungen.
-**Kein Live-MQSC-Runner ist angeschlossen; die Bestandsaufnahme ist
-nur ein Snapshot und keine exklusive Eigentumssicherung.**
+Die lesende Laufzeitintegration verwendet
+`ansible/playbooks/mq-transport-chlauth-readonly-audit.yml` und
+`ansible/library/mq_chlauth_readonly_audit.py`. Ansible führt pro
+MQ-Host genau drei `DISPLAY`-Befehle über den vorhandenen Container
+aus; nur die Rückgaben werden auf localhost dem geprüften Read-only-
+Adapter übergeben. Der Adapter führt selbst keine SSH-, Podman- oder
+MQSC-Aufrufe aus und besitzt keine Schreibmethode. Er verweigert
+fehlende, unplausible und kollidierende Antworten. Das Script ist
+zunächst separat per `--syntax-check` zu prüfen und erst dann lesend
+auszuführen. **Der Istzustand ist nur ein Snapshot, keine exklusive
+Eigentumssicherung; ein Live-Apply ist weiterhin gesperrt.**
+
+```bash
+ansible-playbook -i ansible/inventory.yml -i ansible/inventory.local.yml \
+  ansible/playbooks/mq-transport-chlauth-readonly-audit.yml --syntax-check
+```
 
 Die strikt offline arbeitende MQSC-Auswertung
 `ansible/module_utils/bergen_mq_chlauth_mqsc.py` fordert pro
