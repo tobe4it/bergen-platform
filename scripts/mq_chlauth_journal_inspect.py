@@ -19,7 +19,7 @@ from module_utils.bergen_mq_chlauth_journal import (  # noqa: E402
 
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("journal", type=Path, help="Existing BGT.<7HEX>.jsonl file")
+    parser.add_argument("journal", type=Path, help="Existing AUDIT.<7HEX>.jsonl file")
     args = parser.parse_args(argv)
     try:
         result = recovery_report(args.journal)
