@@ -55,6 +55,9 @@ class ChlauthPlanTests(unittest.TestCase):
                 self.assertNotIn("REMOVEALL", command)
                 self.assertNotIn("BGT.*", command)
             self.assertIn("ACTION(REMOVE)", fixture["cleanup"][0])
+            self.assertTrue(fixture["cleanup"][1].startswith("DELETE CHANNEL("))
+            self.assertIn("TYPE(ADDRESSMAP)", fixture["cleanup"][2])
+            self.assertIn("ACTION(REMOVE)", fixture["cleanup"][2])
 
     def test_invalid_prefix_and_injection_rejected(self):
         for prefix in ("BGT.*", "BGT.CLIENT", "BGT.abcdef0",
