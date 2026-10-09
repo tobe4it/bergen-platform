@@ -113,6 +113,20 @@ erforderlich:
    OAM-Fixtures um; `mq_topology_channel_security_verified` darf deshalb
    noch **nicht** als belegt gelten.
 
+Schema- und Verzeichnisprüfung vom 09.10.2026: anonyme LDAPS-Suche,
+administrativer `ldapwhoami`-Bind sowie Vault-Ladeprüfung erfolgreich;
+LDAP-Preflight `ok=6 changed=0 failed=0`, lesender Provisionierungscheck
+`ok=10 changed=0 failed=0`. Das veröffentlichte `cn=Subschema` weist
+`person` mit `MUST(sn,cn)`, `posixAccount` mit
+`MUST(cn,uid,uidNumber,gidNumber,homeDirectory)` sowie `posixGroup`
+mit `MUST(cn,gidNumber)` aus. Die Gruppen-LDIF nutzt `memberUid`
+(laut `posixGroup` optional) und `member` mit `extensibleObject`
+wie die bestehende MQ-Gruppe. Die vorgeschlagenen Zahlen 1000016 und
+1000017 sind **nicht reserviert**. Keine erfolgreiche Schreib- oder
+MQ-SEARCHGRP-Probe behaupten. Vor Apply Schema-/ACL-Kompatibilität,
+ID-Kollisionen, Mitgliedschaft und selektive Gruppenauflösung separat
+verifizieren; keine Rechtevergabe auf Verdacht.
+
 Die genaue Implementierung wird erst nach Prüfung der LDAP-Provisionierung
 und des Ansible/MQSC-Autorisierungsmodells hinzugefügt. Es werden
 keine Transportkanäle vorab gestartet oder produktive MQ-Objekte verändert.
