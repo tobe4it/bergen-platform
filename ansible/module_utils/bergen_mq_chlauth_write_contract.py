@@ -15,7 +15,7 @@ def canonical_plan():
         side: {"qmgr": data["qmgr"], "host": data["host"], "port": 1414}
         for side, data in LAB.items()
     }
-    return make_plan("BGT.A1B2C3D", nodes)
+    return make_plan("AUDIT.A1B2C3D", nodes)
 
 
 class ApprovedCommandContract:
