@@ -2,9 +2,10 @@
 from pathlib import Path
 import tempfile
 import unittest
+from unittest.mock import patch
 
 from module_utils.bergen_mq_chlauth import ChlauthPlanError
-from module_utils.bergen_mq_chlauth_journal import JournalError, read_journal
+from module_utils.bergen_mq_chlauth_journal import JournalError, LockedFixtureJournal, read_journal
 from module_utils.bergen_mq_chlauth_journaled_offline import (
     run_offline_journaled_fixture,
 )
@@ -57,6 +58,53 @@ class JournaledIntegrationTests(unittest.TestCase):
         with self.assertRaisesRegex(JournalError, "Unresolved"):
             run_offline_journaled_fixture(
                 self.plan, InMemoryMQ(), self.root)
+
+    def test_journal_intent_failure_prevents_fake_write(self):
+        fake = InMemoryMQ()
+
+        with patch.object(
+            LockedFixtureJournal, "intent",
+            side_effect=OSError("simulated journal intent failure")
+        ):
+            with self.assertRaises(Exception):
+                run_offline_journaled_fixture(
+                    self.plan, fake, self.root
+                )
+
+        writes = [e for e in fake.events if e[1] == "apply"]
+        self.assertEqual(writes, [])
+
+        entries = read_journal(
+            self.root / "AUDIT.A1B2C3D.jsonl"
+        )
+        self.assertEqual(
+            [e["kind"] for e in entries], ["BEGIN"]
+        )
+
+    def test_journal_result_failure_blocks_followup_writes(self):
+        fake = InMemoryMQ()
+
+        with patch.object(
+            LockedFixtureJournal, "result",
+            side_effect=OSError("simulated journal result failure")
+        ):
+            with self.assertRaises(Exception):
+                run_offline_journaled_fixture(
+                    self.plan, fake, self.root
+                )
+
+        writes = [e for e in fake.events if e[1] == "apply"]
+        self.assertEqual(
+            writes, [("a", "apply", "add_deny")]
+        )
+
+        entries = read_journal(
+            self.root / "AUDIT.A1B2C3D.jsonl"
+        )
+        self.assertEqual(
+            [e["kind"] for e in entries],
+            ["BEGIN", "INTENT"]
+        )
 
     def test_unknown_write_blocks_followup_mutations(self):
         fake = InMemoryMQ(fail=("a", "apply", "create_receiver"))
