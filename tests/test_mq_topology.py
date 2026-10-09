@@ -92,7 +92,7 @@ class TopologyTests(unittest.TestCase):
         clients = dict(a=FakeClient(), b=FakeClient())
         report = topology.run(nodes(), {'host': 'client'}, 'test', True, False, clients, probe)
         self.assertEqual(report['status'], 'FAIL')
-        self.assertEqual(len(report['residual_objects']), 2)  # physical LQ plus alias
+        self.assertEqual(len(report['residual_objects']), 2)  # physical LQ and alias
         self.assertFalse(any(c[0] == 'delete' for c in clients['a'].calls))
         self.assertFalse(clients['b'].calls)
 
@@ -142,6 +142,7 @@ class TopologyTests(unittest.TestCase):
 
 if __name__ == '__main__': unittest.main()
 )
+
         for side, client in clients.items():
             qlocals = {
                 call[2]: call[3] for call in client.calls
