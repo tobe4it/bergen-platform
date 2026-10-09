@@ -6,22 +6,25 @@ queue-manager settings or firewall rules. Unknown channel/queue state is unsafe.
 import re
 import time
 from ansible.module_utils.bergen_mq import MQError, discover, reconcile, responses
+from ansible.module_utils.bergen_mq_audit_names import (
+    validate_run, channel_name, transmission_queue,
+)
 
 CIPHER = "TLS_AES_256_GCM_SHA384"
 TRANSPORT_CERTLABL = "bergentransport"
 SIDES = (("a", "b"), ("b", "a"))
-CHANNEL_NAME = re.compile(r"^BGT\.[A-F0-9]{7}\.[AB]2[AB]$")
+CHANNEL_NAME = re.compile(r"^AUDIT\.[A-F0-9]{7}\.[AB]2[AB]$")
 ACTIVE_TIMEOUT = 25
 STOP_TIMEOUT = 25
 
 
 def declarations(prefix, nodes):
-    if not re.fullmatch(r"BGT\.[A-F0-9]{7}", prefix):
+    if not re.fullmatch(r"AUDIT\.[A-F0-9]{7}", prefix):
         raise MQError("Invalid unique audit prefix")
     result = {}
     for side, destination in SIDES:
-        channel = prefix + "." + side.upper() + "2" + destination.upper()
-        xmitq = prefix + "." + side.upper() + "X"
+        channel = channel_name(prefix, side, destination)
+        xmitq = transmission_queue(prefix, side)
         peer = nodes[destination]
         if not CHANNEL_NAME.fullmatch(channel):
             raise MQError("Channel name outside run-scoped namespace")
