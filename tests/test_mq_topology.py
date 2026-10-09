@@ -76,72 +76,7 @@ class TopologyTests(unittest.TestCase):
             False, clients, success_probe,
         )
         prefix = report['prefix']
-        self.assertRegex(prefix, r'^AUDIT[.][A-F0-9]{7}
-        def probe(op, *args, **kwargs):
-            if op == 'bad_password': return dict(ok=False, reason=2538, tls_failure=False)
-            return success_probe(op, *args, **kwargs)
-        report = topology.run(nodes(), {'host': 'client'}, 'test', True, False,
-                              dict(a=FakeClient(), b=FakeClient()), probe)
-        self.assertEqual(report['status'], 'FAIL')
-        self.assertTrue(all(t['status'] == 'FAIL' for t in report['tests'] if t['id'].endswith(':invalid-password')))
-
-    def test_timeout_retains_owned_fixtures_and_stops_mutations(self):
-        def probe(op, *args, **kwargs):
-            if op == 'roundtrip': raise mq.MQError('outcome uncertain')
-            return success_probe(op, *args, **kwargs)
-        clients = dict(a=FakeClient(), b=FakeClient())
-        report = topology.run(nodes(), {'host': 'client'}, 'test', True, False, clients, probe)
-        self.assertEqual(report['status'], 'FAIL')
-        self.assertEqual(len(report['residual_objects']), 2)  # physical LQ plus alias
-        self.assertFalse(any(c[0] == 'delete' for c in clients['a'].calls))
-        self.assertFalse(clients['b'].calls)
-
-    def test_probe_overrides_payload_size_and_secrets_use_stdin_only(self):
-        response = subprocess.CompletedProcess([], 0, '{"ok":true,"reason":0,"tls_failure":false}\n', '')
-        with patch.object(topology.subprocess, 'run', return_value=response) as execute:
-            result = topology.Probe(nodes(), {'host': 'client'})('roundtrip', size=4096)
-        self.assertTrue(result['ok'])
-        argv = execute.call_args.args[0]
-        self.assertNotIn('hidden-client', str(argv))
-        self.assertIn('StrictHostKeyChecking=yes', argv)
-        properties = dict(line.split('=', 1) for line in execute.call_args.kwargs['input'].splitlines())
-        self.assertEqual(base64.b64decode(properties['size']), b'4096')
-        self.assertEqual(base64.b64decode(properties['a.password']), b'hidden-client')
-        self.assertEqual(base64.b64decode(properties['a.protocol']), b'TLSv1.3')
-        self.assertEqual(execute.call_args.kwargs['timeout'], 45)
-
-    def test_malformed_probe_output_is_not_a_pass(self):
-        for output in ('', '{}', '{"ok":"true","reason":0,"tls_failure":false}'):
-            with patch.object(topology.subprocess, 'run', return_value=subprocess.CompletedProcess([], 0, output, 'secret')):
-                with self.assertRaises(mq.MQError): topology.Probe(nodes(), {'host': 'client'})('connect')
-
-    def test_cleanup_failure_survives_in_report(self):
-        clients = dict(a=FakeClient(), b=FakeClient())
-        original = clients['a'].command
-        def command(cmd, *args, **kwargs):
-            if cmd == 'delete': raise mq.MQError('in use')
-            return original(cmd, *args, **kwargs)
-        clients['a'].command = command
-        report = topology.run(nodes(), {'host': 'client'}, 'test', True, False, clients, success_probe)
-        self.assertEqual(report['status'], 'FAIL')
-        self.assertTrue(report['residual_objects'])
-
-    def test_java_compiles_and_selftest_uses_only_standard_runtime(self):
-        import shutil
-        import tempfile
-        if not shutil.which('java'): self.skipTest('Java unavailable')
-        with tempfile.TemporaryDirectory(prefix='bergen-probe-test-') as target:
-            result = subprocess.run(['java', '-m', 'jdk.compiler/com.sun.tools.javac.Main', '-d', target,
-                                     str(ROOT / 'tools/mq-tests/BergenMQProbe.java')], capture_output=True, text=True)
-            self.assertEqual(result.returncode, 0, result.stderr)
-            values = {'operation': 'selftest', 'size': '4096', 'seed': '42'}
-            payload = '\n'.join(k + '=' + base64.b64encode(v.encode()).decode() for k, v in values.items())
-            run = subprocess.run(['java', '-cp', target, 'BergenMQProbe'], input=payload, capture_output=True, text=True)
-            self.assertTrue(json.loads(run.stdout)['ok'])
-
-
-if __name__ == '__main__': unittest.main()
-)
+        self.assertRegex(prefix, r'^AUDIT[.][A-F0-9]{7}$')
         for side, client in clients.items():
             qlocals = {
                 call[2]: call[3] for call in client.calls
@@ -217,7 +152,7 @@ if __name__ == '__main__': unittest.main()
         clients = dict(a=FakeClient(), b=FakeClient())
         report = topology.run(nodes(), {'host': 'client'}, 'test', True, False, clients, probe)
         self.assertEqual(report['status'], 'FAIL')
-        self.assertEqual(len(report['residual_objects']), 1)
+        self.assertEqual(len(report['residual_objects']), 2)  # physical LQ plus alias
         self.assertFalse(any(c[0] == 'delete' for c in clients['a'].calls))
         self.assertFalse(clients['b'].calls)
 
