@@ -34,8 +34,19 @@
       register: mq_chlauth_offline_tests
       changed_when: false
 
-    - name: Confirm only offline validation was performed
+    - name: Require unittest summary is available and no tests were skipped
+      ansible.builtin.assert:
+        that:
+          - "'OK' in mq_chlauth_offline_tests.stderr.splitlines()"
+          - "'FAILED' not in mq_chlauth_offline_tests.stderr"
+          - "'skipped=' not in mq_chlauth_offline_tests.stderr"
+          - "mq_chlauth_offline_tests.stderr is search('Ran [0-9]+ tests? in')"
+        fail_msg: Offline test count or successful summary missing.
+
+    - name: Show unittest summary and confirm no MQ mutation
       ansible.builtin.debug:
         msg: >-
-          PASS: CHLAUTH offline tests completed without altering any MQ
-          object. There is NO live CHLAUTH writer or authorization to apply.
+          {{ mq_chlauth_offline_tests.stderr.splitlines()
+          | select('match', '^(Ran [0-9]+ tests? in|OK)
+) | list }}
+          — Offline only; no MQ objects changed and no live writer enabled.
