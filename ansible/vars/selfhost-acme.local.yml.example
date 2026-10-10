@@ -1,0 +1,11 @@
+---
+# EXAMPLE ONLY. Copy to selfhost-acme.local.yml (Git-ignored).
+# Never commit real domains, DNS server names, record IDs or contact emails.
+selfhost_acme_zone: CHANGE_ME_DNS_ZONE
+selfhost_acme_record_ids:
+  - CHANGE_ME_RECORD_ID_ONE
+  - CHANGE_ME_RECORD_ID_TWO
+selfhost_acme_nameservers:
+  - CHANGE_ME_AUTHORITATIVE_NS_ONE
+  - CHANGE_ME_AUTHORITATIVE_NS_TWO
+selfhost_acme_contact_email: CHANGE_ME_ACME_CONTACT_EMAIL
