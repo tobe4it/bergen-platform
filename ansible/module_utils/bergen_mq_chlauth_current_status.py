@@ -18,6 +18,16 @@ _VERSION = re.compile(r"5724-H72\s+\(C\)\s+Copyright IBM Corp\..*")
 
 def _unknown_line_kind(line):
     """Classify without echoing full (potentially sensitive) MQSC output."""
+    if len(line) == 1:
+        # Disclose only a known ASCII punctuation code point. Never echo a
+        # possibly sensitive alphabetic, numeric or non-ASCII raw value.
+        if line in ":>;|":
+            return "single-mqsc-punctuation-U+%04X" % ord(line)
+        if line.isalpha():
+            return "single-letter"
+        if line.isdigit():
+            return "single-digit"
+        return "single-unclassified"
     if line.startswith("5724-"):
         return "copyright-or-version"
     if line.startswith("Starting MQSC"):
