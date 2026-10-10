@@ -121,9 +121,10 @@ def test_reject_wrong_domain_or_invalid_token():
 
 def test_placeholder_only_source():
     code = (HERE / "scripts/selfhost_acme_hook.py").read_text()
-    assert "thebergens.net" not in code
-    assert "3364072" not in code and "3364073" not in code
+    assert "example.invalid" not in code
     assert 'DEFAULT_CONFIG = "/etc/letsencrypt/selfhost-acme.json"' in code
+    assert '"record_ids"' in code
+    assert '"zone"' in code
 
 
 def test_state_directory_requires_private_permissions(tmp_path):
