@@ -22,6 +22,7 @@
           - selfhost_acme_contact_email is match('^[^ @]+@[^ @]+$')
           - selfhost_acme_record_ids | length == 2
           - selfhost_acme_record_ids | unique | length == 2
+          - selfhost_acme_record_ids | select('integer') | list | length == 2
           - selfhost_acme_nameservers | length >= 2
           - selfhost_acme_api_key is match('^[A-Za-z0-9_-]+\\.[A-Za-z0-9_-]+$')
           - mail_tls_source_cert_file is match('^/etc/letsencrypt/live/')
@@ -118,8 +119,8 @@
     - name: Require both selfHOST TXT slots to be idle on all nameservers
       ansible.builtin.assert:
         that:
-          - "'selfhost-api-idle-' ~ (selfhost_acme_record_ids[0] | string) in item.stdout"
-          - "'selfhost-api-idle-' ~ (selfhost_acme_record_ids[1] | string) in item.stdout"
+          - "('selfhost-api-idle-' ~ (selfhost_acme_record_ids[0] | string)) in (item.stdout | replace('\\\"', ''))"
+          - "('selfhost-api-idle-' ~ (selfhost_acme_record_ids[1] | string)) in (item.stdout | replace('\\\"', ''))"
         fail_msg: DNS is not in the expected idle state; abort before ACME staging
       loop: "{{ selfhost_acme_idle_dns.results }}"
       loop_control:
@@ -176,11 +177,34 @@
           - "{{ selfhost_acme_zone }}"
           - -d
           - "*.{{ selfhost_acme_zone }}"
+        creates: /var/lib/acme-staging/config/live/selfhost-dns-api-staging/fullchain.pem
       async: 1200
       poll: 15
       register: selfhost_acme_staging_run
       when: selfhost_acme_run_staging | default(false) | bool
       no_log: true
+
+    - name: Read isolated staging certificate SANs
+      ansible.builtin.command:
+        argv:
+          - openssl
+          - x509
+          - -in
+          - /var/lib/acme-staging/config/live/selfhost-dns-api-staging/fullchain.pem
+          - -noout
+          - -ext
+          - subjectAltName
+      register: selfhost_acme_staging_sans
+      changed_when: false
+      when: selfhost_acme_run_staging | default(false) | bool
+
+    - name: Require both expected DNS names in isolated staging certificate
+      ansible.builtin.assert:
+        that:
+          - "('DNS:' ~ selfhost_acme_zone) in selfhost_acme_staging_sans.stdout"
+          - "('DNS:*.' ~ selfhost_acme_zone) in selfhost_acme_staging_sans.stdout"
+        fail_msg: Isolated staging certificate did not include both expected DNS names
+      when: selfhost_acme_run_staging | default(false) | bool
 
     - name: Report staging status without revealing certificate source secrets
       ansible.builtin.debug:
