@@ -139,6 +139,52 @@
       ansible.builtin.debug:
         var: selfhost_acme_log_summary.stdout_lines
 
+    - name: Extract exact known staging hook failure categories without showing log text
+      ansible.builtin.command:
+        argv:
+          - python3
+          - -c
+          - |
+            from pathlib import Path
+            import re
+            path = Path("/var/lib/acme-staging/log/letsencrypt.log")
+            if not path.is_file():
+                print("log_not_found")
+                raise SystemExit(0)
+            lines = path.read_text(encoding="utf-8", errors="replace").splitlines()
+            known = (
+                ("selfhost_http_rejected", r"selfHOST API rejected (?:present|cleanup) with HTTP ([1-5][0-9][0-9])"),
+                ("selfhost_transport_uncertain", r"selfHOST API request failed; remote slot state uncertain"),
+                ("selfhost_unexpected_http_status", r"selfHOST did not acknowledge the change"),
+                ("api_key_validation_error", r"Missing or invalid API key format"),
+                ("config_invalid", r"Missing or unsafe local configuration|Invalid local configuration|Invalid zone"),
+                ("slot_already_reserved", r"Both TXT slots are occupied|Challenge already reserved"),
+                ("root_permission_error", r"must be executed as root|must be owned by root"),
+                ("dns_propagation_failure", r"DNS propagation not confirmed"),
+                ("unapproved_certbot_domain", r"Certbot requested an unapproved domain"),
+                ("invalid_certbot_validation", r"Certbot DNS-01 validation value malformed"),
+                ("hook_state_error", r"Cleanup does not match|Challenge was not confirmed presented"),
+                ("unexpected_python_exception", r"Traceback \(most recent call last\)|Exception occurred"),
+                ("certbot_acme_rejection", r"urn:ietf:params:acme:error:|challenge failed|unauthorized"),
+            )
+            matches = []
+            for label, pattern in known:
+                found = [re.search(pattern, line, re.I) for line in lines]
+                found = [m for m in found if m]
+                if found:
+                    details = ""
+                    if label == "selfhost_http_rejected":
+                        details = "_HTTP_" + found[-1].group(1)
+                    matches.append(label + details)
+            print("known_failure_categories=" + (",".join(matches) if matches else "none_matched"))
+            print("certbot_log_lines=" + str(len(lines)))
+      changed_when: false
+      register: selfhost_acme_exact_failure
+
+    - name: Show allowlisted hook failure types, never raw log lines
+      ansible.builtin.debug:
+        var: selfhost_acme_exact_failure.stdout_lines
+
     - name: Clarify that diagnosis never changes production or DNS
       ansible.builtin.debug:
         msg: "DIAGNOSTICS_ONLY: no TXT updates, no Certbot issuance, no production certificate changes."
