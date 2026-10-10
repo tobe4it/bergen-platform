@@ -1,0 +1,16 @@
+---
+# EXAMPLE ONLY. Copy this template to mail-tls.local.yml (Git-ignored).
+# Put real hostnames, SSH user, DNS names and Certbot lineage ONLY in that
+# untracked site-local file. NEVER commit the populated copy.
+mail_tls_target_inventory_host: CHANGE_ME_INVENTORY_ALIAS
+mail_tls_source_address: CHANGE_ME_SOURCE_SSH_FQDN
+mail_tls_source_ssh_user: CHANGE_ME_AUTHORIZED_SSH_USER
+
+mail_tls_source_cert_file: /etc/letsencrypt/live/CHANGE_ME_LINEAGE/fullchain.pem
+mail_tls_source_key_file: /etc/letsencrypt/live/CHANGE_ME_LINEAGE/privkey.pem
+
+mail_tls_required_san: "*.example.invalid"
+mail_tls_expected_fqdn: mail.example.invalid
+
+mail_tls_target_cert_file: /etc/ssl/certs/CHANGE_ME-fullchain.pem
+mail_tls_target_key_file: /etc/ssl/private/CHANGE_ME-key.pem
