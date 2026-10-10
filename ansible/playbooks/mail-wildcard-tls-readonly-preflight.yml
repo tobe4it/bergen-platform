@@ -188,14 +188,14 @@
 
     - name: Read effective Dovecot TLS certificate path
       ansible.builtin.command:
-        argv: [doveconf, -h, ssl_server_cert_file]
+        argv: [doveconf, -h, ssl_server/cert_file]
       register: mail_dovecot_cert
       changed_when: false
       no_log: true
 
     - name: Read effective Dovecot TLS private-key path
       ansible.builtin.command:
-        argv: [doveconf, -h, ssl_server_key_file]
+        argv: [doveconf, -h, ssl_server/key_file]
       register: mail_dovecot_key
       changed_when: false
       no_log: true
