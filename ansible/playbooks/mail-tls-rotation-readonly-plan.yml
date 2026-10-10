@@ -1,0 +1,157 @@
+---
+# Read-only rotation planning: imports the already tested source/target preflight.
+# No key fetch/slurp/copy, no certificate writes, and no service reload.
+- import_playbook: mail-wildcard-tls-readonly-preflight.yml
+
+- name: Inspect source certificate identity without copying certificate data
+  hosts: mail_tls_certificate_sources
+  gather_facts: false
+  become: true
+  any_errors_fatal: true
+  tasks:
+    - name: Require source preflight success before planning
+      ansible.builtin.assert:
+        that:
+          - source_mail_tls_public_evidence is defined
+
+    - name: Obtain source leaf certificate SHA256 fingerprint
+      ansible.builtin.command:
+        argv:
+          - openssl
+          - x509
+          - -in
+          - "{{ mail_tls_source_cert_file }}"
+          - -noout
+          - -fingerprint
+          - -sha256
+      register: source_leaf_fingerprint
+      changed_when: false
+
+    - name: Require a complete source leaf fingerprint
+      ansible.builtin.assert:
+        that:
+          - "(source_leaf_fingerprint.stdout.split('=')[-1] | replace(':', '') | trim | lower) is match('^[0-9a-f]{64}$')"
+      changed_when: false
+
+    - name: Retain only public certificate fingerprint
+      ansible.builtin.set_fact:
+        mail_tls_source_leaf_sha256: "{{ source_leaf_fingerprint.stdout.split('=')[-1] | replace(':', '') | trim | lower }}"
+      changed_when: false
+
+- name: Inspect installed certificate identity and key pairing on target
+  hosts: "{{ mail_tls_target_inventory_host }}"
+  gather_facts: false
+  become: true
+  any_errors_fatal: true
+  tasks:
+    - name: Require previous source and target preflight success
+      ansible.builtin.assert:
+        that:
+          - hostvars['mail-tls-source'].mail_tls_source_leaf_sha256 is defined
+          - mail_tls_target_evidence is defined
+
+    - name: Inspect installed target certificate
+      ansible.builtin.stat:
+        path: "{{ mail_tls_target_cert_file }}"
+        follow: true
+      register: mail_tls_installed_cert
+
+    - name: Inspect installed target private key without printing metadata
+      ansible.builtin.stat:
+        path: "{{ mail_tls_target_key_file }}"
+        follow: true
+      register: mail_tls_installed_key
+      no_log: true
+
+    - name: Obtain installed certificate fingerprint if present
+      ansible.builtin.command:
+        argv:
+          - openssl
+          - x509
+          - -in
+          - "{{ mail_tls_target_cert_file }}"
+          - -noout
+          - -fingerprint
+          - -sha256
+      register: mail_tls_installed_fingerprint
+      when: mail_tls_installed_cert.stat.isreg | default(false)
+      changed_when: false
+      failed_when: false
+
+    - name: Obtain installed certificate public-key digest
+      ansible.builtin.shell: |
+        set -o pipefail
+        openssl x509 -in {{ mail_tls_target_cert_file | quote }} -noout -pubkey |
+          openssl pkey -pubin -outform DER |
+          openssl dgst -sha256
+      args:
+        executable: /bin/bash
+      register: mail_tls_installed_cert_pubkey
+      when: mail_tls_installed_cert.stat.isreg | default(false)
+      changed_when: false
+      failed_when: false
+      no_log: true
+
+    - name: Obtain installed private-key public digest without exporting key
+      ansible.builtin.shell: |
+        set -o pipefail
+        openssl pkey -in {{ mail_tls_target_key_file | quote }} -pubout -outform DER |
+          openssl dgst -sha256
+      args:
+        executable: /bin/bash
+      register: mail_tls_installed_key_pubkey
+      when: mail_tls_installed_key.stat.isreg | default(false)
+      changed_when: false
+      failed_when: false
+      no_log: true
+
+    - name: Compute sanitized read-only target assessment
+      ansible.builtin.set_fact:
+        mail_tls_installed_assessment:
+          certificate_regular: "{{ mail_tls_installed_cert.stat.isreg | default(false) | bool }}"
+          key_regular: "{{ mail_tls_installed_key.stat.isreg | default(false) | bool }}"
+          certificate_parse_ok: "{{ (mail_tls_installed_fingerprint.rc | default(1)) == 0 }}"
+          leaf_sha256: "{{ mail_tls_installed_fingerprint.stdout.split('=')[-1] | replace(':', '') | trim | lower if (mail_tls_installed_fingerprint.rc | default(1)) == 0 else '' }}"
+          private_key_matches_certificate: "{{ (mail_tls_installed_cert_pubkey.rc | default(1)) == 0 and (mail_tls_installed_key_pubkey.rc | default(1)) == 0 and mail_tls_installed_cert_pubkey.stdout == mail_tls_installed_key_pubkey.stdout }}"
+      changed_when: false
+      no_log: true
+
+- name: Publish proposed rotation action without authorizing changes
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  vars:
+    mail_tls_source_fingerprint: "{{ hostvars['mail-tls-source'].mail_tls_source_leaf_sha256 }}"
+    mail_tls_target_state: "{{ hostvars[mail_tls_target_inventory_host].mail_tls_installed_assessment }}"
+  tasks:
+    - name: Refuse report if independently collected evidence is incomplete
+      ansible.builtin.assert:
+        that:
+          - mail_tls_source_fingerprint is match('^[0-9a-f]{64}$')
+          - mail_tls_target_state is mapping
+
+    - name: Produce read-only certificate rotation assessment
+      ansible.builtin.debug:
+        msg:
+          verification: PASS
+          mode: READ_ONLY
+          changed: false
+          target_certificate_present: "{{ mail_tls_target_state.certificate_regular }}"
+          target_key_present: "{{ mail_tls_target_state.key_regular }}"
+          target_certificate_parse_ok: "{{ mail_tls_target_state.certificate_parse_ok }}"
+          target_key_matches_certificate: "{{ mail_tls_target_state.private_key_matches_certificate }}"
+          source_leaf_sha256: "{{ mail_tls_source_fingerprint }}"
+          target_leaf_sha256: "{{ mail_tls_target_state.leaf_sha256 }}"
+          proposed_action: >-
+            {% if not mail_tls_target_state.certificate_regular or not mail_tls_target_state.key_regular %}
+            MANUAL_REMEDIATION_MISSING_TARGET_FILES
+            {% elif not mail_tls_target_state.certificate_parse_ok or not mail_tls_target_state.private_key_matches_certificate %}
+            MANUAL_REMEDIATION_INVALID_TARGET_PAIR
+            {% elif mail_tls_target_state.leaf_sha256 == mail_tls_source_fingerprint %}
+            NO_CHANGE_REQUIRED
+            {% else %}
+            CANDIDATE_FOR_ROTATION
+            {% endif %}
+          private_key_transferred: false
+          can_authorize_deployment: false
+          service_reloaded: false
