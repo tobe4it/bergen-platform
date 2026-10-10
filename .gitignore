@@ -13,3 +13,4 @@ ansible/inventory.local.yml
 ansible/reports/
 __pycache__/
 *.pyc
+ansible/vars/mail-tls.local.yml
