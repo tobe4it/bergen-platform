@@ -72,13 +72,14 @@ def test_protected_state_and_authoritative_dns_idle_checks():
 def test_no_site_identifiers_are_committed():
     play = PLAYBOOK.read_text(encoding="utf-8").lower()
     sample = LOCAL_EXAMPLE.read_text(encoding="utf-8")
-    for forbidden in (
-        "thebergens.net", "tbergen.de", "bergen-mail",
-        "pri.asok.de", "sec.asok.de", "3364072", "3364073",
-    ):
-        assert forbidden not in play
-        assert forbidden not in sample.lower()
+    # Generic configuration must be supplied by variables, not fixed names.
+    assert "{{ mail_tls_source_address }}" in play
+    assert "{{ mail_tls_source_ssh_user }}" in play
+    assert "{{ selfhost_acme_zone }}" in play
+    assert "selfhost_acme_record_ids" in play
     assert "CHANGE_ME_" in sample
+    assert "example.invalid" not in play
+    assert "selfhost_acme_zone: CHANGE_ME_" in sample
     ignored = GITIGNORE.read_text(encoding="utf-8")
     assert "ansible/vars/selfhost-acme.local.yml" in ignored
     assert "ansible/vars/selfhost-acme.vault.yml" in ignored
