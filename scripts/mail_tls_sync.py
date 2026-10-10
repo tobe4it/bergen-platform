@@ -199,7 +199,16 @@ def stage_transfer(src_host, src_user, dst_host, dst_user, src_path, stage_path)
 def run_remote_script(host, user, script_path, args):
     script = script_path.read_bytes()
     command = "bash -se -- " + " ".join(q(arg) for arg in args)
-    return ssh_run(host, user, command, script)
+    result = subprocess.run(ssh_args(host, user, command), input=script,
+                            capture_output=True, check=False)
+    if result.returncode:
+        # Relay ONLY the explicit rollback status, never arbitrary remote stderr.
+        status = [line for line in result.stderr.decode("utf-8", "replace").splitlines()
+                  if re.fullmatch(r"ROLLBACK_(OK|FAILED): [A-Za-z0-9 :;.,/_-]+", line)]
+        suffix = "; ".join(status)
+        raise SyncError(f"Target activation failed (exit {result.returncode})"
+                        + (f"; {suffix}" if suffix else ""))
+    return result.stdout.decode("utf-8", "replace").strip()
 
 
 def main():
