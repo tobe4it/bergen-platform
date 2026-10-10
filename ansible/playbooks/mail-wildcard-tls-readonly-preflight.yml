@@ -33,8 +33,8 @@
   become: true
   any_errors_fatal: true
   vars:
-    mail_tls_source_cert_file: /etc/letsencrypt/live/thebergens.net/fullchain.pem
-    mail_tls_source_key_file: /etc/letsencrypt/live/thebergens.net/privkey.pem
+    mail_tls_source_cert_file: /etc/letsencrypt/live/thebergens.net-wildcard/fullchain.pem
+    mail_tls_source_key_file: /etc/letsencrypt/live/thebergens.net-wildcard/privkey.pem
     mail_tls_required_san: "*.thebergens.net"
   tasks:
     - name: Require explicit absolute and distinct source paths
