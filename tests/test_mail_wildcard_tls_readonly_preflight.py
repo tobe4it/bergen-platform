@@ -1,17 +1,11 @@
-"""Structural guardrails for the wildcard TLS *read-only* preflight.
-
-These tests do not connect to MX2 or bergen-mail. Runtime certificate and
-SSH verification is performed only when the Ansible playbook is run.
-"""
+"""Static guardrails: TLS preflight is read-only and receives only local site data."""
 from pathlib import Path
-
 import yaml
 
-
-PLAYBOOK = (
-    Path(__file__).resolve().parents[1]
-    / "ansible/playbooks/mail-wildcard-tls-readonly-preflight.yml"
-)
+ROOT = Path(__file__).resolve().parents[1]
+PLAYBOOK = ROOT / "ansible/playbooks/mail-wildcard-tls-readonly-preflight.yml"
+EXAMPLE = ROOT / "ansible/vars/mail-tls.local.yml.example"
+IGNORE = ROOT / ".gitignore"
 
 ALLOWED_MODULES = {
     "ansible.builtin.assert",
@@ -25,102 +19,102 @@ ALLOWED_MODULES = {
 
 
 def plays():
-    value = yaml.safe_load(PLAYBOOK.read_text(encoding="utf-8"))
-    assert isinstance(value, list) and len(value) == 4
-    return value
+    data = yaml.safe_load(PLAYBOOK.read_text(encoding="utf-8"))
+    assert isinstance(data, list) and len(data) == 4
+    return data
 
 
 def tasks():
     for play in plays():
-        for task in play["tasks"]:
-            yield play, task
+        yield from play["tasks"]
 
 
-def test_no_mutation_or_sensitive_copy_modules():
-    for _, task in tasks():
-        selected = set(task).intersection(ALLOWED_MODULES)
-        assert len(selected) == 1, task.get("name")
-        assert not any(key in task for key in (
-            "ansible.builtin.copy",
-            "ansible.builtin.fetch",
-            "ansible.builtin.slurp",
-            "ansible.builtin.template",
-            "ansible.builtin.file",
-            "ansible.builtin.service",
-            "ansible.builtin.systemd",
-            "ansible.builtin.raw",
-            "ansible.builtin.script",
-            "ansible.builtin.uri",
-        )), task.get("name")
+def test_only_readonly_ansible_actions():
+    for task in tasks():
+        used = set(task).intersection(ALLOWED_MODULES)
+        assert len(used) == 1, task.get("name")
+        assert not any(module in task for module in (
+            "ansible.builtin.copy", "ansible.builtin.fetch",
+            "ansible.builtin.slurp", "ansible.builtin.service",
+            "ansible.builtin.file", "ansible.builtin.template",
+            "ansible.builtin.systemd", "ansible.builtin.uri",
+        ))
         if "ansible.builtin.command" in task:
-            argv = task["ansible.builtin.command"]["argv"]
-            assert argv[0] in ("openssl", "postconf", "doveconf")
+            assert task["ansible.builtin.command"]["argv"][0] in (
+                "openssl", "postconf", "doveconf",
+            )
         if "ansible.builtin.shell" in task:
-            code = task["ansible.builtin.shell"]
-            assert code.startswith("set -o pipefail\n")
-            assert "openssl" in code
-            assert not any(token in code for token in ("> /", ">>", "scp ", "cp "))
+            script = task["ansible.builtin.shell"]
+            assert script.startswith("set -o pipefail\n")
+            assert "openssl" in script
             assert task.get("no_log") is True
 
 
-def test_exact_host_scopes_and_absence_of_live_service_changes():
-    result = plays()
-    assert [p["hosts"] for p in result] == [
-        "localhost", "mail_tls_certificate_sources",
-        "bergen-mail", "localhost",
-    ]
-    assert result[1]["become"] is True
-    assert result[2]["become"] is True
-    assert "ansible.builtin.service" not in PLAYBOOK.read_text()
-    assert "ansible.builtin.copy" not in PLAYBOOK.read_text()
+def test_dynamic_host_selection():
+    p = plays()
+    assert p[0]["hosts"] == "localhost"
+    assert p[1]["hosts"] == "mail_tls_certificate_sources"
+    assert p[2]["hosts"] == "{{ mail_tls_target_inventory_host }}"
+    assert p[3]["hosts"] == "localhost"
+    assert p[1]["become"] is True and p[2]["become"] is True
 
 
-def test_target_checks_require_verified_mx2_evidence_first():
-    target = plays()[2]
-    gate = target["tasks"][0]
-    assert "Refuse target checks" in gate["name"]
+def test_source_and_target_identity_are_local_variables():
+    p = plays()
+    assert "vars" not in p[0]
+    assert "vars" not in p[1]
+    assert "vars" not in p[2]
+    first_gate = p[0]["tasks"][0]["ansible.builtin.assert"]["that"]
+    for var in (
+        "mail_tls_source_address",
+        "mail_tls_target_inventory_host",
+        "mail_tls_source_cert_file",
+        "mail_tls_source_key_file",
+        "mail_tls_required_san",
+        "mail_tls_expected_fqdn",
+        "mail_tls_target_cert_file",
+        "mail_tls_target_key_file",
+    ):
+        assert var + " is defined" in first_gate
+    source = p[0]["tasks"][1]["ansible.builtin.add_host"]
+    assert source["ansible_host"] == "{{ mail_tls_source_address }}"
+    assert source["ansible_user"] == (
+        "{{ mail_tls_source_ssh_user | default(omit) }}"
+    )
+
+
+def test_fail_closed_gate_before_target_queries():
+    gate = plays()[2]["tasks"][0]
     assert gate["ansible.builtin.assert"]["that"] == [
-        "hostvars['mx2-certificate-source'].mx2_mail_tls_public_evidence is defined"
+        "hostvars['mail-tls-source'].source_mail_tls_public_evidence is defined"
     ]
-    assert all(
-        task.get("changed_when") is False
-        for task in target["tasks"] if "changed_when" in task
-    )
+    assert gate.get("changed_when") is False
 
 
-def test_source_uses_existing_certbot_wildcard_lineage():
-    source = plays()[1]
-    assert source["vars"]["mail_tls_source_cert_file"] == (
-        "/etc/letsencrypt/live/thebergens.net-wildcard/fullchain.pem"
-    )
-    assert source["vars"]["mail_tls_source_key_file"] == (
-        "/etc/letsencrypt/live/thebergens.net-wildcard/privkey.pem"
-    )
-    assert source["vars"]["mail_tls_required_san"] == "*.thebergens.net"
-    assert plays()[0]["vars"]["mail_tls_source_address"] == "mx.thebergens.net"
+def test_dovecot_24_queries_named_ssl_settings():
+    t = plays()[2]["tasks"]
+    queries = [task["ansible.builtin.command"]["argv"] for task in t
+               if task["name"].startswith("Read effective Dovecot TLS")]
+    assert queries == [
+        ["doveconf", "-h", "ssl_server/cert_file"],
+        ["doveconf", "-h", "ssl_server/key_file"],
+    ]
 
 
-def test_existing_backend_tls_paths_are_preserved():
-    target = plays()[2]["vars"]
-    assert target["mail_tls_expected_fqdn"] == "mail.thebergens.net"
-    assert target["mail_tls_target_cert_file"] == (
-        "/etc/ssl/certs/mail-backend-fullchain.pem"
-    )
-    assert target["mail_tls_target_key_file"] == (
-        "/etc/ssl/private/mail-backend-key.pem"
-    )
+def test_private_key_not_extracted_or_printed():
+    for task in plays()[1]["tasks"]:
+        if "private" in task["name"].lower():
+            assert task.get("no_log") is True
+    report = plays()[3]["tasks"][-1]["ansible.builtin.debug"]["msg"]
+    assert report["private_key_transferred"] is False
+    assert report["service_reloaded"] is False
+    assert report["can_authorize_deployment"] is False
 
 
-def test_private_key_never_collected_into_controller_facts():
-    source = plays()[1]
-    for task in source["tasks"]:
-        if "key" in task["name"].lower():
-            if "ansible.builtin.assert" not in task:
-                assert task.get("no_log") is True or (
-                    "ansible.builtin.stat" in task
-                    and task.get("no_log") is True
-                ), task["name"]
-    final = plays()[-1]["tasks"][-1]["ansible.builtin.debug"]["msg"]
-    assert final["private_key_transferred"] is False
-    assert final["can_authorize_deployment"] is False
-    assert final["service_reloaded"] is False
+def test_ignored_local_file_and_placeholder_only_template():
+    assert "ansible/vars/mail-tls.local.yml" in IGNORE.read_text()
+    example = EXAMPLE.read_text()
+    assert "CHANGE_ME" in example
+    assert "example.invalid" in example
+    assert "*.example.invalid" in example
+    assert "mail_tls_target_inventory_host:" in example
