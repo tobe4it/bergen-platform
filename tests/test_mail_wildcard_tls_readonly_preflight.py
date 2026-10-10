@@ -75,6 +75,19 @@ def test_exact_host_scopes_and_absence_of_live_service_changes():
     assert "ansible.builtin.copy" not in PLAYBOOK.read_text()
 
 
+def test_target_checks_require_verified_mx2_evidence_first():
+    target = plays()[2]
+    gate = target["tasks"][0]
+    assert "Refuse target checks" in gate["name"]
+    assert gate["ansible.builtin.assert"]["that"] == [
+        "hostvars['mx2-certificate-source'].mx2_mail_tls_public_evidence is defined"
+    ]
+    assert all(
+        task.get("changed_when") is False
+        for task in target["tasks"] if "changed_when" in task
+    )
+
+
 def test_source_uses_existing_certbot_wildcard_lineage():
     source = plays()[1]
     assert source["vars"]["mail_tls_source_cert_file"] == (
