@@ -1,0 +1,144 @@
+---
+# Read-only diagnosis of a failed isolated selfHOST ACME staging issuance.
+# Real host identity, DNS zone and record IDs are passed from Git-ignored YAML.
+# Does not change DNS, hook state, or Certbot certificate lineages.
+
+- name: Identify the approved certificate source for diagnostics
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  tasks:
+    - name: Require local source SSH identity and DNS probe configuration
+      ansible.builtin.assert:
+        that:
+          - mail_tls_source_address is defined
+          - mail_tls_source_ssh_user is defined
+          - selfhost_acme_zone is defined
+          - selfhost_acme_nameservers is defined
+          - selfhost_acme_nameservers | length >= 2
+          - selfhost_acme_record_ids is defined
+          - selfhost_acme_record_ids | length == 2
+        fail_msg: Missing local source or DNS data
+      no_log: true
+
+    - name: Register only the configured certificate source
+      ansible.builtin.add_host:
+        name: selfhost-acme-diagnostic-source
+        groups: selfhost_acme_diagnostic_sources
+        ansible_host: "{{ mail_tls_source_address }}"
+        ansible_user: "{{ mail_tls_source_ssh_user }}"
+        ansible_python_interpreter: /usr/bin/python3
+      changed_when: false
+
+- name: Diagnose staging certificate attempt without changing any state
+  hosts: selfhost_acme_diagnostic_sources
+  become: true
+  gather_facts: false
+  vars:
+    selfhost_acme_state_file: /var/lib/selfhost-acme/active.json
+    selfhost_acme_staging_log: /var/lib/acme-staging/log/letsencrypt.log
+  tasks:
+    - name: Check whether the hook reserved any TXT slots
+      ansible.builtin.stat:
+        path: "{{ selfhost_acme_state_file }}"
+      register: selfhost_acme_state_stat
+
+    - name: Read hook state without exposing challenge values
+      ansible.builtin.slurp:
+        src: "{{ selfhost_acme_state_file }}"
+      register: selfhost_acme_state_raw
+      when: selfhost_acme_state_stat.stat.exists
+      no_log: true
+
+    - name: Parse private state locally without logging contents
+      ansible.builtin.set_fact:
+        selfhost_acme_safe_state: "{{ (selfhost_acme_state_raw.content | b64decode | from_json) if selfhost_acme_state_stat.stat.exists else {} }}"
+      no_log: true
+
+    - name: Print only slot IDs and state labels, never validation values
+      ansible.builtin.debug:
+        msg:
+          slot: "{{ item.key }}"
+          status: "{{ item.value.status | default('UNKNOWN') }}"
+      loop: "{{ selfhost_acme_safe_state | dict2items }}"
+      loop_control:
+        label: "reserved-slot-{{ item.key }}"
+      when: selfhost_acme_safe_state | length > 0
+
+    - name: Report no active local reservations
+      ansible.builtin.debug:
+        msg: "No active ACME hook reservations"
+      when: selfhost_acme_safe_state | length == 0
+
+    - name: Query current public TXT records on each authoritative server
+      ansible.builtin.command:
+        argv:
+          - dig
+          - +short
+          - +norecurse
+          - +time=3
+          - +tries=1
+          - TXT
+          - "_acme-challenge.{{ selfhost_acme_zone }}"
+          - "@{{ item }}"
+      changed_when: false
+      register: selfhost_acme_dns_results
+      loop: "{{ selfhost_acme_nameservers }}"
+
+    - name: Summarize whether each TXT slot is idle (no challenge tokens)
+      ansible.builtin.debug:
+        msg:
+          nameserver: "{{ item.item }}"
+          slot_1_idle: "{{ ('selfhost-api-idle-' ~ (selfhost_acme_record_ids[0] | string)) in item.stdout }}"
+          slot_2_idle: "{{ ('selfhost-api-idle-' ~ (selfhost_acme_record_ids[1] | string)) in item.stdout }}"
+          dns_lookup_rc: "{{ item.rc }}"
+      loop: "{{ selfhost_acme_dns_results.results }}"
+      loop_control:
+        label: "{{ item.item }}"
+
+    - name: Classify staging log errors without printing log text or credentials
+      ansible.builtin.command:
+        argv:
+          - python3
+          - -c
+          - |
+            from pathlib import Path
+            import re
+            log = Path("/var/lib/acme-staging/log/letsencrypt.log")
+            if not log.exists():
+                print("staging_log_present=false")
+                raise SystemExit(0)
+            data = log.read_text(encoding="utf-8", errors="replace").splitlines()
+            print("staging_log_present=true")
+            patterns = [
+                ("api_http_401", r"(?:http|status)\s*401"),
+                ("api_http_403", r"(?:http|status)\s*403"),
+                ("api_http_409", r"(?:http|status)\s*409"),
+                ("api_http_429", r"(?:http|status)\s*429"),
+                ("api_http_503", r"(?:http|status)\s*503"),
+                ("dns_propagation_timeout", r"DNS propagation not confirmed"),
+                ("hook_root_permission", r"must be executed as root|must be owned by root"),
+                ("hook_state_mismatch", r"Cleanup does not match|Both TXT slots are occupied"),
+                ("missing_hook_dependency", r"No such file or directory|ModuleNotFoundError|not found"),
+                ("ca_dns_error", r"NXDOMAIN|SERVFAIL|DNS problem"),
+                ("ca_challenge_rejected", r"unauthorized|challenge failed|Invalid response"),
+                ("network_timeout", r"timed out|connection (?:error|refused)"),
+                ("hook_execution_error", r"Error running (?:authenticator|manual-auth-hook|manual-cleanup-hook)|hook failed"),
+            ]
+            detected = sorted({label for label, expression in patterns
+                               if any(re.search(expression, line, re.I) for line in data)})
+            print("diagnostic_classes=" + (",".join(detected) if detected else "none_of_known_classes"))
+            interesting = [n for n, line in enumerate(data, 1)
+                           if re.search(r"ERROR|Traceback|HookError|error running|DNS propagation|HTTP 4\d\d|HTTP 5\d\d", line, re.I)]
+            print("diagnostic_line_count=" + str(len(interesting)))
+            print("last_diagnostic_line_numbers=" + ",".join(map(str, interesting[-8:])))
+      changed_when: false
+      register: selfhost_acme_log_summary
+
+    - name: Show sanitized staging log classification
+      ansible.builtin.debug:
+        var: selfhost_acme_log_summary.stdout_lines
+
+    - name: Clarify that diagnosis never changes production or DNS
+      ansible.builtin.debug:
+        msg: "DIAGNOSTICS_ONLY: no TXT updates, no Certbot issuance, no production certificate changes."
