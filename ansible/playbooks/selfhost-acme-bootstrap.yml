@@ -1,0 +1,191 @@
+---
+# Install selfHOST DNS-01 hooks from the Ansible controller.
+# Real identities and API credentials MUST be passed in ignored local/Vault YAML.
+# By default this playbook does NOT contact the ACME CA or change DNS.
+- name: Register the explicitly configured ACME certificate source
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  tasks:
+    - name: Require local source identity, ACME zone, record slots and vault credential
+      ansible.builtin.assert:
+        that:
+          - mail_tls_source_address is defined
+          - mail_tls_source_ssh_user is defined
+          - mail_tls_source_cert_file is defined
+          - selfhost_acme_zone is defined
+          - selfhost_acme_contact_email is defined
+          - selfhost_acme_api_key is defined
+          - selfhost_acme_record_ids is defined
+          - selfhost_acme_nameservers is defined
+          - selfhost_acme_zone is match('^[a-z0-9.-]+$')
+          - selfhost_acme_contact_email is match('^[^ @]+@[^ @]+$')
+          - selfhost_acme_record_ids | length == 2
+          - selfhost_acme_record_ids | unique | length == 2
+          - selfhost_acme_nameservers | length >= 2
+          - selfhost_acme_api_key is match('^[A-Za-z0-9_-]+\\.[A-Za-z0-9_-]+$')
+          - mail_tls_source_cert_file is match('^/etc/letsencrypt/live/')
+          - not ansible_check_mode
+        fail_msg: Missing or malformed locally supplied ACME settings; no changes performed
+      no_log: true
+
+    - name: Register external source as ephemeral Ansible target
+      ansible.builtin.add_host:
+        name: selfhost-acme-source
+        groups: selfhost_acme_sources
+        ansible_host: "{{ mail_tls_source_address }}"
+        ansible_user: "{{ mail_tls_source_ssh_user }}"
+        ansible_python_interpreter: /usr/bin/python3
+      changed_when: false
+
+- name: Install guarded Certbot DNS-01 hooks and verify idle DNS slots
+  hosts: selfhost_acme_sources
+  gather_facts: false
+  become: true
+  any_errors_fatal: true
+  vars:
+    selfhost_acme_hook_path: /usr/local/libexec/selfhost_acme_hook.py
+    selfhost_acme_config_path: /etc/letsencrypt/selfhost-acme.json
+  tasks:
+    - name: Ensure the required ACME tools are installed
+      ansible.builtin.command:
+        argv:
+          - python3
+          - -c
+          - "import shutil,sys; sys.exit(any(shutil.which(x) is None for x in ('certbot','dig','python3')))"
+      changed_when: false
+
+    - name: Check existing productive certificate lineage exists
+      ansible.builtin.stat:
+        path: "{{ mail_tls_source_cert_file }}"
+        follow: true
+      register: selfhost_acme_prod_cert
+
+    - name: Refuse setup if the known productive certificate is absent
+      ansible.builtin.assert:
+        that:
+          - selfhost_acme_prod_cert.stat.isreg | default(false)
+
+    - name: Ensure dedicated hook executable directory exists
+      ansible.builtin.file:
+        path: /usr/local/libexec
+        owner: root
+        group: root
+        mode: '0755'
+        state: directory
+
+    - name: Deploy generic DNS-01 hook with restricted change scope
+      ansible.builtin.copy:
+        src: "{{ playbook_dir }}/../../scripts/selfhost_acme_hook.py"
+        dest: "{{ selfhost_acme_hook_path }}"
+        owner: root
+        group: root
+        mode: '0755'
+
+    - name: Write root-only local ACME API configuration without logging contents
+      ansible.builtin.copy:
+        content: "{{ {'api_key': selfhost_acme_api_key, 'zone': selfhost_acme_zone, 'record_ids': selfhost_acme_record_ids, 'nameservers': selfhost_acme_nameservers} | to_nice_json }}\n"
+        dest: "{{ selfhost_acme_config_path }}"
+        owner: root
+        group: root
+        mode: '0600'
+      no_log: true
+
+    - name: Validate local hook JSON and credentials format without an API request
+      ansible.builtin.command:
+        argv:
+          - python3
+          - -c
+          - "import runpy; runpy.run_path('/usr/local/libexec/selfhost_acme_hook.py')['load_config']()"
+      changed_when: false
+      no_log: true
+
+    - name: Query idle ACME TXT slots at each authoritative nameserver
+      ansible.builtin.command:
+        argv:
+          - dig
+          - +short
+          - +norecurse
+          - +time=3
+          - +tries=1
+          - TXT
+          - "_acme-challenge.{{ selfhost_acme_zone }}"
+          - "@{{ item }}"
+      loop: "{{ selfhost_acme_nameservers }}"
+      register: selfhost_acme_idle_dns
+      changed_when: false
+
+    - name: Require both selfHOST TXT slots to be idle on all nameservers
+      ansible.builtin.assert:
+        that:
+          - "'selfhost-api-idle-' ~ (selfhost_acme_record_ids[0] | string) in item.stdout"
+          - "'selfhost-api-idle-' ~ (selfhost_acme_record_ids[1] | string) in item.stdout"
+        fail_msg: DNS is not in the expected idle state; abort before ACME staging
+      loop: "{{ selfhost_acme_idle_dns.results }}"
+      loop_control:
+        label: "{{ item.item }}"
+
+    - name: Report setup without making any ACME request
+      ansible.builtin.debug:
+        msg:
+          status: HOOK_INSTALLED
+          dns: TWO_IDLE_SLOTS_VERIFIED
+          production_lineage_modified: false
+          staging_issuance_performed: false
+
+    - name: Create isolated staging directories only when explicitly authorized
+      ansible.builtin.file:
+        path: "{{ item }}"
+        owner: root
+        group: root
+        mode: '0700'
+        state: directory
+      loop:
+        - /var/lib/acme-staging
+        - /var/lib/acme-staging/config
+        - /var/lib/acme-staging/work
+        - /var/lib/acme-staging/log
+      when: selfhost_acme_run_staging | default(false) | bool
+
+    - name: Request independent Let's Encrypt STAGING certificate via selfHOST DNS-01
+      ansible.builtin.command:
+        argv:
+          - certbot
+          - certonly
+          - --staging
+          - --non-interactive
+          - --agree-tos
+          - --email
+          - "{{ selfhost_acme_contact_email }}"
+          - --config-dir
+          - /var/lib/acme-staging/config
+          - --work-dir
+          - /var/lib/acme-staging/work
+          - --logs-dir
+          - /var/lib/acme-staging/log
+          - --cert-name
+          - selfhost-dns-api-staging
+          - --manual
+          - --preferred-challenges
+          - dns
+          - --manual-auth-hook
+          - "/usr/bin/python3 {{ selfhost_acme_hook_path }} auth"
+          - --manual-cleanup-hook
+          - "/usr/bin/python3 {{ selfhost_acme_hook_path }} cleanup"
+          - -d
+          - "{{ selfhost_acme_zone }}"
+          - -d
+          - "*.{{ selfhost_acme_zone }}"
+      async: 1200
+      poll: 15
+      register: selfhost_acme_staging_run
+      when: selfhost_acme_run_staging | default(false) | bool
+      no_log: true
+
+    - name: Report staging status without revealing certificate source secrets
+      ansible.builtin.debug:
+        msg:
+          status: STAGING_CERTIFICATE_ISSUED
+          production_lineage_modified: false
+          dns_api_used: true
+      when: selfhost_acme_run_staging | default(false) | bool
