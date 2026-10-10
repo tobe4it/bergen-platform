@@ -60,6 +60,41 @@ named SSL server context instead:
 Do not print or send the private key. Do not adjust the effective service
 paths merely to make an audit pass.
 
+## Read-only rotation decision
+
+Before any file transfer, compare the current target certificate and key
+pair with the verified source certificate:
+
+    python3 -m pytest -q tests/test_mail_wildcard_tls_readonly_preflight.py \
+      tests/test_mail_tls_rotation_readonly_plan.py
+
+    ansible-playbook -i ansible/inventory.yml -i ansible/inventory.local.yml \
+      ansible/playbooks/mail-tls-rotation-readonly-plan.yml \
+      -e @ansible/vars/mail-tls.local.yml --syntax-check --ask-vault-pass
+
+    ansible-playbook -i ansible/inventory.yml -i ansible/inventory.local.yml \
+      ansible/playbooks/mail-tls-rotation-readonly-plan.yml \
+      -e @ansible/vars/mail-tls.local.yml --ask-vault-pass
+
+The planner imports the verified source/target preflight first. It then
+obtains SHA-256 fingerprints of the source leaf certificate and installed
+target leaf certificate, checks the target certificate and private key are
+readable regular files, and compares their locally derived public keys.
+Neither the source nor the target private key is transferred or printed.
+
+Its proposed_action is one of:
+- NO_CHANGE_REQUIRED: the same leaf certificate is installed and the
+  target private key matches it.
+- CANDIDATE_FOR_ROTATION: the target has a valid certificate/key pair but
+  its leaf certificate differs from the source.
+- MANUAL_REMEDIATION_MISSING_TARGET_FILES: a required target file is absent.
+- MANUAL_REMEDIATION_INVALID_TARGET_PAIR: target certificate or key cannot
+  be parsed, or their public keys differ.
+
+The planner does not establish CA-chain trust or live TLS correctness;
+those require separate checks. No proposed_action authorizes deployment.
+The production installation remains a separately reviewed operation.
+
 ## Deployment remains a separate change
 
 A future implementation requires a least-privilege secret transport,
