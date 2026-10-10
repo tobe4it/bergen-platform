@@ -9,6 +9,11 @@ it does not renew Let's Encrypt certificates itself.
 
 The controller requires its Python virtual environment with PyYAML and ssh.
 Both SSH peer host keys must already be independently verified and pinned.
+A private SSH control socket is created in a per-run mode-0700 temporary
+folder; the script reuses the authenticated transport for successive probes
+rather than opening seven new TCP connections to the source. On completion,
+the master connections are explicitly asked to exit and the temporary
+socket directory is removed.
 The source user requires noninteractive sudo -n privileges to read the Certbot
 certificate/key and inspect them with OpenSSL. The target requires verified
 noninteractive root SSH access. Restrict sudo rules on the source, never
