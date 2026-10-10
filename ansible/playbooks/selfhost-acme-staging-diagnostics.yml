@@ -251,6 +251,88 @@
       ansible.builtin.debug:
         var: selfhost_acme_network_probe.stdout_lines
 
+    - name: Classify TLS certificate verification failure, CA trust and clock without secrets
+      ansible.builtin.command:
+        argv:
+          - python3
+          - -c
+          - |
+            import datetime
+            import os
+            from pathlib import Path
+            import socket
+            import ssl
+            import subprocess
+
+            host = "my.selfhost.de"
+            print("host_clock_utc=" + datetime.datetime.now(datetime.timezone.utc).isoformat(timespec="seconds"))
+            paths = ssl.get_default_verify_paths()
+            print("python_ssl_cafile_available=" + str(bool(paths.cafile and Path(paths.cafile).is_file())).lower())
+            print("python_ssl_capath_available=" + str(bool(paths.capath and Path(paths.capath).is_dir())).lower())
+            print("ssl_cert_file_override=" + str("SSL_CERT_FILE" in os.environ).lower())
+            print("ssl_cert_dir_override=" + str("SSL_CERT_DIR" in os.environ).lower())
+            for name in ("REQUESTS_CA_BUNDLE", "CURL_CA_BUNDLE"):
+                print(name.lower() + "_override=" + str(name in os.environ).lower())
+
+            classification = {
+                2: "issuer_certificate_missing",
+                9: "certificate_not_yet_valid",
+                10: "certificate_expired",
+                18: "self_signed_leaf",
+                19: "self_signed_chain",
+                20: "local_issuer_certificate_missing",
+                21: "unable_to_verify_first_certificate",
+                23: "certificate_revoked",
+                24: "invalid_certificate_authority",
+                26: "unsupported_certificate_purpose",
+                62: "certificate_hostname_mismatch",
+            }
+            try:
+                addresses = socket.getaddrinfo(host, 443, type=socket.SOCK_STREAM)
+            except socket.gaierror:
+                print("getaddrinfo=dns_error")
+                raise SystemExit(0)
+            endpoints = {}
+            for family, socktype, proto, canonname, sockaddr in addresses:
+                if family not in (socket.AF_INET, socket.AF_INET6):
+                    continue
+                endpoints.setdefault(family, (socktype, proto, sockaddr))
+            for family, label in ((socket.AF_INET, "ipv4"), (socket.AF_INET6, "ipv6")):
+                if family not in endpoints:
+                    print(label + "_tls=no_resolved_address")
+                    continue
+                socktype, proto, sockaddr = endpoints[family]
+                try:
+                    with socket.socket(family, socktype, proto) as tcp:
+                        tcp.settimeout(8)
+                        tcp.connect(sockaddr)
+                        with ssl.create_default_context().wrap_socket(tcp, server_hostname=host):
+                            print(label + "_tls=verified")
+                except ssl.SSLCertVerificationError as exc:
+                    code = exc.verify_code
+                    print(label + "_tls=certificate_verify_failed")
+                    print(label + "_verify_code=" + str(code))
+                    print(label + "_verify_reason=" + classification.get(code, "other_verify_error"))
+                except ssl.SSLError:
+                    print(label + "_tls=tls_handshake_error")
+                except socket.timeout:
+                    print(label + "_tls=timeout")
+                except OSError:
+                    print(label + "_tls=connection_error")
+
+            try:
+                pkg = subprocess.run(["rpm", "-q", "ca-certificates"],
+                                     capture_output=True, text=True, timeout=5)
+                print("rpm_ca_certificates_installed=" + str(pkg.returncode == 0).lower())
+            except (OSError, subprocess.TimeoutExpired):
+                print("rpm_ca_certificates_installed=unknown")
+      register: selfhost_acme_tls_trust_probe
+      changed_when: false
+
+    - name: Show trusted CA and TLS validation classifications
+      ansible.builtin.debug:
+        var: selfhost_acme_tls_trust_probe.stdout_lines
+
     - name: Clarify that diagnosis never changes production or DNS
       ansible.builtin.debug:
         msg: "DIAGNOSTICS_ONLY: no TXT updates, no Certbot issuance, no production certificate changes."
