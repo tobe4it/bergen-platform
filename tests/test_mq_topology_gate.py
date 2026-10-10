@@ -37,7 +37,8 @@ class TopologyAcceptanceGateTests(unittest.TestCase):
         cls.gate = matching[0]
 
     def check_gate(self, status, *, opt_in=False, failures=0, residuals=None,
-                   missing_baseline=None, passed=3, accept=False):
+                   missing_baseline=None, passed=3, transient=False,
+                   transport_passes=0, accept=False):
         rows = [{"id": name, "status": "NOT_TESTED" if name == missing_baseline else "PASS"}
                 for name in BASELINE]
         report = {
@@ -45,7 +46,10 @@ class TopologyAcceptanceGateTests(unittest.TestCase):
             "failed": failures,
             "passed": passed,
             "residual_objects": residuals if residuals is not None else [],
-            "tests": rows + [{"id": "qmgr-restart-persistence", "status": "NOT_TESTED"}],
+            "tests": rows + [{"id": "qmgr-restart-persistence", "status": "NOT_TESTED"}]
+                     + [{"id": f"{side}:remote-{variant}", "status": "PASS"}
+                        for side in ("a", "b")
+                        for variant in ("persistent", "nonpersistent", "binary4k", "commit", "rollback")][:transport_passes],
         }
         with tempfile.TemporaryDirectory(prefix="mq-audit-gate-") as directory:
             playbook = Path(directory) / "gate.yml"
@@ -59,6 +63,7 @@ class TopologyAcceptanceGateTests(unittest.TestCase):
                  "--extra-vars", json.dumps({
                      "topology_run": {"report": report},
                      "mq_topology_accept_partial": opt_in,
+                     "mq_topology_transient_transport": transient,
                  })],
                 cwd=ROOT, capture_output=True, text=True, timeout=45,
                 check=False,
@@ -89,6 +94,13 @@ class TopologyAcceptanceGateTests(unittest.TestCase):
 
     def test_zero_passed_checks_block_partial(self):
         self.check_gate("PARTIAL", opt_in=True, passed=0, accept=False)
+
+    def test_transient_transport_requires_all_ten_remote_cases(self):
+        self.check_gate("PARTIAL", opt_in=True, transient=True,
+                        transport_passes=9, accept=False)
+        self.check_gate("PARTIAL", opt_in=True, transient=True,
+                        transport_passes=10, accept=True)
+
 
 
 if __name__ == "__main__":

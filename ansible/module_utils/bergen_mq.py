@@ -32,7 +32,7 @@ ATTRIBUTES = {
                    deftype="enum", put="enum", get="enum"),
     "channel": dict(COMMON, chltype="enum", conname="text", xmitq="text",
                     maxmsgl="int", hbint="int", kaint="int",
-                    discint="int", sslciph="text", sslcauth="enum"),
+                    discint="int", sslciph="text", sslcauth="enum", certlabl="text"),
     "topic": dict(COMMON, topicstr="text", pub="enum", sub="enum",
                   pubscope="enum", subscope="enum", defpsist="enum"),
     "namelist": dict(COMMON, names="list", nltype="enum"),

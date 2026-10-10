@@ -1,0 +1,164 @@
+---
+# Separate, reviewed change window. Never called by the certificate preparation.
+- name: Activate already prepared MQ transport identities with controlled restart
+  hosts: bergen-mq-lab:bergen-mq-lab-b
+  become: true
+  gather_facts: true
+  serial: 1
+  any_errors_fatal: true
+  vars:
+    mq_lab_transport_pki_enabled: true
+    mq_lab_qmgr: "{{ 'BERGENLAB' if inventory_hostname == 'bergen-mq-lab' else 'BERGENLABB' }}"
+  tasks:
+    - name: Require explicitly approved service restart
+      ansible.builtin.assert:
+        that:
+          - mq_transport_pki_activate | default(false) | bool
+          - mq_transport_restart_approved | default(false) | bool
+          - inventory_hostname in ['bergen-mq-lab', 'bergen-mq-lab-b']
+          - ansible_facts.distribution == 'Rocky'
+        fail_msg: "No transport activation without explicit PKI and restart approval."
+
+    - name: Inspect existing production-of-lab Quadlet without editing
+      ansible.builtin.slurp:
+        src: /etc/containers/systemd/bergen-mq-lab.container
+      register: transport_original_quadlet
+
+    - name: Extract pinned Image= line from existing Quadlet without regex escaping ambiguity
+      ansible.builtin.set_fact:
+        mq_lab_image: >-
+          {{
+            (
+              (transport_original_quadlet.content | b64decode).splitlines()
+              | select('match', '^Image=')
+              | list | first | default('')
+            ) | regex_replace('^Image=', '')
+          }}
+
+    - name: Refuse missing or unpinned existing image
+      ansible.builtin.assert:
+        that:
+          - mq_lab_image is match('^icr[.]io/ibm-messaging/mq:9[.]4[.].*-amd64@sha256:[a-f0-9]{64}$')
+        fail_msg: "Existing Quadlet has no recognized pinned MQ image; no changes applied."
+
+    - name: Render base Quadlet in memory for drift validation
+      ansible.builtin.set_fact:
+        transport_expected_base_quadlet: >-
+          {{ lookup('ansible.builtin.template',
+              playbook_dir ~ '/../roles/mq_lab/templates/bergen-mq-lab.container.j2') }}
+      vars:
+        mq_lab_transport_pki_enabled: false
+
+    - name: Render activated Quadlet in memory for drift validation
+      ansible.builtin.set_fact:
+        transport_expected_target_quadlet: >-
+          {{ lookup('ansible.builtin.template',
+              playbook_dir ~ '/../roles/mq_lab/templates/bergen-mq-lab.container.j2') }}
+      vars:
+        mq_lab_transport_pki_enabled: true
+
+    - name: Require unmodified current Quadlet before any change
+      ansible.builtin.assert:
+        that:
+          - >-
+            (
+              (transport_original_quadlet.content | b64decode).splitlines()
+              | reject('equalto', '') | sort | list
+            ) in [
+              (transport_expected_base_quadlet.splitlines() | reject('equalto', '') | sort | list),
+              (transport_expected_target_quadlet.splitlines() | reject('equalto', '') | sort | list)
+            ]
+        fail_msg: >-
+          Current Quadlet differs from both the expected base and transport-enabled
+          templates. Refusing to modify it; inspect the drift manually.
+
+    - name: Check prepared key material exists before writing Quadlet
+      ansible.builtin.stat:
+        path: "{{ item }}"
+      loop:
+        - /etc/bergen-mq-lab/transport-pki/identity/tls.key
+        - /etc/bergen-mq-lab/transport-pki/identity/tls.crt
+        - /etc/bergen-mq-lab/transport-pki/identity/ca.crt
+        - /etc/bergen-mq-lab/transport-pki/trust/tls.crt
+      register: transport_pki_files
+
+    - name: Refuse incomplete PKI material
+      ansible.builtin.assert:
+        that:
+          - transport_pki_files.results | selectattr('stat.exists', 'equalto', false) | list | length == 0
+
+    - name: Insert both transport mounts atomically after the existing TLS mount
+      ansible.builtin.replace:
+        path: /etc/containers/systemd/bergen-mq-lab.container
+        regexp: '(?m)^(Volume=/etc/bergen-mq-lab/tls:/etc/mqm/pki/keys/bergenlab:ro(?:,Z)?)$'
+        replace: |-
+          \g<1>
+          Volume=/etc/bergen-mq-lab/transport-pki/identity:/etc/mqm/pki/keys/bergentransport:ro{{ ',Z' if (ansible_facts.selinux | default({})).status | default('disabled') == 'enabled' else '' }}
+          Volume=/etc/bergen-mq-lab/transport-pki/trust:/etc/mqm/pki/trust/bergentransport-peer:ro{{ ',Z' if (ansible_facts.selinux | default({})).status | default('disabled') == 'enabled' else '' }}
+      register: transport_mount_update
+      when: >-
+        (
+          (transport_original_quadlet.content | b64decode).splitlines()
+          | reject('equalto', '') | sort | list
+        ) == (
+          transport_expected_base_quadlet.splitlines()
+          | reject('equalto', '') | sort | list
+        )
+
+    - name: Record exact changed state for approved restart
+      ansible.builtin.set_fact:
+        transport_quadlet_update:
+          changed: "{{ transport_mount_update.changed | default(false) }}"
+
+    - name: Reload Quadlet generator after approved definition change
+      ansible.builtin.systemd_service:
+        daemon_reload: true
+      when:
+        - transport_quadlet_update.changed
+        - not ansible_check_mode
+
+    - name: Restart ONLY approved evaluation service on changed Quadlet
+      ansible.builtin.systemd_service:
+        name: bergen-mq-lab.service
+        state: restarted
+      when:
+        - transport_quadlet_update.changed
+        - not ansible_check_mode
+
+    - name: Wait for restarted web listener
+      ansible.builtin.wait_for:
+        host: 127.0.0.1
+        port: 9443
+        timeout: 180
+      when: not ansible_check_mode
+
+    - name: Confirm imported personal labels and separate peer CA
+      ansible.builtin.command:
+        argv:
+          - podman
+          - exec
+          - bergen-mq-lab
+          - /opt/mqm/bin/runmqakm
+          - -cert
+          - -list
+          - -db
+          - /run/runmqserver/tls/key.kdb
+          - -stashed
+      environment:
+        CONTAINERS_STORAGE_CONF: /etc/bergen-mq-lab/storage.conf
+      register: transport_labels
+      changed_when: false
+      when: not ansible_check_mode
+
+    - name: Require existing and newly imported identities
+      ansible.builtin.assert:
+        that:
+          - "'bergenlab' in transport_labels.stdout"
+          - "'bergentransport' in transport_labels.stdout"
+          - "('Bergen MQ Transport CA ' ~ ('BERGENLABB' if inventory_hostname == 'bergen-mq-lab' else 'BERGENLAB')) in transport_labels.stdout"
+        fail_msg: "New certificate import not confirmed. Review service logs and restore previous Quadlet via Ansible."
+      when: not ansible_check_mode
+
+    - name: Show evaluation PKI activation result
+      ansible.builtin.debug:
+        msg: "Transport PKI mounts {{ 'planned' if ansible_check_mode else 'verified' }} on {{ inventory_hostname }}; existing certificate label remains a separate check."

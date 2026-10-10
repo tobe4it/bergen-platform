@@ -13,6 +13,15 @@ from test_mq_audit import audit
 ROOT = Path(__file__).resolve().parents[1]
 sys.modules['ansible.module_utils.bergen_mq'] = mq
 sys.modules['ansible.module_utils.bergen_mq_audit'] = audit
+spec_names = importlib.util.spec_from_file_location(
+    'bergen_mq_audit_names', ROOT / 'ansible/module_utils/bergen_mq_audit_names.py')
+audit_names_module = importlib.util.module_from_spec(spec_names)
+sys.modules['ansible.module_utils.bergen_mq_audit_names'] = audit_names_module
+spec_names.loader.exec_module(audit_names_module)
+spec_transport = importlib.util.spec_from_file_location('bergen_mq_transport', ROOT / 'ansible/module_utils/bergen_mq_transport.py')
+transport_module = importlib.util.module_from_spec(spec_transport)
+sys.modules['ansible.module_utils.bergen_mq_transport'] = transport_module
+spec_transport.loader.exec_module(transport_module)
 spec = importlib.util.spec_from_file_location('topology', ROOT / 'ansible/module_utils/bergen_mq_topology.py')
 topology = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(topology)
@@ -60,6 +69,73 @@ class TopologyTests(unittest.TestCase):
         self.assertNotIn('hidden-client', json.dumps(report))
         self.assertNotIn('hidden-admin', json.dumps(report))
 
+    def test_run_scoped_local_queues_have_distinct_audit_aliases(self):
+        clients = dict(a=FakeClient(), b=FakeClient())
+        report = topology.run(
+            nodes(), {'host': 'client'}, 'test', True,
+            False, clients, success_probe,
+        )
+        prefix = report['prefix']
+        self.assertRegex(prefix, r'^AUDIT[.][A-F0-9]{7}$')
+        for side, client in clients.items():
+            qlocals = {
+                call[2]: call[3] for call in client.calls
+                if call[0] == 'define' and call[1] == 'qlocal'
+                and call[2].startswith('LQ.AUDIT.')
+            }
+            aliases = {
+                call[2]: call[3] for call in client.calls
+                if call[0] == 'define' and call[1] == 'qalias'
+                and call[2].startswith('AUDIT.')
+            }
+            self.assertTrue(qlocals)
+            self.assertEqual(len(qlocals), len(aliases))
+            for alias, attrs in aliases.items():
+                self.assertIn(attrs['target'], qlocals)
+                self.assertEqual(alias, attrs['target'].removeprefix('LQ.'))
+                self.assertLessEqual(len(alias), 48)
+                self.assertLessEqual(len(attrs['target']), 48)
+            self.assertFalse(client.objects)
+
+    def test_transient_remote_queues_route_via_audit_target_alias(self):
+        # Entire test uses REST fakes: no MQ credentials or real channel start.
+        from test_mq_transport import FakeTransportClient
+        active = set()
+        clients = {s: FakeTransportClient(active) for s in ('a', 'b')}
+        report = topology.run(
+            nodes(), {'host': 'client'}, 'test', True,
+            include_objects=False, clients=clients, probe=success_probe,
+            transient_transport=True,
+            transport_peer_firewall_verified=True,
+            transport_cross_ca_verified=True,
+            transport_channel_security_verified=True,
+        )
+        self.assertEqual(report['failed'], 0, report['tests'])
+        self.assertEqual(report['residual_objects'], [])
+        for side in ('a', 'b'):
+            self.assertTrue(all(
+                row['status'] == 'PASS'
+                for row in report['tests']
+                if row['id'].startswith(side + ':remote-')))
+            remote_definitions = [
+                call for call in clients[side].calls
+                if call[0] == 'define' and call[1] == 'qremote'
+                and call[2].startswith('RQ.AUDIT.')
+            ]
+            self.assertEqual(len(remote_definitions), len(topology.TRANSPORT_CASES))
+            destination = 'b' if side == 'a' else 'a'
+            destination_aliases = {
+                call[2]: call[3]['target']
+                for call in clients[destination].calls
+                if call[0] == 'define' and call[1] == 'qalias'
+                and call[2].startswith('AUDIT.')
+            }
+            for call in remote_definitions:
+                remote_target = call[3]['rname']
+                self.assertIn(remote_target, destination_aliases)
+                self.assertTrue(destination_aliases[remote_target].startswith('LQ.AUDIT.'))
+            self.assertFalse(clients[side].objects)
+
     def test_negative_connection_does_not_accept_network_error(self):
         def probe(op, *args, **kwargs):
             if op == 'bad_password': return dict(ok=False, reason=2538, tls_failure=False)
@@ -76,7 +152,7 @@ class TopologyTests(unittest.TestCase):
         clients = dict(a=FakeClient(), b=FakeClient())
         report = topology.run(nodes(), {'host': 'client'}, 'test', True, False, clients, probe)
         self.assertEqual(report['status'], 'FAIL')
-        self.assertEqual(len(report['residual_objects']), 1)
+        self.assertEqual(len(report['residual_objects']), 2)  # physical LQ plus alias
         self.assertFalse(any(c[0] == 'delete' for c in clients['a'].calls))
         self.assertFalse(clients['b'].calls)
 

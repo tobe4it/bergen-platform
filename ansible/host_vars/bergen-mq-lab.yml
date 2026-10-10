@@ -1,0 +1,5 @@
+---
+# Permit only the other dedicated MQ evaluation queue manager to reach TCP/1414.
+# Peer IPv4 is resolved from active site inventory, never hardcoded in Git.
+mq_lab_peer_cidrs:
+  - "{{ hostvars['bergen-mq-lab-b'].ansible_host }}/32"

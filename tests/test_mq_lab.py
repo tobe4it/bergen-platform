@@ -36,8 +36,12 @@ class LabContracts(unittest.TestCase):
     def test_admin_firewall_rules_are_https_only_and_preserve_controller(self):
         defaults = yaml.safe_load((ROLE / "defaults/main.yml").read_text())
         self.assertEqual(defaults["mq_lab_admin_cidrs"], [])
-        tasks = yaml.safe_load((ROLE / "tasks/configure.yml").read_text())
-        task = next(t for t in tasks if t["name"].startswith("Add browser admin HTTPS"))
+        # configure.yml imports firewall.yml; inspect the defining role tasks.
+        configure = yaml.safe_load((ROLE / "tasks/configure.yml").read_text())
+        self.assertTrue(any(t.get("ansible.builtin.import_tasks") == "firewall.yml"
+                            for t in configure))
+        tasks = yaml.safe_load((ROLE / "tasks/firewall.yml").read_text())
+        task = next(t for t in tasks if t.get("name", "").startswith("Add browser admin HTTPS"))
         self.assertEqual(task["loop"], "{{ mq_lab_admin_cidrs }}")
         env = environment()
         env.filters["unique"] = lambda values: list(dict.fromkeys(values))
@@ -49,6 +53,75 @@ class LabContracts(unittest.TestCase):
         self.assertIn('source address="192.168.2.0/23"', result[1])
         self.assertIn('port port="9443"', result[1])
         self.assertNotIn("1414", result[1])
+
+    def test_transport_mounts_are_opt_in_and_default_identity_is_preserved(self):
+        template = (ROLE / "templates/bergen-mq-lab.container.j2").read_text()
+        default_quadlet = render(template, mq_lab_transport_pki_enabled=False)
+        staged_quadlet = render(template, mq_lab_transport_pki_enabled=True)
+        self.assertNotIn("transport-pki", default_quadlet)
+        self.assertIn("Volume=/etc/bergen-mq-lab/tls:/etc/mqm/pki/keys/bergenlab:ro",
+                      default_quadlet)
+        self.assertIn("/etc/mqm/pki/keys/bergentransport:ro", staged_quadlet)
+        self.assertIn("/etc/mqm/pki/trust/bergentransport-peer:ro", staged_quadlet)
+        self.assertIn("/etc/mqm/pki/keys/bergenlab:ro", staged_quadlet)
+        self.assertNotIn("Environment=MQ_DEV=true", staged_quadlet)
+        # Existing installations can have the LDAP volume earlier in [Container].
+        # Equal nonempty line multisets are equivalent; other changes must fail.
+        legacy = default_quadlet.replace(
+            "Volume=/etc/bergen-mq-lab/trust/ldap:/etc/mqm/pki/trust/ldap:ro\n", "")
+        legacy = legacy.replace("ContainerName=bergen-mq-lab\n",
+                                "ContainerName=bergen-mq-lab\n"
+                                "Volume=/etc/bergen-mq-lab/trust/ldap:/etc/mqm/pki/trust/ldap:ro\n")
+        normalize = lambda s: sorted(line for line in s.splitlines() if line)
+        self.assertEqual(normalize(default_quadlet), normalize(legacy))
+        self.assertNotEqual(normalize(default_quadlet),
+                            normalize(legacy.replace("Network=host", "Network=bridge")))
+        self.assertNotEqual(normalize(default_quadlet),
+                            normalize(legacy.replace("DropCapability=all", "DropCapability=none")))
+        self.assertEqual(
+            len([line for line in staged_quadlet.splitlines()
+                 if line.startswith("Volume=/etc/bergen-mq-lab/transport-pki/")]), 2)
+
+    def test_transport_pki_prepare_and_activation_are_separate(self):
+        prepare = yaml.safe_load((ROOT / "ansible/playbooks/mq-transport-pki-prepare.yml").read_text())
+        self.assertEqual(len(prepare), 2)
+        self.assertEqual(len(prepare[0]["tasks"]) > 5, True)
+        self.assertIn("mq_transport_pki_prepare", str(prepare[0]["tasks"][0]))
+        self.assertIn("delegate_to", str(prepare[1]["tasks"]))
+        activate = yaml.safe_load((ROOT / "ansible/playbooks/mq-transport-pki-activate.yml").read_text())
+        self.assertEqual(len(activate), 1)
+        self.assertIn("mq_transport_restart_approved", str(activate[0]["tasks"][0]))
+        self.assertEqual(activate[0]["serial"], 1)
+        self.assertIn("ansible.builtin.replace", str(activate))
+        self.assertNotIn("ansible.builtin.template", str(activate[0]["tasks"][-9:]))
+        activation_text = (ROOT / "ansible/playbooks/mq-transport-pki-activate.yml").read_text()
+        self.assertIn("splitlines()", activation_text)
+        self.assertIn("sort | list", activation_text)
+        self.assertIn("transport_mount_update.changed", activation_text)
+        mount_task = next(task for task in activate[0]["tasks"]
+                          if task["name"].startswith("Insert both transport mounts atomically"))
+        import re
+        pattern = mount_task["ansible.builtin.replace"]["regexp"]
+        replacement = render(mount_task["ansible.builtin.replace"]["replace"])
+        base = render((ROLE / "templates/bergen-mq-lab.container.j2").read_text())
+        preview, count = re.subn(pattern, lambda match:
+                                 replacement.replace(r"\g<1>", match.group(1)),
+                                 base)
+        self.assertEqual(count, 1)
+        self.assertRegex(preview,
+                         r"(?m)^Volume=/etc/bergen-mq-lab/transport-pki/identity:.*$")
+        self.assertRegex(preview,
+                         r"(?m)^Volume=/etc/bergen-mq-lab/transport-pki/trust:.*$")
+        container_section = preview.split("[Container]\n", 1)[1].split("[Service]\n", 1)[0]
+        existing_mount = "Volume=/etc/bergen-mq-lab/tls:/etc/mqm/pki/keys/bergenlab:ro"
+        identity_mount = "Volume=/etc/bergen-mq-lab/transport-pki/identity:/etc/mqm/pki/keys/bergentransport:ro"
+        peer_mount = "Volume=/etc/bergen-mq-lab/transport-pki/trust:/etc/mqm/pki/trust/bergentransport-peer:ro"
+        self.assertIn(existing_mount + "\n" + identity_mount + "\n" + peer_mount, container_section)
+        self.assertNotIn("Volume=/etc/bergen-mq-lab/transport-pki/", preview.split("[Install]\n", 1)[1])
+        self.assertIn("Volume=/etc/bergen-mq-lab/tls:/etc/mqm/pki/keys/bergenlab:ro",
+                      preview)
+        self.assertIn("state: restarted", (ROOT / "ansible/playbooks/mq-transport-pki-activate.yml").read_text())
+        self.assertNotIn("ansible.builtin.systemd_service", str(prepare))
 
     def test_explicit_web_auth_does_not_enable_default_mq_objects(self):
         xml = render((ROLE / "templates/mqwebuser.xml.j2").read_text())

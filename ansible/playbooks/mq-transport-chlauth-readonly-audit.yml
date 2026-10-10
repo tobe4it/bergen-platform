@@ -1,0 +1,74 @@
+---
+# Collect exactly three read-only MQSC calls per MQ host, then validate on
+# controller via the strict parser. No CHLAUTH writes, channel starts or
+# standalone Python SSH connections.
+- name: Collect read-only CHLAUTH evidence from both evaluation queue managers
+  hosts: bergen-mq-lab:bergen-mq-lab-b
+  gather_facts: false
+  become: true
+  serial: 1
+  any_errors_fatal: true
+  environment:
+    CONTAINERS_STORAGE_CONF: /etc/bergen-mq-lab/storage.conf
+  vars:
+    mq_chlauth_fixture_receiver: >-
+      {{ 'AUDIT.A1B2C3D.B2A' if inventory_hostname == 'bergen-mq-lab'
+         else 'AUDIT.A1B2C3D.A2B' }}
+  tasks:
+    - name: Refuse unknown inventory host or Ansible check mode
+      ansible.builtin.assert:
+        that:
+          - inventory_hostname in ['bergen-mq-lab', 'bergen-mq-lab-b']
+          - not ansible_check_mode
+
+    - name: Query queue-manager CHLAUTH and default certificate
+      ansible.builtin.command:
+        argv: [podman, exec, -i, bergen-mq-lab, /opt/mqm/bin/runmqsc]
+        stdin: "DISPLAY QMGR CHLAUTH CERTLABL\n"
+      register: mq_chlauth_qmgr_evidence
+      changed_when: false
+
+    - name: Query exact absent sample receiver
+      ansible.builtin.command:
+        argv: [podman, exec, -i, bergen-mq-lab, /opt/mqm/bin/runmqsc]
+        stdin: "DISPLAY CHANNEL('{{ mq_chlauth_fixture_receiver }}') ALL\n"
+      register: mq_chlauth_receiver_evidence
+      changed_when: false
+      failed_when: false
+
+    - name: Query all CHLAUTH records
+      ansible.builtin.command:
+        argv: [podman, exec, -i, bergen-mq-lab, /opt/mqm/bin/runmqsc]
+        stdin: "DISPLAY CHLAUTH(*) ALL\n"
+      register: mq_chlauth_all_evidence
+      changed_when: false
+
+    - name: Hold strictly scoped evidence in host facts for controller validation
+      ansible.builtin.set_fact:
+        mq_chlauth_readonly_evidence:
+          qmgr:
+            rc: "{{ mq_chlauth_qmgr_evidence.rc | int }}"
+            stdout: "{{ mq_chlauth_qmgr_evidence.stdout }}"
+          receiver:
+            rc: "{{ mq_chlauth_receiver_evidence.rc | int }}"
+            stdout: "{{ mq_chlauth_receiver_evidence.stdout }}"
+          rules:
+            rc: "{{ mq_chlauth_all_evidence.rc | int }}"
+            stdout: "{{ mq_chlauth_all_evidence.stdout }}"
+      no_log: true
+
+- name: Validate both real MQSC evidence sets on the controller
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  tasks:
+    - name: Require both host result sets and invoke read-only parser
+      mq_chlauth_readonly_audit:
+        responses:
+          a: "{{ hostvars['bergen-mq-lab'].mq_chlauth_readonly_evidence }}"
+          b: "{{ hostvars['bergen-mq-lab-b'].mq_chlauth_readonly_evidence }}"
+      register: mq_chlauth_readonly_result
+
+    - name: Show non-sensitive read-only validation result
+      ansible.builtin.debug:
+        var: mq_chlauth_readonly_result

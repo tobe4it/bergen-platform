@@ -1,0 +1,51 @@
+---
+# Deliberately non-mutating review gate for a future CHLAUTH fixture lifecycle.
+# No execution of SET/DEFINE/DELETE. "OK" is not permission for live apply.
+- name: Review transient CHLAUTH write contract offline only
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  become: false
+  tasks:
+    - name: Refuse live CHLAUTH writes regardless of requested flags
+      ansible.builtin.assert:
+        that:
+          - not (mq_chlauth_live_apply | default(false) | bool)
+          - not (mq_chlauth_write_approved | default(false) | bool)
+        fail_msg: >-
+          This playbook is strictly offline. It does not implement a
+          production-safe live writer, exclusive ownership or durable rollback.
+
+    - name: Run all CHLAUTH planning, lifecycle, readback and command-contract tests
+      ansible.builtin.command:
+        argv:
+          - "{{ ansible_playbook_python }}"
+          - -m
+          - unittest
+          - discover
+          - -s
+          - tests
+          - -p
+          - "test_mq_chlauth*.py"
+          - -v
+        chdir: "{{ playbook_dir }}/../.."
+      environment:
+        PYTHONPATH: "{{ playbook_dir }}/../module_utils/.."
+      register: mq_chlauth_offline_tests
+      changed_when: false
+
+    - name: Require unittest summary is available and no tests were skipped
+      ansible.builtin.assert:
+        that:
+          - "'OK' in mq_chlauth_offline_tests.stderr.splitlines()"
+          - "'FAILED' not in mq_chlauth_offline_tests.stderr"
+          - "'skipped=' not in mq_chlauth_offline_tests.stderr"
+          - "mq_chlauth_offline_tests.stderr is search('Ran [0-9]+ tests? in')"
+        fail_msg: Offline test count or successful summary missing.
+
+    - name: Show unittest summary and confirm no MQ mutation
+      ansible.builtin.debug:
+        msg:
+          test_summary: "{{ mq_chlauth_offline_tests.stderr.splitlines() | select('search', '^Ran [0-9]+ tests? in') | list }}"
+          test_status: "{{ mq_chlauth_offline_tests.stderr.splitlines() | select('equalto', 'OK') | list }}"
+          mode: "Offline only; no MQ objects changed and no live writer enabled."

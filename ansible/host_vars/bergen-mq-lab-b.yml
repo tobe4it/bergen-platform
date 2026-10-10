@@ -2,3 +2,6 @@
 # Preserve the existing HTTPS firewall policy for queue manager B.
 # Additional browser/admin networks are not authorized here.
 mq_lab_admin_cidrs: []
+# Reciprocal TCP/1414 peer access, source address from active inventory.
+mq_lab_peer_cidrs:
+  - "{{ hostvars['bergen-mq-lab'].ansible_host }}/32"

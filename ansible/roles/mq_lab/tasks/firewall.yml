@@ -8,11 +8,14 @@
       - mq_lab_admin_cidrs is sequence
       - mq_lab_admin_cidrs is not string
       - mq_lab_admin_cidrs is not mapping
+      - mq_lab_peer_cidrs is sequence
+      - mq_lab_peer_cidrs is not string
+      - mq_lab_peer_cidrs is not mapping
     fail_msg: "Invalid MQ firewall source configuration."
 
 - name: Validate authorized IPv4 ranges before modifying firewall
   ansible.builtin.command:
-    argv: "{{ ['/usr/bin/python3', '-c', mq_lab_firewall_cidr_validator, mq_lab_controller_cidr, mq_lab_client_cidr if mq_lab_allow_client_connections | bool else mq_lab_controller_cidr] + mq_lab_admin_cidrs }}"
+    argv: "{{ ['/usr/bin/python3', '-c', mq_lab_firewall_cidr_validator, mq_lab_controller_cidr, mq_lab_client_cidr if mq_lab_allow_client_connections | bool else mq_lab_controller_cidr] + mq_lab_admin_cidrs + mq_lab_peer_cidrs }}"
   vars:
     mq_lab_firewall_cidr_validator: |
       import ipaddress
@@ -28,9 +31,15 @@
       for value in admins:
           network = ipaddress.IPv4Network(value, strict=True)
           if network.prefixlen == 0:
-              sys.exit("Unrestricted admin IPv4 network is forbidden")
+              sys.exit("Unrestricted IPv4 network is forbidden")
   changed_when: false
   check_mode: false
+- name: Require canonical exact peer QMgr source addresses
+  ansible.builtin.command:
+    argv: "{{ ['/usr/bin/python3', '-c', 'import ipaddress,sys; [ipaddress.IPv4Network(v, strict=True) for v in sys.argv[1:]]; sys.exit(0 if all(ipaddress.IPv4Network(v).prefixlen == 32 for v in sys.argv[1:]) else 1)'] + mq_lab_peer_cidrs }}"
+  changed_when: false
+  check_mode: false
+
 - name: Enable firewall before starting MQ listeners
   ansible.builtin.systemd_service:
     name: firewalld
@@ -65,6 +74,11 @@
       {{ ['rule family="ipv4" source address="' ~ mq_lab_controller_cidr ~ '" port port="9443" protocol="tcp" accept']
          + (['rule family="ipv4" source address="' ~ mq_lab_client_cidr ~ '" port port="1414" protocol="tcp" accept']
             if mq_lab_allow_client_connections | bool else []) }}
+
+- name: Add reviewed peer QMgr sources for MQ listener only
+  ansible.builtin.set_fact:
+    mq_lab_firewall_rules: "{{ (mq_lab_firewall_rules + ['rule family=\"ipv4\" source address=\"' ~ item ~ '\" port port=\"1414\" protocol=\"tcp\" accept']) | unique | list }}"
+  loop: "{{ mq_lab_peer_cidrs }}"
 
 - name: Add browser admin HTTPS sources without opening the MQ client listener
   ansible.builtin.set_fact:

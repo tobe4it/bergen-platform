@@ -1,0 +1,239 @@
+---
+# Strictly read-only assessment before distributing *.thebergens.net.
+# No slurp/fetch/copy of a private key, no file writes, no service changes.
+# Source is registered ephemerally; site-specific SSH credentials stay local.
+- name: Register MX2 certificate source without modifying inventory files
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  vars:
+    mail_tls_source_address: mx.thebergens.net
+  tasks:
+    - name: Require exactly the existing dedicated mail backend inventory host
+      ansible.builtin.assert:
+        that:
+          - "'bergen-mail' in groups['all']"
+          - mail_tls_source_address is string
+          - mail_tls_source_address | length > 0
+          - not ansible_check_mode
+        fail_msg: "Inventory must contain bergen-mail; source must be explicit and check mode is unsupported"
+
+    - name: Register MX2 as an ephemeral read-only audit target
+      ansible.builtin.add_host:
+        name: mx2-certificate-source
+        groups: mail_tls_certificate_sources
+        ansible_host: "{{ mail_tls_source_address }}"
+        ansible_user: "{{ mail_tls_source_ssh_user | default(omit) }}"
+        ansible_python_interpreter: /usr/bin/python3
+      changed_when: false
+
+- name: Validate certificate and private key on MX2 without extracting either
+  hosts: mail_tls_certificate_sources
+  gather_facts: false
+  become: true
+  any_errors_fatal: true
+  vars:
+    mail_tls_source_cert_file: /etc/letsencrypt/live/thebergens.net-wildcard/fullchain.pem
+    mail_tls_source_key_file: /etc/letsencrypt/live/thebergens.net-wildcard/privkey.pem
+    mail_tls_required_san: "*.thebergens.net"
+  tasks:
+    - name: Require explicit absolute and distinct source paths
+      ansible.builtin.assert:
+        that:
+          - mail_tls_source_cert_file is match('^/')
+          - mail_tls_source_key_file is match('^/')
+          - mail_tls_source_cert_file != mail_tls_source_key_file
+          - mail_tls_required_san == '*.thebergens.net'
+
+    - name: Inspect source certificate metadata only
+      ansible.builtin.stat:
+        path: "{{ mail_tls_source_cert_file }}"
+        follow: true
+      register: mx2_cert_stat
+
+    - name: Inspect source private-key metadata only
+      ansible.builtin.stat:
+        path: "{{ mail_tls_source_key_file }}"
+        follow: true
+      register: mx2_key_stat
+      no_log: true
+
+    - name: Require source certificate and key to be regular files
+      ansible.builtin.assert:
+        that:
+          - mx2_cert_stat.stat.isreg | default(false)
+          - mx2_key_stat.stat.isreg | default(false)
+        fail_msg: "Expected MX2 TLS files not found; check source path overrides"
+
+    - name: Require certificate to remain valid for at least 30 days
+      ansible.builtin.command:
+        argv:
+          - openssl
+          - x509
+          - -in
+          - "{{ mail_tls_source_cert_file }}"
+          - -noout
+          - -checkend
+          - "2592000"
+      register: mx2_validity
+      changed_when: false
+      failed_when: false
+
+    - name: Read public certificate SAN (never the private key)
+      ansible.builtin.command:
+        argv:
+          - openssl
+          - x509
+          - -in
+          - "{{ mail_tls_source_cert_file }}"
+          - -noout
+          - -ext
+          - subjectAltName
+      register: mx2_san
+      changed_when: false
+      failed_when: false
+      no_log: true
+
+    - name: Obtain public-key SHA-256 fingerprint from certificate
+      ansible.builtin.shell: |
+        set -o pipefail
+        openssl x509 -in {{ mail_tls_source_cert_file | quote }} -noout -pubkey |
+          openssl pkey -pubin -outform DER |
+          openssl dgst -sha256
+      args:
+        executable: /bin/bash
+      register: mx2_cert_pubkey_digest
+      changed_when: false
+      no_log: true
+
+    - name: Obtain public-key SHA-256 fingerprint from private key without exporting key
+      ansible.builtin.shell: |
+        set -o pipefail
+        openssl pkey -in {{ mail_tls_source_key_file | quote }} -pubout -outform DER |
+          openssl dgst -sha256
+      args:
+        executable: /bin/bash
+      register: mx2_key_pubkey_digest
+      changed_when: false
+      no_log: true
+
+    - name: Fail closed unless wildcard SAN, expiry, and public keys match
+      ansible.builtin.assert:
+        that:
+          - mx2_validity.rc == 0
+          - mx2_san.rc == 0
+          - "mx2_san.stdout is search('DNS:\\\\*\\\\.thebergens\\\\.net(?:\\\\s|,|$)')"
+          - mx2_cert_pubkey_digest.stdout is match('^SHA2-256\\(stdin\\)= [0-9a-f]{64}$')
+          - mx2_cert_pubkey_digest.stdout == mx2_key_pubkey_digest.stdout
+        fail_msg: "MX2 TLS evidence invalid: stop; do not transfer certificate or private key"
+
+    - name: Read certificate expiry for sanitized report
+      ansible.builtin.command:
+        argv:
+          - openssl
+          - x509
+          - -in
+          - "{{ mail_tls_source_cert_file }}"
+          - -noout
+          - -enddate
+      register: mx2_enddate
+      changed_when: false
+
+    - name: Retain only public certificate evidence
+      ansible.builtin.set_fact:
+        mx2_mail_tls_public_evidence:
+          source: "{{ ansible_host }}"
+          certificate_path: "{{ mail_tls_source_cert_file }}"
+          certificate_public_key_sha256: "{{ mx2_cert_pubkey_digest.stdout.split('= ')[-1] }}"
+          not_after: "{{ mx2_enddate.stdout }}"
+          wildcard_san_present: true
+          valid_for_30_days: true
+          certificate_and_key_match: true
+      no_log: true
+
+- name: Inspect effective Postfix and Dovecot TLS paths on bergen-mail
+  hosts: bergen-mail
+  gather_facts: false
+  become: true
+  any_errors_fatal: true
+  vars:
+    mail_tls_expected_fqdn: mail.thebergens.net
+    mail_tls_target_cert_file: /etc/ssl/certs/mail-backend-fullchain.pem
+    mail_tls_target_key_file: /etc/ssl/private/mail-backend-key.pem
+  tasks:
+    - name: Read effective Postfix TLS certificate path
+      ansible.builtin.command:
+        argv: [postconf, -h, smtpd_tls_cert_file]
+      register: mail_postfix_cert
+      changed_when: false
+
+    - name: Read effective Postfix TLS private-key path
+      ansible.builtin.command:
+        argv: [postconf, -h, smtpd_tls_key_file]
+      register: mail_postfix_key
+      changed_when: false
+
+    - name: Read effective Postfix host identity
+      ansible.builtin.command:
+        argv: [postconf, -h, myhostname]
+      register: mail_postfix_hostname
+      changed_when: false
+
+    - name: Read effective Dovecot TLS certificate path
+      ansible.builtin.command:
+        argv: [doveconf, -h, ssl_server_cert_file]
+      register: mail_dovecot_cert
+      changed_when: false
+      no_log: true
+
+    - name: Read effective Dovecot TLS private-key path
+      ansible.builtin.command:
+        argv: [doveconf, -h, ssl_server_key_file]
+      register: mail_dovecot_key
+      changed_when: false
+      no_log: true
+
+    - name: Require both services to use the approved target paths and hostname
+      ansible.builtin.assert:
+        that:
+          - mail_tls_expected_fqdn == 'mail.thebergens.net'
+          - mail_postfix_hostname.stdout | trim == mail_tls_expected_fqdn
+          - mail_postfix_cert.stdout | trim == mail_tls_target_cert_file
+          - mail_postfix_key.stdout | trim == mail_tls_target_key_file
+          - mail_dovecot_cert.stdout | trim == mail_tls_target_cert_file
+          - mail_dovecot_key.stdout | trim == mail_tls_target_key_file
+        fail_msg: "Mail service name or live TLS paths differ; stop before certificate distribution"
+
+    - name: Retain sanitized target configuration evidence
+      ansible.builtin.set_fact:
+        bergen_mail_tls_target_evidence:
+          fqdn: "{{ mail_tls_expected_fqdn }}"
+          certificate_path: "{{ mail_tls_target_cert_file }}"
+          key_path: "{{ mail_tls_target_key_file }}"
+          postfix_matches: true
+          dovecot_matches: true
+      changed_when: false
+
+- name: Report read-only readiness for later certificate deployment
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  tasks:
+    - name: Require both independently captured evidence sets
+      ansible.builtin.assert:
+        that:
+          - hostvars['mx2-certificate-source'].mx2_mail_tls_public_evidence is defined
+          - hostvars['bergen-mail'].bergen_mail_tls_target_evidence is defined
+
+    - name: Publish non-secret readiness summary (no transfer authorization)
+      ansible.builtin.debug:
+        msg:
+          verification: PASS
+          mode: READ_ONLY
+          changed: false
+          source: "{{ hostvars['mx2-certificate-source'].mx2_mail_tls_public_evidence }}"
+          target: "{{ hostvars['bergen-mail'].bergen_mail_tls_target_evidence }}"
+          private_key_transferred: false
+          service_reloaded: false
+          can_authorize_deployment: false
+          next: "Review source paths, key handling, destination ownership and transactional reload before deployment"

@@ -1,0 +1,113 @@
+---
+# Read-only LDAP preflight for two dedicated MQ transport accounts.
+# Does not allocate IDs; recheck under an exclusive provisioning workflow before writing.
+- name: Preflight two dedicated MQ transport LDAP identities (read-only)
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  become: false
+  vars:
+    transport_ldap_uri: ldaps://ldap.thebergens.net:636
+    transport_ldap_base: dc=bergen,dc=intern
+    transport_ldap_users:
+      - {uid: bgttransa, uid_number: 1000016}
+      - {uid: bgttransb, uid_number: 1000017}
+    transport_ldap_groups:
+      - {cn: MQBGTTRANSA, gid_number: 1000016}
+      - {cn: MQBGTTRANSB, gid_number: 1000017}
+  tasks:
+    - name: Refuse writes and require explicit evaluation identity inventory
+      ansible.builtin.assert:
+        that:
+          - transport_ldap_uri == 'ldaps://ldap.thebergens.net:636'
+          - transport_ldap_base == 'dc=bergen,dc=intern'
+          - transport_ldap_users | length == 2
+          - transport_ldap_groups | length == 2
+          - (transport_ldap_users | map(attribute='uid') | list) == ['bgttransa', 'bgttransb']
+          - (transport_ldap_groups | map(attribute='cn') | list) == ['MQBGTTRANSA', 'MQBGTTRANSB']
+          - not (mq_transport_ldap_provision | default(false) | bool)
+        fail_msg: >-
+          Read-only preflight only; LDAP writes are not implemented or authorized.
+          Never set mq_transport_ldap_provision=true for this playbook.
+
+    - name: Read exact intended transport user entries
+      ansible.builtin.command:
+        argv:
+          - ldapsearch
+          - -LLL
+          - -x
+          - -H
+          - "{{ transport_ldap_uri }}"
+          - -b
+          - "cn=users,{{ transport_ldap_base }}"
+          - -s
+          - one
+          - "(uid={{ item.uid }})"
+          - dn
+      loop: "{{ transport_ldap_users }}"
+      loop_control:
+        label: "{{ item.uid }}"
+      register: transport_existing_users
+      changed_when: false
+
+    - name: Read exact intended transport group entries
+      ansible.builtin.command:
+        argv:
+          - ldapsearch
+          - -LLL
+          - -x
+          - -H
+          - "{{ transport_ldap_uri }}"
+          - -b
+          - "cn=groups,{{ transport_ldap_base }}"
+          - -s
+          - one
+          - "(cn={{ item.cn }})"
+          - dn
+      loop: "{{ transport_ldap_groups }}"
+      loop_control:
+        label: "{{ item.cn }}"
+      register: transport_existing_groups
+      changed_when: false
+
+    - name: Read collisions across entire directory for planned UID and GID values
+      ansible.builtin.command:
+        argv:
+          - ldapsearch
+          - -LLL
+          - -x
+          - -H
+          - "{{ transport_ldap_uri }}"
+          - -b
+          - "{{ transport_ldap_base }}"
+          - -s
+          - sub
+          - "(|(uidNumber=1000016)(uidNumber=1000017)(gidNumber=1000016)(gidNumber=1000017))"
+          - dn
+          - uidNumber
+          - gidNumber
+      register: transport_existing_ids
+      changed_when: false
+
+    - name: Fail closed on any existing account, group or numeric ID
+      ansible.builtin.assert:
+        that:
+          - >-
+            (transport_existing_users.results |
+             selectattr('stdout', 'search', '(?m)^dn: ') | list | length) == 0
+          - >-
+            (transport_existing_groups.results |
+             selectattr('stdout', 'search', '(?m)^dn: ') | list | length) == 0
+          - >-
+            transport_existing_ids.stdout is not search('(?m)^dn: ')
+        fail_msg: >-
+          LDAP object/ID collision or a previously provisioned identity was found.
+          Inspect explicitly; never overwrite or reuse a directory ID.
+
+    - name: Report read-only candidate identities
+      ansible.builtin.debug:
+        msg:
+          - "PASS: anonymous LDAPS search found no conflicting transport users/groups or UID/GID values."
+          - "Candidates: bgttransa UID 1000016, bgttransb UID 1000017; MQBGTTRANSA GID 1000016, MQBGTTRANSB GID 1000017."
+          - "This is not a reservation. Administrative bind and Synology-compatible create schema remain unverified."
+          - "No LDAP objects, MQ authorities or MQ channels were changed."

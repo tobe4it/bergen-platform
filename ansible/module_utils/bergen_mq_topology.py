@@ -8,6 +8,10 @@ import uuid
 from datetime import datetime, timezone
 from ansible.module_utils.bergen_mq import MQError, RestClient, discover, reconcile
 from ansible.module_utils.bergen_mq_audit import run_audit
+from ansible.module_utils.bergen_mq_transport import TransientTransport
+from ansible.module_utils.bergen_mq_audit_names import (
+    local_queue, alias_queue, remote_queue,
+)
 
 
 def now():
@@ -119,9 +123,15 @@ def summarize(report):
     return report
 
 
-def run(nodes, ssh, revision, confirm=False, include_objects=True, clients=None, probe=None):
+def run(nodes, ssh, revision, confirm=False, include_objects=True, clients=None, probe=None,
+        transient_transport=False, transport_peer_firewall_verified=False,
+        transport_cross_ca_verified=False, transport_channel_security_verified=False):
     validate(nodes, ssh, confirm)
-    prefix = 'BGT.' + uuid.uuid4().hex[:7].upper()
+    if transient_transport and not (transport_peer_firewall_verified and
+                                    transport_cross_ca_verified and
+                                    transport_channel_security_verified):
+        raise ValueError('Transient transport requires explicit peer firewall, CA trust and channel security review')
+    prefix = 'AUDIT.' + uuid.uuid4().hex[:7].upper()
     report = dict(schema_version=1, prefix=prefix, revision=revision, started=now(),
                   evaluation_only=True, tests=[], cleanup=[], residual_objects=[], object_reports={},
                   targets={s: {k: n.get(k) for k in ('qmgr', 'host', 'port', 'channel', 'protocol', 'cipher')} for s, n in nodes.items()},
@@ -136,6 +146,8 @@ def run(nodes, ssh, revision, confirm=False, include_objects=True, clients=None,
     for name, reason in DEFERRED.items():
         report['tests'].append(dict(id=name, status='NOT_TESTED', detail=reason))
     owned, uncertain = [], False
+    transient = None
+    transient_ready = False
     clients = clients or {s: RestClient(n['endpoint'], n['qmgr'], n['admin_user'], n['admin_password'], n['admin_ca']) for s, n in nodes.items()}
     probe = probe or Probe(nodes, ssh)
 
@@ -196,12 +208,14 @@ def run(nodes, ssh, revision, confirm=False, include_objects=True, clients=None,
             for index, op in enumerate(LOCAL_CASES):
                 if uncertain:
                     break
-                name = prefix + '.' + side.upper() + str(index)
+                name = local_queue(prefix, side.upper() + str(index))
                 def execute(s=side, q=name, operation=op):
                     attrs = dict(maxdepth=1 if operation == 'full' else 10, maxmsgl=4096, defpsist='yes')
                     if operation == 'put_denied': attrs['put'] = 'disabled'
                     if operation == 'get_denied': attrs['get'] = 'disabled'
                     fixture(s, q, **attrs)
+                    alias = alias_queue(prefix, s.upper() + str(index))
+                    fixture(s, alias, 'qalias', target=q)
                     settings = dict(queue=q)
                     action = operation
                     if operation in ('nonpersistent', 'zero-length', 'binary-4k'):
@@ -210,8 +224,7 @@ def run(nodes, ssh, revision, confirm=False, include_objects=True, clients=None,
                                         persistence=0 if operation == 'nonpersistent' else 1)
                     if operation == 'oversize': settings['size'] = 4097
                     if operation == 'alias':
-                        fixture(s, q + '.AL', 'qalias', target=q)
-                        settings.update(queue=q + '.AL', other_queue=q)
+                        settings.update(queue=alias, other_queue=q)
                     return probe(action, s, **settings)
                 expected = {'empty': 2033, 'put_denied': 2051, 'get_denied': 2016, 'oversize': 2030}.get(op, 0)
                 case(side + ':' + op, execute, expected=expected)
@@ -223,23 +236,50 @@ def run(nodes, ssh, revision, confirm=False, include_objects=True, clients=None,
                 case(side + ':oam-denied', no_authority, expected=2035)
             else:
                 report['tests'].append(dict(id=side + ':oam-denied', status='NOT_TESTED', detail='Needs an existing denied queue fixture'))
+        if transient_transport:
+            if uncertain or not all(ready.get(s, False) for s in ('a', 'b')):
+                report['tests'].append(dict(id='transport:prerequisites', status='FAIL',
+                    detail='Transient transport requested but client connections were not verified'))
+            else:
+                transient = TransientTransport(clients, nodes, prefix)
+                transient_ready = case('transport:temporary-fixtures',
+                                       lambda: (transient.create(), None)[1])
+                if transient_ready:
+                    transient_ready = case('transport:tls13-channel-start',
+                                           lambda: (transient.start(), None)[1])
+                    if transient_ready:
+                        report['transport'] = {
+                            'type': 'temporary', 'prefix': prefix,
+                            'directions': {s: {'sender': transient.specs[s]['sender'],
+                                               'xmitq': transient.specs[s]['xmitq']}
+                                           for s in ('a', 'b')},
+                            'tls13_channels_verified': True}
         for side, dest in (('a', 'b'), ('b', 'a')):
-            channel, xmitq = nodes[side].get('sender_channel', ''), nodes[side].get('xmitq', '')
-            if uncertain or not all(ready.values()) or not channel or not xmitq:
+            if transient_transport:
+                channel = transient.specs[side]['sender'] if transient and transient_ready else ''
+                xmitq = transient.specs[side]['xmitq'] if transient and transient_ready else ''
+            else:
+                channel, xmitq = nodes[side].get('sender_channel', ''), nodes[side].get('xmitq', '')
+            if uncertain or not all(ready.get(s, False) for s in ('a', 'b')) or not channel or not xmitq:
                 report['tests'].append(dict(id=side + ':remote-transport', status='NOT_TESTED', detail='Needs both positive connections and dedicated TLS SDR/RCVR/XMITQ fixtures'))
                 continue
             def transport(s=side, d=dest, ch=channel, xq=xmitq, variant='persistent'):
-                assert re.fullmatch(r'BGT\.[A-Z0-9.]{1,16}', ch)
-                assert re.fullmatch(r'BGT\.[A-Z0-9.]{1,44}', xq)
+                assert (re.fullmatch(r'BGT\.[A-Z0-9.]{1,16}', ch)
+                        or re.fullmatch(r'AUDIT\.[A-F0-9]{7}\.[AB]2[AB]', ch))
+                assert (re.fullmatch(r'BGT\.[A-Z0-9.]{1,44}', xq)
+                        or re.fullmatch(r'XQ\.AUDIT\.[A-F0-9]{7}\.[AB]X', xq))
                 sender = discover(clients[s], dict(name=ch, type='channel', state='present', attributes={'chltype': 'sdr'}))
                 receiver = discover(clients[d], dict(name=ch, type='channel', state='present', attributes={'chltype': 'rcvr'}))
                 assert sender and receiver and sender.get('sslciph') and receiver.get('sslciph')
                 assert sender.get('xmitq') == xq
                 suffix = variant.upper()
-                q = prefix + '.' + d.upper() + '.' + suffix + '.IN'
-                remote = prefix + '.' + s.upper() + '.' + suffix + '.REMOTE'
+                logical_suffix = d.upper() + '.' + suffix + '.IN'
+                q = local_queue(prefix, logical_suffix)
+                alias = alias_queue(prefix, logical_suffix)
+                remote = remote_queue(prefix, s.upper() + '.' + suffix + '.REMOTE')
                 fixture(d, q, maxdepth=10, maxmsgl=4096, defpsist='yes')
-                fixture(s, remote, 'qremote', rname=q, rqmname=nodes[d]['qmgr'], xmitq=xq)
+                fixture(d, alias, 'qalias', target=q)
+                fixture(s, remote, 'qremote', rname=alias, rqmname=nodes[d]['qmgr'], xmitq=xq)
                 result = probe('route_' + variant if variant in ('commit', 'rollback') else 'route', s,
                                queue=remote, other_queue=q, destination=d,
                                persistence=0 if variant == 'nonpersistent' else 1,
@@ -264,4 +304,8 @@ def run(nodes, ssh, revision, confirm=False, include_objects=True, clients=None,
                 entry['detail'] = 'Retained for review; no FORCE, CLEAR or drain was attempted'
                 report['residual_objects'].append(dict(side=side, **obj))
             report['cleanup'].append(entry)
+        if transient is not None:
+            channel_cleanup, channel_residuals = transient.cleanup(uncertain=uncertain)
+            report['cleanup'].extend(channel_cleanup)
+            report['residual_objects'].extend(channel_residuals)
     return summarize(report)

@@ -1,0 +1,203 @@
+---
+# One-time provisioning of dedicated per-QMgr transport PKI.
+# No Quadlet changes or container restart; activate separately after review.
+- name: Prepare independent IBM MQ transport CAs and identities
+  hosts: bergen-mq-lab:bergen-mq-lab-b
+  serial: 1
+  any_errors_fatal: true
+  become: true
+  gather_facts: false
+  vars:
+    transport_root: /etc/bergen-mq-lab/transport-pki
+    transport_label: bergentransport
+    transport_qmgr: "{{ 'BERGENLAB' if inventory_hostname == 'bergen-mq-lab' else 'BERGENLABB' }}"
+  tasks:
+    - name: Require reviewed lab identities and no check-mode writes
+      ansible.builtin.assert:
+        that:
+          - inventory_hostname in ['bergen-mq-lab', 'bergen-mq-lab-b']
+          - ansible_host is match('^[0-9]+[.][0-9]+[.][0-9]+[.][0-9]+$')
+          - mq_transport_pki_prepare | default(false) | bool
+          - not ansible_check_mode
+        fail_msg: "Explicit mq_transport_pki_prepare=true required; use only after reviewing the evaluation lab."
+
+    - name: Create protected private and public transport PKI directories
+      ansible.builtin.file:
+        path: "{{ item.path }}"
+        state: directory
+        owner: "{{ item.owner }}"
+        group: '0'
+        mode: "{{ item.mode }}"
+      loop:
+        - {path: /etc/bergen-mq-lab/transport-pki, owner: root, mode: '0700'}
+        - {path: /etc/bergen-mq-lab/transport-pki/private, owner: root, mode: '0700'}
+        - {path: /etc/bergen-mq-lab/transport-pki/identity, owner: '1001', mode: '0750'}
+        - {path: /etc/bergen-mq-lab/transport-pki/trust, owner: root, mode: '0755'}
+
+    - name: Generate independent transport CA private key only if absent
+      ansible.builtin.command:
+        argv: [openssl, genpkey, -algorithm, RSA, -pkeyopt, 'rsa_keygen_bits:3072', -out, /etc/bergen-mq-lab/transport-pki/private/ca.key]
+        creates: /etc/bergen-mq-lab/transport-pki/private/ca.key
+      no_log: true
+
+    - name: Protect transport CA key
+      ansible.builtin.file:
+        path: /etc/bergen-mq-lab/transport-pki/private/ca.key
+        owner: root
+        group: root
+        mode: '0600'
+
+    - name: Generate unique per-QMgr transport CA only if absent
+      ansible.builtin.command:
+        argv:
+          - openssl
+          - req
+          - -new
+          - -x509
+          - -sha256
+          - -days
+          - '3650'
+          - -key
+          - /etc/bergen-mq-lab/transport-pki/private/ca.key
+          - -out
+          - /etc/bergen-mq-lab/transport-pki/ca.crt
+          - -subj
+          - "/CN=Bergen MQ Transport CA {{ transport_qmgr }}"
+          - -addext
+          - basicConstraints=critical,CA:TRUE
+          - -addext
+          - keyUsage=critical,keyCertSign,cRLSign
+        creates: /etc/bergen-mq-lab/transport-pki/ca.crt
+
+    - name: Generate transport identity private key only if absent
+      ansible.builtin.command:
+        argv: [openssl, genpkey, -algorithm, RSA, -pkeyopt, 'rsa_keygen_bits:3072', -out, /etc/bergen-mq-lab/transport-pki/identity/tls.key]
+        creates: /etc/bergen-mq-lab/transport-pki/identity/tls.key
+      no_log: true
+
+    - name: Protect transport identity key for MQ runtime
+      ansible.builtin.file:
+        path: /etc/bergen-mq-lab/transport-pki/identity/tls.key
+        owner: '1001'
+        group: '0'
+        mode: '0400'
+
+    - name: Generate transport certificate request once
+      ansible.builtin.command:
+        argv: [openssl, req, -new, -sha256, -key, /etc/bergen-mq-lab/transport-pki/identity/tls.key, -out, /etc/bergen-mq-lab/transport-pki/private/identity.csr, -subj, "/CN={{ inventory_hostname }} transport"]
+        creates: /etc/bergen-mq-lab/transport-pki/private/identity.csr
+
+    - name: Define transport identity extensions without changing existing PKI
+      ansible.builtin.copy:
+        dest: /etc/bergen-mq-lab/transport-pki/private/identity.ext
+        mode: '0600'
+        content: |
+          basicConstraints=critical,CA:FALSE
+          keyUsage=critical,digitalSignature,keyEncipherment
+          extendedKeyUsage=serverAuth,clientAuth
+          subjectAltName=DNS:{{ inventory_hostname }},IP:{{ ansible_host }}
+
+    - name: Sign transport identity only if absent
+      ansible.builtin.command:
+        argv:
+          - openssl
+          - x509
+          - -req
+          - -sha256
+          - -days
+          - '365'
+          - -in
+          - /etc/bergen-mq-lab/transport-pki/private/identity.csr
+          - -CA
+          - /etc/bergen-mq-lab/transport-pki/ca.crt
+          - -CAkey
+          - /etc/bergen-mq-lab/transport-pki/private/ca.key
+          - -CAcreateserial
+          - -extfile
+          - /etc/bergen-mq-lab/transport-pki/private/identity.ext
+          - -out
+          - /etc/bergen-mq-lab/transport-pki/identity/tls.crt
+        creates: /etc/bergen-mq-lab/transport-pki/identity/tls.crt
+
+    - name: Put public issuing CA alongside transport identity
+      ansible.builtin.copy:
+        src: /etc/bergen-mq-lab/transport-pki/ca.crt
+        dest: /etc/bergen-mq-lab/transport-pki/identity/ca.crt
+        remote_src: true
+        owner: '1001'
+        group: '0'
+        mode: '0444'
+
+    - name: Protect transport certificate for MQ runtime
+      ansible.builtin.file:
+        path: /etc/bergen-mq-lab/transport-pki/identity/tls.crt
+        owner: '1001'
+        group: '0'
+        mode: '0444'
+
+    - name: Verify public transport certificate chain and current IP
+      ansible.builtin.command:
+        argv: [openssl, verify, -CAfile, /etc/bergen-mq-lab/transport-pki/ca.crt, -verify_ip, "{{ ansible_host }}", /etc/bergen-mq-lab/transport-pki/identity/tls.crt]
+      changed_when: false
+
+    - name: Verify transport identity expiry
+      ansible.builtin.command:
+        argv: [openssl, x509, -in, /etc/bergen-mq-lab/transport-pki/identity/tls.crt, -noout, -checkend, '86400']
+      changed_when: false
+
+    - name: Check both required TLS roles in transport identity
+      ansible.builtin.command:
+        argv: [openssl, x509, -in, /etc/bergen-mq-lab/transport-pki/identity/tls.crt, -noout, -ext, extendedKeyUsage]
+      register: transport_eku
+      changed_when: false
+
+    - name: Require clientAuth and serverAuth in generated certificate
+      ansible.builtin.assert:
+        that:
+          - "'TLS Web Client Authentication' in transport_eku.stdout"
+          - "'TLS Web Server Authentication' in transport_eku.stdout"
+
+# Only exchange public CAs after BOTH QMgr finished key generation.
+- name: Exchange and verify dedicated peer transport CA certificates
+  hosts: bergen-mq-lab:bergen-mq-lab-b
+  become: true
+  gather_facts: false
+  serial: 1
+  any_errors_fatal: true
+  tasks:
+    - name: Require explicit certificate preparation approval
+      ansible.builtin.assert:
+        that:
+          - mq_transport_pki_prepare | default(false) | bool
+          - not ansible_check_mode
+
+    - name: Read peer's public transport CA over authenticated SSH
+      ansible.builtin.slurp:
+        src: /etc/bergen-mq-lab/transport-pki/ca.crt
+      delegate_to: "{{ 'bergen-mq-lab-b' if inventory_hostname == 'bergen-mq-lab' else 'bergen-mq-lab' }}"
+      register: transport_peer_ca
+      no_log: true
+
+    - name: Install peer CA in isolated container trust directory
+      ansible.builtin.copy:
+        dest: /etc/bergen-mq-lab/transport-pki/trust/tls.crt
+        content: "{{ transport_peer_ca.content | b64decode }}"
+        owner: root
+        group: root
+        mode: '0444'
+
+    - name: Check peer CA issuer identity differs from local CA
+      ansible.builtin.command:
+        argv: [openssl, x509, -in, /etc/bergen-mq-lab/transport-pki/trust/tls.crt, -noout, -subject]
+      register: transport_peer_subject
+      changed_when: false
+
+    - name: Reject wrong peer trust anchor
+      ansible.builtin.assert:
+        that:
+          - "('CN = Bergen MQ Transport CA ' ~ ('BERGENLABB' if inventory_hostname == 'bergen-mq-lab' else 'BERGENLAB')) in transport_peer_subject.stdout"
+        fail_msg: "Peer CA does not match the OTHER queue manager; stop before mounting."
+
+    - name: Report preparation without activating the MQ service
+      ansible.builtin.debug:
+        msg: "Prepared isolated transport PKI on {{ inventory_hostname }}. No Quadlet modification, container restart, CERTLABL change or channel start."
