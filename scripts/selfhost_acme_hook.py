@@ -80,21 +80,21 @@ def exclusive_state(path=DEFAULT_STATE_DIR):
         raise HookError("Unsafe state directory symlink")
     state_dir.mkdir(mode=0o700, parents=True, exist_ok=True)
     stats = state_dir.stat()
-    if stats.st_uid != 0 or stats.st_mode & 0o077:
-        raise HookError("State directory must be owned by root and mode 0700")
+    if stats.st_uid != os.geteuid() or stats.st_mode & 0o077:
+        raise HookError("State directory must be owned by the running user and mode 0700")
     lock_path = state_dir / "lock"
     if lock_path.is_symlink():
         raise HookError("Unsafe lock-file symlink")
     fd = os.open(lock_path, os.O_CREAT | os.O_RDWR | os.O_NOFOLLOW, 0o600)
     try:
-        if os.fstat(fd).st_uid != 0 or os.fstat(fd).st_mode & 0o077:
+        if os.fstat(fd).st_uid != os.geteuid() or os.fstat(fd).st_mode & 0o077:
             raise HookError("Unsafe state lock permissions")
         fcntl.flock(fd, fcntl.LOCK_EX)
         state_path = state_dir / "active.json"
         if state_path.is_symlink():
             raise HookError("Unsafe state symlink")
         if state_path.exists():
-            if state_path.stat().st_uid != 0 or state_path.stat().st_mode & 0o077:
+            if state_path.stat().st_uid != os.geteuid() or state_path.stat().st_mode & 0o077:
                 raise HookError("Unsafe state-file permissions")
             state = json.loads(state_path.read_text(encoding="utf-8"))
             if not isinstance(state, dict):
@@ -219,6 +219,8 @@ def main(argv=None, environ=None):
     environ = os.environ if environ is None else environ
     if len(argv) != 1 or argv[0] not in ("auth", "cleanup"):
         raise HookError("Usage: selfhost_acme_hook.py auth|cleanup")
+    if os.geteuid() != 0:
+        raise HookError("Certbot selfHOST hook must be executed as root")
     os.umask(0o077)
     cfg = load_config(environ.get("SELFHOST_ACME_CONFIG", DEFAULT_CONFIG))
     if argv[0] == "auth":
