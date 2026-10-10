@@ -119,8 +119,8 @@
     - name: Require both selfHOST TXT slots to be idle on all nameservers
       ansible.builtin.assert:
         that:
-          - "('selfhost-api-idle-' ~ (selfhost_acme_record_ids[0] | string)) in (item.stdout | replace('\\\"', ''))"
-          - "('selfhost-api-idle-' ~ (selfhost_acme_record_ids[1] | string)) in (item.stdout | replace('\\\"', ''))"
+          - "('selfhost-api-idle-' ~ (selfhost_acme_record_ids[0] | string)) in item.stdout"
+          - "('selfhost-api-idle-' ~ (selfhost_acme_record_ids[1] | string)) in item.stdout"
         fail_msg: DNS is not in the expected idle state; abort before ACME staging
       loop: "{{ selfhost_acme_idle_dns.results }}"
       loop_control:
