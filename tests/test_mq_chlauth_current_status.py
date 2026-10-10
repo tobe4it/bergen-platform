@@ -94,6 +94,26 @@ class CurrentStatusTests(unittest.TestCase):
                 with self.assertRaises(ChlauthPlanError):
                     self.check("a", changed)
 
+    def test_unknown_line_reports_only_redacted_shape(self):
+        original = sample(self.plan, "a")
+        malicious = original + "SENSITIVE-PRIVATE-DATA 192.0.2.17\n"
+        with self.assertRaises(ChlauthPlanError) as caught:
+            self.check("a", malicious)
+        message = str(caught.exception)
+        self.assertIn("Unexpected CHSTATUS output line", message)
+        self.assertIn("class=other", message)
+        self.assertIn("chars=", message)
+        self.assertNotIn("SENSITIVE-PRIVATE-DATA", message)
+        self.assertNotIn("192.0.2.17", message)
+
+    def test_diagnostic_code_is_allowed_in_safe_failure_message(self):
+        original = sample(self.plan, "a")
+        unexpected = original + "AMQ8135E: Not authorized.\n"
+        with self.assertRaises(ChlauthPlanError) as caught:
+            self.check("a", unexpected)
+        self.assertIn("class=diagnostic-AMQ8135E", str(caught.exception))
+        self.assertNotIn("Not authorized.", str(caught.exception))
+
     def test_unusable_rc_and_output_are_refused(self):
         base = sample(self.plan, "a")
         for rc in (10.0, True, 20, -1):
