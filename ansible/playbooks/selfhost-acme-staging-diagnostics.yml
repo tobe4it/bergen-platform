@@ -246,7 +246,6 @@
                 print("api_get_error=" + classify(exc))
       register: selfhost_acme_network_probe
       changed_when: false
-      no_log: true
 
     - name: Show only predefined transport classifications
       ansible.builtin.debug:
