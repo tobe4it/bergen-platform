@@ -8,6 +8,7 @@ import copy
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from module_utils.bergen_mq_chlauth_cleanup_lifecycle_offline import (
     OfflineReadbackGatedLifecycleAdapter,
@@ -270,6 +271,53 @@ class StatefulCleanupTests(unittest.TestCase):
 
         self.assert_failed_and_retained_deny(probe)
         self.assertEqual(count["b"], 2)
+
+    def _assert_race_after_last_readback_fails_closed(self, **changes):
+        """Inject interference inside the fake's write entrypoint.
+
+        All three final DISPLAY payloads and all preceding verify calls are
+        already finished; the injection runs before the fake's final state
+        guard. This deliberately exercises the residual TOCTOU window.
+        """
+        original_apply = self.model.apply
+        injected = {"count": 0}
+        probe_calls_at_delete = []
+
+        def race_at_delete(side, command):
+            operation = self.model.contract.classify(side, command)
+            if side == "b" and operation == "delete_receiver":
+                injected["count"] += 1
+                probe_calls_at_delete.extend(self.probe.calls)
+                self.model.interfere(side, **changes)
+            return original_apply(side, command)
+
+        with patch.object(self.model, "apply", side_effect=race_at_delete):
+            self.assert_failed_and_retained_deny(self.probe)
+
+        self.assertEqual(injected["count"], 1)
+        self.assertEqual([side for side, _ in probe_calls_at_delete], ["b", "b"])
+        self.assertEqual(len(self.probe.calls), 2)
+        entries = read_journal(
+            self.root / "AUDIT.A1B2C3D.jsonl"
+        )
+        # The attempted delete is UNKNOWN, and there is no subsequent write
+        # intent on either side: journal-level fail-closed is global.
+        self.assertEqual(entries[-2]["kind"], "INTENT")
+        self.assertEqual(entries[-2]["data"], {
+            "side": "b", "operation": "delete_receiver"
+        })
+        self.assertEqual(entries[-1]["kind"], "RESULT")
+        self.assertEqual(entries[-1]["data"], {
+            "side": "b", "operation": "delete_receiver", "status": "UNKNOWN"
+        })
+        self.assertTrue(self.model.snapshot("b")["receiver"])
+        self.assertTrue(self.model.snapshot("b")["deny"])
+
+    def test_receiver_becomes_active_between_final_probe_and_fake_delete(self):
+        self._assert_race_after_last_readback_fails_closed(active=True)
+
+    def test_allow_reappears_between_final_probe_and_fake_delete(self):
+        self._assert_race_after_last_readback_fails_closed(allow=True)
 
     def test_conflicting_tls_attribute_at_final_probe_blocks_delete(self):
         count = {"b": 0}
