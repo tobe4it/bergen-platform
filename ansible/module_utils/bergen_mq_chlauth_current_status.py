@@ -74,6 +74,7 @@ def require_no_current_receiver_status(plan, side, command, rc, stdout):
     }
     seen = []
     echo_seen = 0
+    colon_seen = False
     for line_number, raw in enumerate(stdout.splitlines(), 1):
         line = raw.strip()
         if not line:
@@ -87,6 +88,19 @@ def require_no_current_receiver_status(plan, side, command, rc, stdout):
             echo_seen += 1
         elif line in valid_lines:
             seen.append(line)
+        elif line == ":":
+            # Some runmqsc versions render a standalone colon after
+            # AMQ8420I and before the completion summary. Permit exactly
+            # one, in this position only; never accept arbitrary prompts.
+            if (colon_seen or echo_seen != 1
+                    or seen != [
+                        expected_qmgr,
+                        "AMQ8420I: Channel Status not found.",
+                    ]):
+                raise ChlauthPlanError(
+                    "Unexpected CHSTATUS standalone colon position"
+                )
+            colon_seen = True
         else:
             raise ChlauthPlanError(
                 "Unexpected CHSTATUS output line at %d (class=%s; chars=%d)"
