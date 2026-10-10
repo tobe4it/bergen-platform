@@ -14,3 +14,6 @@ ansible/reports/
 __pycache__/
 *.pyc
 ansible/vars/mail-tls.local.yml
+
+# selfHOST API credentials must never be versioned
+ansible/vars/selfhost-acme.local.vault.yml
