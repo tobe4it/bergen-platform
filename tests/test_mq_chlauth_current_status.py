@@ -114,6 +114,21 @@ class CurrentStatusTests(unittest.TestCase):
         self.assertIn("class=diagnostic-AMQ8135E", str(caught.exception))
         self.assertNotIn("Not authorized.", str(caught.exception))
 
+    def test_single_colon_diagnostic_is_specific_and_fail_closed(self):
+        base = sample(self.plan, "a")
+        with self.assertRaises(ChlauthPlanError) as caught:
+            self.check("a", base + ":\n")
+        message = str(caught.exception)
+        self.assertIn("class=single-mqsc-punctuation-U+003A", message)
+        self.assertNotIn("verification", message)
+
+    def test_single_letter_is_redacted(self):
+        base = sample(self.plan, "a")
+        with self.assertRaises(ChlauthPlanError) as caught:
+            self.check("a", base + "Z\n")
+        self.assertIn("class=single-letter", str(caught.exception))
+        self.assertNotIn("class=Z", str(caught.exception))
+
     def test_unusable_rc_and_output_are_refused(self):
         base = sample(self.plan, "a")
         for rc in (10.0, True, 20, -1):
