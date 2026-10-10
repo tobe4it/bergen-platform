@@ -16,6 +16,22 @@ _ECHO = re.compile(r"1\s*:\s*(.+)")
 _VERSION = re.compile(r"5724-H72\s+\(C\)\s+Copyright IBM Corp\..*")
 
 
+def _unknown_line_kind(line):
+    """Classify without echoing full (potentially sensitive) MQSC output."""
+    if line.startswith("5724-"):
+        return "copyright-or-version"
+    if line.startswith("Starting MQSC"):
+        return "qmgr-header"
+    if re.match(r"^[0-9]+\s*:", line):
+        return "command-echo"
+    diagnostic = re.match(r"^(AMQ[0-9]{4}[A-Z])\b", line)
+    if diagnostic:
+        return "diagnostic-" + diagnostic.group(1)
+    if line.startswith(("One ", "No ", "All ")):
+        return "summary"
+    return "other"
+
+
 def current_status_command(plan, side):
     """Return the only permitted, exactly scoped read-only status command."""
     contract = ApprovedCommandContract(plan)
@@ -48,7 +64,7 @@ def require_no_current_receiver_status(plan, side, command, rc, stdout):
     }
     seen = []
     echo_seen = 0
-    for raw in stdout.splitlines():
+    for line_number, raw in enumerate(stdout.splitlines(), 1):
         line = raw.strip()
         if not line:
             continue
@@ -62,7 +78,10 @@ def require_no_current_receiver_status(plan, side, command, rc, stdout):
         elif line in valid_lines:
             seen.append(line)
         else:
-            raise ChlauthPlanError("Unexpected CHSTATUS output line")
+            raise ChlauthPlanError(
+                "Unexpected CHSTATUS output line at %d (class=%s; chars=%d)"
+                % (line_number, _unknown_line_kind(line), len(line))
+            )
 
     if echo_seen != 1 or any(seen.count(line) != 1 for line in valid_lines):
         raise ChlauthPlanError("CHSTATUS evidence incomplete or duplicated")
