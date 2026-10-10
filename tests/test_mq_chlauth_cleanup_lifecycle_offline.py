@@ -61,6 +61,16 @@ class CleanupLifecycleOfflineTests(unittest.TestCase):
                 bridge.apply("a", self.plan["a"]["cleanup"][1])
             self.assertFalse(any(event[1] == "apply" for event in fake.events))
 
+    def test_no_receiver_verification_before_delete_is_refused(self):
+        fake = InMemoryMQ()
+        with LockedFixtureJournal(self.root, self.prefix) as journal:
+            bridge = self.bridge(journal, fake)
+            with self.assertRaisesRegex(ChlauthPlanError, "before a completed"):
+                bridge.verify("a", self.plan["a"], "no_receiver")
+            with self.assertRaisesRegex(ChlauthPlanError, "receiver absence"):
+                bridge.apply("a", self.plan["a"]["cleanup"][2])
+            self.assertFalse(any(event[1] == "apply" for event in fake.events))
+
     def test_deny_removal_without_absence_proof_refused(self):
         fake = InMemoryMQ()
         with LockedFixtureJournal(self.root, self.prefix) as journal:
