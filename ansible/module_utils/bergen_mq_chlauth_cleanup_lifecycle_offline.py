@@ -28,6 +28,7 @@ class OfflineReadbackGatedLifecycleAdapter:
         self._no_allow_verified = set()
         self._inactive_verified = set()
         self._no_receiver_verified = set()
+        self._delete_completed = set()
 
     def preflight(self, side, spec):
         return self.delegate.preflight(side, spec)
@@ -50,6 +51,10 @@ class OfflineReadbackGatedLifecycleAdapter:
             )
             self._inactive_verified.add(side)
             return True
+        if stage == "no_receiver" and side not in self._delete_completed:
+            raise ChlauthPlanError(
+                "Receiver absence stage refused before a completed fake delete"
+            )
         outcome = self.delegate.verify(side, spec, stage)
         if stage == "no_allow":
             self._no_allow_verified.add(side)
@@ -81,4 +86,9 @@ class OfflineReadbackGatedLifecycleAdapter:
             self._no_allow_verified.discard(side)
         if operation in ("define_receiver", "delete_receiver"):
             self._no_receiver_verified.discard(side)
-        return self.delegate.apply(side, command)
+        outcome = self.delegate.apply(side, command)
+        if operation == "delete_receiver":
+            self._delete_completed.add(side)
+        elif operation == "define_receiver":
+            self._delete_completed.discard(side)
+        return outcome
