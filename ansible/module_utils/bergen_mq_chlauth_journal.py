@@ -105,6 +105,10 @@ def _validate_event_sequence(entries, path):
     for row in entries[1:]:
         kind, data = row["kind"], row["data"]
         if kind == "INTENT":
+            if unsuccessful:
+                raise JournalError(
+                    "Intent after failed or uncertain CHLAUTH result"
+                )
             if (pending is not None or set(data) != {"side", "operation"}
                     or data["side"] not in ("a", "b")
                     or data["operation"] not in _OPS):
@@ -256,6 +260,10 @@ class LockedFixtureJournal:
             raise JournalError("Unapproved CHLAUTH intent")
         if self._pending:
             raise JournalError("Resolve previous intent before proceeding")
+        if self._has_failure:
+            raise JournalError(
+                "Journal recorded failed or uncertain write; manual recovery required"
+            )
         self._append("INTENT", {"side": side, "operation": operation})
         self._pending.add((side, operation))
 
