@@ -162,7 +162,7 @@ class CurrentStatusTests(unittest.TestCase):
         with self.assertRaises(ChlauthPlanError) as caught:
             self.check("a", base + ":\n")
         message = str(caught.exception)
-        self.assertIn("class=single-mqsc-punctuation-U+003A", message)
+        self.assertIn("Unexpected CHSTATUS standalone colon position", message)
         self.assertNotIn("verification", message)
 
     def test_single_letter_is_redacted(self):
