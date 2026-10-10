@@ -185,6 +185,73 @@
       ansible.builtin.debug:
         var: selfhost_acme_exact_failure.stdout_lines
 
+    - name: Test MX2 direct DNS, TLS and read-only HTTPS reachability to selfHOST
+      ansible.builtin.command:
+        argv:
+          - python3
+          - -c
+          - |
+            import socket
+            import ssl
+            import urllib.error
+            import urllib.request
+
+            host = "my.selfhost.de"
+            url = "https://my.selfhost.de/cgi-bin/dns-api.pl"
+
+            def classify(exc):
+                if isinstance(exc, socket.gaierror):
+                    return "dns_resolution_error"
+                if isinstance(exc, ssl.SSLCertVerificationError):
+                    return "tls_certificate_validation_error"
+                if isinstance(exc, ssl.SSLError):
+                    return "tls_handshake_error"
+                if isinstance(exc, (TimeoutError, socket.timeout)):
+                    return "timeout"
+                if isinstance(exc, ConnectionRefusedError):
+                    return "tcp_connection_refused"
+                if isinstance(exc, ConnectionResetError):
+                    return "tcp_connection_reset"
+                if isinstance(exc, OSError):
+                    return "os_error_" + str(exc.errno)
+                return type(exc).__name__
+
+            try:
+                addresses = socket.getaddrinfo(host, 443, type=socket.SOCK_STREAM)
+                print("dns_resolution=ok" if addresses else "dns_resolution=empty")
+            except (OSError, ValueError) as exc:
+                print("dns_resolution=" + classify(exc))
+
+            print("https_proxy_configured=" + str(bool(
+                urllib.request.getproxies().get("https"))).lower())
+            try:
+                with socket.create_connection((host, 443), timeout=8) as sock:
+                    with ssl.create_default_context().wrap_socket(sock, server_hostname=host):
+                        print("direct_tcp_tls=ok")
+            except (OSError, ValueError) as exc:
+                print("direct_tcp_tls=" + classify(exc))
+
+            # GET is intentionally read-only. A 4xx/405 status still proves an
+            # HTTP response was received. Never send an API key or TXT value.
+            opener = urllib.request.build_opener()
+            request = urllib.request.Request(url, method="GET")
+            try:
+                with opener.open(request, timeout=12) as response:
+                    print("api_get_http_status=" + str(response.status))
+            except urllib.error.HTTPError as exc:
+                print("api_get_http_status=" + str(exc.code))
+            except urllib.error.URLError as exc:
+                print("api_get_transport_error=" + classify(exc.reason))
+            except (OSError, ValueError) as exc:
+                print("api_get_error=" + classify(exc))
+      register: selfhost_acme_network_probe
+      changed_when: false
+      no_log: true
+
+    - name: Show only predefined transport classifications
+      ansible.builtin.debug:
+        var: selfhost_acme_network_probe.stdout_lines
+
     - name: Clarify that diagnosis never changes production or DNS
       ansible.builtin.debug:
         msg: "DIAGNOSTICS_ONLY: no TXT updates, no Certbot issuance, no production certificate changes."
