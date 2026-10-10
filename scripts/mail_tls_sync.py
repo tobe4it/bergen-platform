@@ -6,12 +6,14 @@ Default invocation is read-only; --apply is required to transfer/activate.
 """
 
 import argparse
+from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
 import re
 import shlex
 import subprocess
 import sys
+import tempfile
 
 import yaml
 
@@ -23,6 +25,8 @@ SSH_OPTIONS = [
     "-o", "ConnectTimeout=10", "-o", "ClearAllForwardings=yes",
     "-o", "ForwardAgent=no",
 ]
+# Enabled only inside the protected, per-run connection pool.
+SSH_CONTROL_OPTIONS = []
 
 
 class SyncError(Exception):
@@ -82,7 +86,36 @@ def load_config(path):
 
 
 def ssh_args(host, user, command):
-    return ["ssh", *SSH_OPTIONS, f"{user}@{host}", command]
+    return ["ssh", *SSH_OPTIONS, *SSH_CONTROL_OPTIONS, f"{user}@{host}", command]
+
+
+@contextmanager
+def reused_ssh_connections(peers):
+    """Reuse one SSH transport per peer; restrict its socket to this run."""
+    if SSH_CONTROL_OPTIONS:
+        raise SyncError("SSH connection pool already active")
+    with tempfile.TemporaryDirectory(prefix="mail-tls-ssh-") as control_dir:
+        SSH_CONTROL_OPTIONS.extend([
+            "-o", "ControlMaster=auto",
+            "-o", "ControlPersist=20",
+            "-o", f"ControlPath={control_dir}/%C",
+        ])
+        try:
+            yield
+        finally:
+            # No connection may outlive this invocation intentionally.
+            # -O exit talks to a local control socket, if one exists.
+            for user, host in dict.fromkeys(peers):
+                try:
+                    subprocess.run(
+                        ["ssh", *SSH_OPTIONS, *SSH_CONTROL_OPTIONS,
+                         "-O", "exit", f"{user}@{host}"],
+                        input=b"", stdout=subprocess.DEVNULL,
+                        stderr=subprocess.DEVNULL, timeout=5, check=False,
+                    )
+                except (OSError, subprocess.TimeoutExpired):
+                    pass
+            SSH_CONTROL_OPTIONS.clear()
 
 
 def ssh_run(host, user, command, input_data=None):
@@ -232,6 +265,11 @@ def main():
     dst_user = cfg.get("mail_tls_target_ssh_user", "root")
     if dst_user != "root":
         raise SyncError("Target SSH user must be root for protected atomic activation")
+    with reused_ssh_connections(((src_user, src_host), (dst_user, dst_host))):
+        perform_sync(cfg, args, src_host, src_user, dst_host, dst_user)
+
+
+def perform_sync(cfg, args, src_host, src_user, dst_host, dst_user):
     source_fp, source_expiry = source_evidence(src_host, src_user, cfg)
     target_fp, target_expiry = target_evidence(dst_host, dst_user, cfg)
     print(f"Source expires (UTC): {source_expiry.isoformat()}")
