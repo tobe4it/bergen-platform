@@ -114,6 +114,49 @@ class CurrentStatusTests(unittest.TestCase):
         self.assertIn("class=diagnostic-AMQ8135E", str(caught.exception))
         self.assertNotIn("Not authorized.", str(caught.exception))
 
+    def test_single_colon_after_not_found_is_valid(self):
+        for side in ("a", "b"):
+            with self.subTest(side=side):
+                raw = sample(self.plan, side)
+                with_colon = raw.replace(
+                    "AMQ8420I: Channel Status not found.\n",
+                    "AMQ8420I: Channel Status not found.\n:\n",
+                )
+                result = self.check(side, with_colon)
+                self.assertFalse(result["current_instances_reported"])
+                self.assertFalse(result["can_authorize_delete"])
+
+    def test_colon_before_error_or_before_echo_is_refused(self):
+        raw = sample(self.plan, "a")
+        for changed in (
+            raw.replace("AMQ8420I: Channel Status not found.\n",
+                        ":\nAMQ8420I: Channel Status not found.\n"),
+            raw.replace("     1 : DISPLAY", ":\n     1 : DISPLAY"),
+        ):
+            with self.subTest(changed=changed[-120:]):
+                with self.assertRaises(ChlauthPlanError):
+                    self.check("a", changed)
+
+    def test_double_colon_after_diagnostic_is_refused(self):
+        raw = sample(self.plan, "a")
+        changed = raw.replace(
+            "AMQ8420I: Channel Status not found.\n",
+            "AMQ8420I: Channel Status not found.\n:\n:\n",
+        )
+        with self.assertRaises(ChlauthPlanError):
+            self.check("a", changed)
+
+    def test_other_single_character_prompts_stay_refused(self):
+        raw = sample(self.plan, "a")
+        for marker in (">", ";", "|", "x", "1"):
+            changed = raw.replace(
+                "AMQ8420I: Channel Status not found.\n",
+                "AMQ8420I: Channel Status not found.\n" + marker + "\n",
+            )
+            with self.subTest(marker=marker):
+                with self.assertRaises(ChlauthPlanError):
+                    self.check("a", changed)
+
     def test_single_colon_diagnostic_is_specific_and_fail_closed(self):
         base = sample(self.plan, "a")
         with self.assertRaises(ChlauthPlanError) as caught:
