@@ -131,3 +131,30 @@ def test_source_key_never_copied_to_controller_disk():
     assert "stdout=subprocess.PIPE" in script
     assert "upstream.stdout.close()" in script
     assert "ForwardAgent=no" in script
+
+
+def test_ssh_probe_closes_stdin_and_has_timeout(monkeypatch):
+    from types import SimpleNamespace
+
+    seen = {}
+
+    def fake_run(args, **kwargs):
+        seen.update(kwargs)
+        return SimpleNamespace(returncode=0, stdout=b"OK\n", stderr=b"")
+
+    monkeypatch.setattr(sync.subprocess, "run", fake_run)
+    assert sync.ssh_run("mx.example.invalid", "operator", "hostname") == "OK"
+    assert seen["input"] == b""
+    assert seen["timeout"] == 30
+    assert seen["capture_output"] is True
+
+
+def test_ssh_probe_timeout_is_fail_closed(monkeypatch):
+    import subprocess
+
+    def timed_out(*args, **kwargs):
+        raise subprocess.TimeoutExpired(cmd="ssh", timeout=30)
+
+    monkeypatch.setattr(sync.subprocess, "run", timed_out)
+    with pytest.raises(sync.SyncError, match="timed out"):
+        sync.ssh_run("mx.example.invalid", "operator", "hostname")
