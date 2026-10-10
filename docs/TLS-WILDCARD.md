@@ -60,6 +60,39 @@ PASS means source and target configuration was observed in a safe
 read-only check, NOT that bergen-mail already presents the wildcard
 certificate and NOT permission for a later deployment.
 
+## Troubleshooting a failed preflight
+
+If MX2 reports "Host key verification failed", do NOT disable SSH
+host-key checking or remove the existing known_hosts record blindly.
+On bp-controller, inspect the exact SSH target and its current trust entry:
+
+    ssh -G mx.thebergens.net | grep -E '^(hostname|user|port|hostkeyalias) '
+    ssh-keygen -F mx.thebergens.net
+
+Confirm that the DNS result and SSH host key match the intended MX2
+system, using a previously verified fingerprint or a separate trusted
+administrator channel. If MX2 is already reachable through a trusted
+local SSH alias, override the source address for this preflight:
+
+    -e mail_tls_source_address=YOUR_VERIFIED_MX2_SSH_ALIAS
+
+This does not change DNS, SSH trust, or any host configuration.
+
+If the target reports an unexpected Dovecot certificate path, inspect
+the effective non-secret FILE NAME with the existing Ansible inventory:
+
+    ansible -i ansible/inventory.yml -i ansible/inventory.local.yml \
+      bergen-mail -b -m ansible.builtin.command \
+      -a 'doveconf -h ssl_server_cert_file' --ask-vault-pass
+
+This reads only the path. Do not add -x or -P, dump private key contents,
+or work around the mismatch by forcing the certificate copy. Check
+the actual installed Dovecot 2.4 configuration before adjusting the
+preflight's expected path or the mail role.
+
+The target preflight refuses to proceed if MX2 has not produced
+verified source evidence. This avoids misleading partial validations.
+
 ## Deployment boundary (not implemented)
 
 A separate, reviewed distribution playbook will need:
