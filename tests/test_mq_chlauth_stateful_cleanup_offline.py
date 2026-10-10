@@ -259,16 +259,17 @@ class StatefulCleanupTests(unittest.TestCase):
             if side == "b":
                 count["b"] += 1
                 if count["b"] == 2:
+                    # A conflicting state appears during the final fake probe,
+                    # while the provider replays an older all-clear snapshot.
+                    self.model.interfere(side, active=True)
                     return copy.deepcopy(cached["b"])
             response = self.probe(side)
             if side == "b":
                 cached["b"] = copy.deepcopy(response)
-                # The readback becomes stale before the next delete check.
-                self.model.interfere(side, active=True)
             return response
 
         self.assert_failed_and_retained_deny(probe)
-        self.assertEqual(count["b"], 1)
+        self.assertEqual(count["b"], 2)
 
     def test_conflicting_tls_attribute_at_final_probe_blocks_delete(self):
         count = {"b": 0}
