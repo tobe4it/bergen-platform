@@ -75,10 +75,12 @@ class OfflineReadbackGatedLifecycleAdapter:
             # simulated fixture state. This is defense in depth in the fake,
             # NOT a provenance/atomicity guarantee for real IBM MQ.
             self.delegate.verify(side, self.plan[side], "no_allow")
+            self.delegate.verify(side, self.plan[side], "receiver_inactive")
             verify_receiver_cleanup_readbacks(
                 self.plan, side, self.readback_provider(side)
             )
             self.delegate.verify(side, self.plan[side], "no_allow")
+            self.delegate.verify(side, self.plan[side], "receiver_inactive")
         if operation == "remove_deny" and side not in self._no_receiver_verified:
             raise ChlauthPlanError(
                 "Deny removal refused until receiver absence is verified"
