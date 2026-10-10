@@ -41,6 +41,10 @@ def test_all_actions_are_read_only():
         for task in play["tasks"]:
             modules = set(task).intersection(ALLOWED)
             assert len(modules) == 1, task["name"]
+            assert set(task).difference(ALLOWED, {
+                "name", "when", "register", "changed_when",
+                "failed_when", "no_log", "args",
+            }) == set(), task["name"]
             if "ansible.builtin.command" in task:
                 assert task["ansible.builtin.command"]["argv"][0] == "openssl"
                 assert task.get("changed_when") is False
