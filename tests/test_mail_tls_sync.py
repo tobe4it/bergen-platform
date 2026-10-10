@@ -158,3 +158,42 @@ def test_ssh_probe_timeout_is_fail_closed(monkeypatch):
     monkeypatch.setattr(sync.subprocess, "run", timed_out)
     with pytest.raises(sync.SyncError, match="timed out"):
         sync.ssh_run("mx.example.invalid", "operator", "hostname")
+
+
+def test_ssh_multiplexing_is_scoped_to_a_private_temporary_directory(monkeypatch):
+    import os
+    from types import SimpleNamespace
+
+    calls = []
+
+    def fake_run(args, **kwargs):
+        calls.append(args)
+        return SimpleNamespace(returncode=0, stdout=b"", stderr=b"")
+
+    monkeypatch.setattr(sync.subprocess, "run", fake_run)
+    peers = (("operator", "mx.example.invalid"), ("root", "mail.example.invalid"))
+    with sync.reused_ssh_connections(peers):
+        args = sync.ssh_args("mx.example.invalid", "operator", "true")
+        assert "ControlMaster=auto" in args
+        assert "ControlPersist=20" in args
+        control = next(arg for arg in args if arg.startswith("ControlPath="))
+        directory = Path(control.split("=", 1)[1]).parent
+        assert directory.exists()
+        assert os.stat(directory).st_mode & 0o077 == 0
+    assert not directory.exists()
+    assert sync.SSH_CONTROL_OPTIONS == []
+    assert len(calls) == 2
+    assert all("-O" in args and "exit" in args for args in calls)
+
+
+def test_ssh_multiplexing_closes_sockets_on_exception(monkeypatch):
+    from types import SimpleNamespace
+
+    monkeypatch.setattr(
+        sync.subprocess, "run",
+        lambda *args, **kwargs: SimpleNamespace(returncode=0, stdout=b"", stderr=b""),
+    )
+    with pytest.raises(RuntimeError):
+        with sync.reused_ssh_connections((("operator", "mx.example.invalid"),)):
+            raise RuntimeError("simulated preflight failure")
+    assert sync.SSH_CONTROL_OPTIONS == []
