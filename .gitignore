@@ -17,3 +17,5 @@ ansible/vars/mail-tls.local.yml
 
 # selfHOST API credentials must never be versioned
 ansible/vars/selfhost-acme.local.vault.yml
+ansible/vars/selfhost-acme.local.yml
+ansible/vars/selfhost-acme.vault.yml
