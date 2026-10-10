@@ -7,9 +7,11 @@ from unittest.mock import patch
 from module_utils.bergen_mq_chlauth import ChlauthPlanError
 from module_utils.bergen_mq_chlauth_journal import JournalError, LockedFixtureJournal, read_journal
 from module_utils.bergen_mq_chlauth_journaled_offline import (
-    run_offline_journaled_fixture,
+    JournaledOfflineAdapter, run_offline_journaled_fixture,
 )
-from module_utils.bergen_mq_chlauth_write_contract import canonical_plan
+from module_utils.bergen_mq_chlauth_write_contract import (
+    ApprovedCommandContract, canonical_plan,
+)
 from test_mq_chlauth_lifecycle import FakeAdapter
 
 
@@ -132,6 +134,32 @@ class JournaledIntegrationTests(unittest.TestCase):
             intents, ["add_deny", "define_receiver"]
         )
         self.assertNotEqual(entries[-1]["kind"], "CLEAN")
+
+    def test_second_adapter_cannot_write_after_first_reports_unknown(self):
+        command = self.plan["a"]["apply_order"][0]
+        failing = InMemoryMQ(fail=("a", "apply", "add_deny"))
+        independent = InMemoryMQ()
+        contract = ApprovedCommandContract(self.plan)
+
+        with LockedFixtureJournal(self.root, "AUDIT.A1B2C3D") as journal:
+            first = JournaledOfflineAdapter(failing, journal, contract)
+            second = JournaledOfflineAdapter(independent, journal, contract)
+
+            with self.assertRaises(RuntimeError):
+                first.apply("a", command)
+            with self.assertRaisesRegex(JournalError, "manual recovery"):
+                second.apply("a", command)
+
+            self.assertEqual(
+                [event for event in independent.events if event[1] == "apply"],
+                [],
+            )
+            self.assertEqual(
+                [event["data"]["status"] for event in read_journal(journal.path)
+                 if event["kind"] == "RESULT"],
+                ["UNKNOWN"],
+            )
+            self.assertTrue(second._write_uncertain)
 
     def test_negative_runcheck_causes_rollback_and_unfinished_journal(self):
         fake = InMemoryMQ(fail=("b", "check", "wrong_issuer"))
