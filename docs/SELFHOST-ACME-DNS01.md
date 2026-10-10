@@ -4,6 +4,90 @@ This implementation uses selfHOST's current ACME-DNS API, not its historical
 DynDNS endpoint. The existing production Certbot lineage is not changed by
 checking out these files.
 
+
+## Preferred: manage the entire setup from the Ansible controller
+
+No interactive SSH session on the certificate source is necessary. The
+playbook deploys the reviewed Python hook to the source and creates the
+root-owned 0600 API configuration there. It leaves production Certbot
+unchanged. Every real DNS name, record ID, source username, account email,
+and credential remains in Git-ignored local files.
+
+On the controller:
+
+    cd ~/bergen-platform
+    cp ansible/vars/selfhost-acme.local.yml.example \
+       ansible/vars/selfhost-acme.local.yml
+    chmod 600 ansible/vars/selfhost-acme.local.yml
+    vim ansible/vars/selfhost-acme.local.yml
+
+Provide zone, exactly two numeric record IDs, both authoritative
+nameservers and an ACME contact email in that local YAML. Use the EXISTING
+ignored ansible/vars/mail-tls.local.yml for the source SSH identity and the
+current Certbot certificate path; do not duplicate this infrastructure data.
+
+Create the only secret separately, encrypted by Ansible Vault:
+
+    umask 077
+    EDITOR=vim ansible-vault create ansible/vars/selfhost-acme.vault.yml
+
+Vault plaintext contents while editing (never commit or paste the key):
+
+    selfhost_acme_api_key: "CHANGE_ME_COMPLETE_ID.DOT_SECRET"
+
+The encrypted Vault file is also Git-ignored. Restrict it to mode 0600.
+Ansible needs the Vault password at every execution, and the secret is
+transferred using normal verified SSH plus privilege escalation. Vault
+protects the secret at rest on the controller, not in target process memory.
+
+Run offline guardrails first:
+
+    python3 -m pytest -q \
+      tests/test_selfhost_acme_hook.py tests/test_selfhost_acme_bootstrap.py
+    ansible-playbook \
+      -i ansible/inventory.yml -i ansible/inventory.local.yml \
+      ansible/playbooks/selfhost-acme-bootstrap.yml \
+      -e @ansible/vars/mail-tls.local.yml \
+      -e @ansible/vars/selfhost-acme.local.yml \
+      -e @ansible/vars/selfhost-acme.vault.yml \
+      --syntax-check --ask-vault-pass
+
+Then perform the **install-only** Ansible run:
+
+    ansible-playbook \
+      -i ansible/inventory.yml -i ansible/inventory.local.yml \
+      ansible/playbooks/selfhost-acme-bootstrap.yml \
+      -e @ansible/vars/mail-tls.local.yml \
+      -e @ansible/vars/selfhost-acme.local.yml \
+      -e @ansible/vars/selfhost-acme.vault.yml \
+      --ask-vault-pass
+
+Expected: HOOK_INSTALLED and TWO_IDLE_SLOTS_VERIFIED. This performs no
+ACME issuance and no API write requests. A second execution should be
+idempotent.
+
+Once install-only has passed and API slot state is known, explicitly run
+an isolated staging issuance from the SAME controller:
+
+    ansible-playbook \
+      -i ansible/inventory.yml -i ansible/inventory.local.yml \
+      ansible/playbooks/selfhost-acme-bootstrap.yml \
+      -e @ansible/vars/mail-tls.local.yml \
+      -e @ansible/vars/selfhost-acme.local.yml \
+      -e @ansible/vars/selfhost-acme.vault.yml \
+      -e selfhost_acme_run_staging=true \
+      --ask-vault-pass
+
+The staging pass calls the external selfHOST API and the Let's Encrypt
+staging CA, changing temporary TXT values. It cannot update the productive
+Certbot lineage, because it uses a different --config-dir and --cert-name.
+Do NOT run staging until the install-only status is successful, and never
+deploy its untrusted staging certificate to a live service.
+
+Production Certbot migration is intentionally a separate, reviewable step
+after successful staging and a version-specific check of certbot reconfigure.
+Avoid editing its renewal INI manually or testing against production first.
+
 ## Preconditions
 
 - selfHOST hosts the authoritative zone.
