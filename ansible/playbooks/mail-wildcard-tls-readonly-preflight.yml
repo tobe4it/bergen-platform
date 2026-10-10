@@ -161,6 +161,13 @@
     mail_tls_target_cert_file: /etc/ssl/certs/mail-backend-fullchain.pem
     mail_tls_target_key_file: /etc/ssl/private/mail-backend-key.pem
   tasks:
+    - name: Refuse target checks unless MX2 certificate and key passed validation
+      ansible.builtin.assert:
+        that:
+          - hostvars['mx2-certificate-source'].mx2_mail_tls_public_evidence is defined
+        fail_msg: "MX2 evidence unavailable or invalid; target preflight skipped"
+      changed_when: false
+
     - name: Read effective Postfix TLS certificate path
       ansible.builtin.command:
         argv: [postconf, -h, smtpd_tls_cert_file]
