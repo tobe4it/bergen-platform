@@ -1,0 +1,48 @@
+---
+# Observe the exact per-side fixture receiver CURRENT channel status on both
+# lab MQ hosts without creating, altering, deleting or starting anything.
+# This probe deliberately does not claim cleanup/ownership authorization.
+- name: Probe exact fixture receiver CURRENT status (read-only)
+  hosts: bergen-mq-lab:bergen-mq-lab-b
+  gather_facts: false
+  become: true
+  serial: 1
+  any_errors_fatal: true
+  environment:
+    CONTAINERS_STORAGE_CONF: /etc/bergen-mq-lab/storage.conf
+  vars:
+    mq_chstatus_receiver: >-
+      {{ 'AUDIT.A1B2C3D.B2A' if inventory_hostname == 'bergen-mq-lab'
+         else 'AUDIT.A1B2C3D.A2B' }}
+    mq_chstatus_command: "DISPLAY CHSTATUS('{{ mq_chstatus_receiver }}') CURRENT"
+
+  tasks:
+    - name: Require only the two reviewed lab hosts
+      ansible.builtin.assert:
+        that:
+          - inventory_hostname in ['bergen-mq-lab', 'bergen-mq-lab-b']
+          - not ansible_check_mode
+
+    - name: Collect a single exact read-only MQSC channel-status response
+      ansible.builtin.command:
+        argv: [podman, exec, -i, bergen-mq-lab, /opt/mqm/bin/runmqsc]
+        stdin: "{{ mq_chstatus_command }}\n"
+      register: mq_chstatus_observed
+      changed_when: false
+      failed_when: false
+      no_log: true
+
+    - name: Show return code and non-sensitive MQSC control/diagnostic lines
+      ansible.builtin.debug:
+        msg:
+          host: "{{ inventory_hostname }}"
+          receiver: "{{ mq_chstatus_receiver }}"
+          command: "{{ mq_chstatus_command }}"
+          rc: "{{ mq_chstatus_observed.rc | int }}"
+          stderr_present: "{{ (mq_chstatus_observed.stderr | default('') | trim | length) > 0 }}"
+          stdout_control_lines: >-
+            {{ mq_chstatus_observed.stdout_lines | default([])
+               | map('trim')
+               | select('match', '^(?:[0-9]+\\s*:\\s*DISPLAY CHSTATUS|AMQ[0-9]{4}[A-Z]?:|Starting MQSC for queue manager |One MQSC command read\\.|No commands have a syntax error\\.|One valid MQSC command could not be processed\\.|All valid MQSC commands were processed\\.)')
+               | list }}
+      changed_when: false
