@@ -113,3 +113,8 @@ revision does NOT erase their appearance in older commits. If eliminating
 that history is required, review a coordinated repository-wide history
 rewrite and new credentials or keys only where actual secrets were exposed.
 Never force-push a rewritten history as part of this routine refactor.
+
+## Automation
+
+For guarded distribution, optional daily systemd timer and rollback handling,
+see [MAIL-TLS-AUTOSYNC.md](MAIL-TLS-AUTOSYNC.md).
