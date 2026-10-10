@@ -1,5 +1,0 @@
----
-# EXAMPLE ONLY. Never enter real API credentials into this tracked file.
-# Create ansible/vars/selfhost-acme.local.vault.yml with ansible-vault create.
-# The generated file is Git-ignored and must stay encrypted.
-selfhost_acme_api_key: "CHANGE_ME_ACCESS_ID.CHANGE_ME_SECRET"
