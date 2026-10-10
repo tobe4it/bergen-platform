@@ -95,12 +95,14 @@ The planner does not establish CA-chain trust or live TLS correctness;
 those require separate checks. No proposed_action authorizes deployment.
 The production installation remains a separately reviewed operation.
 
-## Deployment remains a separate change
+## Deployment is an explicit opt-in step
 
-A future implementation requires a least-privilege secret transport,
-restricted target file modes, end-to-end certificate/key validation,
-transactional activation with rollback, controlled Postfix and Dovecot
-reload, service-port TLS checks, and certificate renewal monitoring.
+A controller-side distributor now provides encrypted staging, validation,
+transactional activation with best-effort rollback and service-port TLS checks.
+The manual preflight and planner remain read-only. The distributor is not
+activated by checking out the code; review and test it before enabling the
+optional systemd timer. Source renewal and active notification monitoring
+must be configured separately.
 
 Distributing a wildcard private key enlarges the set of systems from which
 it may be compromised. A per-service certificate reduces this blast radius.
