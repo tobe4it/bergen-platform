@@ -57,6 +57,48 @@ class JournalTests(unittest.TestCase):
             with LockedFixtureJournal(self.root, "AUDIT.B2B2B2B"):
                 pass
 
+    def test_unsuccessful_result_blocks_followup_intents_in_same_session(self):
+        for status in ("UNKNOWN", "FAILED"):
+            with self.subTest(status=status):
+                root = self.root / status.lower()
+                with LockedFixtureJournal(root, self.prefix) as journal:
+                    journal.intent("a", "add_deny")
+                    journal.result("a", "add_deny", status)
+                    with self.assertRaisesRegex(JournalError, "manual recovery"):
+                        journal.intent("b", "define_receiver")
+                    with self.assertRaises(JournalError):
+                        journal.mark_clean({
+                            "a": "VERIFIED_CLEAN", "b": "VERIFIED_CLEAN"
+                        })
+                    path = journal.path
+                self.assertEqual(
+                    [event["kind"] for event in read_journal(path)],
+                    ["BEGIN", "INTENT", "RESULT"],
+                )
+
+    def test_rehashed_intent_after_unknown_result_is_invalid(self):
+        with LockedFixtureJournal(self.root, self.prefix) as journal:
+            journal.intent("a", "add_deny")
+            journal.result("a", "add_deny", "UNKNOWN")
+            path = journal.path
+
+        def forge(rows):
+            rows.append({
+                "seq": 0, "prev": "", "kind": "INTENT",
+                "data": {"side": "b", "operation": "define_receiver"},
+                "digest": "",
+            })
+            rows.append({
+                "seq": 0, "prev": "", "kind": "RESULT",
+                "data": {"side": "b", "operation": "define_receiver",
+                         "status": "ACKED"},
+                "digest": "",
+            })
+
+        self._forge_valid_digests(path, forge)
+        with self.assertRaisesRegex(JournalError, "Intent after failed"):
+            read_journal(path)
+
     def test_no_completion_without_both_verified_sides(self):
         with LockedFixtureJournal(self.root, self.prefix) as audit:
             with self.assertRaises(JournalError):
