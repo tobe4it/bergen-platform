@@ -124,3 +124,18 @@ def test_placeholder_only_source():
     assert "thebergens.net" not in code
     assert "3364072" not in code and "3364073" not in code
     assert 'DEFAULT_CONFIG = "/etc/letsencrypt/selfhost-acme.json"' in code
+
+
+def test_state_directory_requires_private_permissions(tmp_path):
+    state = tmp_path / "state"
+    state.mkdir(mode=0o700)
+    state.chmod(0o755)
+    with pytest.raises(hook.HookError, match="mode 0700"):
+        with hook.exclusive_state(state):
+            pass
+
+
+def test_hook_main_requires_root(monkeypatch):
+    monkeypatch.setattr(hook.os, "geteuid", lambda: 1000)
+    with pytest.raises(hook.HookError, match="must be executed as root"):
+        hook.main(["auth"], env())
