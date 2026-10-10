@@ -1,0 +1,55 @@
+---
+# Exact one-command MQSC CURRENT status readback per queue manager, followed by
+# strict full stdout/stderr validation on the Ansible controller.
+# No MQSC mutations. No channel START/STOP/DELETE.
+- name: Gather exact per-receiver CURRENT status (read-only)
+  hosts: bergen-mq-lab:bergen-mq-lab-b
+  gather_facts: false
+  become: true
+  serial: 1
+  any_errors_fatal: true
+  environment:
+    CONTAINERS_STORAGE_CONF: /etc/bergen-mq-lab/storage.conf
+  vars:
+    mq_chstatus_receiver: >-
+      {{ 'AUDIT.A1B2C3D.B2A' if inventory_hostname == 'bergen-mq-lab'
+         else 'AUDIT.A1B2C3D.A2B' }}
+  tasks:
+    - name: Refuse unreviewed hosts and check mode
+      ansible.builtin.assert:
+        that:
+          - inventory_hostname in ['bergen-mq-lab', 'bergen-mq-lab-b']
+          - not ansible_check_mode
+
+    - name: Execute only scoped DISPLAY CHSTATUS CURRENT
+      ansible.builtin.command:
+        argv: [podman, exec, -i, bergen-mq-lab, /opt/mqm/bin/runmqsc]
+        stdin: "DISPLAY CHSTATUS('{{ mq_chstatus_receiver }}') CURRENT\n"
+      register: mq_chstatus_collected
+      changed_when: false
+      failed_when: false
+      no_log: true
+
+    - name: Retain full confidential MQSC readback for controller validation
+      ansible.builtin.set_fact:
+        mq_chstatus_readback:
+          rc: "{{ mq_chstatus_collected.rc | int }}"
+          stdout: "{{ mq_chstatus_collected.stdout }}"
+          stderr: "{{ mq_chstatus_collected.stderr | default('') }}"
+      no_log: true
+
+- name: Validate complete CHSTATUS evidence on the controller
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  tasks:
+    - name: Fail closed unless both full MQSC responses match
+      mq_chlauth_chstatus_audit:
+        responses:
+          a: "{{ hostvars['bergen-mq-lab'].mq_chstatus_readback }}"
+          b: "{{ hostvars['bergen-mq-lab-b'].mq_chstatus_readback }}"
+      register: mq_chstatus_audit_result
+
+    - name: Display only non-sensitive validation summary
+      ansible.builtin.debug:
+        var: mq_chstatus_audit_result
