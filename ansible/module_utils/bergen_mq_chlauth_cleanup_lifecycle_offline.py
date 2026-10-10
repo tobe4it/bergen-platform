@@ -70,11 +70,15 @@ class OfflineReadbackGatedLifecycleAdapter:
                 raise ChlauthPlanError(
                     "Receiver deletion denied: offline cleanup evidence missing"
                 )
-            # Re-evaluate immediately before forwarding to the in-memory fake.
-            # No claim of atomicity or exclusive ownership is made.
+            # Re-evaluate the model-backed stage as well as fresh DISPLAY
+            # payloads. A stale/replayed payload must not override a newer
+            # simulated fixture state. This is defense in depth in the fake,
+            # NOT a provenance/atomicity guarantee for real IBM MQ.
+            self.delegate.verify(side, self.plan[side], "no_allow")
             verify_receiver_cleanup_readbacks(
                 self.plan, side, self.readback_provider(side)
             )
+            self.delegate.verify(side, self.plan[side], "no_allow")
         if operation == "remove_deny" and side not in self._no_receiver_verified:
             raise ChlauthPlanError(
                 "Deny removal refused until receiver absence is verified"
