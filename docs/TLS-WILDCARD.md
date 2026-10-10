@@ -1,114 +1,80 @@
-# Wildcard TLS: MX2 to bergen-mail
+# Generic wildcard certificate source-to-target preflight
 
-## Scope and established topology
+This public document deliberately contains no real infrastructure names,
+DNS zones, SSH users, IP addresses, or certificate lineage names.
 
-Source and renewal owner: MX2, SSH address mx.thebergens.net.
+## Site-local configuration
 
-Certbot lineage renewed in September 2026:
-- /etc/letsencrypt/live/thebergens.net-wildcard/fullchain.pem
-- /etc/letsencrypt/live/thebergens.net-wildcard/privkey.pem
+Copy the tracked placeholder example to the Git-ignored local file:
 
-First target: the bergen-mail LXC serving mail.thebergens.net.
+    cp ansible/vars/mail-tls.local.yml.example ansible/vars/mail-tls.local.yml
+    chmod 600 ansible/vars/mail-tls.local.yml
 
-The existing mail Ansible role expects:
-- /etc/ssl/certs/mail-backend-fullchain.pem
-- /etc/ssl/private/mail-backend-key.pem
+Edit that file locally (for example with vim). Supply the real existing target
+inventory alias, source SSH DNS name or verified SSH alias, SSH user, Certbot
+fullchain and private-key paths, required wildcard SAN, expected target FQDN,
+and target Postfix/Dovecot certificate/key paths.
 
-Postfix and Dovecot must continue referring to those target files.
+The populated file MUST stay untracked. Confirm the ignore rule:
 
-Renewal via Certbot DNS-01 is a separate process. Manual DNS challenge
-authorization, if still needed, remains separate from distribution.
+    git check-ignore -v ansible/vars/mail-tls.local.yml
 
-## Read-only preflight on bp-controller
+The two service paths must reflect the actual effective Postfix and Dovecot
+configuration. Use standard internal inventory and Vault files for SSH
+credentials and other secrets, never the committed example file.
 
-Run syntax-check and then collect the real evidence:
+## Read-only audit
 
-    cd ~/bergen-platform
-    ansible-playbook \
-      -i ansible/inventory.yml \
-      -i ansible/inventory.local.yml \
+On the Ansible controller:
+
+    ansible-playbook -i ansible/inventory.yml -i ansible/inventory.local.yml \
       ansible/playbooks/mail-wildcard-tls-readonly-preflight.yml \
-      --syntax-check
+      -e @ansible/vars/mail-tls.local.yml --syntax-check --ask-vault-pass
 
-    ansible-playbook \
-      -i ansible/inventory.yml \
-      -i ansible/inventory.local.yml \
+    ansible-playbook -i ansible/inventory.yml -i ansible/inventory.local.yml \
       ansible/playbooks/mail-wildcard-tls-readonly-preflight.yml \
-      --ask-vault-pass
+      -e @ansible/vars/mail-tls.local.yml --ask-vault-pass
 
-If Vault protection is required even for parsing the inventory, add
---ask-vault-pass to the syntax-check command.
+The source is registered as an ephemeral, generic in-memory host alias.
+A known-good SSH host key must already be trusted. Never bypass host-key
+verification, and independently verify an unknown key before adoption.
 
-The source is added to the in-memory inventory only as
-mx2-certificate-source with ansible_host=mx.thebergens.net.
-SSH defaults to the user's configured Ansible identity. If necessary
-supply -e mail_tls_source_ssh_user=YOUR_AUTHORIZED_SSH_USER
-using an existing authorized account. Do not commit credentials.
+The preflight validates:
+- source certificate/key files exist;
+- wildcard DNS SAN equals the configured expected SAN;
+- certificate expiry is at least 30 days away;
+- public keys derived locally from certificate and private key match;
+- effective Postfix and Dovecot TLS file paths match the local settings;
+- configured mail hostname matches the real Postfix hostname.
 
-Checks:
-1. Source Certbot certificate and key exist at the expected paths.
-2. The certificate contains the exact DNS:*.thebergens.net SAN.
-3. The certificate remains valid for at least 30 days.
-4. The locally derived PUBLIC keys of certificate and private key match.
-5. Effective Postfix and Dovecot certificate paths on bergen-mail match
-   the approved destination files, and Postfix hostname is mail.thebergens.net.
+Expected result is verification PASS with changed=0. The result is NOT an
+authorization to change files or reload services. This playbook never copies
+private keys, certificate files or service configuration.
 
-Neither certificate nor key is transferred. The private key is not
-printed or saved on the controller. Expect changed=0.
+If Dovecot 2.4 returns a blank path for a legacy setting, query the
+named SSL server context instead:
 
-PASS means source and target configuration was observed in a safe
-read-only check, NOT that bergen-mail already presents the wildcard
-certificate and NOT permission for a later deployment.
+    doveconf -h ssl_server/cert_file
+    doveconf -h ssl_server/key_file
 
-## Troubleshooting a failed preflight
+Do not print or send the private key. Do not adjust the effective service
+paths merely to make an audit pass.
 
-If MX2 reports "Host key verification failed", do NOT disable SSH
-host-key checking or remove the existing known_hosts record blindly.
-On bp-controller, inspect the exact SSH target and its current trust entry:
+## Deployment remains a separate change
 
-    ssh -G mx.thebergens.net | grep -E '^(hostname|user|port|hostkeyalias) '
-    ssh-keygen -F mx.thebergens.net
+A future implementation requires a least-privilege secret transport,
+restricted target file modes, end-to-end certificate/key validation,
+transactional activation with rollback, controlled Postfix and Dovecot
+reload, service-port TLS checks, and certificate renewal monitoring.
 
-Confirm that the DNS result and SSH host key match the intended MX2
-system, using a previously verified fingerprint or a separate trusted
-administrator channel. If MX2 is already reachable through a trusted
-local SSH alias, override the source address for this preflight:
+Distributing a wildcard private key enlarges the set of systems from which
+it may be compromised. A per-service certificate reduces this blast radius.
 
-    -e mail_tls_source_address=YOUR_VERIFIED_MX2_SSH_ALIAS
+## Previous Git history
 
-This does not change DNS, SSH trust, or any host configuration.
-
-If the target reports an unexpected Dovecot certificate path, inspect
-the effective non-secret FILE NAME with the existing Ansible inventory:
-
-    ansible -i ansible/inventory.yml -i ansible/inventory.local.yml \
-      bergen-mail -b -m ansible.builtin.command \
-      -a 'doveconf -h ssl_server_cert_file' --ask-vault-pass
-
-This reads only the path. Do not add -x or -P, dump private key contents,
-or work around the mismatch by forcing the certificate copy. Check
-the actual installed Dovecot 2.4 configuration before adjusting the
-preflight's expected path or the mail role.
-
-The target preflight refuses to proceed if MX2 has not produced
-verified source evidence. This avoids misleading partial validations.
-
-## Deployment boundary (not implemented)
-
-A separate, reviewed distribution playbook will need:
-- End-to-end secret-safe transport without persistent plaintext staging
-  of the private key on the controller or leaking into Ansible logs.
-- Restrictive ownership and mode for staged and active private keys.
-- Verification on the target of certificate hostname, chain validity,
-  expiry and key pairing before activation.
-- Atomic activation / recoverable rollback for certificate and key.
-- Validated Postfix and Dovecot configuration, controlled reload, and
-  verification with IMAPS 993, SMTP STARTTLS 587, and if enabled TLS 465.
-- Rotation after each MX2 Certbot renewal and alerting on failure/expiry.
-
-Copying a wildcard private key expands the impact of a compromise of
-any recipient. A dedicated certificate for mail.thebergens.net reduces
-that blast radius and remains a worthwhile alternative.
-
-DO NOT copy a private key with ad hoc shell/scp commands or expose it
-in support output. No live mail service change is authorized here.
+Git history and previously published tags are immutable references unless
+intentionally rewritten. Removing site-specific values from the latest
+revision does NOT erase their appearance in older commits. If eliminating
+that history is required, review a coordinated repository-wide history
+rewrite and new credentials or keys only where actual secrets were exposed.
+Never force-push a rewritten history as part of this routine refactor.
