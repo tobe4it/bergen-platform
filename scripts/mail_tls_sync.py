@@ -86,8 +86,16 @@ def ssh_args(host, user, command):
 
 
 def ssh_run(host, user, command, input_data=None):
-    result = subprocess.run(ssh_args(host, user, command), input=input_data,
-                            capture_output=True, check=False)
+    # Do not inherit a controller terminal or heredoc as SSH stdin.
+    # Bound failed or stalled network operations rather than hanging the timer.
+    try:
+        result = subprocess.run(
+            ssh_args(host, user, command),
+            input=b"" if input_data is None else input_data,
+            capture_output=True, check=False, timeout=30,
+        )
+    except subprocess.TimeoutExpired as exc:
+        raise SyncError(f"SSH command timed out on {host} (30s)") from exc
     if result.returncode:
         # Never echo stderr: remote tools may inadvertently expose credentials.
         raise SyncError(f"SSH command failed on {host} (exit {result.returncode})")
