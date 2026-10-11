@@ -93,7 +93,7 @@
             # followed by [renewalparams]. Wrap ONLY in memory for stdlib INI.
             cfg = configparser.ConfigParser(interpolation=None)
             try:
-                cfg.read_string("[certbot_metadata]\\n" + profile.read_text(encoding="utf-8"))
+                cfg.read_string("[certbot_metadata]\n" + profile.read_text(encoding="utf-8"))
             except (configparser.Error, OSError, UnicodeError):
                 print("production_renewal_profile=invalid_format")
                 raise SystemExit(2)
