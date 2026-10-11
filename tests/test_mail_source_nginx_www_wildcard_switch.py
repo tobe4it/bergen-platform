@@ -1,6 +1,8 @@
 """Offline safeguards for the WWW-only Nginx certificate switch."""
 from pathlib import Path
 import re
+import subprocess
+import sys
 import yaml
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -119,3 +121,58 @@ def test_no_accidental_duplicate_yaml_tail_or_truncated_config_guard():
     ) in assertions
     assert len(plays()[0]["tasks"]) == 2
     assert len(plays()[1]["tasks"]) >= 12
+
+
+
+def test_symlink_guard_accepts_only_the_approved_file(tmp_path):
+    t = tasks()
+    guard = t["Require a direct symlink to precisely the matching sites-available file"]
+    argv = guard["ansible.builtin.command"]["argv"]
+    assert argv[:2] == ["python3", "-c"]
+    compile(argv[2], "<safe-symlink-guard>", "exec")
+    assert guard["changed_when"] is False
+    assert guard["no_log"] is True
+    assert guard["when"] == "nginx_www_config_stat.stat.islnk | default(false)"
+    conf_d = tmp_path / "conf.d"
+    sites_available = tmp_path / "sites-available"
+    conf_d.mkdir()
+    sites_available.mkdir()
+    target = sites_available / "www.conf"
+    target.write_text("server { }\n", encoding="utf-8")
+    link = conf_d / "www.conf"
+    link.symlink_to(target)
+    check = lambda candidate: subprocess.run(
+        [sys.executable, "-c", argv[2], str(link), str(candidate)],
+        capture_output=True, text=True, timeout=10, check=False,
+    )
+    assert check(target).returncode == 0
+    wrong = sites_available / "wrong.conf"
+    wrong.write_text("server { }\n", encoding="utf-8")
+    assert check(wrong).returncode != 0
+    target.unlink()
+    target.symlink_to(wrong)
+    assert check(target).returncode != 0
+
+
+def test_backup_and_all_mutations_target_checked_regular_file_not_symlink():
+    t = tasks()
+    resolve = t["Resolve only the approved sites-available counterpart for a symlink"]
+    assert "nginx_www_edit_path" in resolve["ansible.builtin.set_fact"]
+    assert "/etc/nginx/sites-available/" in str(resolve)
+    validate = t["Require a regular approved edit target and no symlink at that path"]
+    assertions = validate["ansible.builtin.assert"]["that"]
+    assert any("nginx_www_edit_stat.stat.isreg" in x for x in assertions)
+    assert any("not (nginx_www_edit_stat.stat.islnk" in x for x in assertions)
+    assert t["Load exact WWW nginx configuration privately"]["ansible.builtin.slurp"]["src"] == (
+        "{{ nginx_www_edit_path }}"
+    )
+    scope = t["Safely replace only two certificate references with explicit authorization"]
+    block = scope["block"]
+    backup = block[0]["ansible.builtin.copy"]
+    assert backup["src"] == "{{ nginx_www_edit_path }}"
+    assert backup["mode"] == "0600"
+    for step in block[1:3]:
+        assert step["ansible.builtin.replace"]["path"] == "{{ nginx_www_edit_path }}"
+    rescue = scope["rescue"][0]["ansible.builtin.copy"]
+    assert rescue["dest"] == "{{ nginx_www_edit_path }}"
+    assert rescue["mode"] == "{{ nginx_www_edit_stat.stat.mode }}"
