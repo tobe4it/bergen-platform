@@ -1,0 +1,449 @@
+---
+# Read-only diagnosis of a failed isolated selfHOST ACME staging issuance.
+# Real host identity, DNS zone and record IDs are passed from Git-ignored YAML.
+# Does not change DNS, hook state, or Certbot certificate lineages.
+
+- name: Identify the approved certificate source for diagnostics
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  tasks:
+    - name: Require local source SSH identity and DNS probe configuration
+      ansible.builtin.assert:
+        that:
+          - mail_tls_source_address is defined
+          - mail_tls_source_ssh_user is defined
+          - selfhost_acme_zone is defined
+          - selfhost_acme_nameservers is defined
+          - selfhost_acme_nameservers | length >= 2
+          - selfhost_acme_record_ids is defined
+          - selfhost_acme_record_ids | length == 2
+        fail_msg: Missing local source or DNS data
+      no_log: true
+
+    - name: Register only the configured certificate source
+      ansible.builtin.add_host:
+        name: selfhost-acme-diagnostic-source
+        groups: selfhost_acme_diagnostic_sources
+        ansible_host: "{{ mail_tls_source_address }}"
+        ansible_user: "{{ mail_tls_source_ssh_user }}"
+        ansible_python_interpreter: /usr/bin/python3
+      changed_when: false
+
+- name: Diagnose staging certificate attempt without changing any state
+  hosts: selfhost_acme_diagnostic_sources
+  become: true
+  gather_facts: false
+  vars:
+    selfhost_acme_state_file: /var/lib/selfhost-acme/active.json
+    selfhost_acme_staging_log: /var/lib/acme-staging/log/letsencrypt.log
+  tasks:
+    - name: Check whether the hook reserved any TXT slots
+      ansible.builtin.stat:
+        path: "{{ selfhost_acme_state_file }}"
+      register: selfhost_acme_state_stat
+
+    - name: Read hook state without exposing challenge values
+      ansible.builtin.slurp:
+        src: "{{ selfhost_acme_state_file }}"
+      register: selfhost_acme_state_raw
+      when: selfhost_acme_state_stat.stat.exists
+      no_log: true
+
+    - name: Parse private state locally without logging contents
+      ansible.builtin.set_fact:
+        selfhost_acme_safe_state: "{{ (selfhost_acme_state_raw.content | b64decode | from_json) if selfhost_acme_state_stat.stat.exists else {} }}"
+      no_log: true
+
+    - name: Print only slot IDs and state labels, never validation values
+      ansible.builtin.debug:
+        msg:
+          slot: "{{ item.key }}"
+          status: "{{ item.value.status | default('UNKNOWN') }}"
+      loop: "{{ selfhost_acme_safe_state | dict2items }}"
+      loop_control:
+        label: "reserved-slot-{{ item.key }}"
+      when: selfhost_acme_safe_state | length > 0
+
+    - name: Report no active local reservations
+      ansible.builtin.debug:
+        msg: "No active ACME hook reservations"
+      when: selfhost_acme_safe_state | length == 0
+
+    - name: Query current public TXT records on each authoritative server
+      ansible.builtin.command:
+        argv:
+          - dig
+          - +short
+          - +norecurse
+          - +time=3
+          - +tries=1
+          - TXT
+          - "_acme-challenge.{{ selfhost_acme_zone }}"
+          - "@{{ item }}"
+      changed_when: false
+      register: selfhost_acme_dns_results
+      loop: "{{ selfhost_acme_nameservers }}"
+
+    - name: Summarize whether each TXT slot is idle (no challenge tokens)
+      ansible.builtin.debug:
+        msg:
+          nameserver: "{{ item.item }}"
+          slot_1_idle: "{{ ('selfhost-api-idle-' ~ (selfhost_acme_record_ids[0] | string)) in item.stdout }}"
+          slot_2_idle: "{{ ('selfhost-api-idle-' ~ (selfhost_acme_record_ids[1] | string)) in item.stdout }}"
+          dns_lookup_rc: "{{ item.rc }}"
+      loop: "{{ selfhost_acme_dns_results.results }}"
+      loop_control:
+        label: "{{ item.item }}"
+
+    - name: Classify staging log errors without printing log text or credentials
+      ansible.builtin.command:
+        argv:
+          - python3
+          - -c
+          - |
+            from pathlib import Path
+            import re
+            log = Path("/var/lib/acme-staging/log/letsencrypt.log")
+            if not log.exists():
+                print("staging_log_present=false")
+                raise SystemExit(0)
+            data = log.read_text(encoding="utf-8", errors="replace").splitlines()
+            print("staging_log_present=true")
+            patterns = [
+                ("api_http_401", r"(?:http|status)\s*401"),
+                ("api_http_403", r"(?:http|status)\s*403"),
+                ("api_http_409", r"(?:http|status)\s*409"),
+                ("api_http_429", r"(?:http|status)\s*429"),
+                ("api_http_503", r"(?:http|status)\s*503"),
+                ("dns_propagation_timeout", r"DNS propagation not confirmed"),
+                ("hook_root_permission", r"must be executed as root|must be owned by root"),
+                ("hook_state_mismatch", r"Cleanup does not match|Both TXT slots are occupied"),
+                ("missing_hook_dependency", r"No such file or directory|ModuleNotFoundError|not found"),
+                ("ca_dns_error", r"NXDOMAIN|SERVFAIL|DNS problem"),
+                ("ca_challenge_rejected", r"unauthorized|challenge failed|Invalid response"),
+                ("network_timeout", r"timed out|connection (?:error|refused)"),
+                ("hook_execution_error", r"Error running (?:authenticator|manual-auth-hook|manual-cleanup-hook)|hook failed"),
+            ]
+            detected = sorted({label for label, expression in patterns
+                               if any(re.search(expression, line, re.I) for line in data)})
+            print("diagnostic_classes=" + (",".join(detected) if detected else "none_of_known_classes"))
+            interesting = [n for n, line in enumerate(data, 1)
+                           if re.search(r"ERROR|Traceback|HookError|error running|DNS propagation|HTTP 4\d\d|HTTP 5\d\d", line, re.I)]
+            print("diagnostic_line_count=" + str(len(interesting)))
+            print("last_diagnostic_line_numbers=" + ",".join(map(str, interesting[-8:])))
+      changed_when: false
+      register: selfhost_acme_log_summary
+
+    - name: Show sanitized staging log classification
+      ansible.builtin.debug:
+        var: selfhost_acme_log_summary.stdout_lines
+
+    - name: Extract exact known staging hook failure categories without showing log text
+      ansible.builtin.command:
+        argv:
+          - python3
+          - -c
+          - |
+            from pathlib import Path
+            import re
+            path = Path("/var/lib/acme-staging/log/letsencrypt.log")
+            if not path.is_file():
+                print("log_not_found")
+                raise SystemExit(0)
+            lines = path.read_text(encoding="utf-8", errors="replace").splitlines()
+            known = (
+                ("selfhost_http_rejected", r"selfHOST API rejected (?:present|cleanup) with HTTP ([1-5][0-9][0-9])"),
+                ("selfhost_transport_uncertain", r"selfHOST API request failed; remote slot state uncertain"),
+                ("selfhost_unexpected_http_status", r"selfHOST did not acknowledge the change"),
+                ("api_key_validation_error", r"Missing or invalid API key format"),
+                ("config_invalid", r"Missing or unsafe local configuration|Invalid local configuration|Invalid zone"),
+                ("slot_already_reserved", r"Both TXT slots are occupied|Challenge already reserved"),
+                ("root_permission_error", r"must be executed as root|must be owned by root"),
+                ("dns_propagation_failure", r"DNS propagation not confirmed"),
+                ("unapproved_certbot_domain", r"Certbot requested an unapproved domain"),
+                ("invalid_certbot_validation", r"Certbot DNS-01 validation value malformed"),
+                ("hook_state_error", r"Cleanup does not match|Challenge was not confirmed presented"),
+                ("unexpected_python_exception", r"Traceback \(most recent call last\)|Exception occurred"),
+                ("certbot_acme_rejection", r"urn:ietf:params:acme:error:|challenge failed|unauthorized"),
+            )
+            matches = []
+            for label, pattern in known:
+                found = [re.search(pattern, line, re.I) for line in lines]
+                found = [m for m in found if m]
+                if found:
+                    details = ""
+                    if label == "selfhost_http_rejected":
+                        details = "_HTTP_" + found[-1].group(1)
+                    matches.append(label + details)
+            print("known_failure_categories=" + (",".join(matches) if matches else "none_matched"))
+            print("certbot_log_lines=" + str(len(lines)))
+      changed_when: false
+      register: selfhost_acme_exact_failure
+
+    - name: Show allowlisted hook failure types, never raw log lines
+      ansible.builtin.debug:
+        var: selfhost_acme_exact_failure.stdout_lines
+
+    - name: Test MX2 direct DNS, TLS and read-only HTTPS reachability to selfHOST
+      ansible.builtin.command:
+        argv:
+          - python3
+          - -c
+          - |
+            import socket
+            import ssl
+            import urllib.error
+            import urllib.request
+
+            host = "my.selfhost.de"
+            url = "https://my.selfhost.de/cgi-bin/dns-api.pl"
+
+            def classify(exc):
+                if isinstance(exc, socket.gaierror):
+                    return "dns_resolution_error"
+                if isinstance(exc, ssl.SSLCertVerificationError):
+                    return "tls_certificate_validation_error"
+                if isinstance(exc, ssl.SSLError):
+                    return "tls_handshake_error"
+                if isinstance(exc, (TimeoutError, socket.timeout)):
+                    return "timeout"
+                if isinstance(exc, ConnectionRefusedError):
+                    return "tcp_connection_refused"
+                if isinstance(exc, ConnectionResetError):
+                    return "tcp_connection_reset"
+                if isinstance(exc, OSError):
+                    return "os_error_" + str(exc.errno)
+                return type(exc).__name__
+
+            try:
+                addresses = socket.getaddrinfo(host, 443, type=socket.SOCK_STREAM)
+                print("dns_resolution=ok" if addresses else "dns_resolution=empty")
+            except (OSError, ValueError) as exc:
+                print("dns_resolution=" + classify(exc))
+
+            print("https_proxy_configured=" + str(bool(
+                urllib.request.getproxies().get("https"))).lower())
+            try:
+                with socket.create_connection((host, 443), timeout=8) as sock:
+                    with ssl.create_default_context().wrap_socket(sock, server_hostname=host):
+                        print("direct_tcp_tls=ok")
+            except (OSError, ValueError) as exc:
+                print("direct_tcp_tls=" + classify(exc))
+
+            # GET is intentionally read-only. A 4xx/405 status still proves an
+            # HTTP response was received. Never send an API key or TXT value.
+            opener = urllib.request.build_opener()
+            request = urllib.request.Request(url, method="GET")
+            try:
+                with opener.open(request, timeout=12) as response:
+                    print("api_get_http_status=" + str(response.status))
+            except urllib.error.HTTPError as exc:
+                print("api_get_http_status=" + str(exc.code))
+            except urllib.error.URLError as exc:
+                print("api_get_transport_error=" + classify(exc.reason))
+            except (OSError, ValueError) as exc:
+                print("api_get_error=" + classify(exc))
+      register: selfhost_acme_network_probe
+      changed_when: false
+
+    - name: Show only predefined transport classifications
+      ansible.builtin.debug:
+        var: selfhost_acme_network_probe.stdout_lines
+
+    - name: Classify TLS certificate verification failure, CA trust and clock without secrets
+      ansible.builtin.command:
+        argv:
+          - python3
+          - -c
+          - |
+            import datetime
+            import os
+            from pathlib import Path
+            import socket
+            import ssl
+            import subprocess
+
+            host = "my.selfhost.de"
+            print("host_clock_utc=" + datetime.datetime.now(datetime.timezone.utc).isoformat(timespec="seconds"))
+            paths = ssl.get_default_verify_paths()
+            print("python_ssl_cafile_available=" + str(bool(paths.cafile and Path(paths.cafile).is_file())).lower())
+            print("python_ssl_capath_available=" + str(bool(paths.capath and Path(paths.capath).is_dir())).lower())
+            print("ssl_cert_file_override=" + str("SSL_CERT_FILE" in os.environ).lower())
+            print("ssl_cert_dir_override=" + str("SSL_CERT_DIR" in os.environ).lower())
+            for name in ("REQUESTS_CA_BUNDLE", "CURL_CA_BUNDLE"):
+                print(name.lower() + "_override=" + str(name in os.environ).lower())
+
+            classification = {
+                2: "issuer_certificate_missing",
+                9: "certificate_not_yet_valid",
+                10: "certificate_expired",
+                18: "self_signed_leaf",
+                19: "self_signed_chain",
+                20: "local_issuer_certificate_missing",
+                21: "unable_to_verify_first_certificate",
+                23: "certificate_revoked",
+                24: "invalid_certificate_authority",
+                26: "unsupported_certificate_purpose",
+                62: "certificate_hostname_mismatch",
+                66: "end_entity_public_key_too_small",
+                67: "ca_public_key_too_small",
+                68: "ca_signature_digest_too_weak",
+            }
+            try:
+                addresses = socket.getaddrinfo(host, 443, type=socket.SOCK_STREAM)
+            except socket.gaierror:
+                print("getaddrinfo=dns_error")
+                raise SystemExit(0)
+            endpoints = {}
+            for family, socktype, proto, canonname, sockaddr in addresses:
+                if family not in (socket.AF_INET, socket.AF_INET6):
+                    continue
+                endpoints.setdefault(family, (socktype, proto, sockaddr))
+            for family, label in ((socket.AF_INET, "ipv4"), (socket.AF_INET6, "ipv6")):
+                if family not in endpoints:
+                    print(label + "_tls=no_resolved_address")
+                    continue
+                socktype, proto, sockaddr = endpoints[family]
+                try:
+                    with socket.socket(family, socktype, proto) as tcp:
+                        tcp.settimeout(8)
+                        tcp.connect(sockaddr)
+                        with ssl.create_default_context().wrap_socket(tcp, server_hostname=host):
+                            print(label + "_tls=verified")
+                except ssl.SSLCertVerificationError as exc:
+                    code = exc.verify_code
+                    print(label + "_tls=certificate_verify_failed")
+                    print(label + "_verify_code=" + str(code))
+                    print(label + "_verify_reason=" + classification.get(code, "other_verify_error"))
+                except ssl.SSLError:
+                    print(label + "_tls=tls_handshake_error")
+                except socket.timeout:
+                    print(label + "_tls=timeout")
+                except OSError:
+                    print(label + "_tls=connection_error")
+
+            try:
+                pkg = subprocess.run(["rpm", "-q", "ca-certificates"],
+                                     capture_output=True, text=True, timeout=5)
+                print("rpm_ca_certificates_installed=" + str(pkg.returncode == 0).lower())
+            except (OSError, subprocess.TimeoutExpired):
+                print("rpm_ca_certificates_installed=unknown")
+      register: selfhost_acme_tls_trust_probe
+      changed_when: false
+
+    - name: Show trusted CA and TLS validation classifications
+      ansible.builtin.debug:
+        var: selfhost_acme_tls_trust_probe.stdout_lines
+
+    - name: Inspect publicly presented selfHOST TLS leaf key and local OpenSSL policy
+      ansible.builtin.command:
+        argv:
+          - python3
+          - -c
+          - |
+            import re
+            import subprocess
+
+            host = "my.selfhost.de"
+            try:
+                handshake = subprocess.run(
+                    ["openssl", "s_client", "-connect", host + ":443",
+                     "-servername", host, "-showcerts"],
+                    input=b"", capture_output=True, timeout=20, check=False,
+                )
+                pem = re.search(
+                    rb"-----BEGIN CERTIFICATE-----\s+.*?-----END CERTIFICATE-----",
+                    handshake.stdout, re.S,
+                )
+                if not pem:
+                    print("peer_leaf_certificate=not_retrieved")
+                else:
+                    cert = subprocess.run(
+                        ["openssl", "x509", "-noout", "-text"],
+                        input=pem.group(), capture_output=True,
+                        timeout=10, check=False,
+                    )
+                    if cert.returncode:
+                        print("peer_leaf_certificate=unparseable")
+                    else:
+                        body = cert.stdout.decode("utf-8", errors="replace")
+                        algorithm = re.search(r"Public Key Algorithm:\s*([A-Za-z0-9_-]+)", body)
+                        bits = re.search(r"Public-Key:\s*\((\d+) bit\)", body)
+                        print("peer_leaf_certificate=obtained")
+                        print("peer_leaf_key_algorithm=" + (
+                            algorithm.group(1) if algorithm else "unavailable"))
+                        print("peer_leaf_key_bits=" + (
+                            bits.group(1) if bits else "not_reported"))
+                try:
+                    policies = subprocess.run(
+                        ["update-crypto-policies", "--show"],
+                        capture_output=True, timeout=5, check=False,
+                    )
+                    text = policies.stdout.decode("ascii", errors="ignore").strip()
+                    print("host_crypto_policy=" + (
+                        text if policies.returncode == 0 and
+                        re.fullmatch(r"[A-Z0-9_:+-]+", text) else "not_available"))
+                except (OSError, subprocess.TimeoutExpired):
+                    print("host_crypto_policy=not_available")
+            except (OSError, subprocess.TimeoutExpired):
+                print("peer_leaf_certificate=probe_failed")
+      changed_when: false
+      register: selfhost_acme_leaf_key_probe
+
+    - name: Show only public TLS key algorithm, bit length and host policy
+      ansible.builtin.debug:
+        var: selfhost_acme_leaf_key_probe.stdout_lines
+
+    - name: Probe opt-in RSA2048 TLS compatibility with selfHOST using GET only
+      ansible.builtin.command:
+        argv:
+          - python3
+          - -c
+          - |
+            import socket
+            import ssl
+            import urllib.error
+            import urllib.request
+
+            url = "https://my.selfhost.de/cgi-bin/dns-api.pl"
+            context = ssl.create_default_context()
+            context.minimum_version = ssl.TLSVersion.TLSv1_2
+            try:
+                context.set_ciphers("ECDHE+AESGCM:!aNULL:!eNULL:@SECLEVEL=2")
+                print("compatibility_tls12_cipher_profile=ECDHE_AESGCM_SECLEVEL2_APPLIED")
+                print("certificate_verification=" + (
+                    "enabled" if context.verify_mode == ssl.CERT_REQUIRED else "disabled"))
+                print("hostname_verification=" + (
+                    "enabled" if context.check_hostname else "disabled"))
+                opener = urllib.request.build_opener(
+                    urllib.request.HTTPSHandler(context=context))
+                request = urllib.request.Request(url, method="GET")
+                try:
+                    with opener.open(request, timeout=12) as response:
+                        print("compatibility_https_status=" + str(response.status))
+                except urllib.error.HTTPError as exc:
+                    print("compatibility_https_status=" + str(exc.code))
+                except urllib.error.URLError as exc:
+                    why = exc.reason
+                    if isinstance(why, ssl.SSLCertVerificationError):
+                        print("compatibility_tls_result=certificate_verify_failed")
+                        print("compatibility_tls_verify_code=" + str(why.verify_code))
+                    elif isinstance(why, (socket.timeout, TimeoutError)):
+                        print("compatibility_tls_result=timeout")
+                    elif isinstance(why, ssl.SSLError):
+                        print("compatibility_tls_result=tls_error")
+                    else:
+                        print("compatibility_tls_result=transport_error")
+            except (OSError, ValueError):
+                print("compatibility_tls_result=context_configuration_error")
+      register: selfhost_acme_compat_probe
+      changed_when: false
+
+    - name: Show verified RSA2048 compatibility probe classification
+      ansible.builtin.debug:
+        var: selfhost_acme_compat_probe.stdout_lines
+
+    - name: Clarify that diagnosis never changes production or DNS
+      ansible.builtin.debug:
+        msg: "DIAGNOSTICS_ONLY: no TXT updates, no Certbot issuance, no production certificate changes."

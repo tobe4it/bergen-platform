@@ -10,6 +10,13 @@ The project follows **Semantic Versioning (SemVer)** and the changelog format is
 
 ### Added
 
+- Public mail-gateway TLS operations runbook in `docs/MAIL-TLS-OPERATIONS.md`:
+  certificate ownership, DNS-01/HTTP-01, Certbot timers, exact-lineage deploy
+  hooks, IPv4/IPv6 MTA-STS, validation, quarantine, rollback and evidence gaps.
+- Read-only-by-default, site-local-variable-driven MTA-STS Nginx IPv6 and
+  Certbot hook adoption playbook with root-owned file guards, guarded backup,
+  explicit apply and offline behavior tests.
+
 - Guarded two-QMgr/client audit harness with Java MQI probes for TLS/password
   negatives, local PUT/GET, message integrity, transactions, queue limits and
   bidirectional remote-queue transport; produces hashed JSON/Markdown evidence
@@ -24,6 +31,14 @@ The project follows **Semantic Versioning (SemVer)** and the changelog format is
 
 ### Changed
 
+- Source MX Certbot cleanup and MTA-STS repair are recorded separately from
+  the still-open internal mail-backend cutover; README, mail operations and
+  roadmap now link to the audited TLS checkpoint.
+- Scoped gateway Postfix/wildcard reload hooks have fail-closed, lineage-aware
+  behavior. Legacy broken/unused renewal profiles were quarantined without
+  deleting their certificate files; the obsolete monthly legacy renewal cron
+  was disabled, not replaced with a system-wide crypto-policy workaround.
+
 - Two-QMgr/client messaging probes now require TLS 1.3 with a TLS 1.3 cipher;
   TLS 1.2 configuration is rejected before any live test mutation.
 - MQ server deployment accepts isolated named lab instances and requires separate
@@ -31,6 +46,20 @@ The project follows **Semantic Versioning (SemVer)** and the changelog format is
 - Client deployment starts a stopped LXC without restarting an already running one.
 - Messaging/security/two-QMgr tests remain NOT_TESTED pending their implementation
   and live execution; this change is infrastructure preparation only.
+
+### Verified (2026-10-11)
+
+- Selected MTA-STS HTTP-01 challenge and HTTPS policy served with a valid
+  certificate over IPv4 and the public IPv6 address after scoped Nginx listener
+  corrections; staging and exact-lineage production renewal succeeded.
+- Lineage-scoped MTA-STS deploy hook ignored unrelated certificates and
+  reloaded Nginx for the selected simulated lineage; controller read-only
+  Ansible preflight completed with `changed=0 failed=0` and four offline tests
+  passed.
+- The scheduled global Certbot scan completed successfully with all ten
+  remaining profiles not yet due. No renewal occurred in that scheduled run;
+  future unattended renewal and downstream certificate sync remain to be
+  observed, not represented as already proven.
 
 ---
 

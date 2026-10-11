@@ -164,6 +164,11 @@ Goals:
 
 Implemented foundation:
 
+- Scoped public-gateway TLS/Certbot lifecycle checkpoint (2026-10-11):
+  RSA/ECDSA gateway certificates, DNS-01 wildcard, exact-name MTA-STS
+  certificate with IPv4/IPv6 HTTPS, renewal-hook tests and successful global
+  no-op timer run; see [Mail TLS operations](MAIL-TLS-OPERATIONS.md).
+  The next real unattended renewal and full consumer sync still need evidence.
 - Internal Postfix submission and delivery backend
 - Dovecot LDAP authentication, LMTP and IMAPS
 - Mailuser-only create-only mailbox provisioning
@@ -172,7 +177,9 @@ Implemented foundation:
 
 Planned:
 
-- publicly trusted TLS certificate issuance and renewal
+- monitor actual unattended TLS renewal, lineage-scoped service reloads,
+  controller-to-backend certificate synchronization and certificate expiry;
+  complete remaining backend/client TLS acceptance
 - firewall and private gateway-path enforcement
 - end-to-end gateway queueing and delivery acceptance tests
 - SMTP AUTH, IMAP, mailbox and alias authorization test matrix

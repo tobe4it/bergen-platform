@@ -10,6 +10,15 @@ ansible/group_vars/all/bergen-mq-lab.yml
 ansible/vars/bergen-mq-*.local.yml
 ansible/vars/mq-topology/
 ansible/inventory.local.yml
+# Site-local inventory editor backups may contain credentials or host addresses.
+ansible/inventory.local.yml~
+ansible/inventory.local.yml.*~
 ansible/reports/
 __pycache__/
 *.pyc
+ansible/vars/mail-tls.local.yml
+
+# selfHOST API credentials must never be versioned
+ansible/vars/selfhost-acme.local.vault.yml
+ansible/vars/selfhost-acme.local.yml
+ansible/vars/selfhost-acme.vault.yml

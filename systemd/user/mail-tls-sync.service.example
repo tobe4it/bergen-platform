@@ -1,0 +1,18 @@
+[Unit]
+Description=Validate and sync a renewed mail wildcard TLS certificate
+Documentation=man:systemd.service(5)
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=%h/bergen-platform
+ExecStart=%h/bergen-platform/.venv/bin/python3 %h/bergen-platform/scripts/mail_tls_sync.py --config %h/bergen-platform/ansible/vars/mail-tls.local.yml --apply
+TimeoutStartSec=180
+UMask=0077
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectHome=no
+
+# Requires verified noninteractive SSH keys and sudo -n at the source.
+# No Vault password, certificate material or site-local identities in this unit.

@@ -1,0 +1,306 @@
+---
+# Strictly scoped migration for two existing Certbot global deploy hooks.
+# All actual host identities, file names and lineage IDs live in Git-ignored vars.
+# Default mode is read-only. Explicit deploy_hook_apply=true is required.
+- name: Register approved mail certificate source
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  tasks:
+    - name: Require exact private Certbot deploy-hook scope
+      ansible.builtin.assert:
+        that:
+          - mail_tls_source_address is defined
+          - mail_tls_source_ssh_user is defined
+          - mail_tls_source_cert_file is defined
+          - mail_tls_source_cert_file is match('^/etc/letsencrypt/live/[A-Za-z0-9._-]+/fullchain[.]pem$')
+          - mail_tls_postfix_rsa_lineage is defined
+          - mail_tls_postfix_rsa_lineage is match('^[A-Za-z0-9._-]+$')
+          - mail_tls_postfix_ecdsa_lineage is defined
+          - mail_tls_postfix_ecdsa_lineage is match('^[A-Za-z0-9._-]+$')
+          - mail_tls_postfix_rsa_lineage != mail_tls_postfix_ecdsa_lineage
+          - mail_tls_postfix_hook_path is defined
+          - mail_tls_nginx_hook_path is defined
+          - mail_tls_postfix_hook_path is match('^/etc/letsencrypt/renewal-hooks/deploy/[A-Za-z0-9._-]+$')
+          - mail_tls_nginx_hook_path is match('^/etc/letsencrypt/renewal-hooks/deploy/[A-Za-z0-9._-]+$')
+          - mail_tls_nginx_hook_path != mail_tls_postfix_hook_path
+          - mail_tls_postfix_rsa_lineage != (mail_tls_source_cert_file | dirname | basename)
+          - mail_tls_postfix_ecdsa_lineage != (mail_tls_source_cert_file | dirname | basename)
+          - not ansible_check_mode
+        fail_msg: Missing or conflicting ignored local hook configuration.
+      no_log: true
+
+    - name: Register only the configured certificate source
+      ansible.builtin.add_host:
+        name: mx-deploy-hook-source
+        groups: mx_deploy_hook_sources
+        ansible_host: "{{ mail_tls_source_address }}"
+        ansible_user: "{{ mail_tls_source_ssh_user }}"
+        ansible_python_interpreter: /usr/bin/python3
+      changed_when: false
+
+- name: Inspect or expressly harden two Certbot deploy hooks
+  hosts: mx_deploy_hook_sources
+  gather_facts: false
+  become: true
+  any_errors_fatal: true
+  vars:
+    wildcard_lineage: "{{ mail_tls_source_cert_file | dirname | basename }}"
+    hook_backup_dir: /var/lib/selfhost-acme/deploy-hook-backups
+    hook_postfix_backup: "{{ hook_backup_dir }}/postfix-before-scope.sh"
+    hook_nginx_backup: "{{ hook_backup_dir }}/nginx-before-failure-handling.sh"
+    old_postfix_hook: |
+      #!/bin/sh
+      systemctl reload postfix 2>/dev/null || true
+    old_nginx_hook: |
+      #!/bin/sh
+      set -u
+      [ "${RENEWED_LINEAGE:-}" = "/etc/letsencrypt/live/{{ wildcard_lineage }}" ] || exit 0
+      if /usr/bin/systemctl is-active --quiet nginx; then
+          if /usr/sbin/nginx -t; then
+              /usr/bin/systemctl reload nginx
+          else
+              echo "nginx-Konfiguration ungueltig; Reload uebersprungen." >&2
+          fi
+      fi
+      exit 0
+    new_postfix_hook: |
+      #!/bin/sh
+      set -eu
+      case "${RENEWED_LINEAGE:-}" in
+          "/etc/letsencrypt/live/{{ mail_tls_postfix_rsa_lineage }}"|"/etc/letsencrypt/live/{{ mail_tls_postfix_ecdsa_lineage }}") ;;
+          *) exit 0 ;;
+      esac
+      if ! /usr/bin/systemctl is-active --quiet postfix; then
+          echo 'postfix inactive; Certbot deploy reload not performed' >&2
+          exit 1
+      fi
+      /usr/bin/systemctl reload postfix
+    new_nginx_hook: |
+      #!/bin/sh
+      set -eu
+      [ "${RENEWED_LINEAGE:-}" = "/etc/letsencrypt/live/{{ wildcard_lineage }}" ] || exit 0
+      if ! /usr/bin/systemctl is-active --quiet nginx; then
+          echo 'nginx inactive; Certbot deploy reload not performed' >&2
+          exit 1
+      fi
+      /usr/sbin/nginx -t
+      /usr/bin/systemctl reload nginx
+  tasks:
+    - name: Require both hook paths to be existing ordinary files and not symlinks
+      ansible.builtin.stat:
+        path: "{{ item }}"
+        follow: false
+      loop:
+        - "{{ mail_tls_postfix_hook_path }}"
+        - "{{ mail_tls_nginx_hook_path }}"
+      register: hook_file_states
+      no_log: true
+
+    - name: Reject absent or symlinked hooks and non-root owners
+      ansible.builtin.assert:
+        that:
+          - hook_file_states.results | length == 2
+          - hook_file_states.results[0].stat.isreg | default(false)
+          - hook_file_states.results[1].stat.isreg | default(false)
+          - not (hook_file_states.results[0].stat.islnk | default(false))
+          - not (hook_file_states.results[1].stat.islnk | default(false))
+          - hook_file_states.results[0].stat.pw_name == 'root'
+          - hook_file_states.results[1].stat.pw_name == 'root'
+          - hook_file_states.results[0].stat.gr_name == 'root'
+          - hook_file_states.results[1].stat.gr_name == 'root'
+        fail_msg: Certbot hook paths are missing, linked or not root-owned.
+
+    - name: Read existing hooks privately
+      ansible.builtin.slurp:
+        src: "{{ item }}"
+      loop:
+        - "{{ mail_tls_postfix_hook_path }}"
+        - "{{ mail_tls_nginx_hook_path }}"
+      register: hook_original_data
+      no_log: true
+
+    - name: Classify exact known legacy or already-hardened hook bodies
+      ansible.builtin.set_fact:
+        hook_legacy_state: >-
+          {{ (hook_original_data.results[0].content | b64decode) == old_postfix_hook
+             and (hook_original_data.results[1].content | b64decode) == old_nginx_hook }}
+        hook_hardened_state: >-
+          {{ (hook_original_data.results[0].content | b64decode) == new_postfix_hook
+             and (hook_original_data.results[1].content | b64decode) == new_nginx_hook }}
+      no_log: true
+
+    - name: Refuse unrecognized hook content or a partially migrated pair
+      ansible.builtin.assert:
+        that:
+          - (hook_legacy_state | bool) or (hook_hardened_state | bool)
+        fail_msg: Hook contents differ from reviewed legacy or managed version; stop without editing.
+
+    - name: Check for any existing safety backups before an apply
+      ansible.builtin.stat:
+        path: "{{ item }}"
+        follow: false
+      loop:
+        - "{{ hook_postfix_backup }}"
+        - "{{ hook_nginx_backup }}"
+      register: hook_backup_states
+      no_log: true
+
+    - name: Refuse overwriting earlier safety backups
+      ansible.builtin.assert:
+        that:
+          - not (hook_backup_states.results[0].stat.exists | default(false))
+          - not (hook_backup_states.results[1].stat.exists | default(false))
+        fail_msg: Previous deploy-hook backup exists; review before applying.
+      when:
+        - deploy_hook_apply | default(false) | bool
+        - hook_legacy_state | bool
+
+    - name: Refuse changing Certbot deploy hooks while Certbot is running
+      ansible.builtin.command:
+        argv:
+          - /usr/bin/python3
+          - -c
+          - |
+            import importlib.util
+            source = '/usr/local/libexec/selfhost_acme_recover.py'
+            spec = importlib.util.spec_from_file_location('acme_recovery', source)
+            module = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(module)
+            module.assert_no_running_certbot()
+            print('certbot_processes=NONE')
+      changed_when: false
+      no_log: true
+      when:
+        - deploy_hook_apply | default(false) | bool
+        - hook_legacy_state | bool
+
+    - name: Announce inspected Certbot deploy-hook state
+      ansible.builtin.debug:
+        msg:
+          state: "{{ 'READY' if hook_legacy_state | bool else 'ALREADY_HARDENED' }}"
+          apply_authorized: "{{ deploy_hook_apply | default(false) | bool }}"
+          affected_lineages: two_postfix_and_one_wildcard_lineages
+          other_deploy_hooks_untouched: true
+          services_reloaded_during_install: false
+
+    - name: Back up and install reviewed Certbot hooks on explicit approval
+      when:
+        - deploy_hook_apply | default(false) | bool
+        - hook_legacy_state | bool
+      block:
+        - name: Create root-only local deploy-hook backup directory
+          ansible.builtin.file:
+            path: "{{ hook_backup_dir }}"
+            state: directory
+            owner: root
+            group: root
+            mode: '0700'
+          no_log: true
+
+        - name: Back up original Postfix hook under root-only directory
+          ansible.builtin.copy:
+            src: "{{ mail_tls_postfix_hook_path }}"
+            dest: "{{ hook_postfix_backup }}"
+            remote_src: true
+            owner: root
+            group: root
+            mode: '0600'
+          no_log: true
+
+        - name: Back up original Nginx hook under root-only directory
+          ansible.builtin.copy:
+            src: "{{ mail_tls_nginx_hook_path }}"
+            dest: "{{ hook_nginx_backup }}"
+            remote_src: true
+            owner: root
+            group: root
+            mode: '0600'
+          no_log: true
+
+        - name: Install scoped Postfix hook
+          ansible.builtin.copy:
+            content: "{{ new_postfix_hook }}"
+            dest: "{{ mail_tls_postfix_hook_path }}"
+            owner: root
+            group: root
+            mode: '0700'
+          no_log: true
+
+        - name: Install fail-closed Wildcard Nginx hook
+          ansible.builtin.copy:
+            content: "{{ new_nginx_hook }}"
+            dest: "{{ mail_tls_nginx_hook_path }}"
+            owner: root
+            group: root
+            mode: '0700'
+          no_log: true
+
+        - name: Validate both installed hook scripts without executing reloads
+          ansible.builtin.command:
+            argv: [sh, -n, "{{ item }}"]
+          loop:
+            - "{{ mail_tls_postfix_hook_path }}"
+            - "{{ mail_tls_nginx_hook_path }}"
+          changed_when: false
+          no_log: true
+
+        - name: Verify both hooks ignore unrelated Certbot lineage without reload
+          ansible.builtin.command:
+            argv: ["{{ item }}"]
+          environment:
+            RENEWED_LINEAGE: /etc/letsencrypt/live/_unrelated_readonly_probe_
+          loop:
+            - "{{ mail_tls_postfix_hook_path }}"
+            - "{{ mail_tls_nginx_hook_path }}"
+          changed_when: false
+          no_log: true
+      rescue:
+        - name: Check Postfix backup availability after failure
+          ansible.builtin.stat:
+            path: "{{ hook_postfix_backup }}"
+          register: postfix_rollback_stat
+          no_log: true
+
+        - name: Check Nginx backup availability after failure
+          ansible.builtin.stat:
+            path: "{{ hook_nginx_backup }}"
+          register: nginx_rollback_stat
+          no_log: true
+
+        - name: Restore original Postfix hook if backed up
+          ansible.builtin.copy:
+            src: "{{ hook_postfix_backup }}"
+            dest: "{{ mail_tls_postfix_hook_path }}"
+            remote_src: true
+            owner: root
+            group: root
+            mode: "{{ hook_file_states.results[0].stat.mode }}"
+          when: postfix_rollback_stat.stat.isreg | default(false)
+          no_log: true
+
+        - name: Restore original Nginx hook if backed up
+          ansible.builtin.copy:
+            src: "{{ hook_nginx_backup }}"
+            dest: "{{ mail_tls_nginx_hook_path }}"
+            remote_src: true
+            owner: root
+            group: root
+            mode: "{{ hook_file_states.results[1].stat.mode }}"
+          when: nginx_rollback_stat.stat.isreg | default(false)
+          no_log: true
+
+        - name: Fail rather than claim a successful deployment after rollback
+          ansible.builtin.fail:
+            msg: Hook installation or offline validation failed; attempted restoration of backed-up files.
+
+    - name: Report end state without credentials or real paths
+      ansible.builtin.debug:
+        msg:
+          configuration: >-
+            {{ 'HOOKS_ALREADY_HARDENED' if hook_hardened_state | bool
+               else ('HOOKS_HARDENED_AND_OFFLINE_CHECKED' if (deploy_hook_apply | default(false) | bool)
+                     else 'READY_FOR_EXPLICIT_APPLY') }}
+          production_certificates_modified: false
+          postfix_or_nginx_reloaded_by_playbook: false
+          other_domains_out_of_scope: true
