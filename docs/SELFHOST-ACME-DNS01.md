@@ -301,3 +301,59 @@ After that, rerun the read-only diagnostic and verify both slots are idle
 and no reservations remain before attempting any new staging certificate.
 If a guard fails, do not force the recovery or clear state manually. Review
 the failed condition first.
+
+
+## Review and activate existing production Certbot renewal settings
+
+Once a separate Let's Encrypt staging issuance has succeeded, both slots are
+back at their idle values, and the read-only production preflight has passed,
+prepare the EXISTING production Certbot lineage to use the hook. The
+preferred approach is Certbot 2.3+ "reconfigure": it first performs a
+staging-backed test, then persists the new renewal settings if successful.
+It does not replace the live certificate. It does temporarily publish
+ACME TXT challenges. Do not edit Certbot renewal INI by hand.
+
+From the controller, first run the offline guardrail tests:
+
+    python3 -m pytest -q tests/test_selfhost_acme_production_reconfigure.py
+    ansible-playbook -i ansible/inventory.yml -i ansible/inventory.local.yml \
+      ansible/playbooks/selfhost-acme-production-reconfigure.yml \
+      -e @ansible/vars/mail-tls.local.yml \
+      -e @ansible/vars/selfhost-acme.local.yml \
+      --vault-id infra@prompt --syntax-check
+
+Next run WITHOUT the apply flag. This verifies the live fullchain/private key,
+expected single-lineage config, stopped Certbot activity, idle authoritative
+TXT slots and existing backup status; it performs no API write and never
+reconfigures Certbot:
+
+    ansible-playbook -i ansible/inventory.yml -i ansible/inventory.local.yml \
+      ansible/playbooks/selfhost-acme-production-reconfigure.yml \
+      -e @ansible/vars/mail-tls.local.yml \
+      -e @ansible/vars/selfhost-acme.local.yml \
+      --vault-id infra@prompt
+
+Expected: current_renewal_configuration=renewal_config_status=READY, with
+configuration=READY_FOR_EXPLICIT_APPLY. If any guard fails, stop.
+
+Only after an operator reviews that result, authorize the configuration
+change using the exact same command plus:
+
+    -e selfhost_acme_reconfigure_apply=true
+
+The guarded apply first makes a root-only backup of the existing renewal
+profile under /var/lib/selfhost-acme/ and runs Certbot reconfigure against
+the EXACT existing --cert-name, using the installed manual auth/cleanup hooks.
+The staging validation temporarily changes TXT values, but it must leave
+the productive fullchain and private key hashes unchanged. Post-checks
+require saved hook paths to be exact and all TXT slots to return idle.
+
+Certbot's existing renew timer may then renew the lineage automatically
+when it becomes due. However, Certbot timer enablement does not prove that
+other lineages on the same host are healthy; separately review invalid
+renewal profiles and test relevant renewals without applying broad changes.
+
+If a reconfigure attempt fails, do not immediately retry: use the existing
+read-only diagnostic and recovery workflows to inspect reserved TXT slots.
+The root-only backup stays available. Do not restore it blindly because
+the failed run may have modified the profile before reporting a failure.
