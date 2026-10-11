@@ -42,9 +42,9 @@
     - name: Require expected Debian LXC hostname
       ansible.builtin.assert:
         that:
-          - ansible_system == 'Linux'
-          - ansible_os_family == 'Debian'
-          - ansible_hostname == lxc_hostname
+          - ansible_facts['system'] == 'Linux'
+          - ansible_facts['os_family'] == 'Debian'
+          - ansible_facts['hostname'] == lxc_hostname
         fail_msg: >-
           The destination does not match the reviewed target or is not a
           Debian-family guest. No Linux baseline will be installed.

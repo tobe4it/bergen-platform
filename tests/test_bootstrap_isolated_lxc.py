@@ -43,6 +43,14 @@ class IsolatedBootstrapTests(unittest.TestCase):
         tmux_check = next(t for t in tasks if "Confirm tmux" in t["name"])
         self.assertEqual(tmux_check["when"], "not ansible_check_mode")
 
+    def test_use_ansible_facts_mapping_not_deprecated_injected_vars(self):
+        checks = self.play["pre_tasks"][3]["ansible.builtin.assert"]["that"]
+        self.assertIn("ansible_facts['system'] == 'Linux'", checks)
+        self.assertIn("ansible_facts['os_family'] == 'Debian'", checks)
+        self.assertIn("ansible_facts['hostname'] == lxc_hostname", checks)
+        for old_name in ["ansible_system", "ansible_os_family", "ansible_hostname"]:
+            self.assertNotIn(old_name, SOURCE)
+
     def test_no_site_specific_values(self):
         self.assertNotIn("192.168.", SOURCE)
         self.assertNotIn("thebergens.net", SOURCE)
