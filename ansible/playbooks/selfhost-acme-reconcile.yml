@@ -1,0 +1,72 @@
+---
+# Explicit and guarded local-reservation recovery from the controller.
+# Does NOT call the selfHOST API or modify a production certificate.
+# The default run is read-only (apart from installing the recovery helper).
+
+- name: Register the approved external certificate source
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  tasks:
+    - name: Validate local source identity
+      ansible.builtin.assert:
+        that:
+          - mail_tls_source_address is defined
+          - mail_tls_source_ssh_user is defined
+          - selfhost_acme_zone is defined
+          - selfhost_acme_record_ids is defined
+          - selfhost_acme_record_ids | length == 2
+          - selfhost_acme_nameservers is defined
+          - selfhost_acme_nameservers | length >= 2
+      no_log: true
+
+    - name: Register only the configured source host
+      ansible.builtin.add_host:
+        name: selfhost-acme-recovery-source
+        groups: selfhost_acme_recovery_sources
+        ansible_host: "{{ mail_tls_source_address }}"
+        ansible_user: "{{ mail_tls_source_ssh_user }}"
+        ansible_python_interpreter: /usr/bin/python3
+      changed_when: false
+
+- name: Inspect or explicitly clear only abandoned local ACME reservations
+  hosts: selfhost_acme_recovery_sources
+  gather_facts: false
+  become: true
+  any_errors_fatal: true
+  tasks:
+    - name: Install generic protected reconciliation helper from controller
+      ansible.builtin.copy:
+        src: "{{ playbook_dir }}/../../scripts/selfhost_acme_recover.py"
+        dest: /usr/local/libexec/selfhost_acme_recover.py
+        owner: root
+        group: root
+        mode: '0755'
+
+    - name: Confirm both reserved slots and both authoritative DNS idle values
+      ansible.builtin.command:
+        argv:
+          - /usr/bin/python3
+          - /usr/local/libexec/selfhost_acme_recover.py
+          - --check
+      register: selfhost_acme_recovery_preflight
+      changed_when: false
+
+    - name: Report safe recovery preflight
+      ansible.builtin.debug:
+        var: selfhost_acme_recovery_preflight.stdout
+
+    - name: Reconcile orphaned state only when explicitly authorized
+      ansible.builtin.command:
+        argv:
+          - /usr/bin/python3
+          - /usr/local/libexec/selfhost_acme_recover.py
+          - --apply
+      when: selfhost_acme_reconcile_apply | default(false) | bool
+      register: selfhost_acme_recovery_applied
+      changed_when: "'RECONCILED:' in selfhost_acme_recovery_applied.stdout"
+
+    - name: Report whether recovery changed any local state
+      ansible.builtin.debug:
+        var: selfhost_acme_recovery_applied.stdout
+      when: selfhost_acme_reconcile_apply | default(false) | bool
