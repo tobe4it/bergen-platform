@@ -22,3 +22,6 @@ ansible/vars/mail-tls.local.yml
 ansible/vars/selfhost-acme.local.vault.yml
 ansible/vars/selfhost-acme.local.yml
 ansible/vars/selfhost-acme.vault.yml
+
+# Site-specific reverse proxy topology and certificate endpoints
+ansible/group_vars/all/bergen-proxy.yml
