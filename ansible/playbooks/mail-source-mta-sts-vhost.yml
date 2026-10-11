@@ -109,7 +109,151 @@
 
     - name: Identify which IPv6 listeners are missing
       ansible.builtin.set_fact:
-        missing_http_v6: "{{ not (vhost_body is regex('(?m)^\\s*listen\\s+\\[::\\]:80;\\s*$')) }}"
+        missing_http_v6: "{{ (vhost_body | regex_findall('(?m)^\\s*listen\\s+\\[::\\]:80;\\s*
+        missing_https_v6: "{{ (vhost_body | regex_findall('(?m)^\\s*listen\\s+\\[::\\]:443 ssl http2;\\s*
+        missing_hook: "{{ not (selected_file_states.results[1].stat.exists | default(false)) }}"
+
+    - name: Announce approved scope and planned changes without private identifiers
+      ansible.builtin.debug:
+        msg:
+          http_ipv6_missing: "{{ missing_http_v6 }}"
+          https_ipv6_missing: "{{ missing_https_v6 }}"
+          deploy_hook_missing: "{{ missing_hook }}"
+          explicit_apply: "{{ mail_mta_sts_apply | default(false) | bool }}"
+          unrelated_vhosts_untouched: true
+
+    - name: Inspect dedicated immutable pre-change backup
+      ansible.builtin.stat:
+        path: "{{ vhost_backup_path }}"
+        follow: false
+      register: previous_backup
+      no_log: true
+
+    - name: Refuse overwriting a previous safety backup
+      ansible.builtin.assert:
+        that:
+          - not (previous_backup.stat.exists | default(false))
+        fail_msg: Safety backup already present; manual review required before another change.
+      when:
+        - mail_mta_sts_apply | default(false) | bool
+        - missing_http_v6 | bool or missing_https_v6 | bool
+
+    - name: Reconcile only the missing listeners and the exact lineage hook
+      when: mail_mta_sts_apply | default(false) | bool
+      block:
+        - name: Initialize per-run rollback marker
+          ansible.builtin.set_fact:
+            vhost_backup_created_this_run: false
+
+        - name: Require Certbot not currently running
+          ansible.builtin.shell: |
+            if pgrep -x certbot >/dev/null; then exit 1; fi
+          args:
+            executable: /bin/sh
+          changed_when: false
+
+        - name: Ensure exclusive vhost backup directory before listener changes
+          ansible.builtin.file:
+            path: "{{ vhost_backup_dir }}"
+            state: directory
+            owner: root
+            group: root
+            mode: '0700'
+          when: missing_http_v6 | bool or missing_https_v6 | bool
+
+        - name: Back up vhost before changing listeners
+          ansible.builtin.copy:
+            src: "{{ mail_mta_sts_conf_path }}"
+            dest: "{{ vhost_backup_path }}"
+            remote_src: true
+            owner: root
+            group: root
+            mode: '0600'
+          when: missing_http_v6 | bool or missing_https_v6 | bool
+          no_log: true
+
+        - name: Record successful vhost backup in this run
+          ansible.builtin.set_fact:
+            vhost_backup_created_this_run: true
+          when: missing_http_v6 | bool or missing_https_v6 | bool
+
+        - name: Add missing HTTP IPv6 listener only
+          ansible.builtin.lineinfile:
+            path: "{{ mail_mta_sts_conf_path }}"
+            line: '    listen [::]:80;'
+            insertafter: '^\s*listen 80;$'
+            state: present
+          when: missing_http_v6 | bool
+
+        - name: Add missing HTTPS IPv6 listener only
+          ansible.builtin.lineinfile:
+            path: "{{ mail_mta_sts_conf_path }}"
+            line: '    listen [::]:443 ssl http2;'
+            insertafter: '^\s*listen 443 ssl http2;$'
+            state: present
+          when: missing_https_v6 | bool
+
+        - name: Validate effective Nginx syntax before reloading
+          ansible.builtin.command: /usr/sbin/nginx -t
+          changed_when: false
+
+        - name: Reload Nginx only if listeners were changed
+          ansible.builtin.systemd:
+            name: nginx
+            state: reloaded
+          when: missing_http_v6 | bool or missing_https_v6 | bool
+
+        - name: Install the approved lineage-restricted hook if missing
+          ansible.builtin.copy:
+            content: "{{ expected_hook }}"
+            dest: "{{ mail_mta_sts_hook_path }}"
+            owner: root
+            group: root
+            mode: '0755'
+          when: missing_hook | bool
+          no_log: true
+
+        - name: Verify hook syntax and that unrelated lineages do nothing
+          ansible.builtin.command:
+            argv: ["{{ mail_mta_sts_hook_path }}"]
+          environment:
+            RENEWED_LINEAGE: /etc/letsencrypt/live/_unrelated_probe_
+          changed_when: false
+      rescue:
+        - name: Inspect backup after reconciliation failure
+          ansible.builtin.stat:
+            path: "{{ vhost_backup_path }}"
+          register: rescue_backup
+          no_log: true
+
+        - name: Restore vhost if this run backed it up
+          ansible.builtin.copy:
+            src: "{{ vhost_backup_path }}"
+            dest: "{{ mail_mta_sts_conf_path }}"
+            remote_src: true
+            owner: root
+            group: root
+            mode: "{{ selected_file_states.results[0].stat.mode }}"
+          when:
+            - vhost_backup_created_this_run | default(false) | bool
+            - rescue_backup.stat.isreg | default(false)
+
+        - name: Validate restored Nginx configuration
+          ansible.builtin.command: /usr/sbin/nginx -t
+          changed_when: false
+
+        - name: Reload restored Nginx configuration
+          ansible.builtin.systemd:
+            name: nginx
+            state: reloaded
+          when:
+            - vhost_backup_created_this_run | default(false) | bool
+            - rescue_backup.stat.isreg | default(false)
+
+        - name: Report remediation failure
+          ansible.builtin.fail:
+            msg: Scoped reconciliation failed; vhost restoration attempted if changed.
+) | length) == 0 }}"
         missing_https_v6: "{{ not (vhost_body is regex('(?m)^\\s*listen\\s+\\[::\\]:443 ssl http2;\\s*$')) }}"
         missing_hook: "{{ not (selected_file_states.results[1].stat.exists | default(false)) }}"
 
@@ -226,7 +370,7 @@
             group: root
             mode: "{{ selected_file_states.results[0].stat.mode }}"
           when:
-            - missing_http_v6 | bool or missing_https_v6 | bool
+            - vhost_backup_created_this_run | default(false) | bool
             - rescue_backup.stat.isreg | default(false)
 
         - name: Validate restored Nginx configuration
@@ -238,7 +382,276 @@
             name: nginx
             state: reloaded
           when:
-            - missing_http_v6 | bool or missing_https_v6 | bool
+            - vhost_backup_created_this_run | default(false) | bool
+            - rescue_backup.stat.isreg | default(false)
+
+        - name: Report remediation failure
+          ansible.builtin.fail:
+            msg: Scoped reconciliation failed; vhost restoration attempted if changed.
+) | length) == 0 }}"
+        missing_hook: "{{ not (selected_file_states.results[1].stat.exists | default(false)) }}"
+
+    - name: Announce approved scope and planned changes without private identifiers
+      ansible.builtin.debug:
+        msg:
+          http_ipv6_missing: "{{ missing_http_v6 }}"
+          https_ipv6_missing: "{{ missing_https_v6 }}"
+          deploy_hook_missing: "{{ missing_hook }}"
+          explicit_apply: "{{ mail_mta_sts_apply | default(false) | bool }}"
+          unrelated_vhosts_untouched: true
+
+    - name: Inspect dedicated immutable pre-change backup
+      ansible.builtin.stat:
+        path: "{{ vhost_backup_path }}"
+        follow: false
+      register: previous_backup
+      no_log: true
+
+    - name: Refuse overwriting a previous safety backup
+      ansible.builtin.assert:
+        that:
+          - not (previous_backup.stat.exists | default(false))
+        fail_msg: Safety backup already present; manual review required before another change.
+      when:
+        - mail_mta_sts_apply | default(false) | bool
+        - missing_http_v6 | bool or missing_https_v6 | bool
+
+    - name: Reconcile only the missing listeners and the exact lineage hook
+      when: mail_mta_sts_apply | default(false) | bool
+      block:
+        - name: Require Certbot not currently running
+          ansible.builtin.shell: |
+            if pgrep -x certbot >/dev/null; then exit 1; fi
+          args:
+            executable: /bin/sh
+          changed_when: false
+
+        - name: Ensure exclusive vhost backup directory before listener changes
+          ansible.builtin.file:
+            path: "{{ vhost_backup_dir }}"
+            state: directory
+            owner: root
+            group: root
+            mode: '0700'
+          when: missing_http_v6 | bool or missing_https_v6 | bool
+
+        - name: Back up vhost before changing listeners
+          ansible.builtin.copy:
+            src: "{{ mail_mta_sts_conf_path }}"
+            dest: "{{ vhost_backup_path }}"
+            remote_src: true
+            owner: root
+            group: root
+            mode: '0600'
+          when: missing_http_v6 | bool or missing_https_v6 | bool
+          no_log: true
+
+        - name: Add missing HTTP IPv6 listener only
+          ansible.builtin.lineinfile:
+            path: "{{ mail_mta_sts_conf_path }}"
+            line: '    listen [::]:80;'
+            insertafter: '^\s*listen 80;$'
+            state: present
+          when: missing_http_v6 | bool
+
+        - name: Add missing HTTPS IPv6 listener only
+          ansible.builtin.lineinfile:
+            path: "{{ mail_mta_sts_conf_path }}"
+            line: '    listen [::]:443 ssl http2;'
+            insertafter: '^\s*listen 443 ssl http2;$'
+            state: present
+          when: missing_https_v6 | bool
+
+        - name: Validate effective Nginx syntax before reloading
+          ansible.builtin.command: /usr/sbin/nginx -t
+          changed_when: false
+
+        - name: Reload Nginx only if listeners were changed
+          ansible.builtin.systemd:
+            name: nginx
+            state: reloaded
+          when: missing_http_v6 | bool or missing_https_v6 | bool
+
+        - name: Install the approved lineage-restricted hook if missing
+          ansible.builtin.copy:
+            content: "{{ expected_hook }}"
+            dest: "{{ mail_mta_sts_hook_path }}"
+            owner: root
+            group: root
+            mode: '0755'
+          when: missing_hook | bool
+          no_log: true
+
+        - name: Verify hook syntax and that unrelated lineages do nothing
+          ansible.builtin.command:
+            argv: ["{{ mail_mta_sts_hook_path }}"]
+          environment:
+            RENEWED_LINEAGE: /etc/letsencrypt/live/_unrelated_probe_
+          changed_when: false
+      rescue:
+        - name: Inspect backup after reconciliation failure
+          ansible.builtin.stat:
+            path: "{{ vhost_backup_path }}"
+          register: rescue_backup
+          no_log: true
+
+        - name: Restore vhost if this run backed it up
+          ansible.builtin.copy:
+            src: "{{ vhost_backup_path }}"
+            dest: "{{ mail_mta_sts_conf_path }}"
+            remote_src: true
+            owner: root
+            group: root
+            mode: "{{ selected_file_states.results[0].stat.mode }}"
+          when:
+            - vhost_backup_created_this_run | default(false) | bool
+            - rescue_backup.stat.isreg | default(false)
+
+        - name: Validate restored Nginx configuration
+          ansible.builtin.command: /usr/sbin/nginx -t
+          changed_when: false
+
+        - name: Reload restored Nginx configuration
+          ansible.builtin.systemd:
+            name: nginx
+            state: reloaded
+          when:
+            - vhost_backup_created_this_run | default(false) | bool
+            - rescue_backup.stat.isreg | default(false)
+
+        - name: Report remediation failure
+          ansible.builtin.fail:
+            msg: Scoped reconciliation failed; vhost restoration attempted if changed.
+) | length) == 0 }}"
+        missing_https_v6: "{{ not (vhost_body is regex('(?m)^\\s*listen\\s+\\[::\\]:443 ssl http2;\\s*$')) }}"
+        missing_hook: "{{ not (selected_file_states.results[1].stat.exists | default(false)) }}"
+
+    - name: Announce approved scope and planned changes without private identifiers
+      ansible.builtin.debug:
+        msg:
+          http_ipv6_missing: "{{ missing_http_v6 }}"
+          https_ipv6_missing: "{{ missing_https_v6 }}"
+          deploy_hook_missing: "{{ missing_hook }}"
+          explicit_apply: "{{ mail_mta_sts_apply | default(false) | bool }}"
+          unrelated_vhosts_untouched: true
+
+    - name: Inspect dedicated immutable pre-change backup
+      ansible.builtin.stat:
+        path: "{{ vhost_backup_path }}"
+        follow: false
+      register: previous_backup
+      no_log: true
+
+    - name: Refuse overwriting a previous safety backup
+      ansible.builtin.assert:
+        that:
+          - not (previous_backup.stat.exists | default(false))
+        fail_msg: Safety backup already present; manual review required before another change.
+      when:
+        - mail_mta_sts_apply | default(false) | bool
+        - missing_http_v6 | bool or missing_https_v6 | bool
+
+    - name: Reconcile only the missing listeners and the exact lineage hook
+      when: mail_mta_sts_apply | default(false) | bool
+      block:
+        - name: Require Certbot not currently running
+          ansible.builtin.shell: |
+            if pgrep -x certbot >/dev/null; then exit 1; fi
+          args:
+            executable: /bin/sh
+          changed_when: false
+
+        - name: Ensure exclusive vhost backup directory before listener changes
+          ansible.builtin.file:
+            path: "{{ vhost_backup_dir }}"
+            state: directory
+            owner: root
+            group: root
+            mode: '0700'
+          when: missing_http_v6 | bool or missing_https_v6 | bool
+
+        - name: Back up vhost before changing listeners
+          ansible.builtin.copy:
+            src: "{{ mail_mta_sts_conf_path }}"
+            dest: "{{ vhost_backup_path }}"
+            remote_src: true
+            owner: root
+            group: root
+            mode: '0600'
+          when: missing_http_v6 | bool or missing_https_v6 | bool
+          no_log: true
+
+        - name: Add missing HTTP IPv6 listener only
+          ansible.builtin.lineinfile:
+            path: "{{ mail_mta_sts_conf_path }}"
+            line: '    listen [::]:80;'
+            insertafter: '^\s*listen 80;$'
+            state: present
+          when: missing_http_v6 | bool
+
+        - name: Add missing HTTPS IPv6 listener only
+          ansible.builtin.lineinfile:
+            path: "{{ mail_mta_sts_conf_path }}"
+            line: '    listen [::]:443 ssl http2;'
+            insertafter: '^\s*listen 443 ssl http2;$'
+            state: present
+          when: missing_https_v6 | bool
+
+        - name: Validate effective Nginx syntax before reloading
+          ansible.builtin.command: /usr/sbin/nginx -t
+          changed_when: false
+
+        - name: Reload Nginx only if listeners were changed
+          ansible.builtin.systemd:
+            name: nginx
+            state: reloaded
+          when: missing_http_v6 | bool or missing_https_v6 | bool
+
+        - name: Install the approved lineage-restricted hook if missing
+          ansible.builtin.copy:
+            content: "{{ expected_hook }}"
+            dest: "{{ mail_mta_sts_hook_path }}"
+            owner: root
+            group: root
+            mode: '0755'
+          when: missing_hook | bool
+          no_log: true
+
+        - name: Verify hook syntax and that unrelated lineages do nothing
+          ansible.builtin.command:
+            argv: ["{{ mail_mta_sts_hook_path }}"]
+          environment:
+            RENEWED_LINEAGE: /etc/letsencrypt/live/_unrelated_probe_
+          changed_when: false
+      rescue:
+        - name: Inspect backup after reconciliation failure
+          ansible.builtin.stat:
+            path: "{{ vhost_backup_path }}"
+          register: rescue_backup
+          no_log: true
+
+        - name: Restore vhost if this run backed it up
+          ansible.builtin.copy:
+            src: "{{ vhost_backup_path }}"
+            dest: "{{ mail_mta_sts_conf_path }}"
+            remote_src: true
+            owner: root
+            group: root
+            mode: "{{ selected_file_states.results[0].stat.mode }}"
+          when:
+            - vhost_backup_created_this_run | default(false) | bool
+            - rescue_backup.stat.isreg | default(false)
+
+        - name: Validate restored Nginx configuration
+          ansible.builtin.command: /usr/sbin/nginx -t
+          changed_when: false
+
+        - name: Reload restored Nginx configuration
+          ansible.builtin.systemd:
+            name: nginx
+            state: reloaded
+          when:
+            - vhost_backup_created_this_run | default(false) | bool
             - rescue_backup.stat.isreg | default(false)
 
         - name: Report remediation failure
