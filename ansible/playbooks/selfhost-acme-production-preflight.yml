@@ -1,0 +1,177 @@
+---
+# Read-only preflight for transitioning an existing Certbot certificate lineage
+# to selfHOST DNS-01 hooks. No DNS write, API request, renewal or reconfigure.
+# All real hostnames/record IDs are supplied in Git-ignored local variables.
+
+- name: Register the approved certificate source for production preflight
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  tasks:
+    - name: Validate source and DNS data without exposing private values
+      ansible.builtin.assert:
+        that:
+          - mail_tls_source_address is defined
+          - mail_tls_source_ssh_user is defined
+          - mail_tls_source_cert_file is defined
+          - mail_tls_source_cert_file is match('^/etc/letsencrypt/live/[A-Za-z0-9._-]+/fullchain[.]pem$')
+          - selfhost_acme_zone is defined
+          - selfhost_acme_record_ids is defined
+          - selfhost_acme_record_ids | length == 2
+          - selfhost_acme_nameservers is defined
+          - selfhost_acme_nameservers | length >= 2
+        fail_msg: Required local values absent or certificate path unexpected.
+      no_log: true
+
+    - name: Add only the reviewed remote certificate source
+      ansible.builtin.add_host:
+        name: selfhost-acme-prod-preflight-source
+        groups: selfhost_acme_prod_preflight_sources
+        ansible_host: "{{ mail_tls_source_address }}"
+        ansible_user: "{{ mail_tls_source_ssh_user }}"
+        ansible_python_interpreter: /usr/bin/python3
+      changed_when: false
+
+- name: Check Certbot production readiness without modifying any certificate
+  hosts: selfhost_acme_prod_preflight_sources
+  become: true
+  gather_facts: false
+  any_errors_fatal: true
+  tasks:
+    - name: Confirm source fullchain still exists
+      ansible.builtin.stat:
+        path: "{{ mail_tls_source_cert_file }}"
+        follow: true
+      register: selfhost_acme_prod_chain
+
+    - name: Require existing live certificate path unchanged
+      ansible.builtin.assert:
+        that:
+          - selfhost_acme_prod_chain.stat.isreg | default(false)
+        fail_msg: Existing productive fullchain is missing. Stop.
+
+    - name: Report current Certbot version
+      ansible.builtin.command:
+        argv: [certbot, --version]
+      register: selfhost_acme_certbot_version
+      changed_when: false
+
+    - name: Show Certbot version
+      ansible.builtin.debug:
+        var: selfhost_acme_certbot_version.stdout
+
+    - name: Check whether this Certbot supports its reconfigure command
+      ansible.builtin.command:
+        argv: [certbot, help, reconfigure]
+      register: selfhost_acme_reconfigure_help
+      changed_when: false
+      failed_when: false
+
+    - name: Report reconfigure support without dumping help text
+      ansible.builtin.debug:
+        msg:
+          certbot_reconfigure_help_exit_code: "{{ selfhost_acme_reconfigure_help.rc }}"
+          certbot_reconfigure_help_available: "{{ selfhost_acme_reconfigure_help.rc == 0 }}"
+
+    - name: Inspect only safe fields of the existing certificate renewal profile
+      ansible.builtin.command:
+        argv:
+          - python3
+          - -c
+          - |
+            import configparser
+            from pathlib import Path
+            import sys
+
+            fullchain = Path(sys.argv[1])
+            lineage = fullchain.parent.name
+            profile = Path("/etc/letsencrypt/renewal") / (lineage + ".conf")
+            if not profile.is_file() or profile.is_symlink():
+                print("production_renewal_profile=missing_or_unsafe")
+                raise SystemExit(2)
+            cfg = configparser.ConfigParser(interpolation=None)
+            cfg.read(profile)
+            if not cfg.has_section("renewalparams"):
+                print("production_renewal_profile=no_renewalparams")
+                raise SystemExit(2)
+            values = cfg["renewalparams"]
+            auth = values.get("authenticator", "").strip()
+            if auth not in ("manual", "webroot", "standalone", "apache", "nginx"):
+                auth = "other_or_unknown"
+            server = values.get("server", "")
+            if "acme-staging" in server:
+                target = "staging"
+            elif not server or "acme-v02.api.letsencrypt.org/directory" in server:
+                target = "production_or_default"
+            else:
+                target = "custom_or_unknown"
+            print("production_renewal_profile=found")
+            print("renewal_authenticator=" + auth)
+            print("renewal_acme_server_type=" + target)
+            print("renewal_manual_auth_hook_present=" + str(bool(values.get("manual_auth_hook", "").strip())).lower())
+            print("renewal_manual_cleanup_hook_present=" + str(bool(values.get("manual_cleanup_hook", "").strip())).lower())
+            print("renewal_key_type=" + (
+                values.get("key_type", "unspecified")
+                if values.get("key_type", "") in ("ecdsa", "rsa") else "unspecified"))
+          - "{{ mail_tls_source_cert_file }}"
+      changed_when: false
+      register: selfhost_acme_renewal_profile
+
+    - name: Show only safe renewal profile summary
+      ansible.builtin.debug:
+        var: selfhost_acme_renewal_profile.stdout_lines
+
+    - name: Check hook state and DNS idle values under recovery guard
+      ansible.builtin.command:
+        argv:
+          - /usr/bin/python3
+          - /usr/local/libexec/selfhost_acme_recover.py
+          - --check
+      changed_when: false
+      register: selfhost_acme_slot_guard
+
+    - name: Require staging cleanup completed before any production reconfiguration
+      ansible.builtin.assert:
+        that:
+          - "'ALREADY_CLEAN: No local reservations; both DNS slots idle' in selfhost_acme_slot_guard.stdout"
+        fail_msg: ACME TXT reservations or DNS still active after staging.
+        success_msg: "PASS: no local ACME reservations and both DNS slots idle"
+
+    - name: Summarize existing Certbot and ACME-related systemd timers
+      ansible.builtin.command:
+        argv:
+          - python3
+          - -c
+          - |
+            import subprocess
+            try:
+                proc = subprocess.run(
+                    ["systemctl", "list-unit-files", "--type=timer",
+                     "--no-legend", "--no-pager"],
+                    capture_output=True, text=True, timeout=12,
+                    check=False,
+                )
+                if proc.returncode:
+                    print("systemd_timer_inventory=not_available")
+                else:
+                    matches = []
+                    for line in proc.stdout.splitlines():
+                        fields = line.split()
+                        if fields and any(term in fields[0].lower()
+                                          for term in ("certbot", "acme", "letsencrypt")):
+                            matches.append(fields[0] + ":" + (
+                                fields[1] if len(fields) > 1 else "unknown"))
+                    print("certbot_related_timers=" +
+                          (",".join(matches) if matches else "none"))
+            except (OSError, subprocess.TimeoutExpired):
+                print("systemd_timer_inventory=not_available")
+      register: selfhost_acme_existing_timers
+      changed_when: false
+
+    - name: Show existing timer inventory
+      ansible.builtin.debug:
+        var: selfhost_acme_existing_timers.stdout_lines
+
+    - name: Confirm preflight did not request any ACME challenge
+      ansible.builtin.debug:
+        msg: "READ_ONLY: Certbot version, existing renewal profile, idle TXT state and renewal timers inspected; no production changes."
