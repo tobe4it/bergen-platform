@@ -157,7 +157,11 @@ def test_opt_in_tls_rsa2048_still_checks_certificate_and_hostname():
     conf = cfg()
     conf["tls_rsa2048_compat"] = True
     context = hook.api_https_context(conf)
-    assert context.security_level == 2
+    tls12 = [cipher for cipher in context.get_ciphers()
+             if cipher["protocol"] == "TLSv1.2"]
+    assert tls12
+    assert all("ECDHE" in cipher["name"] and "GCM" in cipher["name"]
+               for cipher in tls12)
     assert context.minimum_version >= ssl.TLSVersion.TLSv1_2
     assert context.verify_mode == ssl.CERT_REQUIRED
     assert context.check_hostname
@@ -198,7 +202,11 @@ def test_api_transport_context_is_bound_to_https_handler(monkeypatch):
     assert len(https_handlers) == 1
     assert https_handlers[0]._context.check_hostname
     assert https_handlers[0]._context.verify_mode == __import__("ssl").CERT_REQUIRED
-    assert https_handlers[0]._context.security_level == 2
+    tls12 = [cipher for cipher in https_handlers[0]._context.get_ciphers()
+             if cipher["protocol"] == "TLSv1.2"]
+    assert tls12
+    assert all("ECDHE" in cipher["name"] and "GCM" in cipher["name"]
+               for cipher in tls12)
 
 
 def test_rejects_nonboolean_tls_exception_config(tmp_path, monkeypatch):
