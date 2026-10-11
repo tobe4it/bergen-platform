@@ -136,7 +136,7 @@ def api_https_context(cfg):
     context = ssl.create_default_context()
     if cfg.get("tls_rsa2048_compat", False):
         context.minimum_version = ssl.TLSVersion.TLSv1_2
-        context.set_ciphers("DEFAULT:@SECLEVEL=2")
+        context.set_ciphers("ECDHE+AESGCM:!aNULL:!eNULL:@SECLEVEL=2")
     return context
 
 
