@@ -197,3 +197,46 @@ slots, uncertain API outcomes, or missing DNS propagation. It does not
 automatically clear stale reservations, install a Certbot timer, modify
 existing renewal files, or activate renewed certificates on the source.
 Monitoring and recovery remain separate operational tasks.
+
+
+## RHEL FUTURE and selfHOST RSA-2048 HTTPS compatibility (opt-in)
+
+A machine under RHEL crypto-policy FUTURE can reject a valid provider TLS
+certificate with a 2048-bit RSA leaf (OpenSSL verify error 66). FUTURE
+requires >=3072-bit RSA. Do NOT change the machine-wide crypto policy or
+disable HTTPS verification. Requesting a stronger certificate from the
+provider remains the preferred permanent correction.
+
+A strictly scoped compatibility option is available ONLY for the fixed
+HTTPS endpoint in scripts/selfhost_acme_hook.py. The setting defaults to
+false. To enable it for the selfHOST ACME hook ONLY, add the following to
+the Git-ignored controller file ansible/vars/selfhost-acme.local.yml:
+
+    selfhost_acme_tls_rsa2048_compat: true
+
+The bootstrap playbook transfers this flag into the root-only source
+configuration as tls_rsa2048_compat. It changes no other system services.
+When enabled, the hook creates a separate Python TLS context with:
+
+- CA chain verification still REQUIRED;
+- hostname verification still ENABLED;
+- TLS version >=1.2;
+- TLS 1.2 cipher suites restricted to ephemeral ECDHE and AES-GCM;
+- OpenSSL security level 2, permitting RSA-2048 instead of FUTURE RSA-3072.
+
+TLS 1.3 suites follow OpenSSL's TLS 1.3 configuration. This workaround is
+not the same as turning verification off. It does, however, make an explicit
+cryptographic exception for the provider endpoint. It must not be adopted
+globally or applied to unrelated HTTPS operations.
+
+First use ansible/playbooks/selfhost-acme-staging-diagnostics.yml and inspect
+the read-only task "Show verified RSA2048 compatibility probe classification".
+A returned HTTP status, including 4xx/405, means the TLS connection and
+server identity verification succeeded. The GET request does NOT carry a
+credential and does NOT modify DNS.
+
+After that read-only TLS test succeeds and the local reserved/remote idle
+state has been safely reconciled, rerun bootstrap installation-only (without
+selfhost_acme_run_staging=true) to deploy the opt-in configuration. Do not
+repeat the staging issuance while any local TXT slot remains reserved.
+
