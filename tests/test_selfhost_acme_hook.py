@@ -140,3 +140,76 @@ def test_hook_main_requires_root(monkeypatch):
     monkeypatch.setattr(hook.os, "geteuid", lambda: 1000)
     with pytest.raises(hook.HookError, match="must be executed as root"):
         hook.main(["auth"], env())
+
+
+def test_default_tls_profile_keeps_certificate_verification():
+    import ssl
+
+    context = hook.api_https_context(cfg())
+    assert context.verify_mode == ssl.CERT_REQUIRED
+    assert context.check_hostname
+    assert context.minimum_version >= ssl.TLSVersion.TLSv1_2
+
+
+def test_opt_in_tls_rsa2048_still_checks_certificate_and_hostname():
+    import ssl
+
+    conf = cfg()
+    conf["tls_rsa2048_compat"] = True
+    context = hook.api_https_context(conf)
+    assert context.security_level == 2
+    assert context.minimum_version >= ssl.TLSVersion.TLSv1_2
+    assert context.verify_mode == ssl.CERT_REQUIRED
+    assert context.check_hostname
+
+
+def test_api_transport_context_is_bound_to_https_handler(monkeypatch):
+    import urllib.request
+
+    captured = {}
+
+    class Response:
+        status = 202
+
+        def read(self, _n):
+            return b""
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+    class Opener:
+        def open(self, request, timeout):
+            assert request.full_url == hook.API_URL
+            return Response()
+
+    def build_opener(*handlers):
+        captured["handlers"] = handlers
+        return Opener()
+
+    monkeypatch.setattr(urllib.request, "build_opener", build_opener)
+    conf = cfg()
+    conf["tls_rsa2048_compat"] = True
+    hook.api_request(conf, "present", 1, "A" * 43)
+    https_handlers = [h for h in captured["handlers"]
+                      if isinstance(h, urllib.request.HTTPSHandler)]
+    assert len(https_handlers) == 1
+    assert https_handlers[0]._context.check_hostname
+    assert https_handlers[0]._context.verify_mode == __import__("ssl").CERT_REQUIRED
+    assert https_handlers[0]._context.security_level == 2
+
+
+def test_rejects_nonboolean_tls_exception_config(tmp_path, monkeypatch):
+    conf = cfg()
+    conf["tls_rsa2048_compat"] = "true"
+    secret_path = tmp_path / "selfhost.json"
+    secret_path.write_text(json.dumps(conf))
+    secret_path.chmod(0o600)
+    monkeypatch.setattr(hook.os, "geteuid", lambda: secret_path.stat().st_uid)
+    # Root-only _private_file remains unchanged; patch just this guard for
+    # the format test and do not change file permissions in production.
+    monkeypatch.setattr(hook, "_private_file", lambda path: secret_path)
+    with pytest.raises(hook.HookError, match="must be a boolean"):
+        hook.load_config(secret_path)
