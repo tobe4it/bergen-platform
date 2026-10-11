@@ -61,3 +61,63 @@ def test_tracked_preflight_has_no_infrastructure_identifiers():
     for value in ("thebergens.net", "bergen-mail", "3364072", "3364073",
                   "pri.asok.de", "sec.asok.de", "lxadmin"):
         assert value not in text
+
+
+
+def _run_embedded_renewal_profile_parser(tmp_path, contents):
+    """Execute the exact in-playbook Python parser on a synthetic Certbot file."""
+    import subprocess
+    import sys
+
+    task = next(
+        t for t in load_plays()[1]["tasks"]
+        if t["name"] == "Inspect only safe fields of the existing certificate renewal profile"
+    )
+    argv = task["ansible.builtin.command"]["argv"]
+    assert argv[:3] == ["python3", "-c", argv[2]]
+    script = argv[2]
+    renewal_dir = tmp_path / "renewal"
+    renewal_dir.mkdir()
+    profile = renewal_dir / "sample-lineage.conf"
+    profile.write_text(contents, encoding="utf-8")
+    assert 'Path("/etc/letsencrypt/renewal")' in script
+    script = script.replace(
+        'Path("/etc/letsencrypt/renewal")', repr(str(renewal_dir))
+    )
+    return subprocess.run(
+        [sys.executable, "-c", script,
+         str(tmp_path / "live" / "sample-lineage" / "fullchain.pem")],
+        capture_output=True, text=True, timeout=10, check=False,
+    )
+
+
+def test_certbot_profile_accepts_unsectioned_metadata_preamble(tmp_path):
+    source = (
+        "# Certbot generated profile\n"
+        "version = 3.1.0\n"
+        "archive_dir = /etc/letsencrypt/archive/sample-lineage\n"
+        "cert = /etc/letsencrypt/live/sample-lineage/cert.pem\n"
+        "[renewalparams]\n"
+        "authenticator = manual\n"
+        "server = https://acme-v02.api.letsencrypt.org/directory\n"
+        "manual_auth_hook = \n"
+        "manual_cleanup_hook = \n"
+        "key_type = ecdsa\n"
+    )
+    result = _run_embedded_renewal_profile_parser(tmp_path, source)
+    assert result.returncode == 0, result.stderr
+    assert "production_renewal_profile=found" in result.stdout
+    assert "renewal_authenticator=manual" in result.stdout
+    assert "renewal_key_type=ecdsa" in result.stdout
+    assert "renewal_manual_auth_hook_present=false" in result.stdout
+    assert "renewal_acme_server_type=production_or_default" in result.stdout
+    assert "archive_dir" not in result.stdout
+
+
+def test_certbot_profile_invalid_format_fails_closed_without_source_leak(tmp_path):
+    source = "version = 3.1.0\nTHIS IS AN INVALID CONFIG LINE WITH SECRET=do-not-print\n"
+    result = _run_embedded_renewal_profile_parser(tmp_path, source)
+    assert result.returncode == 2
+    assert "production_renewal_profile=invalid_format" in result.stdout
+    assert "do-not-print" not in result.stdout + result.stderr
+    assert "Traceback" not in result.stderr
