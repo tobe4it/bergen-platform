@@ -26,6 +26,7 @@ Current capabilities include:
 - IBM MQ declarative REST administration prototype ([scope and validation](docs/MQ.md), evaluation only)
 - Rocky LXC / Podman MQ [evaluation example](docs/MQ-LAB.md); clarify productive licensing with IBM
 - Postfix/Dovecot mail backend with LDAP identities and explicit aliases
+- Scoped public-gateway Certbot renewal, MTA-STS IPv4/IPv6 and TLS operations runbook
 - Pi-hole DNS filtering in a dedicated LXC
 - EVCC charging control with guarded configuration/history migration
 - Centralized remote Syslog forwarding
@@ -89,6 +90,7 @@ Project documentation can be found in the **docs/** directory.
 - CHANGELOG.md
 - DAYTRADING.md
 - MAIL.md
+- MAIL-TLS-OPERATIONS.md
 - MQTT.md
 - PIHOLE.md
 - EVCC.md
@@ -159,6 +161,10 @@ Mail
 - Declarative aliases and Send-as ownership
 
 See **docs/MAIL.md** for architecture, deployment boundaries and migration.
+See **[docs/MAIL-TLS-OPERATIONS.md](docs/MAIL-TLS-OPERATIONS.md)** for the
+public gateway's Certbot certificate inventory, DNS-01/HTTP-01 procedures,
+lineage-scoped reloads, IPv6 MTA-STS, quarantine/rollback and validation.
+Gateway TLS health is not proof of completed backend migration.
 
 DNS Filtering
 
