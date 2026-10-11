@@ -240,3 +240,64 @@ state has been safely reconciled, rerun bootstrap installation-only (without
 selfhost_acme_run_staging=true) to deploy the opt-in configuration. Do not
 repeat the staging issuance while any local TXT slot remains reserved.
 
+
+## Recover abandoned TXT reservations after a failed staging hook
+
+If a previous Certbot staging invocation failed while establishing HTTPS, the
+hook may have kept both source-side slots marked "reserved" despite BOTH
+authoritative DNS servers showing their idle values. Do NOT blindly remove
+/var/lib/selfhost-acme/active.json or repeat Certbot while these reservations
+are present. Use the controller-only reconciliation playbook:
+
+1. Confirm the provider endpoint's read-only compatibility probe returns
+   certificate_verification=enabled, hostname_verification=enabled, and a
+   regular HTTP status (often 405 for GET).
+2. Add to the ignored ansible/vars/selfhost-acme.local.yml:
+
+       selfhost_acme_tls_rsa2048_compat: true
+
+   This keeps the host-wide crypto-policy FUTURE unchanged and only opts the
+   fixed provider HTTPS hook into RSA-2048 compatibility, with full CA/hostname
+   verification. It is an explicit exception, not a global default.
+3. On the controller test the recovery logic offline:
+
+       python3 -m pytest -q \
+         tests/test_selfhost_acme_hook.py \
+         tests/test_selfhost_acme_bootstrap.py \
+         tests/test_selfhost_acme_recover.py
+
+4. Re-run ansible/playbooks/selfhost-acme-bootstrap.yml WITHOUT setting
+   selfhost_acme_run_staging=true. This updates only the installed hook/local
+   config and verifies both DNS idle values, with no CA issuance.
+5. From the controller run the safe recovery preflight (requires only the
+   two ignored non-secret YAML files):
+
+       ansible-playbook -i ansible/inventory.yml \
+         -i ansible/inventory.local.yml \
+         ansible/playbooks/selfhost-acme-reconcile.yml \
+         -e @ansible/vars/mail-tls.local.yml \
+         -e @ansible/vars/selfhost-acme.local.yml \
+         --vault-id infra@prompt
+
+   Expected READY: exactly two abandoned reserved slots and both DNS slots
+   idle; both checks occur with the same protected state lock.
+6. Only if READY was observed, explicitly apply the local-only reconciliation:
+
+       ansible-playbook -i ansible/inventory.yml \
+         -i ansible/inventory.local.yml \
+         ansible/playbooks/selfhost-acme-reconcile.yml \
+         -e @ansible/vars/mail-tls.local.yml \
+         -e @ansible/vars/selfhost-acme.local.yml \
+         -e selfhost_acme_reconcile_apply=true \
+         --vault-id infra@prompt
+
+   This refuses to run if a Certbot process is present, requires the two
+   known reserved tokens and corresponding authoritative DNS idle values,
+   creates a private root-only JSON backup, and resets ONLY local hook state.
+   It NEVER calls the selfHOST API, deletes TXT records or changes any cert.
+   Repeat runs are idempotent (ALREADY_CLEAN).
+
+After that, rerun the read-only diagnostic and verify both slots are idle
+and no reservations remain before attempting any new staging certificate.
+If a guard fails, do not force the recovery or clear state manually. Review
+the failed condition first.
