@@ -57,3 +57,75 @@ def test_no_private_site_values_or_secrets_in_repo():
     assert "read_text" in source
     assert "print(body)" not in source
     assert "print(p.stdout)" not in source
+
+
+
+def test_renewal_hook_diagnostics_passes_required_lineage_argument():
+    tasks = load()[1]["tasks"]
+    task = next(
+        t for t in tasks
+        if t["name"] == (
+            "Assess renewal profiles and two existing deploy hooks without "
+            "printing their paths or contents"
+        )
+    )
+    argv = task["ansible.builtin.command"]["argv"]
+    assert len(argv) == 4
+    assert argv[:2] == ["python3", "-c"]
+    assert argv[3] == "{{ mail_tls_source_cert_file }}"
+    assert "sys.argv[1]" in argv[2]
+    compile(argv[2], "<safe-renewal-diagnostics>", "exec")
+
+
+def test_embedded_diagnostic_executes_with_synthetic_local_fixtures(tmp_path):
+    import subprocess
+    import sys
+
+    task = next(
+        t for t in load()[1]["tasks"]
+        if t["name"].startswith("Assess renewal profiles")
+    )
+    script = task["ansible.builtin.command"]["argv"][2]
+
+    for old, new in (
+        ("/etc/letsencrypt/renewal-hooks/deploy", tmp_path / "hooks"),
+        ("/etc/letsencrypt/renewal", tmp_path / "renewal"),
+        ("/etc/letsencrypt/live", tmp_path / "live"),
+    ):
+        script = script.replace(f'Path("{old}")', f"Path({str(new)!r})")
+
+    renewal_dir = tmp_path / "renewal"
+    renewal_dir.mkdir()
+    (renewal_dir / "test-lineage.conf").write_text(
+        "version = 3.1.0\n"
+        "[renewalparams]\n"
+        "authenticator = manual\n"
+        "manual_auth_hook = /usr/local/bin/test-auth\n",
+        encoding="utf-8",
+    )
+    hooks = tmp_path / "hooks"
+    hooks.mkdir()
+    hook = hooks / "sample"
+    hook.write_text(
+        "#!/bin/sh\n# secret-marker-never-echo\n"
+        "systemctl reload postfix\n",
+        encoding="utf-8",
+    )
+    hook.chmod(0o700)
+    live = tmp_path / "live" / "test-lineage"
+    live.mkdir(parents=True)
+    (live / "cert.pem").write_text("dummy\n", encoding="utf-8")
+    result = subprocess.run(
+        [sys.executable, "-c", script, str(live / "fullchain.pem")],
+        capture_output=True, text=True, timeout=10, check=False,
+    )
+    assert result.returncode == 0, result.stderr
+    assert "renewal_profiles_total=1" in result.stdout
+    assert "renewal_profiles_invalid_format=0" in result.stdout
+    assert "renewal_profiles_manual_no_auth_hook=0" in result.stdout
+    assert "renewal_profiles_missing_live_cert=0" in result.stdout
+    assert "global_deploy_files=1" in result.stdout
+    assert "deploy_hook_1_executable=true" in result.stdout
+    assert "deploy_hook_1_mentions_postfix=true" in result.stdout
+    assert "target_renewal_profile_present=true" in result.stdout
+    assert "secret-marker-never-echo" not in result.stdout + result.stderr
