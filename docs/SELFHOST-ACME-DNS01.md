@@ -418,8 +418,11 @@ The existing ignored \`ansible/vars/selfhost-acme.local.yml\` provides
 Default is read-only. The source checks the new certificate is valid
 for at least 30 days and matches the WWW hostname and private key. It
 requires exactly one old certificate/key path pair in exactly one
-included, non-symlinked \`/etc/nginx/conf.d/*.conf\` virtual host. A
-valid nginx configuration is also required before any changes.
+included `/etc/nginx/conf.d/*.conf` virtual host. It accepts a regular
+file or a symlink resolving to the exactly same-named, regular file under
+`/etc/nginx/sites-available/`. Any other symlink target is refused. The
+backup, change and rollback use only the approved regular file; the symlink
+is preserved. Nginx syntax must also be valid before any changes.
 
 Review \`state: READY\`. Only then explicitly authorize a change by
 adding \`-e nginx_www_apply=true\` to the command. The apply creates a
