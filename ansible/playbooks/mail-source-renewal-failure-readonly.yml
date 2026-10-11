@@ -186,6 +186,7 @@
                 # Static keyword inspection does NOT demonstrate actual execution.
             print("target_renewal_profile_present=" +
                   str((renewal_dir / (target_lineage + ".conf")).is_file()).lower())
+          - "{{ mail_tls_source_cert_file }}"
       changed_when: false
       register: acme_hooks_classes
 
