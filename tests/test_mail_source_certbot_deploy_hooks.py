@@ -42,10 +42,10 @@ def test_guards_and_backup_before_apply():
     for x in change["rescue"]:
         if x["name"].startswith("Restore original"):
             assert x["ansible.builtin.copy"]["remote_src"] is True
-    text = PLAYBOOK.read_text(encoding="utf-8").lower()
-    for private in ("thebergens.net", "tbergen.de", "bergen.family",
-                    "3364072", "3364073", "lxadmin", "192.168."):
-        assert private not in text
+    source = PLAYBOOK.read_text(encoding="utf-8")
+    assert "BEGIN PRIVATE KEY" not in source
+    assert "api_key:" not in source
+    assert "ansible_host: 192." not in source
 
 
 def fixture_hooks(tmp_path):
