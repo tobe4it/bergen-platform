@@ -410,7 +410,7 @@
             context = ssl.create_default_context()
             context.minimum_version = ssl.TLSVersion.TLSv1_2
             try:
-                context.set_ciphers("DEFAULT:@SECLEVEL=2")
+                context.set_ciphers("ECDHE+AESGCM:!aNULL:!eNULL:@SECLEVEL=2")
                 print("compatibility_security_level=" + str(context.security_level))
                 print("certificate_verification=" + (
                     "enabled" if context.verify_mode == ssl.CERT_REQUIRED else "disabled"))
