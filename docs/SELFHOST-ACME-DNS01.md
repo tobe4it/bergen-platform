@@ -383,3 +383,54 @@ symlinked copies, alternative config syntax and downstream proxying require
 further inspection. Check any existing hooks' **contents** separately before
 adding a deploy hook, because multiple hooks can overlap. A timer being
 active does not itself prove that an unattended renewal succeeds.
+
+
+## Guarded correction of a single nginx WWW endpoint still using an expired lineage
+
+If a WWW nginx virtual host still serves an older, expired certificate
+while a separately tested valid wildcard certificate already covers its
+hostname, use the scoped WWW-only playbook. Do not apply it to hosts in
+other DNS zones: an apex-and-wildcard certificate from one zone does not
+cover unrelated zones.
+
+All steps execute on the Ansible controller; the playbook reaches the
+configured certificate source using privilege escalation. Keep the two
+additional values only in the existing Git-ignored
+\`ansible/vars/mail-tls.local.yml\` file:
+
+    nginx_www_config_path: /etc/nginx/conf.d/CHANGE_ME_WWW.conf
+    nginx_www_legacy_lineage: CHANGE_ME_LEGACY_CERTBOT_NAME
+
+The existing ignored \`ansible/vars/selfhost-acme.local.yml\` provides
+\`selfhost_acme_zone\`. The playbook derives the WWW hostname as
+\`www.<zone>\`, and derives the new certificate from the existing
+\`mail_tls_source_cert_file\`.
+
+    cd ~/bergen-platform
+    python3 -m pytest -q tests/test_mail_source_nginx_www_wildcard_switch.py
+    ansible-playbook \
+      -i ansible/inventory.yml -i ansible/inventory.local.yml \
+      ansible/playbooks/mail-source-nginx-www-wildcard-switch.yml \
+      -e @ansible/vars/mail-tls.local.yml \
+      -e @ansible/vars/selfhost-acme.local.yml \
+      --vault-id infra@prompt
+
+Default is read-only. The source checks the new certificate is valid
+for at least 30 days and matches the WWW hostname and private key. It
+requires exactly one old certificate/key path pair in exactly one
+included, non-symlinked \`/etc/nginx/conf.d/*.conf\` virtual host. A
+valid nginx configuration is also required before any changes.
+
+Review \`state: READY\`. Only then explicitly authorize a change by
+adding \`-e nginx_www_apply=true\` to the command. The apply creates a
+root-only backup under \`/var/lib/selfhost-acme\`, swaps exactly the two
+WWW certificate paths, checks nginx syntax, gracefully reloads nginx,
+and checks the live local HTTPS/SNI leaf fingerprint against the chosen
+certificate. On validation failure, it restores the backed-up file and
+reloads the previous configuration. If an earlier backup exists, it
+refuses to overwrite it.
+
+Any other nginx virtual host, including virtual hosts under different
+DNS zones, is deliberately outside scope. It requires its own
+certificate and a separate controlled migration. No Certbot issuance
+is performed by this WWW-only playbook.
