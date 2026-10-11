@@ -1,0 +1,84 @@
+---
+# Bootstrap one explicitly identified LXC through Proxmox-mediated SSH.
+# No direct TCP/22 probing, guest key refresh or SSH host key trust downgrade.
+- name: Bootstrap an explicitly approved isolated Linux LXC
+  hosts: "{{ lxc_inventory_group | default('__no_isolated_lxc_target__') }}"
+  gather_facts: false
+  become: true
+  serial: 1
+
+  pre_tasks:
+    - name: Refuse missing approval or a non-Proxmox-mediated target
+      ansible.builtin.assert:
+        that:
+          - lxc_inventory_group is defined
+          - lxc_hostname is defined
+          - inventory_hostname == lxc_hostname
+          - lxc_vmid is defined
+          - lxc_vmid | int >= 100
+          - ansible_ssh_common_args is defined
+          - "'pct_ssh_proxy.py' in ansible_ssh_common_args"
+          - "ansible_ssh_common_args is search('--vmid ' ~ (lxc_vmid | string) ~ '([\" ]|$)')"
+          - "('HostKeyAlias=lxc-' ~ (lxc_vmid | string)) in ansible_ssh_common_args"
+          - "'StrictHostKeyChecking=yes' in ansible_ssh_common_args"
+          - ansible_check_mode or (isolated_lxc_bootstrap_approved | default(false) | bool)
+        fail_msg: >-
+          Refusing baseline changes: require the exact isolated LXC, its
+          reviewed Proxmox pct SSH transport and explicit live approval.
+          Dry-run (--check) does not require live approval.
+
+    - name: Verify SSH through the configured PCT transport
+      ansible.builtin.wait_for_connection:
+        delay: 0
+        connect_timeout: 10
+        timeout: 60
+      check_mode: false
+      changed_when: false
+
+    - name: Gather guest facts after confirming the transport
+      ansible.builtin.setup:
+      check_mode: false
+
+    - name: Require expected Debian LXC hostname
+      ansible.builtin.assert:
+        that:
+          - ansible_system == 'Linux'
+          - ansible_os_family == 'Debian'
+          - ansible_hostname == lxc_hostname
+        fail_msg: >-
+          The destination does not match the reviewed target or is not a
+          Debian-family guest. No Linux baseline will be installed.
+
+  tasks:
+    - name: Apply the existing reusable Linux LXC baseline
+      ansible.builtin.import_role:
+        name: lxc_base
+
+    - name: Verify Ansible modules still work through the transport
+      ansible.builtin.ping:
+
+    - name: Confirm tmux installation after a live bootstrap
+      ansible.builtin.command:
+        argv:
+          - dpkg-query
+          - -W
+          - '-f=${Status}'
+          - tmux
+      register: isolated_lxc_tmux_status
+      changed_when: false
+      failed_when: >-
+        isolated_lxc_tmux_status.rc != 0 or
+        'install ok installed' not in isolated_lxc_tmux_status.stdout
+      when: not ansible_check_mode
+
+    - name: Summarize isolated LXC baseline
+      ansible.builtin.debug:
+        msg:
+          lxc: "{{ inventory_hostname }}"
+          vmid: "{{ lxc_vmid }}"
+          transport: "Proxmox PCT-mediated SSH"
+          mode: "{{ 'read-only check' if ansible_check_mode else 'live bootstrap' }}"
+          baseline_role: lxc_base
+          note: >-
+            This playbook does not change bridges, guest networking,
+            UniFi/Proxmox firewall rules or unrelated LXCs.
