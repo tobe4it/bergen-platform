@@ -1,0 +1,123 @@
+---
+# Read-only source audit. Infrastructure identities remain in ignored variables.
+- name: Identify the configured source
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  tasks:
+    - name: Require the known source identity and certificate
+      ansible.builtin.assert:
+        that:
+          - mail_tls_source_address is defined
+          - mail_tls_source_ssh_user is defined
+          - mail_tls_source_cert_file is defined
+      no_log: true
+    - name: Register source dynamically
+      ansible.builtin.add_host:
+        name: acme-runtime-source
+        groups: acme_runtime_source_group
+        ansible_host: "{{ mail_tls_source_address }}"
+        ansible_user: "{{ mail_tls_source_ssh_user }}"
+        ansible_python_interpreter: /usr/bin/python3
+      changed_when: false
+
+- name: Inspect Certbot renewal scheduling and TLS consumers
+  hosts: acme_runtime_source_group
+  become: true
+  gather_facts: false
+  tasks:
+    - name: Read Certbot timer state and last and next runs
+      ansible.builtin.command:
+        argv:
+          - systemctl
+          - show
+          - certbot-renew.timer
+          - --property=LoadState,ActiveState,UnitFileState,LastTriggerUSec,NextElapseUSecRealtime,Triggers
+          - --no-pager
+      register: acme_timer
+      changed_when: false
+
+    - name: Report effective Certbot timer settings
+      ansible.builtin.debug:
+        var: acme_timer.stdout_lines
+
+    - name: Inspect last Certbot renewal service result
+      ansible.builtin.command:
+        argv:
+          - systemctl
+          - show
+          - certbot-renew.service
+          - --property=LoadState,ActiveState,Result,ExecMainStatus,ExecMainExitTimestamp
+          - --no-pager
+      register: acme_service
+      changed_when: false
+
+    - name: Report last renewal service status
+      ansible.builtin.debug:
+        var: acme_service.stdout_lines
+
+    - name: Locate existing global Certbot deploy hooks
+      ansible.builtin.find:
+        paths: /etc/letsencrypt/renewal-hooks/deploy
+        file_type: file
+        recurse: false
+      register: acme_deploy_hooks
+      failed_when: false
+
+    - name: Report number of global deploy hook files
+      ansible.builtin.debug:
+        msg:
+          global_deploy_hooks_found: "{{ acme_deploy_hooks.matched | default('unknown') }}"
+
+    - name: Check lineage-specific deploy hook presence
+      ansible.builtin.command:
+        argv:
+          - grep
+          - -Eq
+          - '^[[:space:]]*deploy_hook[[:space:]]*='
+          - "/etc/letsencrypt/renewal/{{ mail_tls_source_cert_file | dirname | basename }}.conf"
+      register: acme_lineage_deploy
+      changed_when: false
+      failed_when: false
+
+    - name: Report lineage deploy hook presence
+      ansible.builtin.debug:
+        msg:
+          lineage_deploy_hook_configured: "{{ acme_lineage_deploy.rc == 0 }}"
+          lineage_profile_accessible: "{{ acme_lineage_deploy.rc in [0, 1] }}"
+
+    - name: Check Postfix SMTP server certificate setting
+      ansible.builtin.command:
+        argv: [postconf, -h, smtpd_tls_cert_file]
+      register: acme_postfix_cert
+      changed_when: false
+      failed_when: false
+
+    - name: Check Postfix SMTP server chain setting
+      ansible.builtin.command:
+        argv: [postconf, -h, smtpd_tls_chain_files]
+      register: acme_postfix_chain
+      changed_when: false
+      failed_when: false
+
+    - name: Check Dovecot TLS certificate setting
+      ansible.builtin.command:
+        argv: [doveconf, -h, ssl_cert]
+      register: acme_dovecot_cert
+      changed_when: false
+      failed_when: false
+
+    - name: Summarize direct references to the selected Certbot lineage
+      ansible.builtin.debug:
+        msg:
+          postfix_certificate_setting_available: "{{ acme_postfix_cert.rc == 0 }}"
+          postfix_direct_certificate_reference: "{{ mail_tls_source_cert_file in acme_postfix_cert.stdout }}"
+          postfix_chain_setting_available: "{{ acme_postfix_chain.rc == 0 }}"
+          postfix_direct_chain_reference: "{{ mail_tls_source_cert_file in acme_postfix_chain.stdout }}"
+          dovecot_certificate_setting_available: "{{ acme_dovecot_cert.rc == 0 }}"
+          dovecot_direct_certificate_reference: "{{ mail_tls_source_cert_file in acme_dovecot_cert.stdout }}"
+          interpretation: "False means not directly confirmed; symlinks, SNI or other configuration remain possible."
+
+    - name: Confirm audit did not renew or reload anything
+      ansible.builtin.debug:
+        msg: "READ_ONLY: Timer and deploy-hook inventory inspected; no certificate, DNS or service changes."
