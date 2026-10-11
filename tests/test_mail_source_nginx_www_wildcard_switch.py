@@ -99,3 +99,23 @@ def test_no_private_identifiers_or_credential_disclosure():
     assert "legacy_certificate_removed: false" in text
     assert "certbot renew" not in text
     assert "certbot certonly" not in text
+
+
+
+def test_no_accidental_duplicate_yaml_tail_or_truncated_config_guard():
+    source = PLAYBOOK.read_text(encoding="utf-8")
+    assert source.count(
+        "- name: Preflight or expressly switch one nginx WWW vhost"
+    ) == 1
+    assert source.count(
+        "- name: Register approved source and validate local scope"
+    ) == 1
+    assert source.count("    - name: Show status after guarded switch") == 1
+    assert source.rstrip().endswith("legacy_certificate_removed: false")
+    assertions = plays()[0]["tasks"][0]["ansible.builtin.assert"]["that"]
+    assert (
+        "nginx_www_config_path is match("
+        "'^/etc/nginx/conf[.]d/[A-Za-z0-9._-]+[.]conf$')"
+    ) in assertions
+    assert len(plays()[0]["tasks"]) == 2
+    assert len(plays()[1]["tasks"]) >= 12
