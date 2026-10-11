@@ -89,8 +89,14 @@
             if not profile.is_file() or profile.is_symlink():
                 print("production_renewal_profile=missing_or_unsafe")
                 raise SystemExit(2)
+            # Certbot renewal files have an unsectioned metadata preamble
+            # followed by [renewalparams]. Wrap ONLY in memory for stdlib INI.
             cfg = configparser.ConfigParser(interpolation=None)
-            cfg.read(profile)
+            try:
+                cfg.read_string("[certbot_metadata]\\n" + profile.read_text(encoding="utf-8"))
+            except (configparser.Error, OSError, UnicodeError):
+                print("production_renewal_profile=invalid_format")
+                raise SystemExit(2)
             if not cfg.has_section("renewalparams"):
                 print("production_renewal_profile=no_renewalparams")
                 raise SystemExit(2)
