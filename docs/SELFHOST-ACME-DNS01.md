@@ -357,3 +357,29 @@ If a reconfigure attempt fails, do not immediately retry: use the existing
 read-only diagnostic and recovery workflows to inspect reserved TXT slots.
 The root-only backup stays available. Do not restore it blindly because
 the failed run may have modified the profile before reporting a failure.
+
+
+## Operating the existing Certbot renewal timer after production reconfigure
+
+After the existing production lineage has passed guarded reconfigure, perform
+an initial read-only audit from the controller. This checks whether
+certbot-renew.timer is enabled and active, its most recent and next expected
+trigger, the last certbot-renew.service result, deploy-hook presence and direct
+TLS certificate references for selected source services. It does **not**
+request a certificate, run certbot renew, modify DNS, or reload daemons.
+
+    cd ~/bergen-platform
+    python3 -m pytest -q tests/test_mail_source_renewal_runtime_readonly.py
+    ansible-playbook -i ansible/inventory.yml -i ansible/inventory.local.yml \\
+      ansible/playbooks/mail-source-renewal-runtime-readonly.yml \\
+      -e @ansible/vars/mail-tls.local.yml \\
+      --vault-id infra@prompt
+
+Inspect timer_activestate, timer_unitfilestate, timer_nextelapseusecrealtime,
+service_result and service_execmainstatus, then the source service
+certificate-reference classifications. A false direct reference does NOT
+prove the service does not use the certificate: aliases, SNI, TLS maps,
+symlinked copies, alternative config syntax and downstream proxying require
+further inspection. Check any existing hooks' **contents** separately before
+adding a deploy hook, because multiple hooks can overlap. A timer being
+active does not itself prove that an unattended renewal succeeds.
