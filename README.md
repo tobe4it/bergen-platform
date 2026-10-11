@@ -217,7 +217,7 @@ The Bergen Platform follows Semantic Versioning.
 
 Current release:
 
-v0.9.1
+v0.9.2 — Mail gateway TLS, Certbot and MTA-STS maintenance (2026-10-11)
 
 See **docs/CHANGELOG.md** for release history.
 
