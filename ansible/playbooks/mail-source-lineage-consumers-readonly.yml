@@ -1,0 +1,134 @@
+---
+# Read-only Certbot lineage consumer references. Identity provided in ignored vars.
+- name: Register approved source
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  tasks:
+    - name: Require configured source
+      ansible.builtin.assert:
+        that:
+          - mail_tls_source_address is defined
+          - mail_tls_source_ssh_user is defined
+          - mail_tls_source_cert_file is defined
+          - mail_tls_source_cert_file is match('^/etc/letsencrypt/live/[A-Za-z0-9._-]+/fullchain[.]pem$')
+      no_log: true
+    - name: Register configured host only
+      ansible.builtin.add_host:
+        name: acme-lineage-consumers-source
+        groups: acme_lineage_consumers_sources
+        ansible_host: "{{ mail_tls_source_address }}"
+        ansible_user: "{{ mail_tls_source_ssh_user }}"
+        ansible_python_interpreter: /usr/bin/python3
+      changed_when: false
+
+- name: Inspect only static service references for suspect lineages
+  hosts: acme_lineage_consumers_sources
+  become: true
+  gather_facts: false
+  tasks:
+    - name: Classify source certificate references by anonymous profile ordinal
+      ansible.builtin.command:
+        argv:
+          - python3
+          - -c
+          - |
+            import configparser
+            from pathlib import Path
+            import subprocess
+            import sys
+
+            selected = Path(sys.argv[1]).parent.name
+            renewal = Path('/etc/letsencrypt/renewal')
+            live = Path('/etc/letsencrypt/live')
+            archive = Path('/etc/letsencrypt/archive')
+            service_roots = (
+                ('postfix', Path('/etc/postfix')),
+                ('dovecot', Path('/etc/dovecot')),
+                ('nginx', Path('/etc/nginx')),
+                ('httpd', Path('/etc/httpd')),
+                ('haproxy', Path('/etc/haproxy')),
+                ('rspamd', Path('/etc/rspamd')),
+                ('certbot_deploy_hooks', Path('/etc/letsencrypt/renewal-hooks/deploy')),
+            )
+            service_units = ('postfix', 'dovecot', 'nginx', 'httpd', 'haproxy', 'rspamd')
+            files_by_service = {}
+            for label, root in service_roots:
+                files = []
+                if root.is_dir() and not root.is_symlink():
+                    for path in root.rglob('*'):
+                        if len(files) >= 800:
+                            break
+                        try:
+                            if path.is_file() and not path.is_symlink() and path.stat().st_size <= 524288:
+                                files.append(path)
+                        except OSError:
+                            continue
+                files_by_service[label] = files
+
+            for ordinal, profile in enumerate(sorted(renewal.glob('*.conf')), 1):
+                if profile.is_symlink() or not profile.is_file():
+                    continue
+                cfg = configparser.ConfigParser(interpolation=None)
+                try:
+                    cfg.read_string('[metadata]\n' + profile.read_text(encoding='utf-8'))
+                except (configparser.Error, UnicodeError, OSError):
+                    continue
+                if not cfg.has_section('renewalparams'):
+                    continue
+                params = cfg['renewalparams']
+                no_auth_hook = (params.get('authenticator', '').strip() == 'manual'
+                                and not params.get('manual_auth_hook', '').strip())
+                files_missing = any(not (live / profile.stem / name).is_file()
+                                    for name in ('cert.pem', 'fullchain.pem', 'privkey.pem'))
+                if not (no_auth_hook or files_missing):
+                    continue
+                ident = 'profile_%02d_' % ordinal
+                print(ident + 'target=' + str(profile.stem == selected).lower())
+                print(ident + 'suspect_reason=' +
+                      ('missing_live_files' if files_missing else 'manual_no_auth_hook'))
+                tokens = (
+                    str(live / profile.stem) + '/',
+                    str(archive / profile.stem) + '/',
+                )
+                metadata = cfg['metadata']
+                for setting in ('cert', 'fullchain', 'privkey'):
+                    configured = metadata.get(setting, '').strip()
+                    if configured.startswith('/') and len(configured) >= 20:
+                        tokens += (configured,)
+                for label, files in files_by_service.items():
+                    matches = 0
+                    for file in files:
+                        try:
+                            source = file.read_text(encoding='utf-8', errors='replace')
+                        except OSError:
+                            continue
+                        source = '\n'.join(line for line in source.splitlines()
+                                           if not line.lstrip().startswith('#'))
+                        if any(token in source for token in tokens):
+                            matches += 1
+                    print(ident + label + '_config_files_inspected=' + str(len(files)))
+                    print(ident + label + '_direct_reference_files=' + str(matches))
+                for service in service_units:
+                    try:
+                        result = subprocess.run(['systemctl', 'is-active', service],
+                                                capture_output=True, text=True,
+                                                timeout=5, check=False)
+                        value = 'active' if result.returncode == 0 else 'not_active'
+                    except (OSError, subprocess.TimeoutExpired):
+                        value = 'unknown'
+                    print(ident + 'service_' + service + '=' + value)
+                print(ident + 'interpretation=static_references_only')
+            print('audit_scope=allowlisted_config_files_only')
+          - "{{ mail_tls_source_cert_file }}"
+      register: acme_lineage_consumer_audit
+      changed_when: false
+      no_log: true
+
+    - name: Show only anonymous reference counts and service states
+      ansible.builtin.debug:
+        var: acme_lineage_consumer_audit.stdout_lines
+
+    - name: Confirm no renewal or service change
+      ansible.builtin.debug:
+        msg: 'READ_ONLY: Service configuration references only; no Certbot, DNS or service changes.'
