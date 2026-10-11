@@ -24,6 +24,7 @@
           - selfhost_acme_record_ids | unique | length == 2
           - selfhost_acme_record_ids | select('integer') | list | length == 2
           - selfhost_acme_nameservers | length >= 2
+          - selfhost_acme_tls_rsa2048_compat is not defined or selfhost_acme_tls_rsa2048_compat is boolean
           - selfhost_acme_api_key is match('^[A-Za-z0-9_-]+\\.[A-Za-z0-9_-]+$')
           - mail_tls_source_cert_file is match('^/etc/letsencrypt/live/')
           - not ansible_check_mode
@@ -85,7 +86,7 @@
 
     - name: Write root-only local ACME API configuration without logging contents
       ansible.builtin.copy:
-        content: "{{ {'api_key': selfhost_acme_api_key, 'zone': selfhost_acme_zone, 'record_ids': selfhost_acme_record_ids, 'nameservers': selfhost_acme_nameservers} | to_nice_json }}\n"
+        content: "{{ {'api_key': selfhost_acme_api_key, 'zone': selfhost_acme_zone, 'record_ids': selfhost_acme_record_ids, 'nameservers': selfhost_acme_nameservers, 'tls_rsa2048_compat': selfhost_acme_tls_rsa2048_compat | default(false)} | to_nice_json }}\n"
         dest: "{{ selfhost_acme_config_path }}"
         owner: root
         group: root
