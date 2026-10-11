@@ -286,6 +286,9 @@
                 24: "invalid_certificate_authority",
                 26: "unsupported_certificate_purpose",
                 62: "certificate_hostname_mismatch",
+                66: "end_entity_public_key_too_small",
+                67: "ca_public_key_too_small",
+                68: "ca_signature_digest_too_weak",
             }
             try:
                 addresses = socket.getaddrinfo(host, 443, type=socket.SOCK_STREAM)
@@ -332,6 +335,65 @@
     - name: Show trusted CA and TLS validation classifications
       ansible.builtin.debug:
         var: selfhost_acme_tls_trust_probe.stdout_lines
+
+    - name: Inspect publicly presented selfHOST TLS leaf key and local OpenSSL policy
+      ansible.builtin.command:
+        argv:
+          - python3
+          - -c
+          - |
+            import re
+            import subprocess
+
+            host = "my.selfhost.de"
+            try:
+                handshake = subprocess.run(
+                    ["openssl", "s_client", "-connect", host + ":443",
+                     "-servername", host, "-showcerts"],
+                    input=b"", capture_output=True, timeout=20, check=False,
+                )
+                pem = re.search(
+                    rb"-----BEGIN CERTIFICATE-----\s+.*?-----END CERTIFICATE-----",
+                    handshake.stdout, re.S,
+                )
+                if not pem:
+                    print("peer_leaf_certificate=not_retrieved")
+                else:
+                    cert = subprocess.run(
+                        ["openssl", "x509", "-noout", "-text"],
+                        input=pem.group(), capture_output=True,
+                        timeout=10, check=False,
+                    )
+                    if cert.returncode:
+                        print("peer_leaf_certificate=unparseable")
+                    else:
+                        body = cert.stdout.decode("utf-8", errors="replace")
+                        algorithm = re.search(r"Public Key Algorithm:\s*([A-Za-z0-9_-]+)", body)
+                        bits = re.search(r"Public-Key:\s*\((\d+) bit\)", body)
+                        print("peer_leaf_certificate=obtained")
+                        print("peer_leaf_key_algorithm=" + (
+                            algorithm.group(1) if algorithm else "unavailable"))
+                        print("peer_leaf_key_bits=" + (
+                            bits.group(1) if bits else "not_reported"))
+                try:
+                    policies = subprocess.run(
+                        ["update-crypto-policies", "--show"],
+                        capture_output=True, timeout=5, check=False,
+                    )
+                    text = policies.stdout.decode("ascii", errors="ignore").strip()
+                    print("host_crypto_policy=" + (
+                        text if policies.returncode == 0 and
+                        re.fullmatch(r"[A-Z0-9_:+-]+", text) else "not_available"))
+                except (OSError, subprocess.TimeoutExpired):
+                    print("host_crypto_policy=not_available")
+            except (OSError, subprocess.TimeoutExpired):
+                print("peer_leaf_certificate=probe_failed")
+      changed_when: false
+      register: selfhost_acme_leaf_key_probe
+
+    - name: Show only public TLS key algorithm, bit length and host policy
+      ansible.builtin.debug:
+        var: selfhost_acme_leaf_key_probe.stdout_lines
 
     - name: Clarify that diagnosis never changes production or DNS
       ansible.builtin.debug:
