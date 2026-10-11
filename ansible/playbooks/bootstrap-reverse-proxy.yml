@@ -6,15 +6,16 @@
   become: true
   gather_facts: true
   tasks:
-    - name: Require existing host and explicit deployment approval
+    - name: Require existing dedicated proxy group and deployment approval
       ansible.builtin.assert:
         that:
           - reverse_proxy_deployment_approved | default(false) | bool
           - inventory_hostname != 'localhost'
-          - ansible_virtualization_type | default('') in ['lxc', 'container', '']
+          - "inventory_hostname in groups.get('reverse_proxy_nodes', [])"
+          - (ansible_virtualization_type | default('unknown')) in ['lxc', 'container']
         fail_msg: >-
-          This playbook is for an existing dedicated proxy guest only and
-          requires reverse_proxy_deployment_approved=true in local vars.
+          This playbook requires explicit approval and a container member
+          of reverse_proxy_nodes. Refusing unreviewed deployment targets.
 
     - name: Reconcile managed Nginx configuration
       ansible.builtin.import_role:

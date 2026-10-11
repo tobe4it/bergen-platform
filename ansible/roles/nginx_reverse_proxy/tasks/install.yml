@@ -1,10 +1,11 @@
 ---
-- name: Install Nginx
+- name: Install Nginx without permitting package post-install startup
   ansible.builtin.apt:
     name: nginx
     state: present
     update_cache: true
     cache_valid_time: 3600
+    policy_rc_d: 101
 
 - name: Ensure managed virtual host directories exist
   ansible.builtin.file:
