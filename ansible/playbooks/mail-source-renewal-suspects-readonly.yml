@@ -1,0 +1,152 @@
+---
+# Pure read-only certificate-source audit. No real host, domain or credential in Git.
+- name: Register approved certificate source
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  tasks:
+    - name: Require locally configured certificate source
+      ansible.builtin.assert:
+        that:
+          - mail_tls_source_address is defined
+          - mail_tls_source_ssh_user is defined
+          - mail_tls_source_cert_file is defined
+          - mail_tls_source_cert_file is match('^/etc/letsencrypt/live/[A-Za-z0-9._-]+/fullchain[.]pem$')
+      no_log: true
+
+    - name: Register only approved source
+      ansible.builtin.add_host:
+        name: acme-suspects-source
+        groups: acme_suspects_sources
+        ansible_host: "{{ mail_tls_source_address }}"
+        ansible_user: "{{ mail_tls_source_ssh_user }}"
+        ansible_python_interpreter: /usr/bin/python3
+      changed_when: false
+
+- name: Examine exceptional renewal profiles without modifying their files
+  hosts: acme_suspects_sources
+  become: true
+  gather_facts: false
+  tasks:
+    - name: Classify profiles with missing certificates or manual authentication without hook
+      ansible.builtin.command:
+        argv:
+          - python3
+          - -c
+          - |
+            import configparser
+            import datetime
+            import re
+            import subprocess
+            from pathlib import Path
+            import sys
+
+            selected = Path(sys.argv[1]).parent.name
+            renewals = Path('/etc/letsencrypt/renewal')
+            live_root = Path('/etc/letsencrypt/live')
+            archive_root = Path('/etc/letsencrypt/archive')
+
+            def state(path):
+                if not path:
+                    return 'unset'
+                if path.is_symlink() and not path.exists():
+                    return 'broken_symlink'
+                if path.is_file():
+                    return 'file_or_valid_symlink'
+                if path.is_dir():
+                    return 'directory'
+                if path.exists():
+                    return 'other'
+                return 'missing'
+
+            def expiry(cert_path):
+                if not cert_path.is_file():
+                    return 'unavailable'
+                try:
+                    p = subprocess.run(
+                        ['openssl', 'x509', '-noout', '-enddate', '-in', str(cert_path)],
+                        capture_output=True, text=True, timeout=8, check=False,
+                    )
+                    if p.returncode or not p.stdout.startswith('notAfter='):
+                        return 'unavailable'
+                    from email.utils import parsedate_to_datetime
+                    dt = parsedate_to_datetime(p.stdout.split('=', 1)[1].strip())
+                    return dt.date().isoformat()
+                except (OSError, ValueError, TypeError, subprocess.TimeoutExpired):
+                    return 'unavailable'
+
+            count = 0
+            selected_found = 0
+            for ordinal, profile in enumerate(sorted(renewals.glob('*.conf')), 1):
+                if profile.is_symlink() or not profile.is_file():
+                    continue
+                cfg = configparser.ConfigParser(interpolation=None)
+                try:
+                    cfg.read_string('[metadata]\n' + profile.read_text(encoding='utf-8'))
+                except (OSError, UnicodeError, configparser.Error):
+                    continue
+                if not cfg.has_section('renewalparams'):
+                    continue
+                params = cfg['renewalparams']
+                metadata = cfg['metadata']
+                auth = params.get('authenticator', '').strip()
+                no_hook = auth == 'manual' and not params.get('manual_auth_hook', '').strip()
+                files = {name: live_root / profile.stem / (name + '.pem')
+                         for name in ('cert', 'fullchain', 'privkey')}
+                missing = any(not path.is_file() for path in files.values())
+                if profile.stem == selected:
+                    selected_found += 1
+                if not (no_hook or missing):
+                    continue
+                count += 1
+                prefix = 'suspect_profile_%02d_' % ordinal
+                print(prefix + 'target=' + str(profile.stem == selected).lower())
+                print(prefix + 'manual_without_auth_hook=' + str(no_hook).lower())
+                print(prefix + 'authenticator=' + ('manual' if auth == 'manual' else 'other'))
+                print(prefix + 'cleanup_hook_present=' +
+                      str(bool(params.get('manual_cleanup_hook', '').strip())).lower())
+                for name, path in files.items():
+                    print(prefix + 'live_' + name + '=' + state(path))
+                    configured = metadata.get(name, '').strip()
+                    expected = str(path)
+                    print(prefix + 'metadata_' + name + '_path=' +
+                          ('expected' if configured == expected else
+                           ('different' if configured else 'unset')))
+                    if configured:
+                        print(prefix + 'metadata_' + name + '_file=' +
+                              state(Path(configured)))
+                arch_path = metadata.get('archive_dir', '').strip()
+                if not arch_path:
+                    print(prefix + 'archive=unset')
+                else:
+                    archive = Path(arch_path)
+                    # Never descend into arbitrary configured directories.
+                    safe = (archive.is_absolute() and not archive.is_symlink() and
+                            archive.parent == archive_root and
+                            archive.name == profile.stem)
+                    if not safe:
+                        print(prefix + 'archive=nonstandard_location')
+                    elif not archive.is_dir():
+                        print(prefix + 'archive=missing')
+                    else:
+                        print(prefix + 'archive=present')
+                        for kind in ('cert', 'fullchain', 'privkey'):
+                            versions = [x for x in archive.glob(kind + '*.pem')
+                                        if x.is_file() and not x.is_symlink()]
+                            print(prefix + 'archive_' + kind + '_files=' +
+                                  str(len(versions)))
+                print(prefix + 'cert_expires=' + expiry(files['cert']))
+            print('suspect_profile_count=' + str(count))
+            print('selected_lineage_profile_count=' + str(selected_found))
+          - "{{ mail_tls_source_cert_file }}"
+      changed_when: false
+      no_log: true
+      register: acme_suspect_audit
+
+    - name: Display only anonymous diagnostic classifications
+      ansible.builtin.debug:
+        var: acme_suspect_audit.stdout_lines
+
+    - name: Confirm no certificates services or DNS data were changed
+      ansible.builtin.debug:
+        msg: 'READ_ONLY: Renewal metadata and file existence examined; no Certbot calls, writes, DNS updates or reloads.'
