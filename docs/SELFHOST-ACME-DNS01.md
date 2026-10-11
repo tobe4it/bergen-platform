@@ -437,3 +437,66 @@ Any other nginx virtual host, including virtual hosts under different
 DNS zones, is deliberately outside scope. It requires its own
 certificate and a separate controlled migration. No Certbot issuance
 is performed by this WWW-only playbook.
+
+
+## Controlled Certbot deploy-hook hardening (Postfix and wildcard Nginx only)
+
+The mail source currently has one global Postfix deploy hook that silently
+ignores reload errors and another hook that applies only to the existing
+wildcard lineage but ignores an invalid nginx configuration. The scoped
+migration in `ansible/playbooks/mail-source-certbot-deploy-hooks.yml`
+can harden precisely these two existing hook files. It does not install a
+second Postfix hook and does not alter certificate issuance, DNS records,
+Nginx vhosts or the Postfix TLS key configuration.
+
+All commands below are run **only on the Ansible controller**. In the existing
+Git-ignored `ansible/vars/mail-tls.local.yml`, supply the two existing
+Postfix Certbot lineage names and the exact existing hook paths:
+
+    mail_tls_postfix_rsa_lineage: CHANGE_ME_EXISTING_RSA_LINEAGE
+    mail_tls_postfix_ecdsa_lineage: CHANGE_ME_EXISTING_ECDSA_LINEAGE
+    mail_tls_postfix_hook_path: /etc/letsencrypt/renewal-hooks/deploy/CHANGE_ME_POSTFIX_HOOK
+    mail_tls_nginx_hook_path: /etc/letsencrypt/renewal-hooks/deploy/CHANGE_ME_NGINX_HOOK
+
+The wildcard lineage name is read from the already configured
+`mail_tls_source_cert_file`. No real infrastructure values belong in Git.
+
+    cd ~/bergen-platform
+    python3 -m pytest -q tests/test_mail_source_certbot_deploy_hooks.py
+    ansible-playbook -i ansible/inventory.yml -i ansible/inventory.local.yml \
+      ansible/playbooks/mail-source-certbot-deploy-hooks.yml \
+      --syntax-check
+
+    ansible-playbook -i ansible/inventory.yml -i ansible/inventory.local.yml \
+      ansible/playbooks/mail-source-certbot-deploy-hooks.yml \
+      -e @ansible/vars/mail-tls.local.yml \
+      --vault-id infra@prompt
+
+The default is **read-only** and should report `READY_FOR_EXPLICIT_APPLY`.
+The playbook requires two existing root-owned, non-symlinked hook files and
+compares **both entire files** to reviewed historical bodies. If either
+differs, it refuses the change rather than overwriting an unknown hook.
+The provided tests use stub systemctl/nginx commands, not live reloads.
+
+Only after review, add `-e deploy_hook_apply=true` to the same command.
+The apply first stores both originals under a root-only backup directory,
+then installs the scoped hooks, checks `sh -n`, and confirms both ignore
+an unrelated test lineage without reloading anything. If installation
+fails, it attempts to restore the two original hook files.
+
+The new Postfix hook reloads only after either of the two explicitly
+configured mail lineages is renewed. The new Nginx hook reloads only
+after a successful renewal of the configured wildcard lineage, and only
+after `nginx -t` succeeds. A reload or preflight failure returns nonzero
+rather than being ignored. Neither hook triggers service reload during
+playbook installation.
+
+**Legacy ownership:** Before retiring the old monthly source-local
+certificate-creation playbook, verify its cron schedule and whether it
+recreates the Postfix hook. Hardening the hook alone does not prevent
+a later legacy cron run from overwriting it. Do not disable that cron
+or change the system-wide crypto policy as part of this migration.
+
+The regular Certbot renewal service may still fail due to other legacy
+renewal profiles; successful targeted staging tests are not a proof
+of successful unattended renewal of all profiles.
