@@ -395,6 +395,55 @@
       ansible.builtin.debug:
         var: selfhost_acme_leaf_key_probe.stdout_lines
 
+    - name: Probe opt-in RSA2048 TLS compatibility with selfHOST using GET only
+      ansible.builtin.command:
+        argv:
+          - python3
+          - -c
+          - |
+            import socket
+            import ssl
+            import urllib.error
+            import urllib.request
+
+            url = "https://my.selfhost.de/cgi-bin/dns-api.pl"
+            context = ssl.create_default_context()
+            context.minimum_version = ssl.TLSVersion.TLSv1_2
+            try:
+                context.set_ciphers("DEFAULT:@SECLEVEL=2")
+                print("compatibility_security_level=" + str(context.security_level))
+                print("certificate_verification=" + (
+                    "enabled" if context.verify_mode == ssl.CERT_REQUIRED else "disabled"))
+                print("hostname_verification=" + (
+                    "enabled" if context.check_hostname else "disabled"))
+                opener = urllib.request.build_opener(
+                    urllib.request.HTTPSHandler(context=context))
+                request = urllib.request.Request(url, method="GET")
+                try:
+                    with opener.open(request, timeout=12) as response:
+                        print("compatibility_https_status=" + str(response.status))
+                except urllib.error.HTTPError as exc:
+                    print("compatibility_https_status=" + str(exc.code))
+                except urllib.error.URLError as exc:
+                    why = exc.reason
+                    if isinstance(why, ssl.SSLCertVerificationError):
+                        print("compatibility_tls_result=certificate_verify_failed")
+                        print("compatibility_tls_verify_code=" + str(why.verify_code))
+                    elif isinstance(why, (socket.timeout, TimeoutError)):
+                        print("compatibility_tls_result=timeout")
+                    elif isinstance(why, ssl.SSLError):
+                        print("compatibility_tls_result=tls_error")
+                    else:
+                        print("compatibility_tls_result=transport_error")
+            except (OSError, ValueError):
+                print("compatibility_tls_result=context_configuration_error")
+      register: selfhost_acme_compat_probe
+      changed_when: false
+
+    - name: Show verified RSA2048 compatibility probe classification
+      ansible.builtin.debug:
+        var: selfhost_acme_compat_probe.stdout_lines
+
     - name: Clarify that diagnosis never changes production or DNS
       ansible.builtin.debug:
         msg: "DIAGNOSTICS_ONLY: no TXT updates, no Certbot issuance, no production certificate changes."
