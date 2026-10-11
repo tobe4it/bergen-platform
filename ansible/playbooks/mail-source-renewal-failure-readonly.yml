@@ -1,0 +1,198 @@
+---
+# Read-only diagnosis of source Certbot renewal failures and existing deploy hooks.
+# Does not invoke Certbot, write DNS, change any renewal profile or reload services.
+# Real infrastructure details are exclusively supplied via Git-ignored local vars.
+
+- name: Register the approved certificate source
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  tasks:
+    - name: Require the existing private source connection settings
+      ansible.builtin.assert:
+        that:
+          - mail_tls_source_address is defined
+          - mail_tls_source_ssh_user is defined
+          - mail_tls_source_cert_file is defined
+          - mail_tls_source_cert_file is match('^/etc/letsencrypt/live/[A-Za-z0-9._-]+/fullchain[.]pem$')
+      no_log: true
+
+    - name: Register only the approved source
+      ansible.builtin.add_host:
+        name: acme-renewal-diagnostic-source
+        groups: acme_renewal_diagnostic_sources
+        ansible_host: "{{ mail_tls_source_address }}"
+        ansible_user: "{{ mail_tls_source_ssh_user }}"
+        ansible_python_interpreter: /usr/bin/python3
+      changed_when: false
+
+- name: Audit Certbot service failure and deploy hooks without exposing contents
+  hosts: acme_renewal_diagnostic_sources
+  gather_facts: false
+  become: true
+  tasks:
+    - name: Classify the recent Certbot renewal journal without printing log lines
+      ansible.builtin.command:
+        argv:
+          - python3
+          - -c
+          - |
+            import re
+            import subprocess
+
+            try:
+                p = subprocess.run(
+                    ["journalctl", "--unit=certbot-renew.service",
+                     "--since=24 hours ago", "--no-pager",
+                     "--output=cat", "-n", "300"],
+                    capture_output=True, text=True, timeout=15,
+                    check=False,
+                )
+            except (OSError, subprocess.TimeoutExpired):
+                print("journal_audit=unavailable")
+                raise SystemExit(0)
+            if p.returncode != 0:
+                print("journal_audit=unavailable")
+                raise SystemExit(0)
+            lines = p.stdout.splitlines()
+            print("journal_audit=available")
+            print("journal_lines_read=" + str(len(lines)))
+            categories = {
+                "invalid_renewal_profile": (
+                    r"renewal configuration file.*broken",
+                    r"failed to load renewal configuration",
+                    r"invalid renewal configuration",
+                    r"renewal configuration.*invalid",
+                    r"renewal conf(?:iguration)?.*error",
+                ),
+                "manual_auth_without_hook": (
+                    r"manual.*(?:auth|authentication).*hook.*(?:required|missing)",
+                    r"manual plugin.*non-interactive",
+                    r"manual.*plugin.*must.*interactive",
+                    r"authentication script must be provided",
+                ),
+                "renewal_failed": (
+                    r"failed to renew",
+                    r"failed to process",
+                    r"renewal failed",
+                    r"some renewals failed",
+                ),
+                "challenge_rejected": (
+                    r"acme:error:",
+                    r"challenge failed",
+                    r"dns problem",
+                    r"unauthorized",
+                ),
+                "tls_transport_failure": (
+                    r"certificate verify failed",
+                    r"ee certificate key too small",
+                    r"selfhost api request failed",
+                ),
+                "permissions_or_filesystem": (
+                    r"permission denied",
+                    r"no such file or directory",
+                ),
+                "rate_limited": (
+                    r"rate.?limit",
+                    r"too many certificates",
+                ),
+            }
+            for label, patterns in categories.items():
+                matches = sum(bool(any(re.search(rx, line, re.I)
+                                       for rx in patterns)) for line in lines)
+                print("journal_" + label + "_matching_lines=" + str(matches))
+      changed_when: false
+      register: acme_journal_classes
+
+    - name: Display only allowlisted Certbot error categories
+      ansible.builtin.debug:
+        var: acme_journal_classes.stdout_lines
+
+    - name: Assess renewal profiles and two existing deploy hooks without printing their paths or contents
+      ansible.builtin.command:
+        argv:
+          - python3
+          - -c
+          - |
+            import configparser
+            from pathlib import Path
+            import re
+            import stat
+            import sys
+
+            target_lineage = Path(sys.argv[1]).parent.name
+            renewal_dir = Path("/etc/letsencrypt/renewal")
+            profiles = sorted(renewal_dir.glob("*.conf"))
+            stats = {
+                "renewal_profiles_total": 0,
+                "renewal_profiles_invalid_format": 0,
+                "renewal_profiles_no_renewalparams": 0,
+                "renewal_profiles_missing_live_cert": 0,
+                "renewal_profiles_manual_no_auth_hook": 0,
+            }
+            for profile in profiles:
+                if profile.is_symlink() or not profile.is_file():
+                    continue
+                stats["renewal_profiles_total"] += 1
+                cfg = configparser.ConfigParser(interpolation=None)
+                try:
+                    cfg.read_string("[metadata]\n" +
+                                    profile.read_text(encoding="utf-8"))
+                except (OSError, UnicodeError, configparser.Error):
+                    stats["renewal_profiles_invalid_format"] += 1
+                    continue
+                if not cfg.has_section("renewalparams"):
+                    stats["renewal_profiles_no_renewalparams"] += 1
+                    continue
+                params = cfg["renewalparams"]
+                if params.get("authenticator", "").strip() == "manual" and not (
+                    params.get("manual_auth_hook", "").strip()
+                ):
+                    stats["renewal_profiles_manual_no_auth_hook"] += 1
+                live = Path("/etc/letsencrypt/live") / profile.stem / "cert.pem"
+                if not live.is_file():
+                    stats["renewal_profiles_missing_live_cert"] += 1
+            for k, v in stats.items():
+                print(k + "=" + str(v))
+
+            hooks_dir = Path("/etc/letsencrypt/renewal-hooks/deploy")
+            hooks = []
+            if hooks_dir.is_dir() and not hooks_dir.is_symlink():
+                for candidate in hooks_dir.iterdir():
+                    try:
+                        mode = candidate.lstat().st_mode
+                    except OSError:
+                        continue
+                    if stat.S_ISREG(mode):
+                        hooks.append(candidate)
+            print("global_deploy_files=" + str(len(hooks)))
+            for number, hook in enumerate(sorted(hooks), start=1):
+                mode = hook.lstat().st_mode
+                try:
+                    body = hook.read_text(encoding="utf-8", errors="replace")[:131072].lower()
+                except OSError:
+                    body = ""
+                print("deploy_hook_" + str(number) + "_executable=" +
+                      str(bool(mode & 0o111)).lower())
+                print("deploy_hook_" + str(number) + "_reload_or_restart_keyword=" +
+                      str(bool(re.search(r"\b(?:reload|restart|try-reload-or-restart)\b", body))).lower())
+                print("deploy_hook_" + str(number) + "_uses_certbot_env=" +
+                      str(bool(re.search(r"renewed_lineage|renewed_domains", body))).lower())
+                print("deploy_hook_" + str(number) + "_uses_remote_command=" +
+                      str(bool(re.search(r"\b(?:ssh|rsync|scp)\b", body))).lower())
+                for service in ("postfix", "dovecot", "nginx", "httpd", "haproxy", "rspamd"):
+                    print("deploy_hook_" + str(number) + "_mentions_" + service + "=" +
+                          str(bool(re.search(r"\b" + service + r"\b", body))).lower())
+                # Static keyword inspection does NOT demonstrate actual execution.
+            print("target_renewal_profile_present=" +
+                  str((renewal_dir / (target_lineage + ".conf")).is_file()).lower())
+      changed_when: false
+      register: acme_hooks_classes
+
+    - name: Display only counts and allowlisted deploy hook features
+      ansible.builtin.debug:
+        var: acme_hooks_classes.stdout_lines
+
+    - name: Confirm diagnosis did not perform any changes
+      ansible.builtin.debug:
+        msg: "READ_ONLY: Journal and deploy scripts classified; no DNS changes, certificate issuance or service reloads."
