@@ -1,0 +1,270 @@
+---
+# Audit the already-operated mail Certbot source for a new HTTPS reverse proxy.
+# No certificate or key transfer, no ACME request, no file/service/DNS changes.
+# Requires both ignored mail TLS and proxy topology variables.
+- name: Validate source and proxy inventory for read-only TLS preflight
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  tasks:
+    - name: Require existing Certbot source and exactly one selected proxy LXC
+      ansible.builtin.assert:
+        that:
+          - mail_tls_source_address is defined
+          - mail_tls_source_ssh_user is defined
+          - mail_tls_source_cert_file is defined
+          - mail_tls_source_key_file is defined
+          - mail_tls_required_san is defined
+          - reverse_proxy_sites is defined
+          - reverse_proxy_sites is sequence
+          - reverse_proxy_sites is not string
+          - reverse_proxy_sites | length > 0
+          - reverse_proxy_tls_cert_path is defined
+          - reverse_proxy_tls_key_path is defined
+          - lxc_hostname is defined
+          - lxc_vmid is defined
+          - lxc_inventory_group is defined
+          - lxc_inventory_group == 'reverse_proxy_nodes'
+          - groups.get(lxc_inventory_group, []) == [lxc_hostname]
+          - mail_tls_source_address is match('^[A-Za-z0-9][A-Za-z0-9.-]+$')
+          - mail_tls_source_ssh_user is match('^[a-z_][a-z0-9_-]*$')
+          - mail_tls_source_cert_file is match('^/etc/letsencrypt/live/[A-Za-z0-9._-]+/fullchain[.]pem$')
+          - mail_tls_source_key_file is match('^/etc/letsencrypt/live/[A-Za-z0-9._-]+/privkey[.]pem$')
+          - mail_tls_required_san is match('^\\*\\.[A-Za-z0-9.-]+$')
+          - reverse_proxy_tls_cert_path is match('^/[A-Za-z0-9_./-]+[.]pem$')
+          - reverse_proxy_tls_key_path is match('^/[A-Za-z0-9_./-]+[.]pem$')
+          - reverse_proxy_tls_cert_path != reverse_proxy_tls_key_path
+        fail_msg: >-
+          Refusing audit: supply reviewed Certbot source and proxy site variables
+          from ignored local files and one exact proxy inventory target.
+
+    - name: Validate every proxy name against source wildcard scope
+      ansible.builtin.assert:
+        that:
+          - item.hostname is match('^[A-Za-z0-9-]+([.][A-Za-z0-9-]+)+$')
+          - item.hostname.endswith(mail_tls_required_san[1:])
+          - item.hostname.count('.') == mail_tls_required_san.count('.')
+        fail_msg: 'A proxy FQDN is outside the existing single-level wildcard.'
+      loop: '{{ reverse_proxy_sites }}'
+      loop_control:
+        label: '{{ item.hostname | default("invalid") }}'
+
+    - name: Register the existing source for audited SSH only
+      ansible.builtin.add_host:
+        name: proxy-tls-certbot-source
+        groups: proxy_tls_certbot_sources
+        ansible_host: '{{ mail_tls_source_address }}'
+        ansible_user: '{{ mail_tls_source_ssh_user }}'
+        ansible_python_interpreter: /usr/bin/python3
+      changed_when: false
+
+- name: Validate existing Certbot fullchain and private key without copying either
+  hosts: proxy_tls_certbot_sources
+  become: true
+  gather_facts: false
+  any_errors_fatal: true
+  tasks:
+    - name: Check source certificate file metadata
+      ansible.builtin.stat:
+        path: '{{ mail_tls_source_cert_file }}'
+        follow: true
+      register: proxy_tls_source_cert
+
+    - name: Check source key metadata without exposing the key
+      ansible.builtin.stat:
+        path: '{{ mail_tls_source_key_file }}'
+        follow: true
+      register: proxy_tls_source_key
+      no_log: true
+
+    - name: Require normal certificate and protected root-owned key
+      ansible.builtin.assert:
+        that:
+          - proxy_tls_source_cert.stat.isreg | default(false)
+          - proxy_tls_source_key.stat.isreg | default(false)
+          - proxy_tls_source_key.stat.pw_name | default('') == 'root'
+          - proxy_tls_source_key.stat.mode | default('') in ['0600', '0400']
+        fail_msg: 'Certbot source certificate/key missing or unprotected.'
+      no_log: true
+
+    - name: Require at least thirty days before source certificate expiration
+      ansible.builtin.command:
+        argv:
+          - openssl
+          - x509
+          - -in
+          - '{{ mail_tls_source_cert_file }}'
+          - -noout
+          - -checkend
+          - '2592000'
+      changed_when: false
+      check_mode: false
+
+    - name: Read existing source certificate SAN extension
+      ansible.builtin.command:
+        argv:
+          - openssl
+          - x509
+          - -in
+          - '{{ mail_tls_source_cert_file }}'
+          - -noout
+          - -ext
+          - subjectAltName
+      register: proxy_tls_source_san
+      changed_when: false
+      check_mode: false
+
+    - name: Require intended wildcard SAN on existing source certificate
+      ansible.builtin.assert:
+        that:
+          - mail_tls_required_san in proxy_tls_source_san.stdout | regex_findall('DNS:([^,\\s]+)')
+        fail_msg: 'The existing Certbot source lacks the expected wildcard SAN.'
+
+    - name: Verify existing certificate covers every proxy hostname
+      ansible.builtin.command:
+        argv:
+          - openssl
+          - x509
+          - -in
+          - '{{ mail_tls_source_cert_file }}'
+          - -noout
+          - -checkhost
+          - '{{ item.hostname }}'
+      register: proxy_tls_source_names
+      changed_when: false
+      check_mode: false
+      loop: '{{ reverse_proxy_sites }}'
+      loop_control:
+        label: '{{ item.hostname }}'
+
+    - name: Refuse unmatched proxy certificate names
+      ansible.builtin.assert:
+        that:
+          - "'does match certificate' in item.stdout"
+        fail_msg: 'The existing certificate does not cover a planned hostname.'
+      loop: '{{ proxy_tls_source_names.results }}'
+      loop_control:
+        label: '{{ item.item.hostname }}'
+
+    - name: Derive public-key digest from source certificate
+      ansible.builtin.shell: |
+        set -o pipefail
+        openssl x509 -in {{ mail_tls_source_cert_file | quote }} -noout -pubkey |
+          openssl pkey -pubin -outform DER | openssl dgst -sha256
+      args:
+        executable: /bin/bash
+      register: proxy_tls_source_cert_digest
+      changed_when: false
+      check_mode: false
+      no_log: true
+
+    - name: Derive public-key digest from source private key
+      ansible.builtin.shell: |
+        set -o pipefail
+        openssl pkey -in {{ mail_tls_source_key_file | quote }} -pubout -outform DER |
+          openssl dgst -sha256
+      args:
+        executable: /bin/bash
+      register: proxy_tls_source_key_digest
+      changed_when: false
+      check_mode: false
+      no_log: true
+
+    - name: Require source certificate and private key to match
+      ansible.builtin.assert:
+        that:
+          - proxy_tls_source_cert_digest.stdout == proxy_tls_source_key_digest.stdout
+          - proxy_tls_source_cert_digest.stdout is match('^SHA2-256\\(stdin\\)= [a-f0-9]{64}$')
+        fail_msg: 'Certificate/private key mismatch on Certbot source.'
+      no_log: true
+
+    - name: Read public source certificate expiry
+      ansible.builtin.command:
+        argv: [openssl, x509, -in, '{{ mail_tls_source_cert_file }}', -noout, -enddate]
+      register: proxy_tls_source_expiry
+      changed_when: false
+      check_mode: false
+
+    - name: Publish sanitized source evidence
+      ansible.builtin.set_fact:
+        proxy_tls_source_audit:
+          passed: true
+          expires: '{{ proxy_tls_source_expiry.stdout }}'
+          names: '{{ reverse_proxy_sites | map(attribute="hostname") | list }}'
+          key_and_certificate_match: true
+      changed_when: false
+
+- name: Inspect proxy TLS destination without modifying LXC files
+  hosts: reverse_proxy_nodes
+  become: true
+  gather_facts: false
+  any_errors_fatal: true
+  tasks:
+    - name: Ensure audit reaches the expected isolated LXC through PCT SSH
+      ansible.builtin.assert:
+        that:
+          - inventory_hostname == lxc_hostname
+          - ansible_ssh_common_args is defined
+          - "'pct_ssh_proxy.py' in ansible_ssh_common_args"
+          - "ansible_ssh_common_args is search('--vmid ' ~ (lxc_vmid | string) ~ '([\" ]|$)')"
+          - "'StrictHostKeyChecking=yes' in ansible_ssh_common_args"
+        fail_msg: 'Unexpected proxy target or unverified Ansible SSH transport.'
+
+    - name: Read planned target certificate metadata only
+      ansible.builtin.stat:
+        path: '{{ reverse_proxy_tls_cert_path }}'
+        follow: true
+      register: proxy_tls_target_cert
+
+    - name: Read planned target key metadata only
+      ansible.builtin.stat:
+        path: '{{ reverse_proxy_tls_key_path }}'
+        follow: true
+      register: proxy_tls_target_key
+      no_log: true
+
+    - name: Refuse partial or inappropriately protected installed TLS material
+      ansible.builtin.assert:
+        that:
+          - (proxy_tls_target_cert.stat.exists | bool) == (proxy_tls_target_key.stat.exists | bool)
+          - not (proxy_tls_target_cert.stat.exists | bool) or (proxy_tls_target_cert.stat.isreg | default(false))
+          - not (proxy_tls_target_key.stat.exists | bool) or (proxy_tls_target_key.stat.isreg | default(false))
+          - not (proxy_tls_target_key.stat.exists | bool) or (proxy_tls_target_key.stat.pw_name | default('') == 'root')
+          - not (proxy_tls_target_key.stat.exists | bool) or (proxy_tls_target_key.stat.mode | default('') in ['0400', '0600'])
+        fail_msg: 'Proxy TLS files are partially installed or insufficiently protected.'
+      no_log: true
+
+    - name: Report target TLS inventory state
+      ansible.builtin.set_fact:
+        proxy_tls_target_audit:
+          files_present: '{{ proxy_tls_target_cert.stat.exists | bool }}'
+          state: "{{ 'ALREADY_PRESENT_REVIEW_REQUIRED' if proxy_tls_target_cert.stat.exists else 'MISSING_EXPECTED_FIRST_INSTALL' }}"
+          modified: false
+      changed_when: false
+
+- name: Summarize source verification and destination state
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  tasks:
+    - name: Require both audits were completed before reporting
+      ansible.builtin.assert:
+        that:
+          - hostvars['proxy-tls-certbot-source'].proxy_tls_source_audit.passed
+          - hostvars[lxc_hostname].proxy_tls_target_audit is defined
+
+    - name: Report read-only TLS source selection
+      ansible.builtin.debug:
+        msg:
+          status: SOURCE_VERIFIED
+          source_type: EXISTING_MAIL_CERTBOT_LINEAGE
+          certificate_expiration: "{{ hostvars['proxy-tls-certbot-source'].proxy_tls_source_audit.expires }}"
+          covered_proxy_names: "{{ hostvars['proxy-tls-certbot-source'].proxy_tls_source_audit.names }}"
+          target_status: "{{ hostvars[lxc_hostname].proxy_tls_target_audit.state }}"
+          changed_system_state: false
+          private_key_transferred: false
+          can_authorize_deployment: false
+          note: >-
+            CA-chain and TLS live listener validation are not part of this
+            preflight. Source-to-target TLS distribution and Nginx reload
+            require a separate reviewed implementation and explicit approval.
