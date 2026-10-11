@@ -220,6 +220,51 @@ Only after explicit change approval and a successful read-only preflight
 may either playbook be used with its respective `-e ..._apply=true` flag.
 Do not run both applies together; evaluate impact and rollback after each.
 
+### Controller-to-backend certificate distribution
+
+The controller's existing `mail-tls-sync.timer` is a **separate** lifecycle
+from the MX Certbot timer. Its purpose is to synchronize the selected
+renewed certificate and key to the internal mail backend, then validate
+the service presentation. Do not confuse a successful MX Certbot scan
+with successful distribution. Run these read-only checks on **bp-controller**
+(or the corresponding Ansible controller, not on the MX):
+
+```bash
+systemctl list-timers --all mail-tls-sync.timer
+systemctl show mail-tls-sync.service \
+  -p ActiveState -p Result -p ExecMainStatus
+journalctl -u mail-tls-sync.service -n 100 --no-pager
+```
+
+If units have different names at a restored site, inspect that site's unit
+inventory rather than guessing. After a source certificate actually changes,
+verify that sync has run after the issuance timestamp, then check the cert
+served by the **internal mail endpoint** on all expected ports:
+
+```bash
+# From a trusted client with DNS/network access to the internal mail service.
+MAIL_SERVICE_FQDN=MAIL_SERVICE_FQDN
+
+openssl s_client -connect "$MAIL_SERVICE_FQDN:993" \
+  -servername "$MAIL_SERVICE_FQDN" -verify_hostname "$MAIL_SERVICE_FQDN" \
+  -verify_return_error </dev/null
+
+openssl s_client -starttls smtp -connect "$MAIL_SERVICE_FQDN:587" \
+  -servername "$MAIL_SERVICE_FQDN" -verify_hostname "$MAIL_SERVICE_FQDN" \
+  -verify_return_error </dev/null
+
+openssl s_client -connect "$MAIL_SERVICE_FQDN:465" \
+  -servername "$MAIL_SERVICE_FQDN" -verify_hostname "$MAIL_SERVICE_FQDN" \
+  -verify_return_error </dev/null
+```
+
+Confirm `Verify return code: 0 (ok)`, the expected SAN and the newly issued
+expiration. A passing check on the MX host alone is insufficient. The
+controller sync was verified during the earlier rollout; the next complete
+unattended source rotation **and** downstream synchronization is still
+outstanding evidence. Avoid logging private key material or submitting
+unredacted logs to the repository.
+
 ## 6. MX host: periodic read-only health check
 
 The following runs on the **public MX host**, not on the Ansible controller:
