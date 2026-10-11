@@ -79,7 +79,7 @@ def test_fails_closed_when_one_dns_slot_not_idle(monkeypatch, tmp_path):
     state_path = make_state(tmp_path, reservations())
     monkeypatch.setattr(hook, "authoritative_txt",
                         lambda server, name: {"selfhost-api-idle-1"})
-    with pytest.raises(hook.HookError, match="not all configured DNS slots"):
+    with pytest.raises(hook.HookError, match="Not all configured DNS slots"):
         recover.reconcile(cfg(), apply=True, state_dir=tmp_path)
     assert json.loads(state_path.read_text()) == reservations()
     assert not list(tmp_path.glob("reconciled-*.json"))
