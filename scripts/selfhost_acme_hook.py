@@ -134,8 +134,8 @@ def api_https_context(cfg):
     endpoint, never to global OpenSSL or other services.
     """
     context = ssl.create_default_context()
+    context.minimum_version = ssl.TLSVersion.TLSv1_2
     if cfg.get("tls_rsa2048_compat", False):
-        context.minimum_version = ssl.TLSVersion.TLSv1_2
         context.set_ciphers("ECDHE+AESGCM:!aNULL:!eNULL:@SECLEVEL=2")
     return context
 
