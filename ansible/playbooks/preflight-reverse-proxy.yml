@@ -117,7 +117,7 @@
         that:
           - reverse_proxy_existing_config.rc == 0
           - >-
-            reverse_proxy_existing_config.stdout | regex_findall('(?m)^hostname: ([^\\r\\n]+)$')
+            reverse_proxy_existing_config.stdout | regex_findall('(?m)^hostname: ([^\r\n]+)$')
             == [lxc_hostname]
         fail_msg: 'Existing LXC configuration does not match the planned proxy identity.'
       when: reverse_proxy_matching_guests | length == 1
@@ -134,7 +134,7 @@
         that:
           - >-
             reverse_proxy_storage_status.stdout_lines
-            | select('match', '^' ~ (lxc_storage | regex_escape) ~ '\\s+\\S+\\s+active\\s+')
+            | select('match', '^' ~ (lxc_storage | regex_escape) ~ '\s+\S+\s+active\s+')
             | list | length == 1
         fail_msg: 'The configured rootfs storage is missing or not active.'
 
@@ -150,7 +150,7 @@
         that:
           - >-
             reverse_proxy_template_inventory.stdout_lines
-            | select('match', '^' ~ (lxc_template | regex_escape) ~ '\\s+')
+            | select('match', '^' ~ (lxc_template | regex_escape) ~ '\s+')
             | list | length == 1
         fail_msg: 'The configured LXC template is not present on its storage.'
 
