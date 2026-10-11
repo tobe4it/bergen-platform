@@ -82,7 +82,7 @@ def _run_embedded_renewal_profile_parser(tmp_path, contents):
     profile.write_text(contents, encoding="utf-8")
     assert 'Path("/etc/letsencrypt/renewal")' in script
     script = script.replace(
-        'Path("/etc/letsencrypt/renewal")', repr(str(renewal_dir))
+        'Path("/etc/letsencrypt/renewal")', f"Path({str(renewal_dir)!r})"
     )
     return subprocess.run(
         [sys.executable, "-c", script,
@@ -115,7 +115,7 @@ def test_certbot_profile_accepts_unsectioned_metadata_preamble(tmp_path):
 
 
 def test_certbot_profile_invalid_format_fails_closed_without_source_leak(tmp_path):
-    source = "version = 3.1.0\nTHIS IS AN INVALID CONFIG LINE WITH SECRET=do-not-print\n"
+    source = "version = 3.1.0\nTHIS IS NOT AN INI OPTION do-not-print\n"
     result = _run_embedded_renewal_profile_parser(tmp_path, source)
     assert result.returncode == 2
     assert "production_renewal_profile=invalid_format" in result.stdout
