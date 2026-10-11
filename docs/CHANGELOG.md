@@ -10,34 +10,18 @@ The project follows **Semantic Versioning (SemVer)** and the changelog format is
 
 ### Added
 
-- Public mail-gateway TLS operations runbook in `docs/MAIL-TLS-OPERATIONS.md`:
-  certificate ownership, DNS-01/HTTP-01, Certbot timers, exact-lineage deploy
-  hooks, IPv4/IPv6 MTA-STS, validation, quarantine, rollback and evidence gaps.
-- Read-only-by-default, site-local-variable-driven MTA-STS Nginx IPv6 and
-  Certbot hook adoption playbook with root-owned file guards, guarded backup,
-  explicit apply and offline behavior tests.
-
 - Guarded two-QMgr/client audit harness with Java MQI probes for TLS/password
   negatives, local PUT/GET, message integrity, transactions, queue limits and
   bidirectional remote-queue transport; produces hashed JSON/Markdown evidence
   and optional mail submission.
 - Explicit audit inventory of deferred disruptive/infrastructure-dependent cases;
   clean implemented coverage reports `PARTIAL`, never a misleading full PASS.
-
 - Separate second-QMgr and client-LXC site examples and deployment instructions
   in `docs/MQ-TOPOLOGY.md`; VMIDs/network settings remain explicit site inputs.
 - Rocky Java client role with non-login test account, SSH collection of the MQ
   library, source image check, SHA-256 transfer verification and provenance.
 
 ### Changed
-
-- Source MX Certbot cleanup and MTA-STS repair are recorded separately from
-  the still-open internal mail-backend cutover; README, mail operations and
-  roadmap now link to the audited TLS checkpoint.
-- Scoped gateway Postfix/wildcard reload hooks have fail-closed, lineage-aware
-  behavior. Legacy broken/unused renewal profiles were quarantined without
-  deleting their certificate files; the obsolete monthly legacy renewal cron
-  was disabled, not replaced with a system-wide crypto-policy workaround.
 
 - Two-QMgr/client messaging probes now require TLS 1.3 with a TLS 1.3 cipher;
   TLS 1.2 configuration is rejected before any live test mutation.
@@ -47,19 +31,55 @@ The project follows **Semantic Versioning (SemVer)** and the changelog format is
 - Messaging/security/two-QMgr tests remain NOT_TESTED pending their implementation
   and live execution; this change is infrastructure preparation only.
 
-### Verified (2026-10-11)
+---
 
-- Selected MTA-STS HTTP-01 challenge and HTTPS policy served with a valid
-  certificate over IPv4 and the public IPv6 address after scoped Nginx listener
-  corrections; staging and exact-lineage production renewal succeeded.
-- Lineage-scoped MTA-STS deploy hook ignored unrelated certificates and
-  reloaded Nginx for the selected simulated lineage; controller read-only
-  Ansible preflight completed with `changed=0 failed=0` and four offline tests
-  passed.
-- The scheduled global Certbot scan completed successfully with all ten
-  remaining profiles not yet due. No renewal occurred in that scheduled run;
-  future unattended renewal and downstream certificate sync remain to be
-  observed, not represented as already proven.
+## [0.9.2] - 2026-10-11
+
+Mail gateway TLS and Certbot maintenance release. The gateway certificate
+lifecycle is distinct from the still-incomplete internal mail backend cutover.
+
+### Added
+
+- Scoped mail TLS/ACME playbooks for certificate audits, renewal diagnostics,
+  HTTP-01/MTA-STS vhost adoption and selfHOST DNS-01 management.
+- Read-only-by-default, site-local-variable-driven MTA-STS Nginx IPv6 and
+  Certbot deploy-hook adoption with guarded root-only backup and explicit apply.
+- Controller-driven selected mail certificate synchronization, example user
+  systemd timer/service units and offline regression tests.
+- Public mail-gateway TLS operations runbook in `docs/MAIL-TLS-OPERATIONS.md`:
+  ownership, DNS-01/HTTP-01, IPv4/IPv6 MTA-STS, scoped reload hooks, timer
+  checks, quarantine, rollback and operational acceptance criteria.
+
+### Changed
+
+- Scoped Postfix RSA/ECDSA and wildcard Nginx deploy hooks now distinguish
+  authorized lineages and fail closed on reload/validation errors.
+- Documented the retirement/quarantine of unused renewal configurations
+  without deleting certificate material and the disabling of an obsolete
+  monthly legacy renewal cron; no system-wide crypto-policy workaround.
+- Linked the source-MX lifecycle to mail backend documentation, while
+  preserving separate cutover and mailbox-migration acceptance requirements.
+- Ignored site-local Ansible settings and inventory-editor backup files;
+  sanitized test fixtures to avoid embedding real infrastructure identifiers.
+
+### Verified
+
+- 104 Mail-TLS/selfHOST-ACME Python tests passed; 15 associated Ansible
+  syntax checks and Python script compilation passed on the release branch.
+- Exact-name MTA-STS staging and production renewal succeeded; IPv4 and
+  public IPv6 HTTPS delivered the reviewed policy and renewed certificate.
+- MTA-STS lineage hook ignored unrelated names and reloaded Nginx for its
+  selected test invocation; remote Ansible read-only preflight passed with
+  `changed=0` and `failed=0`.
+- Scheduled global Certbot scan on 2026-10-11 completed successfully with
+  ten existing profiles not yet due. It did **not** exercise a real unattended
+  renewal or full downstream certificate distribution.
+
+### Follow-up
+
+- Observe a real scheduled source-certificate renewal, deploy-hook execution,
+  internal sync and served certificate verification. Complete monitoring and
+  the separate mail-backend production cutover acceptance criteria.
 
 ---
 
