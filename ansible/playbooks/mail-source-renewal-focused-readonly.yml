@@ -1,0 +1,146 @@
+---
+# Read-only focused audit of Certbot renewal profiles and deployed hooks.
+# Reports only stable ordinal IDs and classifications, never actual names or paths.
+- name: Register the approved source
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  tasks:
+    - name: Require approved source connection and certificate path
+      ansible.builtin.assert:
+        that:
+          - mail_tls_source_address is defined
+          - mail_tls_source_ssh_user is defined
+          - mail_tls_source_cert_file is defined
+          - mail_tls_source_cert_file is match('^/etc/letsencrypt/live/[A-Za-z0-9._-]+/fullchain[.]pem$')
+      no_log: true
+    - name: Register precisely the configured source
+      ansible.builtin.add_host:
+        name: acme-focused-audit-source
+        groups: acme_focused_audit_sources
+        ansible_host: "{{ mail_tls_source_address }}"
+        ansible_user: "{{ mail_tls_source_ssh_user }}"
+        ansible_python_interpreter: /usr/bin/python3
+      changed_when: false
+
+- name: Classify existing renewal profiles and global hooks without changes
+  hosts: acme_focused_audit_sources
+  become: true
+  gather_facts: false
+  tasks:
+    - name: Classify renewal profiles and deploy hooks by ordinal ID only
+      ansible.builtin.command:
+        argv:
+          - python3
+          - -c
+          - |
+            import configparser
+            from pathlib import Path
+            import re
+            import stat
+            import sys
+
+            chosen = Path(sys.argv[1]).parent.name
+            renewal = Path("/etc/letsencrypt/renewal")
+            live_root = Path("/etc/letsencrypt/live")
+            hooks_root = Path("/etc/letsencrypt/renewal-hooks/deploy")
+
+            def cert_state(path):
+                if path.is_symlink() and not path.exists():
+                    return "broken_symlink"
+                if path.is_file():
+                    return "regular_or_valid_symlink"
+                if path.is_symlink():
+                    return "symlink_not_regular"
+                if path.exists():
+                    return "non_file"
+                return "missing"
+
+            print("profile_identifiers=ordinal_only")
+            for n, profile in enumerate(sorted(renewal.glob("*.conf")), start=1):
+                prefix = "profile_%02d_" % n
+                if profile.is_symlink() or not profile.is_file():
+                    print(prefix + "state=unsafe_or_nonfile")
+                    continue
+                cfg = configparser.ConfigParser(interpolation=None)
+                try:
+                    cfg.read_string("[metadata]\n" +
+                                    profile.read_text(encoding="utf-8"))
+                except (OSError, UnicodeError, configparser.Error):
+                    print(prefix + "state=invalid_ini")
+                    continue
+                params = cfg["renewalparams"] if cfg.has_section("renewalparams") else None
+                print(prefix + "target=" + str(profile.stem == chosen).lower())
+                if params is None:
+                    print(prefix + "state=missing_renewalparams")
+                    continue
+                auth = params.get("authenticator", "").strip()
+                print(prefix + "authenticator=" +
+                      ("manual" if auth == "manual" else "other_or_unknown"))
+                print(prefix + "manual_auth_hook=" +
+                      ("present" if params.get("manual_auth_hook", "").strip()
+                       else "absent"))
+                print(prefix + "manual_cleanup_hook=" +
+                      ("present" if params.get("manual_cleanup_hook", "").strip()
+                       else "absent"))
+                for name in ("cert.pem", "fullchain.pem", "privkey.pem"):
+                    print(prefix + name.replace(".", "_") + "=" +
+                          cert_state(live_root / profile.stem / name))
+                for setting in ("cert", "fullchain", "privkey", "archive_dir"):
+                    value = cfg["metadata"].get(setting, "").strip()
+                    print(prefix + "metadata_" + setting + "=" +
+                          ("present" if value else "absent"))
+                print(prefix + "state=inspected")
+
+            print("deploy_hook_identifiers=ordinal_only")
+            if hooks_root.is_symlink() or not hooks_root.is_dir():
+                print("deploy_hooks_directory=unavailable")
+                raise SystemExit(0)
+            hook_paths = []
+            for path in hooks_root.iterdir():
+                try:
+                    metadata = path.lstat()
+                except OSError:
+                    continue
+                if stat.S_ISREG(metadata.st_mode):
+                    hook_paths.append(path)
+            for n, path in enumerate(sorted(hook_paths), start=1):
+                prefix = "deploy_hook_%02d_" % n
+                mode = path.lstat().st_mode
+                print(prefix + "executable=" + str(bool(mode & 0o111)).lower())
+                try:
+                    body = path.read_text(encoding="utf-8", errors="replace")[:131072]
+                except OSError:
+                    print(prefix + "readable=false")
+                    continue
+                print(prefix + "readable=true")
+                # Static heuristics; shell commands and control flow are not executed.
+                # Ignore simple full-line comments, but cannot prove branch behavior.
+                code = "\n".join(line for line in body.splitlines()
+                                 if not line.lstrip().startswith("#")).lower()
+                print(prefix + "mentions_renewed_lineage=" +
+                      str("renewed_lineage" in code).lower())
+                print(prefix + "mentions_renewed_domains=" +
+                      str("renewed_domains" in code).lower())
+                print(prefix + "has_conditional_syntax=" +
+                      str(bool(re.search(r"(?m)^\s*(?:if|case|elif|while)\b|(?:\[\[|\$\{?renewed_lineage)", code))).lower())
+                for service in ("postfix", "dovecot", "nginx", "httpd", "haproxy", "rspamd"):
+                    verb = re.search(
+                        r"\b(?:systemctl|service)\s+(?:--[^\s]+\s+)*"
+                        r"(?:reload|restart|try-reload-or-restart)\b[^\n]*\b" +
+                        service + r"\b", code)
+                    print(prefix + service + "_reload_or_restart_pattern=" +
+                          str(bool(verb)).lower())
+                print(prefix + "static_inspection_only=true")
+          - "{{ mail_tls_source_cert_file }}"
+      no_log: true
+      register: acme_focused_classes
+      changed_when: false
+
+    - name: Show only neutral IDs and allowlisted classifications
+      ansible.builtin.debug:
+        var: acme_focused_classes.stdout_lines
+
+    - name: Confirm no Certbot invocation or service changes
+      ansible.builtin.debug:
+        msg: "READ_ONLY: Only configuration metadata and script text were classified; no source files, DNS or services changed."
