@@ -156,6 +156,25 @@
         - deploy_hook_apply | default(false) | bool
         - hook_legacy_state | bool
 
+    - name: Refuse changing Certbot deploy hooks while Certbot is running
+      ansible.builtin.command:
+        argv:
+          - /usr/bin/python3
+          - -c
+          - |
+            import importlib.util
+            source = '/usr/local/libexec/selfhost_acme_recover.py'
+            spec = importlib.util.spec_from_file_location('acme_recovery', source)
+            module = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(module)
+            module.assert_no_running_certbot()
+            print('certbot_processes=NONE')
+      changed_when: false
+      no_log: true
+      when:
+        - deploy_hook_apply | default(false) | bool
+        - hook_legacy_state | bool
+
     - name: Announce inspected Certbot deploy-hook state
       ansible.builtin.debug:
         msg:
