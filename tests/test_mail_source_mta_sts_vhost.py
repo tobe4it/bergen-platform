@@ -2,6 +2,7 @@
 from pathlib import Path
 import os
 import subprocess
+import re
 
 import pytest
 import yaml
@@ -36,8 +37,8 @@ def test_scoped_and_read_only_by_default():
                for x in plays[1]["tasks"])
     source = PLAYBOOK.read_text()
     assert "BEGIN PRIVATE KEY" not in source
-    assert "82.165." not in source
-    assert "2a02:" not in source
+    assert re.search(r"\\b(?:[0-9]{1,3}\\.){3}[0-9]{1,3}\\b", source) is None
+    assert re.search(r"\\b(?:[0-9a-fA-F]{1,4}:){2,}", source) is None
 
 
 @pytest.mark.parametrize("lineage,expected,nginx_rc,expected_rc", [
