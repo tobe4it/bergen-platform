@@ -147,16 +147,62 @@
         follow: false
       register: nginx_www_config_stat
 
-    - name: Require regular non-symlink nginx configuration file
+    - name: Resolve only the approved sites-available counterpart for a symlink
+      ansible.builtin.set_fact:
+        nginx_www_edit_path: >-
+          {{ '/etc/nginx/sites-available/' ~ (nginx_www_config_path | basename)
+             if (nginx_www_config_stat.stat.islnk | default(false))
+             else nginx_www_config_path }}
+      no_log: true
+
+    - name: Require a direct symlink to precisely the matching sites-available file
+      ansible.builtin.command:
+        argv:
+          - python3
+          - -c
+          - |
+            import os
+            import sys
+            from pathlib import Path
+
+            link, target = map(Path, sys.argv[1:3])
+            if not link.is_symlink():
+                print('nginx_symlink=NOT_A_LINK')
+                raise SystemExit(2)
+            try:
+                raw = os.readlink(link)
+                destination = (link.parent / raw).resolve(strict=True)
+                if destination != target or target.is_symlink() or not target.is_file():
+                    print('nginx_symlink=UNEXPECTED_TARGET')
+                    raise SystemExit(2)
+            except (OSError, RuntimeError):
+                print('nginx_symlink=UNREADABLE')
+                raise SystemExit(2)
+            print('nginx_symlink=APPROVED_TARGET')
+          - "{{ nginx_www_config_path }}"
+          - "{{ nginx_www_edit_path }}"
+      changed_when: false
+      no_log: true
+      when: nginx_www_config_stat.stat.islnk | default(false)
+
+    - name: Inspect the actual approved configuration file without following links
+      ansible.builtin.stat:
+        path: "{{ nginx_www_edit_path }}"
+        follow: false
+      register: nginx_www_edit_stat
+
+    - name: Require a regular approved edit target and no symlink at that path
       ansible.builtin.assert:
         that:
-          - nginx_www_config_stat.stat.isreg | default(false)
-          - not (nginx_www_config_stat.stat.islnk | default(false))
-        fail_msg: Refusing to edit symlink or absent Nginx file.
+          - nginx_www_edit_stat.stat.isreg | default(false)
+          - not (nginx_www_edit_stat.stat.islnk | default(false))
+          - nginx_www_edit_path == nginx_www_config_path or
+            nginx_www_edit_path == '/etc/nginx/sites-available/' ~ (nginx_www_config_path | basename)
+        fail_msg: Refusing unsafe Nginx file or unapproved symlink target.
 
     - name: Load exact WWW nginx configuration privately
       ansible.builtin.slurp:
-        src: "{{ nginx_www_config_path }}"
+        src: "{{ nginx_www_edit_path }}"
       register: nginx_www_original
       no_log: true
 
@@ -214,7 +260,7 @@
       block:
         - name: Preserve original Nginx vhost under root-only state directory
           ansible.builtin.copy:
-            src: "{{ nginx_www_config_path }}"
+            src: "{{ nginx_www_edit_path }}"
             dest: "{{ backup_path }}"
             remote_src: true
             owner: root
@@ -224,14 +270,14 @@
 
         - name: Replace only old certificate chain path
           ansible.builtin.replace:
-            path: "{{ nginx_www_config_path }}"
+            path: "{{ nginx_www_edit_path }}"
             regexp: "{{ old_chain | regex_escape }}"
             replace: "{{ new_chain }}"
           no_log: true
 
         - name: Replace only old private key path
           ansible.builtin.replace:
-            path: "{{ nginx_www_config_path }}"
+            path: "{{ nginx_www_edit_path }}"
             regexp: "{{ old_key | regex_escape }}"
             replace: "{{ new_key }}"
           no_log: true
@@ -285,11 +331,11 @@
         - name: Restore original WWW configuration after failed validation
           ansible.builtin.copy:
             src: "{{ backup_path }}"
-            dest: "{{ nginx_www_config_path }}"
+            dest: "{{ nginx_www_edit_path }}"
             remote_src: true
             owner: root
             group: root
-            mode: "{{ nginx_www_config_stat.stat.mode }}"
+            mode: "{{ nginx_www_edit_stat.stat.mode }}"
           no_log: true
 
         - name: Verify restored Nginx configuration
