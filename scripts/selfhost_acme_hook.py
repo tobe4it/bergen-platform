@@ -11,6 +11,7 @@ import json
 import os
 from pathlib import Path
 import re
+import ssl
 import subprocess
 import sys
 import tempfile
@@ -56,6 +57,8 @@ def load_config(path=DEFAULT_CONFIG):
         type(s) is not int or s <= 0 for s in slots
     ):
         raise HookError("Exactly two distinct numeric record IDs are required")
+    if type(cfg.get("tls_rsa2048_compat", False)) is not bool:
+        raise HookError("tls_rsa2048_compat must be a boolean")
     if not isinstance(servers, list) or len(servers) < 2 or any(
         not isinstance(s, str) or not DOMAIN.fullmatch(s) for s in servers
     ):
@@ -123,6 +126,20 @@ def save_state(path, state):
             tmp.unlink()
 
 
+def api_https_context(cfg):
+    """Endpoint-only TLS compatibility; keep CA and hostname verification enabled.
+
+    Opt-in for providers whose valid RSA-2048 leaf is refused by FUTURE's
+    3072-bit minimum. This context belongs ONLY to the fixed selfHOST HTTPS
+    endpoint, never to global OpenSSL or other services.
+    """
+    context = ssl.create_default_context()
+    if cfg.get("tls_rsa2048_compat", False):
+        context.minimum_version = ssl.TLSVersion.TLSv1_2
+        context.set_ciphers("DEFAULT:@SECLEVEL=2")
+    return context
+
+
 def api_request(cfg, action, record_id, validation):
     payload = json.dumps({
         "api_key": cfg["api_key"],
@@ -137,7 +154,9 @@ def api_request(cfg, action, record_id, validation):
     class NoRedirect(urllib.request.HTTPRedirectHandler):
         def redirect_request(self, request, fp, code, msg, headers, newurl):
             return None
-    opener = urllib.request.build_opener(NoRedirect)
+    opener = urllib.request.build_opener(
+        NoRedirect, urllib.request.HTTPSHandler(context=api_https_context(cfg))
+    )
     try:
         with opener.open(req, timeout=15) as response:
             if response.status != 202:
