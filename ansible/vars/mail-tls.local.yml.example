@@ -1,0 +1,31 @@
+---
+# EXAMPLE ONLY. Copy this template to mail-tls.local.yml (Git-ignored).
+# Put real hostnames, SSH user, DNS names and Certbot lineage ONLY in that
+# untracked site-local file. NEVER commit the populated copy.
+mail_tls_target_inventory_host: CHANGE_ME_INVENTORY_ALIAS
+mail_tls_source_address: CHANGE_ME_SOURCE_SSH_FQDN
+mail_tls_source_ssh_user: CHANGE_ME_AUTHORIZED_SSH_USER
+
+mail_tls_source_cert_file: /etc/letsencrypt/live/CHANGE_ME_LINEAGE/fullchain.pem
+mail_tls_source_key_file: /etc/letsencrypt/live/CHANGE_ME_LINEAGE/privkey.pem
+
+mail_tls_required_san: "*.example.invalid"
+mail_tls_expected_fqdn: mail.example.invalid
+
+mail_tls_target_cert_file: /etc/ssl/certs/CHANGE_ME-fullchain.pem
+mail_tls_target_key_file: /etc/ssl/private/CHANGE_ME-key.pem
+
+# Optional source-host deploy hook audit (read-only unless explicitly applied).
+mail_tls_postfix_rsa_lineage: CHANGE_ME_RSA_LINEAGE
+mail_tls_postfix_ecdsa_lineage: CHANGE_ME_ECDSA_LINEAGE
+mail_tls_postfix_hook_path: /etc/letsencrypt/renewal-hooks/deploy/CHANGE_ME_POSTFIX_HOOK
+mail_tls_nginx_hook_path: /etc/letsencrypt/renewal-hooks/deploy/CHANGE_ME_WILDCARD_HOOK
+
+# Optional narrowly scoped MTA-STS IPv4/IPv6 and deploy-hook audit.
+mail_mta_sts_name: mta-sts.example.invalid
+mail_mta_sts_conf_path: /etc/nginx/conf.d/mta-sts.example.invalid.conf
+mail_mta_sts_hook_path: /etc/letsencrypt/renewal-hooks/deploy/60-mta-sts.example.invalid
+
+# Neither apply flag is enabled by default:
+# deploy_hook_apply: false
+# mail_mta_sts_apply: false

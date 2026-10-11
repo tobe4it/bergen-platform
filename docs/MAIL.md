@@ -6,6 +6,12 @@ The Bergen Platform mail backend replaces a Synology mailbox server while
 retaining the existing public SMTP gateway. It separates connection-level edge
 policy from identity, submission and mailbox storage.
 
+Public-gateway certificate issuance, Certbot renewal, MTA-STS policy HTTPS,
+TLS deploy hooks, certificate sync and on-host recovery are covered in the
+[Mail TLS operations runbook](MAIL-TLS-OPERATIONS.md). That runbook records the
+separate October 2026 gateway verification; it does not supersede the backend
+migration acceptance criteria in this document.
+
 ## Architecture
 
 ```text
@@ -52,6 +58,22 @@ checkpoint, not yet the production cutover from the existing mailbox server.
 | Relay selection | Configured | The gateway hostname is retained and outbound SMTP prefers its IPv4 address |
 | Central Syslog forwarding | Automated | The mail bootstrap configures queued TCP forwarding and emits a tagged test event |
 | Repeat bootstrap | Verified | A complete repeat bootstrap finished without failed tasks |
+
+### Gateway TLS checkpoint (2026-10-11)
+
+The public gateway's Certbot renewal inventory was cleaned up, the selected
+MTA-STS HTTP-01/HTTPS service was verified over IPv4 and public IPv6, and a
+lineage-specific renewal, scoped Nginx reload hook and read-only Ansible
+preflight passed. A scheduled global Certbot run completed successfully **with
+no certificates due**, so the next real unattended renewal/reload remains an
+outstanding verification. The certificate synchronization workflow to the
+internal backend had also been tested separately; the next real wildcard
+rotation still needs end-to-end observation. See the
+[operational evidence and procedures](MAIL-TLS-OPERATIONS.md).
+
+The gateway's verified certificate lifecycle must not be mistaken for the
+completion of mailbox migration, authorization acceptance or the public
+client-access design.
 
 The deployed role deliberately separates facts proven by local service checks
 from functions that still require end-to-end acceptance tests. A successful
@@ -352,6 +374,15 @@ Acceptance: controller and GitHub branch contain the same role version and a
 repeat bootstrap reports no failed tasks.
 
 ### 2. TLS lifecycle
+
+**Checkpoint:** issuance, trusted-protocol tests and synchronization were
+separately verified for the configured backend service, and the source MX
+renewal/IPv6 repairs are documented in the
+[operations runbook](MAIL-TLS-OPERATIONS.md). The remaining production
+acceptance includes observing an actual unattended source renewal, validated
+backend synchronization/consumer reload and operational alerting. The steps
+below remain the broader cutover acceptance criteria; they should not be
+marked complete solely from a successful Certbot no-op timer run.
 
 - Issue a publicly trusted certificate for the mail service FQDN, preferably
   with DNS-01 so no temporary public web listener is required.

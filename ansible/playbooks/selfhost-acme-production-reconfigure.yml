@@ -1,0 +1,291 @@
+---
+# Explicit opt-in for changing ONLY an existing Certbot wildcard lineage.
+# Uses Certbot's built-in staging-backed "reconfigure"; never edits INI by hand.
+# All real source identities and DNS zones remain in ignored local YAML.
+# Default mode is read-only. Explicit -e selfhost_acme_reconfigure_apply=true
+# authorizes Certbot to use the selfHOST API and save renewal settings.
+
+- name: Register the approved certificate source
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  tasks:
+    - name: Require explicit existing Certbot fullchain and site-local zone
+      ansible.builtin.assert:
+        that:
+          - mail_tls_source_address is defined
+          - mail_tls_source_ssh_user is defined
+          - mail_tls_source_cert_file is defined
+          - mail_tls_source_cert_file is match('^/etc/letsencrypt/live/[A-Za-z0-9._-]+/fullchain[.]pem$')
+          - selfhost_acme_zone is defined
+          - selfhost_acme_zone is match('^[a-z0-9.-]+$')
+          - mail_tls_required_san is defined
+          - mail_tls_required_san == '*.' ~ selfhost_acme_zone
+          - not ansible_check_mode
+        fail_msg: Missing local scope or inconsistent wildcard zone; refusing changes.
+      no_log: true
+
+    - name: Register one externally configured certificate source
+      ansible.builtin.add_host:
+        name: selfhost-acme-reconfigure-source
+        groups: selfhost_acme_reconfigure_sources
+        ansible_host: "{{ mail_tls_source_address }}"
+        ansible_user: "{{ mail_tls_source_ssh_user }}"
+        ansible_python_interpreter: /usr/bin/python3
+      changed_when: false
+
+- name: Inspect or expressly reconfigure the existing Certbot lineage
+  hosts: selfhost_acme_reconfigure_sources
+  become: true
+  gather_facts: false
+  any_errors_fatal: true
+  vars:
+    acme_lineage: "{{ mail_tls_source_cert_file | dirname | basename }}"
+    acme_renewal_profile: "/etc/letsencrypt/renewal/{{ acme_lineage }}.conf"
+    acme_hook_auth: "/usr/bin/python3 /usr/local/libexec/selfhost_acme_hook.py auth"
+    acme_hook_cleanup: "/usr/bin/python3 /usr/local/libexec/selfhost_acme_hook.py cleanup"
+    acme_backup: "/var/lib/selfhost-acme/renewal-before-reconfigure.conf.bak"
+  tasks:
+    - name: Ensure productive certificate and private-key files exist
+      ansible.builtin.stat:
+        path: "{{ item }}"
+        follow: true
+        get_checksum: true
+        checksum_algorithm: sha256
+      register: acme_live_before
+      loop:
+        - "{{ mail_tls_source_cert_file }}"
+        - "{{ mail_tls_source_cert_file | dirname }}/privkey.pem"
+      no_log: true
+
+    - name: Refuse reconfiguration if either current live TLS file is absent
+      ansible.builtin.assert:
+        that:
+          - acme_live_before.results[0].stat.isreg | default(false)
+          - acme_live_before.results[1].stat.isreg | default(false)
+        fail_msg: Productive live certificate or private key is missing.
+
+    - name: Verify renewal profile is a regular, non-symlink file
+      ansible.builtin.stat:
+        path: "{{ acme_renewal_profile }}"
+        follow: false
+      register: acme_profile_stat
+
+    - name: Require existing profile and known Certbot reconfigure support
+      ansible.builtin.assert:
+        that:
+          - acme_profile_stat.stat.isreg | default(false)
+          - not (acme_profile_stat.stat.islnk | default(false))
+        fail_msg: Expected existing Certbot lineage configuration is absent.
+
+    - name: Confirm installed Certbot supports staging-backed reconfigure
+      ansible.builtin.command:
+        argv: [certbot, help, reconfigure]
+      changed_when: false
+      register: acme_reconfigure_help
+
+    - name: Verify exact saved authenticator and hook paths without displaying profile
+      ansible.builtin.command:
+        argv:
+          - python3
+          - -c
+          - |
+            import configparser
+            from pathlib import Path
+            import sys
+
+            profile = Path(sys.argv[1])
+            expected_auth = sys.argv[2]
+            expected_cleanup = sys.argv[3]
+            cfg = configparser.ConfigParser(interpolation=None)
+            try:
+                cfg.read_string("[metadata]\n" + profile.read_text(encoding="utf-8"))
+            except (OSError, UnicodeError, configparser.Error):
+                print("renewal_config_status=UNREADABLE")
+                raise SystemExit(2)
+            if not cfg.has_section("renewalparams"):
+                print("renewal_config_status=MISSING_RENEWALPARAMS")
+                raise SystemExit(2)
+            params = cfg["renewalparams"]
+            if params.get("authenticator", "").strip() != "manual":
+                print("renewal_config_status=UNEXPECTED_AUTHENTICATOR")
+                raise SystemExit(2)
+            auth = params.get("manual_auth_hook", "").strip()
+            cleanup = params.get("manual_cleanup_hook", "").strip()
+            if not auth and not cleanup:
+                print("renewal_config_status=READY")
+            elif auth == expected_auth and cleanup == expected_cleanup:
+                print("renewal_config_status=ALREADY_CONFIGURED")
+            else:
+                print("renewal_config_status=CONFLICTING_HOOKS")
+                raise SystemExit(2)
+          - "{{ acme_renewal_profile }}"
+          - "{{ acme_hook_auth }}"
+          - "{{ acme_hook_cleanup }}"
+      register: acme_renewal_before
+      changed_when: false
+
+    - name: Check that Certbot is not currently running
+      ansible.builtin.command:
+        argv:
+          - /usr/bin/python3
+          - -c
+          - |
+            import importlib.util
+            p = '/usr/local/libexec/selfhost_acme_recover.py'
+            s = importlib.util.spec_from_file_location('acme_recovery', p)
+            m = importlib.util.module_from_spec(s)
+            s.loader.exec_module(m)
+            m.assert_no_running_certbot()
+            print('certbot_processes=NONE')
+      changed_when: false
+
+    - name: Verify no reserved challenges and both authoritative TXT slots idle
+      ansible.builtin.command:
+        argv:
+          - /usr/bin/python3
+          - /usr/local/libexec/selfhost_acme_recover.py
+          - --check
+      register: acme_clean_before
+      changed_when: false
+
+    - name: Require no local reservations and remote DNS idle values
+      ansible.builtin.assert:
+        that:
+          - "'ALREADY_CLEAN: No local reservations; both DNS slots idle' in acme_clean_before.stdout"
+        fail_msg: SelfHOST hook or DNS slots are not idle; do not run Certbot.
+
+    - name: Inspect whether an earlier backup already exists
+      ansible.builtin.stat:
+        path: "{{ acme_backup }}"
+        follow: false
+      register: acme_backup_stat
+
+    - name: Refuse reconfigure if an older backup needs review
+      ansible.builtin.assert:
+        that:
+          - not (acme_backup_stat.stat.exists | default(false))
+        fail_msg: A previous production renewal backup is already present; review it first.
+      when:
+        - selfhost_acme_reconfigure_apply | default(false) | bool
+        - acme_renewal_before.stdout is search('renewal_config_status=READY')
+
+    - name: Show safe execution decision
+      ansible.builtin.debug:
+        msg:
+          current_renewal_configuration: "{{ acme_renewal_before.stdout }}"
+          apply_authorized: "{{ selfhost_acme_reconfigure_apply | default(false) | bool }}"
+          certbot_reconfigure_supported: "{{ acme_reconfigure_help.rc == 0 }}"
+          existing_certificate_preserved: true
+
+    - name: Back up existing renewal configuration to root-only state directory
+      ansible.builtin.copy:
+        src: "{{ acme_renewal_profile }}"
+        dest: "{{ acme_backup }}"
+        remote_src: true
+        owner: root
+        group: root
+        mode: '0600'
+      no_log: true
+      when:
+        - selfhost_acme_reconfigure_apply | default(false) | bool
+        - acme_renewal_before.stdout is search('renewal_config_status=READY')
+
+    - name: Reconfigure ONLY the existing lineage using Certbot built-in staging test
+      ansible.builtin.command:
+        argv:
+          - certbot
+          - reconfigure
+          - --cert-name
+          - "{{ acme_lineage }}"
+          - --non-interactive
+          - --manual
+          - --preferred-challenges
+          - dns
+          - --manual-auth-hook
+          - "{{ acme_hook_auth }}"
+          - --manual-cleanup-hook
+          - "{{ acme_hook_cleanup }}"
+      async: 1200
+      poll: 15
+      no_log: true
+      register: acme_reconfigure_result
+      when:
+        - selfhost_acme_reconfigure_apply | default(false) | bool
+        - acme_renewal_before.stdout is search('renewal_config_status=READY')
+
+    - name: Inspect persisted auth hooks after successful reconfiguration
+      ansible.builtin.command:
+        argv:
+          - python3
+          - -c
+          - |
+            import configparser
+            from pathlib import Path
+            import sys
+            profile = Path(sys.argv[1])
+            auth, cleanup = sys.argv[2:4]
+            cfg = configparser.ConfigParser(interpolation=None)
+            try:
+                cfg.read_string("[metadata]\n" + profile.read_text(encoding="utf-8"))
+            except (OSError, UnicodeError, configparser.Error):
+                print("persisted_hooks=UNREADABLE")
+                raise SystemExit(2)
+            params = cfg["renewalparams"] if cfg.has_section("renewalparams") else {}
+            if (params.get("authenticator", "").strip() == "manual" and
+                    params.get("manual_auth_hook", "").strip() == auth and
+                    params.get("manual_cleanup_hook", "").strip() == cleanup):
+                print("persisted_hooks=VERIFIED")
+            else:
+                print("persisted_hooks=NOT_MATCHING")
+                raise SystemExit(2)
+          - "{{ acme_renewal_profile }}"
+          - "{{ acme_hook_auth }}"
+          - "{{ acme_hook_cleanup }}"
+      changed_when: false
+      register: acme_renewal_after
+      when: selfhost_acme_reconfigure_apply | default(false) | bool
+
+    - name: Check no orphaned challenges remain after reconfigure
+      ansible.builtin.command:
+        argv:
+          - /usr/bin/python3
+          - /usr/local/libexec/selfhost_acme_recover.py
+          - --check
+      register: acme_clean_after
+      changed_when: false
+      when: selfhost_acme_reconfigure_apply | default(false) | bool
+
+    - name: Recheck productive certificate and private-key bytes after reconfigure
+      ansible.builtin.stat:
+        path: "{{ item }}"
+        follow: true
+        get_checksum: true
+        checksum_algorithm: sha256
+      register: acme_live_after
+      loop:
+        - "{{ mail_tls_source_cert_file }}"
+        - "{{ mail_tls_source_cert_file | dirname }}/privkey.pem"
+      no_log: true
+      when: selfhost_acme_reconfigure_apply | default(false) | bool
+
+    - name: Require unchanged live TLS files, correct saved hooks and clean DNS
+      ansible.builtin.assert:
+        that:
+          - acme_renewal_after.stdout == 'persisted_hooks=VERIFIED'
+          - "'ALREADY_CLEAN: No local reservations; both DNS slots idle' in acme_clean_after.stdout"
+          - acme_live_after.results[0].stat.checksum == acme_live_before.results[0].stat.checksum
+          - acme_live_after.results[1].stat.checksum == acme_live_before.results[1].stat.checksum
+        success_msg: "PASS: Existing lineage configured for automated DNS-01; productive certificate and key unchanged."
+      when: selfhost_acme_reconfigure_apply | default(false) | bool
+
+    - name: Report resulting state without printing site data
+      ansible.builtin.debug:
+        msg:
+          configuration: >-
+            {{ 'READY_FOR_EXPLICIT_APPLY'
+               if not (selfhost_acme_reconfigure_apply | default(false) | bool)
+               else ('RECONFIGURED_AND_VERIFIED' if acme_renewal_before.stdout is search('renewal_config_status=READY')
+                     else 'ALREADY_CONFIGURED_AND_VERIFIED') }}
+          production_certificate_reissued: false
+          existing_lineage_reused: true
