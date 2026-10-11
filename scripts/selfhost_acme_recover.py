@@ -48,7 +48,7 @@ def check_exact_orphans(cfg, state):
             raise hook.HookError("Non-reserved reservation found; manual review required")
         if entry.get("identifier") not in (cfg["zone"], "*." + cfg["zone"]):
             raise hook.HookError("Unexpected reservation identifier")
-        if not hook.DNS01.fullmatch(entry.get("validation", "")):
+        if not isinstance(entry.get("validation"), str) or not hook.DNS01.fullmatch(entry["validation"]):
             raise hook.HookError("Invalid reserved validation token")
     if len({item["validation"] for item in state.values()}) != 2:
         raise hook.HookError("Two independent validation values required")
@@ -87,6 +87,10 @@ def create_private_backup(path, state):
 def reconcile(cfg, *, apply=False, state_dir=hook.DEFAULT_STATE_DIR):
     assert_no_running_certbot()
     with hook.exclusive_state(state_dir) as (state, path):
+        if not state:
+            assert_remote_slots_idle(cfg, state)
+            print("ALREADY_CLEAN: No local reservations; both DNS slots idle")
+            return
         check_exact_orphans(cfg, state)
         assert_remote_slots_idle(cfg, state)
         assert_no_running_certbot()
