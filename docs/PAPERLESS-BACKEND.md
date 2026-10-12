@@ -37,7 +37,7 @@ Debian template, storage pool, bridge, CPU and memory. Review data capacity
 and backup storage explicitly; the 16 GiB rootfs gate is a minimum, not a
 recommendation for document archive capacity.
 
-Use the checked-in example as a reference, but put all real infrastructure
+Use the checked-in example under docs/examples/paperless.local.example.yml as a reference, but put all real infrastructure
 and secrets into the Git-ignored, chmod-0600
 `ansible/group_vars/all/paperless.local.yml` file. Before live deployment,
 add exactly one `paperless_nodes` host to
