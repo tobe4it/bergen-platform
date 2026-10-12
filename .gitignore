@@ -27,5 +27,5 @@ ansible/vars/selfhost-acme.vault.yml
 ansible/group_vars/all/bergen-proxy.yml
 
 # Site-local Paperless LXC identity and application/database secrets
-ansible/group_vars/all/paperless.local.yml
+ansible/vars/paperless.local.yml
 ansible/group_vars/all/bergen-paperless.yml

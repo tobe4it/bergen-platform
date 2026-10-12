@@ -67,7 +67,7 @@ class PaperlessPrivateBackendTests(unittest.TestCase):
             self.assertNotIn("192.168.", contents, str(path))
             self.assertNotIn("BEGIN PRIVATE KEY", contents, str(path))
         ignore = IGNORE.read_text()
-        self.assertIn("ansible/group_vars/all/paperless.local.yml", ignore)
+        self.assertIn("ansible/vars/paperless.local.yml", ignore)
         self.assertIn("ansible/group_vars/all/bergen-paperless.yml", ignore)
 
     def test_template_syntax_compiles(self):

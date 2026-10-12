@@ -39,7 +39,7 @@ recommendation for document archive capacity.
 
 Use the checked-in example under docs/examples/paperless.local.example.yml as a reference, but put all real infrastructure
 and secrets into the Git-ignored, chmod-0600
-`ansible/group_vars/all/paperless.local.yml` file. Before live deployment,
+`ansible/vars/paperless.local.yml` file. Before live deployment,
 add exactly one `paperless_nodes` host to
 `ansible/inventory.local.yml` with verified, pinned PCT-mediated SSH
 transport similar to `bergen-proxy`. Do not reuse VMID 125.
@@ -51,7 +51,7 @@ cd ~/bergen-platform
 python -m unittest discover -s tests -p 'test_paperless_private_backend.py' -v
 
 ansible-playbook ansible/playbooks/preflight-paperless.yml \
-  -e @ansible/group_vars/all/paperless.local.yml
+  -e @ansible/vars/paperless.local.yml
 ```
 
 The expected summary is `PREFLIGHT_PASS` and `deployment: not_performed`.
