@@ -1,0 +1,18 @@
+---
+- name: Preflight Synology shared Paperless inputs (read only)
+  hosts: all
+  gather_facts: false
+  become: true
+
+  pre_tasks:
+    - name: Require exact reviewed Synology host
+      ansible.builtin.assert:
+        that:
+          - inventory_hostname == 'ldap.thebergens.net'
+        fail_msg: Refusing unexpected NAS target
+
+  tasks:
+    - name: Inspect DSM share root and shared Paperless inputs
+      ansible.builtin.include_role:
+        name: synology_paperless_groups
+        tasks_from: preflight
