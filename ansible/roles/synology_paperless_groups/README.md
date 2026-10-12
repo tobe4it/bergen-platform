@@ -3,7 +3,14 @@
 Scope: only `/volume1/paperless-scan/{Eltern,Familie}` and the explicitly
 reviewed `Familie` ACE on `/volume1/paperless-scan`.
 
-This feature is **not wired into the daily personal-input timer**.
+The group feature is staged for addition as a **read-only audit** to the
+existing daily personal-input service. The service unit has a second
+`ExecStart` command running
+`ansible/playbooks/audit-synology-paperless-groups.yml`.
+The audit requires `root=hardened`, `PRESENT: Eltern`, and
+`PRESENT: Familie`; failure marks the oneshot service failed.
+No group ACL changes or creation occur in the daily job.
+The group hardening/provisioning playbooks remain manual-only.
 Paperless ingestion remains disabled.
 
 The review found `Familie@bergen.intern` inherited full access from the
@@ -42,5 +49,5 @@ least-privilege reduction requires separate design and testing.
 
 Validate SMB access as normal users and a guest/unauthenticated session
 before introducing real documents. Verify the downstream Paperless owner/
-group ACL mapping and import quarantine independently. No timer or importer
-switches are changed in this branch.
+group ACL mapping and import quarantine independently. The timer's schedule is unchanged; a separate deployment of the updated
+service unit is required. The importer remains disabled.
