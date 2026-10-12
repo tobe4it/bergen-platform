@@ -79,6 +79,13 @@ class PaperlessPrivateBackendTests(unittest.TestCase):
         self.assertIn("Network=bergen-paperless.network", broker)
         self.assertIn("NoNewPrivileges=true", app)
 
+    def test_paperless_explicitly_selects_postgresql(self):
+        env = (ROLE / "templates/paperless.env.j2").read_text()
+        self.assertIn("PAPERLESS_DBENGINE=postgresql", env)
+        self.assertIn("PAPERLESS_DBHOST=bergen-paperless-db", env)
+        self.assertIn("PAPERLESS_DBNAME=paperless", env)
+        self.assertIn("PAPERLESS_REDIS=redis://bergen-paperless-redis:6379", env)
+
     def test_secrets_only_in_protected_templates(self):
         tasks = (ROLE / "tasks/main.yml").read_text()
         for path in ("paperless.env", "postgres.env"):
