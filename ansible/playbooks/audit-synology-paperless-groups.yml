@@ -1,0 +1,29 @@
+---
+- name: Audit production Synology shared Paperless ACLs
+  hosts: all
+  gather_facts: false
+  become: true
+
+  pre_tasks:
+    - name: Require exact reviewed Synology host
+      ansible.builtin.assert:
+        that:
+          - inventory_hostname == 'ldap.thebergens.net'
+        fail_msg: Refusing unexpected NAS target
+
+  tasks:
+    - name: Inspect configured group input ACLs without mutation
+      ansible.builtin.include_role:
+        name: synology_paperless_groups
+        tasks_from: preflight
+
+    - name: Require hardened root and both ready input folders
+      ansible.builtin.assert:
+        that:
+          - "'GROUP_PREFLIGHT_PASS root=hardened' in synology_paperless_groups_preflight.stdout_lines"
+          - "'PRESENT: Eltern' in synology_paperless_groups_preflight.stdout_lines"
+          - "'PRESENT: Familie' in synology_paperless_groups_preflight.stdout_lines"
+        fail_msg: >-
+          Unsafe or incomplete shared Paperless ACLs; no automatic repair is
+          permitted. Review Synology state before attempting provisioning.
+        success_msg: GROUP_DAILY_AUDIT_PASS
