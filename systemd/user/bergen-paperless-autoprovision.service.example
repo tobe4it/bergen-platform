@@ -13,7 +13,7 @@ ExecStart=%h/bergen-platform/.venv/bin/ansible-playbook -i ldap.thebergens.net, 
 
 # Read-only; validate shared group folders after personal provisioning.
 # A failed group audit marks this oneshot service failed, without changing group ACLs.
-ExecStart=%h/bergen-platform/.venv/bin/ansible-playbook -i ldap.thebergens.net, -u supervisor --become ansible/playbooks/preflight-synology-paperless-groups.yml
+ExecStart=%h/bergen-platform/.venv/bin/ansible-playbook -i ldap.thebergens.net, -u supervisor --become ansible/playbooks/audit-synology-paperless-groups.yml
 
 Environment=ANSIBLE_HOST_KEY_CHECKING=True
 
