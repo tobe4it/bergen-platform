@@ -1,0 +1,51 @@
+---
+- name: Roll back reviewed shared-root ACL only while group folders are absent
+  ansible.builtin.raw: |
+    set -eu
+    ROOT=/volume1/paperless-scan
+    ACL=/usr/syno/bin/synoacltool
+    NEW='group:Familie@bergen.intern:allow:r-x---a-R-c--:----'
+    OLD='group:Familie@bergen.intern:allow:rwxpdDaARWc--:fd--'
+
+    fail() { echo "ROOT_ROLLBACK_FAIL: $*" >&2; exit 1; }
+    for dir in "$ROOT/Eltern" "$ROOT/Familie"; do
+      [ ! -e "$dir" ] && [ ! -L "$dir" ] ||
+        fail "refusing to broaden root ACL with group folder present"
+    done
+    before=$("$ACL" -get "$ROOT")
+    if printf '%s\n' "$before" |
+      grep -Eq '^[[:space:]]*\[3\] group:Familie@bergen\.intern:allow:rwxpdDaARWc--:fd-- \(level:0\)$'; then
+      echo ROOT_ROLLBACK_UNCHANGED
+    else
+      printf '%s\n' "$before" |
+        grep -Eq '^[[:space:]]*\[3\] group:Familie@bergen\.intern:allow:r-x---a-R-c--:---- \(level:0\)$' ||
+        fail "unexpected family ACE or index"
+      count=$(printf '%s\n' "$before" |
+        grep -cE '^[[:space:]]*\[[0-9]+\]' || true)
+      [ "$count" -eq 4 ] || fail "unexpected root ACL entries"
+      for ace in \
+        'group:administrators:allow:rwxpdDaARWc--:fd--' \
+        'user:paperless-sync:allow:rwxpdDaARWc--:fd--' \
+        'group:administrators@bergen.intern:allow:rwxpdDaARWc--:fd--'; do
+        printf '%s\n' "$before" |
+          grep -Fq "$ace (level:0)" || fail "missing baseline ACE"
+      done
+      "$ACL" -replace "$ROOT" 3 "$OLD" >/dev/null ||
+        fail "ACL replacement failed"
+      echo ROOT_ROLLBACK_CHANGED
+    fi
+
+    after=$("$ACL" -get "$ROOT")
+    count=$(printf '%s\n' "$after" |
+      grep -cE '^[[:space:]]*\[[0-9]+\]' || true)
+    [ "$count" -eq 4 ] || fail "unexpected post-rollback ACL count"
+    printf '%s\n' "$after" |
+      grep -Fq "$OLD (level:0)" ||
+      fail "legacy ACL not restored"
+    echo ROOT_ROLLBACK_PASS
+  register: synology_paperless_root_rollback
+  changed_when: "'ROOT_ROLLBACK_CHANGED' in synology_paperless_root_rollback.stdout"
+
+- name: Show root rollback result
+  ansible.builtin.debug:
+    var: synology_paperless_root_rollback.stdout_lines
