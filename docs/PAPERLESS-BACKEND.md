@@ -57,9 +57,14 @@ high-entropy values. Use `ansible-vault edit` for later changes; never
 temporarily decrypt the file on disk. Verify its header is
 `$ANSIBLE_VAULT;...` and protect it with mode 0600.
 
-The read-only Proxmox preflight uses **only** `paperless.local.yml` and
-does not load the Paperless Vault. Later explicitly approved deployment
-must load both variable sources:
+The read-only Proxmox preflight needs **only**
+`paperless.local.yml` as an explicit extra-vars file and does not load the
+new Paperless Vault file. However, Ansible automatically loads the existing
+encrypted `ansible/group_vars/all/vault.yml` from the standard inventory;
+therefore, even this read-only preflight needs `--ask-vault-pass` using
+the existing platform Vault password.
+
+Later explicitly approved deployment must load both variable sources:
 
 ```bash
 ansible-playbook -i ansible/inventory.yml -i ansible/inventory.local.yml \
@@ -81,8 +86,10 @@ Read-only Proxmox preflight:
 cd ~/bergen-platform
 python -m unittest discover -s tests -p 'test_paperless_private_backend.py' -v
 
-ansible-playbook ansible/playbooks/preflight-paperless.yml \
-  -e @ansible/vars/paperless.local.yml
+ansible-playbook -i ansible/inventory.yml \
+  ansible/playbooks/preflight-paperless.yml \
+  -e @ansible/vars/paperless.local.yml \
+  --ask-vault-pass
 ```
 
 The expected summary is `PREFLIGHT_PASS` and `deployment: not_performed`.
