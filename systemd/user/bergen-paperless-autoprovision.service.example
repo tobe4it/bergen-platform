@@ -1,0 +1,20 @@
+[Unit]
+Description=Bergen Paperless - Synology LDAP home provisioning
+Documentation=man:systemd.service(5)
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=oneshot
+
+WorkingDirectory=%h/bergen-platform
+
+ExecStart=%h/bergen-platform/.venv/bin/ansible-playbook -i ldap.thebergens.net, -u supervisor --become ansible/playbooks/provision-synology-paperless.yml -e synology_paperless_apply=true
+
+Environment=ANSIBLE_HOST_KEY_CHECKING=True
+
+TimeoutStartSec=300
+UMask=0077
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectHome=no

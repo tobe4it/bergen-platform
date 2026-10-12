@@ -61,3 +61,43 @@ validate-synology-paperless.yml
 Never alter parent home ACLs.
 Reject unexpected owners, symlinks and ACL deviations.
 Run preflight before provisioning and validate afterward.
+
+## Automatic provisioning
+
+Prepared systemd user units:
+
+- systemd/user/bergen-paperless-autoprovision.service.example
+- systemd/user/bergen-paperless-autoprovision.timer.example
+
+The service executes under the Linux user ansible on bp-controller.
+
+Schedule:
+- Daily at 05:00 local time
+- Up to 30 minutes randomized delay
+- Persistent scheduling enabled
+
+Runtime:
+- Release checkout: /home/ansible/bergen-platform
+- Target: ldap.thebergens.net
+- SSH identity: supervisor
+- Remote privilege escalation: sudo
+
+The provisioning playbook performs:
+1. Read-only discovery and ACL preflight
+2. Idempotent provisioning of missing inputs
+3. Final ACL verification
+
+Operational safeguards:
+- No automatic Git pull
+- No execution from feature worktrees
+- No change to parent LDAP home ACLs
+- No NAS-to-Paperless ingestion
+- No periodic creation of synthetic validation files
+- Journal logging through systemd
+
+Deployment is disabled until the reviewed release is
+available in the regular Bergen Platform checkout.
+
+After deployment, inspect with:
+  systemctl --user status bergen-paperless-autoprovision.timer
+  journalctl --user -u bergen-paperless-autoprovision.service
