@@ -7,7 +7,7 @@ After=network-online.target
 [Service]
 Type=oneshot
 
-WorkingDirectory=%h/bergen-platform
+WorkingDirectory=%h/bergen-platform-paperless-runtime
 
 ExecStart=%h/bergen-platform/.venv/bin/ansible-playbook -i ldap.thebergens.net, -u supervisor --become ansible/playbooks/provision-synology-paperless.yml -e synology_paperless_apply=true
 

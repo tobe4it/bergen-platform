@@ -77,7 +77,7 @@ Schedule:
 - Persistent scheduling enabled
 
 Runtime:
-- Release checkout: /home/ansible/bergen-platform
+- Pinned runtime checkout: /home/ansible/bergen-platform-paperless-runtime
 - Target: ldap.thebergens.net
 - SSH identity: supervisor
 - Remote privilege escalation: sudo
@@ -96,7 +96,7 @@ Operational safeguards:
 - Journal logging through systemd
 
 Deployment is disabled until the reviewed release is
-available in the regular Bergen Platform checkout.
+available in the pinned Paperless runtime checkout.
 
 After deployment, inspect with:
   systemctl --user status bergen-paperless-autoprovision.timer
