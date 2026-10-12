@@ -128,6 +128,52 @@ class SharedProxyAuditTests(unittest.TestCase):
         self.assertEqual(evidence, ("b"*64, new))
         self.assertEqual(transfer.call_count, 2)
 
+    def test_first_install_plan_is_read_only(self):
+        src, cfg, local, shared = topology()
+        with patch.object(proxy, "load_restricted_yaml", return_value=cfg), \
+             patch.object(proxy, "inventory_children", side_effect=[local, shared]), \
+             patch.object(proxy, "checked_remote", return_value="") as remote:
+            result = proxy.plan_proxy_first_install(
+                src, "proxy.yml", "local.yml", "inventory.yml",
+                "MISSING_EXPECTED_FIRST_INSTALL")
+        self.assertEqual(result, "FIRST_INSTALL_PREFLIGHT_PASS")
+        self.assertEqual(remote.call_count, 1)
+        command = remote.call_args.args[2]
+        for expected in ("test ! -x /usr/sbin/nginx",
+                         "! systemctl is-active --quiet nginx",
+                         "test ! -e /etc/nginx/tls/fullchain.pem",
+                         "test ! -e /etc/nginx/tls/privkey.pem"):
+            self.assertIn(expected, command)
+        for forbidden in ("install ", "systemctl reload", "systemctl start",
+                          "cat >", "mkdir", "rm -", "openssl pkey"):
+            self.assertNotIn(forbidden, command)
+
+    def test_first_install_plan_refuses_incomplete_or_preexisting_state(self):
+        src, _cfg, _local, _shared = topology()
+        for status in ("NO_CHANGE", "ROTATION_CANDIDATE", "INVALID", None):
+            with patch.object(proxy, "load_restricted_yaml",
+                              side_effect=AssertionError("should fail first")):
+                with self.assertRaisesRegex(proxy.ProxyAuditError, "not empty"):
+                    proxy.plan_proxy_first_install(
+                        src, "proxy.yml", "local.yml", "inventory.yml", status)
+
+    def test_first_install_plan_requires_proxy_vars_before_source_access(self):
+        with patch.object(sys, "argv", ["mail_tls_sync.py", "--config",
+                                        "unused.yml", "--proxy-first-install-plan"]), \
+             patch.object(mail, "load_config",
+                          side_effect=AssertionError("must not access source")):
+            with self.assertRaisesRegex(mail.SyncError, "requires --proxy-vars"):
+                mail.main()
+
+    def test_first_install_plan_with_apply_is_refused_before_access(self):
+        with patch.object(sys, "argv", ["mail_tls_sync.py", "--config",
+                                        "unused.yml", "--proxy-vars", "proxy.yml",
+                                        "--proxy-first-install-plan", "--apply"]), \
+             patch.object(mail, "load_config",
+                          side_effect=AssertionError("must not access source")):
+            with self.assertRaisesRegex(mail.SyncError, "AUDIT ONLY"):
+                mail.main()
+
     def test_proxy_adapter_never_transfers_secrets_or_modifies_mail_timer(self):
         text = (ROOT / "scripts/tls_proxy_target.py").read_text()
         for name in ("subprocess.run", "StrictHostKeyChecking", "HostKeyAlias",
