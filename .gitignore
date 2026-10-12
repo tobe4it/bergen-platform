@@ -31,3 +31,6 @@ ansible/vars/paperless.local.yml
 ansible/group_vars/all/bergen-paperless.yml
 ansible/vars/paperless.vault.yml
 ansible/vars/paperless.vault.yml.*
+
+# Site-specific NAS scan paths and principal assignments
+ansible/vars/paperless.scan-ingest.local.yml
