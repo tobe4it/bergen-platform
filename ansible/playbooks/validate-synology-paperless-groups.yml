@@ -1,0 +1,30 @@
+---
+- name: Validate shared Paperless group ACLs on Synology
+  hosts: all
+  gather_facts: false
+  become: true
+
+  pre_tasks:
+    - name: Require explicit runtime test approval
+      ansible.builtin.assert:
+        that:
+          - inventory_hostname == 'ldap.thebergens.net'
+          - synology_paperless_groups_validation_approved | default(false) | bool
+          - not ansible_check_mode
+        fail_msg: Group file-write test requires exact NAS and approval
+
+  tasks:
+    - name: Read-only group ACL preflight
+      ansible.builtin.include_role:
+        name: synology_paperless_groups
+        tasks_from: preflight
+
+    - name: Validate effective group ACLs using temporary files
+      ansible.builtin.include_role:
+        name: synology_paperless_groups
+        tasks_from: validate
+
+    - name: Recheck final group ACLs
+      ansible.builtin.include_role:
+        name: synology_paperless_groups
+        tasks_from: preflight
