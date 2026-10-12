@@ -22,3 +22,7 @@ ansible/vars/mail-tls.local.yml
 ansible/vars/selfhost-acme.local.vault.yml
 ansible/vars/selfhost-acme.local.yml
 ansible/vars/selfhost-acme.vault.yml
+
+# Site-specific Proxmox backup target and NFS export; never commit live details.
+ansible/vars/paperless-backup.local.yml
+ansible/vars/paperless-backup.local.yml.*
