@@ -327,6 +327,7 @@ def perform_sync(cfg, args, src_host, src_user, dst_host, dst_user):
                     q(stage + "/privkey.pem") + "; rmdir -- " + q(stage))
         except SyncError:
             print("WARNING: Restricted staging directory requires manual cleanup", file=sys.stderr)
+    return source_fp, source_expiry
 
 
 if __name__ == "__main__":
