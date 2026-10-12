@@ -56,9 +56,9 @@ ansible-playbook -i ansible/inventory.local.yml \
 Inspect next execution, service status and logs:
 
 ```bash
-ssh root@192.168.20.133 'systemctl list-timers --all bergen-paperless-vzdump.timer'
-ssh root@192.168.20.133 'systemctl status bergen-paperless-vzdump.timer --no-pager'
-ssh root@192.168.20.133 'journalctl -u bergen-paperless-vzdump.service -n 100 --no-pager'
+ssh root@YOUR_PROXMOX_ADDRESS 'systemctl list-timers --all bergen-paperless-vzdump.timer'
+ssh root@YOUR_PROXMOX_ADDRESS 'systemctl status bergen-paperless-vzdump.timer --no-pager'
+ssh root@YOUR_PROXMOX_ADDRESS 'journalctl -u bergen-paperless-vzdump.service -n 100 --no-pager'
 ```
 
 Check the Proxmox VZDump notification target and a real scheduled execution.
