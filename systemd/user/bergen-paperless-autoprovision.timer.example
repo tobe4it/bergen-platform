@@ -3,7 +3,7 @@ Description=Daily Synology Paperless LDAP home reconciliation
 Documentation=man:systemd.timer(5)
 
 [Timer]
-OnCalendar=*-*-* 05:00:00
+OnCalendar=*-*-* 05:00:00 Europe/Berlin
 RandomizedDelaySec=30m
 Persistent=true
 Unit=bergen-paperless-autoprovision.service
