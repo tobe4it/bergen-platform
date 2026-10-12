@@ -1,0 +1,107 @@
+---
+- name: Read-only fail-closed preflight for shared Synology Paperless inputs
+  ansible.builtin.raw: |
+    set -eu
+    ROOT=/volume1/paperless-scan
+    ACL=/usr/syno/bin/synoacltool
+    CFG=/etc/samba/smb.share.conf
+    SYNC=paperless-sync
+    OLD='group:Familie@bergen.intern:allow:rwxpdDaARWc--:fd--'
+    NEW='group:Familie@bergen.intern:allow:r-x---a-R-c--:----'
+    ADMIN='group:administrators:allow:rwxpdDaARWc--:fd--'
+    LDAPADMIN='group:administrators@bergen.intern:allow:rwxpdDaARWc--:fd--'
+    SERVICE='user:paperless-sync:allow:rwxpdDaARWc--:fd--'
+
+    fail() { echo "GROUP_PREFLIGHT_FAIL: $*" >&2; exit 1; }
+
+    [ -x "$ACL" ] || fail "synoacltool missing"
+    [ -f "$CFG" ] || fail "SMB share configuration missing"
+    [ -d "$ROOT" ] && [ ! -L "$ROOT" ] || fail "missing or symlinked root"
+    [ "$(stat -c '%u' "$ROOT")" = 0 ] || fail "root must be owned by uid 0"
+    id "$SYNC" >/dev/null 2>&1 || fail "sync principal unresolved"
+    case " $(id -nG "$SYNC") " in
+      *" administrators "*) fail "sync account is administrator";;
+    esac
+
+    smbpath=$(awk '
+      /^\[[^]]+\]/ { active=($0=="[paperless-scan]"); next }
+      active && /^[[:space:]]*path[[:space:]]*=/ {
+        sub(/^[^=]*=[[:space:]]*/, "")
+        sub(/[[:space:]]*$/, "")
+        print
+        exit
+      }' "$CFG")
+    [ "$smbpath" = "$ROOT" ] || fail "SMB share points elsewhere"
+
+    archive=$("$ACL" -get-archive "$ROOT") || fail "cannot read root archive"
+    case "$archive" in
+      *is_inherit*) fail "root ACL must be direct";;
+      *has_ACL*) ;;
+      *) fail "root lacks ACL";;
+    esac
+
+    rootacl=$("$ACL" -get "$ROOT") || fail "cannot read root ACL"
+    count=$(printf '%s\n' "$rootacl" |
+      grep -cE '^[[:space:]]*\[[0-9]+\]' || true)
+    [ "$count" -eq 4 ] || fail "root must have exactly four ACL entries"
+    for ace in "$ADMIN" "$LDAPADMIN" "$SERVICE"; do
+      printf '%s\n' "$rootacl" |
+        grep -Fq "$ace (level:0)" || fail "root ACL missing $ace"
+    done
+
+    if printf '%s\n' "$rootacl" |
+      grep -Fq "$OLD (level:0)"; then
+      state=legacy
+      # Require exact index for a subsequent guarded -replace, not just set membership.
+      printf '%s\n' "$rootacl" |
+        grep -Eq '^[[:space:]]*\[3\] group:Familie@bergen\.intern:allow:rwxpdDaARWc--:fd-- \(level:0\)$' ||
+        fail "legacy family ACE is not at expected index 3"
+    elif printf '%s\n' "$rootacl" |
+      grep -Fq "$NEW (level:0)"; then
+      state=hardened
+    else
+      fail "root Familie ACL is neither known legacy nor reviewed hardened entry"
+    fi
+
+    for group in Eltern Familie; do
+      dir="$ROOT/$group"
+      if [ -e "$dir" ] || [ -L "$dir" ]; then
+        [ -d "$dir" ] && [ ! -L "$dir" ] ||
+          fail "$group is not a real directory"
+        [ "$state" = hardened ] ||
+          fail "unsafe: group directory exists under legacy root ACL"
+        [ "$(stat -c '%u' "$dir")" = 0 ] ||
+          fail "$group directory owner must be uid 0"
+        childarchive=$("$ACL" -get-archive "$dir") ||
+          fail "cannot inspect $group archive"
+        case "$childarchive" in
+          *is_inherit*) fail "$group inherits broad root permissions";;
+          *has_ACL*) ;;
+          *) fail "$group has no ACL";;
+        esac
+        childacl=$("$ACL" -get "$dir") ||
+          fail "cannot inspect $group ACL"
+        childcount=$(printf '%s\n' "$childacl" |
+          grep -cE '^[[:space:]]*\[[0-9]+\]' || true)
+        [ "$childcount" -eq 3 ] ||
+          fail "$group must have exactly three direct entries"
+        for ace in \
+          "$ADMIN" "$SERVICE" \
+          "group:$group@bergen.intern:allow:rwxpdDaARWc--:fd--"; do
+          printf '%s\n' "$childacl" |
+            grep -Fq "$ace (level:0)" ||
+            fail "$group missing expected ACL: $ace"
+        done
+        echo "PRESENT: $group"
+      else
+        echo "MISSING: $group"
+      fi
+    done
+    echo "GROUP_PREFLIGHT_PASS root=$state"
+  register: synology_paperless_groups_preflight
+  changed_when: false
+  check_mode: false
+
+- name: Show shared-folder preflight
+  ansible.builtin.debug:
+    var: synology_paperless_groups_preflight.stdout_lines
