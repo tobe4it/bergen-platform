@@ -92,6 +92,9 @@ class SharedProxyAuditTests(unittest.TestCase):
             "mail_tls_source_address": "mx.example.invalid",
             "mail_tls_source_ssh_user": "operator",
             "mail_tls_target_inventory_host": "mail",
+            "mail_tls_expected_fqdn": "mail.example.invalid",
+            "mail_tls_target_cert_file": "/etc/ssl/certs/mail.pem",
+            "mail_tls_target_key_file": "/etc/ssl/private/mail.pem",
         }
         now = datetime(2026, 12, 22, tzinfo=timezone.utc)
         with patch.object(sys, "argv", ["mail_tls_sync.py", "--config", "unused.yml"]), \
