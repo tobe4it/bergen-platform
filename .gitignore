@@ -26,3 +26,9 @@ ansible/vars/selfhost-acme.vault.yml
 # Site-specific Proxmox backup target and NFS export; never commit live details.
 ansible/vars/paperless-backup.local.yml
 ansible/vars/paperless-backup.local.yml.*
+
+# Paperless deployment secrets from the separate private backend work
+ansible/vars/paperless.local.yml
+ansible/group_vars/all/bergen-paperless.yml
+ansible/vars/paperless.vault.yml
+ansible/vars/paperless.vault.yml.*
