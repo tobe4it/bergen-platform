@@ -202,3 +202,36 @@ def audit_proxy_target(mail_cfg, source_fp, source_expiry,
     print("PROXY TLS: installed expiry UTC " + expiry.isoformat())
     print("PROXY TLS: AUDIT_ONLY; no files transferred or services changed")
     return decision
+
+
+def plan_proxy_first_install(mail_cfg, proxy_vars, local_inventory,
+                             shared_inventory, audited_status):
+    """Read-only gate before designing a separately authorized first install.
+
+    Not a deployment operation. Existing Mail TLS distribution is unaffected.
+    """
+    import mail_tls_sync as sync
+
+    if audited_status != "MISSING_EXPECTED_FIRST_INSTALL":
+        raise ProxyAuditError("Refusing first-install plan: destination is not empty")
+    config = load_restricted_yaml(proxy_vars)
+    guest, pve, vmid, _names = checked_target(
+        mail_cfg, config, inventory_children(local_inventory),
+        inventory_children(shared_inventory))
+    ssh = proxy_ssh_arguments(sync, guest, pve, vmid)
+    # This verifies the target is still empty and Nginx is neither installed
+    # nor active. A later, separately approved activation must recheck atomically.
+    command = (
+        "set -eu; "
+        "test ! -x /usr/sbin/nginx; "
+        "test ! -x /usr/bin/nginx; "
+        "! systemctl is-active --quiet nginx; "
+        "test ! -e /etc/nginx/tls/fullchain.pem; "
+        "test ! -L /etc/nginx/tls/fullchain.pem; "
+        "test ! -e /etc/nginx/tls/privkey.pem; "
+        "test ! -L /etc/nginx/tls/privkey.pem"
+    )
+    checked_remote(sync, ssh, command)
+    print("PROXY TLS: FIRST_INSTALL_PREFLIGHT_PASS")
+    print("PROXY TLS: PLAN_ONLY; no certificate transfer, file writes or Nginx change")
+    return "FIRST_INSTALL_PREFLIGHT_PASS"

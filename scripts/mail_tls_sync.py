@@ -264,10 +264,14 @@ def main():
                         help="Ignored inventory with verified guest SSH transport")
     parser.add_argument("--proxy-pve-inventory", type=Path,
                         default=Path("ansible/inventory.yml"))
+    parser.add_argument("--proxy-first-install-plan", action="store_true",
+                        help="Additional read-only preflight for a future proxy first install")
     args = parser.parse_args()
     # Never allow --apply to imply that a new proxy target may be modified.
     if args.proxy_vars is not None and args.apply:
         raise SyncError("Proxy extension is AUDIT ONLY; --apply is refused")
+    if args.proxy_first_install_plan and args.proxy_vars is None:
+        raise SyncError("--proxy-first-install-plan requires --proxy-vars")
     cfg = load_config(args.config)
     src_host = cfg["mail_tls_source_address"]
     src_user = cfg["mail_tls_source_ssh_user"]
@@ -279,11 +283,16 @@ def main():
         source_fp, source_expiry = perform_sync(
             cfg, args, src_host, src_user, dst_host, dst_user)
         if args.proxy_vars is not None:
-            from tls_proxy_target import ProxyAuditError, audit_proxy_target
+            from tls_proxy_target import (
+                ProxyAuditError, audit_proxy_target, plan_proxy_first_install)
             try:
-                audit_proxy_target(
+                result = audit_proxy_target(
                     cfg, source_fp, source_expiry, args.proxy_vars,
                     args.proxy_local_inventory, args.proxy_pve_inventory)
+                if args.proxy_first_install_plan:
+                    plan_proxy_first_install(
+                        cfg, args.proxy_vars, args.proxy_local_inventory,
+                        args.proxy_pve_inventory, result)
             except ProxyAuditError as exc:
                 raise SyncError(f"Read-only proxy TLS audit failed: {exc}") from exc
 
