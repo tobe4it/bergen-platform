@@ -39,6 +39,11 @@ reachable by default.
 - The intended effective `Familie` membership is the four human accounts,
   but that result **cannot** be inferred from `memberUid` alone; verify
   `Kinder` membership read-only and test the transitive result.
+- Verified `Kinder` (GID 1000006): `member` and `memberUid` list
+  `uid=nils` and `uid=Linda`. Thus the effective LDAP family membership is
+  **thomas, nadja, nils, Linda** by expansion of `Eltern` and `Kinder`.
+  Note: this confirms the LDAP source data, **not** the future authentik
+  or Paperless OIDC group claim.
 - Configure authentik LDAP source with `Group membership field=member`,
   `User membership attribute=distinguishedName`, `Sync Group Parents`
   enabled (subject to pinned-version test). The `memberUid/uid` shortcut
