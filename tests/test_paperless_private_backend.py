@@ -15,7 +15,7 @@ class PaperlessPrivateBackendTests(unittest.TestCase):
     def test_yaml_sources_parse_without_side_effects(self):
         for path in (PLAYBOOK, PREFLIGHT, ROLE / "defaults/main.yml",
                      ROLE / "tasks/main.yml",
-                     ROOT / "ansible/group_vars/all/paperless.example.yml"):
+                     ROOT / "docs/examples/paperless.local.example.yml"):
             self.assertTrue(yaml.safe_load(path.read_text()), str(path))
 
     def test_unapproved_by_default(self):
