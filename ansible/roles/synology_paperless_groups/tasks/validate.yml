@@ -1,0 +1,115 @@
+---
+- name: Runtime verification of shared Paperless group directory ACLs
+  ansible.builtin.raw: |
+    set -eu
+    umask 077
+    ROOT=/volume1/paperless-scan
+    ACL=/usr/syno/bin/synoacltool
+    marker=
+    probe=
+
+    fail() { echo "GROUP_RUNTIME_FAIL: $*" >&2; exit 1; }
+    cleanup() {
+      [ -z "$marker" ] || rm -f "$marker"
+      [ -z "$probe" ] || {
+        [ ! -d "$probe" ] || rmdir "$probe" ||
+          echo "GROUP_RUNTIME_CLEANUP_FAILED: $probe" >&2
+      }
+    }
+    trap cleanup EXIT
+
+    [ -d "$ROOT/Eltern" ] && [ ! -L "$ROOT/Eltern" ] ||
+      fail "Eltern path not a directory"
+    [ -d "$ROOT/Familie" ] && [ ! -L "$ROOT/Familie" ] ||
+      fail "Familie path not a directory"
+
+    rootacl=$("$ACL" -get "$ROOT")
+    printf '%s\n' "$rootacl" |
+      grep -Fq 'group:Familie@bergen.intern:allow:r-x---a-R-c--:---- (level:0)' ||
+      fail "root has not been hardened"
+
+    echo "=== Root delete-child negative test ==="
+    probe=$(mktemp -d "$ROOT/.bergen-root-delete-probe.XXXXXXXX")
+    for child in nils Linda; do
+      principal="$child@bergen.intern"
+      if sudo -n -u "$principal" rmdir "$probe" >/dev/null 2>&1; then
+        fail "$principal can delete entries from shared root"
+      fi
+      [ -d "$probe" ] || fail "probe unexpectedly removed"
+      echo "ROOT_DELETE_DENIED: $child"
+    done
+    rmdir "$probe"
+    probe=
+
+    for group in Eltern Familie; do
+      echo "=== $group ==="
+      dir="$ROOT/$group"
+      marker="$dir/.bergen-group-access-$$"
+      [ ! -e "$marker" ] && [ ! -L "$marker" ] ||
+        fail "test file already exists"
+      sudo -n -u thomas@bergen.intern \
+        sh -c 'umask 077; printf "GROUP_ACL_TEST\n" > "$1"' \
+        sh "$marker" || fail "Thomas cannot create in $group"
+
+      # Confirm actual inherited ACL, not only directory-level access.
+      archive=$("$ACL" -get-archive "$marker")
+      case "$archive" in
+        *is_inherit*) ;;
+        *) fail "$group file did not inherit Synology ACL";;
+      esac
+
+      sudo -n -u paperless-sync \
+        grep -qx GROUP_ACL_TEST "$marker" ||
+        fail "sync cannot read $group file"
+
+      if [ "$group" = Eltern ]; then
+        allowed='thomas nadja'
+        denied='nils Linda'
+      else
+        allowed='thomas nadja nils Linda'
+        denied=''
+      fi
+
+      for person in $allowed; do
+        principal="$person@bergen.intern"
+        sudo -n -u "$principal" \
+          grep -qx GROUP_ACL_TEST "$marker" ||
+          fail "$person cannot read $group file"
+        sudo -n -u "$principal" test -w "$dir" ||
+          fail "$person cannot write in $group"
+        echo "GROUP_ALLOW_PASS: $group $person"
+      done
+
+      for person in $denied; do
+        principal="$person@bergen.intern"
+        if sudo -n -u "$principal" \
+          cat "$marker" >/dev/null 2>&1; then
+          fail "$person can read $group file"
+        fi
+        if sudo -n -u "$principal" \
+          sh -c 'printf X >> "$1"' sh "$marker" 2>/dev/null; then
+          fail "$person can change $group file"
+        fi
+        deniedfile="$dir/.bergen-denied-$person-$$"
+        if sudo -n -u "$principal" \
+          sh -c 'printf X > "$1"' sh "$deniedfile" 2>/dev/null; then
+          rm -f "$deniedfile"
+          fail "$person can create files in $group"
+        fi
+        echo "GROUP_DENY_PASS: $group $person"
+      done
+
+      sudo -n -u paperless-sync rm "$marker" ||
+        fail "sync cannot consume/remove $group test file"
+      marker=
+      echo "GROUP_RUNTIME_PASS: $group"
+    done
+
+    echo GROUP_RUNTIME_ALL_PASS
+  register: synology_paperless_groups_validation
+  changed_when: false
+  check_mode: false
+
+- name: Show shared-folder runtime ACL validation
+  ansible.builtin.debug:
+    var: synology_paperless_groups_validation.stdout_lines
