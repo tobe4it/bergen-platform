@@ -18,6 +18,16 @@ class PaperlessPrivateBackendTests(unittest.TestCase):
                      ROOT / "docs/examples/paperless.local.example.yml"):
             self.assertTrue(yaml.safe_load(path.read_text()), str(path))
 
+    def test_role_task_list_is_unique_and_postgres_validation_complete(self):
+        tasks = yaml.safe_load((ROLE / "tasks/main.yml").read_text())
+        names = [task["name"] for task in tasks]
+        self.assertEqual(len(names), 10)
+        self.assertEqual(len(names), len(set(names)))
+        assertions = tasks[0]["ansible.builtin.assert"]["that"]
+        self.assertTrue(any("paperless_postgres_image.split" in x
+                            and "match(" in x and "$" in x for x in assertions))
+        self.assertEqual(tasks[-1]["ansible.builtin.debug"]["msg"]["backup_required"], True)
+
     def test_unapproved_by_default(self):
         data = yaml.safe_load((ROLE / "defaults/main.yml").read_text())
         self.assertIs(data["paperless_deployment_approved"], False)
