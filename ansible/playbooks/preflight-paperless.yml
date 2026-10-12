@@ -1,0 +1,109 @@
+---
+# Read-only cluster-wide assessment before any Paperless LXC provisioning.
+# Credentials and real site identities must only be supplied from ignored vars.
+- name: Validate proposed isolated Paperless backend
+  hosts: localhost
+  gather_facts: false
+  tasks:
+    - name: Require explicit infrastructure and isolated backend plan
+      ansible.builtin.assert:
+        that:
+          - pve_node is defined
+          - pve_inventory_host is defined
+          - lxc_vmid is defined
+          - lxc_hostname is defined
+          - lxc_template is defined
+          - lxc_storage is defined
+          - lxc_bridge is defined
+          - lxc_cores is defined
+          - lxc_memory is defined
+          - lxc_rootfs_size is defined
+          - lxc_unprivileged is defined
+          - lxc_firewall is defined
+          - pve_node | length > 0
+          - lxc_hostname is match('^[a-z][a-z0-9-]{1,62}$')
+          - lxc_vmid | int >= 100
+          - lxc_unprivileged | bool
+          - lxc_firewall | int == 1
+          - lxc_cores | int >= 2
+          - lxc_memory | int >= 2048
+          - lxc_rootfs_size | int >= 16
+          - lxc_bridge is match('^[A-Za-z0-9_.-]+$')
+          - lxc_storage is match('^[A-Za-z0-9_.-]+$')
+          - lxc_template is match('^[A-Za-z0-9_.-]+:vztmpl/[A-Za-z0-9_.-]+[.]tar[.](zst|gz|xz)$')
+          - paperless_deployment_approved | default(false) | bool == false
+        fail_msg: >-
+          Refusing Paperless preflight: provide an unprivileged, firewalled LXC
+          with at least 2 cores, 2048 MiB RAM, 16 GiB system volume. The
+          deployment approval must remain false for planning.
+
+- name: Inspect cluster VMID, storage and bridge without changes
+  hosts: "{{ pve_inventory_host | default('__missing_pve_host__') }}"
+  gather_facts: false
+  become: true
+  tasks:
+    - name: Inspect cluster-wide guest inventory
+      ansible.builtin.command:
+        argv: [pvesh, get, /cluster/resources, --type, vm, --output-format, json]
+      register: paperless_guests
+      changed_when: false
+      check_mode: false
+
+    - name: Require proposed VMID to be unoccupied
+      ansible.builtin.assert:
+        that:
+          - >-
+            (paperless_guests.stdout | from_json
+             | selectattr('vmid', 'equalto', lxc_vmid | int) | list | length) == 0
+        fail_msg: 'The proposed Paperless VMID is already occupied.'
+
+    - name: Confirm bridge exists on the selected Proxmox node
+      ansible.builtin.command:
+        argv: [ip, link, show, dev, "{{ lxc_bridge }}"]
+      changed_when: false
+      check_mode: false
+
+    - name: Inspect available storage
+      ansible.builtin.command:
+        argv: [pvesm, status]
+      register: paperless_storage
+      changed_when: false
+      check_mode: false
+
+    - name: Verify storage is available
+      ansible.builtin.assert:
+        that:
+          - >-
+            paperless_storage.stdout_lines |
+            select('match', '^' ~ (lxc_storage | regex_escape) ~ '\s+\S+\s+active\s+') |
+            list | length == 1
+        fail_msg: 'The selected storage is unavailable.'
+
+    - name: Inspect the requested Debian LXC template
+      ansible.builtin.command:
+        argv: [pvesm, list, "{{ lxc_template.split(':')[0] }}", --content, vztmpl]
+      register: paperless_templates
+      changed_when: false
+      check_mode: false
+
+    - name: Require exact template availability
+      ansible.builtin.assert:
+        that:
+          - >-
+            paperless_templates.stdout_lines |
+            select('match', '^' ~ (lxc_template | regex_escape) ~ '\s+') |
+            list | length == 1
+        fail_msg: 'The selected LXC template was not found.'
+
+    - name: Summarize read-only Paperless infrastructure gate
+      ansible.builtin.debug:
+        msg:
+          state: PREFLIGHT_PASS
+          name: "{{ lxc_hostname }}"
+          vmid: "{{ lxc_vmid }}"
+          node: "{{ pve_node }}"
+          network_bridge: "{{ lxc_bridge }}"
+          storage: "{{ lxc_storage }}"
+          persistent_media: requires_separate_capacity_and_backup_review
+          container_runtime: needs_nesting_keyctl_fuse_review
+          deployment: not_performed

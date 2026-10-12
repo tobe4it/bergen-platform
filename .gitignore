@@ -25,3 +25,7 @@ ansible/vars/selfhost-acme.vault.yml
 
 # Site-specific reverse proxy topology and certificate endpoints
 ansible/group_vars/all/bergen-proxy.yml
+
+# Site-local Paperless LXC identity and application/database secrets
+ansible/group_vars/all/paperless.local.yml
+ansible/group_vars/all/bergen-paperless.yml
