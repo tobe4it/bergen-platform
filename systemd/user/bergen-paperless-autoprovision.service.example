@@ -1,5 +1,5 @@
 [Unit]
-Description=Bergen Paperless - Synology LDAP home provisioning
+Description=Bergen Paperless - personal input provisioning and group ACL audit
 Documentation=man:systemd.service(5)
 Wants=network-online.target
 After=network-online.target
@@ -10,6 +10,10 @@ Type=oneshot
 WorkingDirectory=%h/bergen-platform-paperless-runtime
 
 ExecStart=%h/bergen-platform/.venv/bin/ansible-playbook -i ldap.thebergens.net, -u supervisor --become ansible/playbooks/provision-synology-paperless.yml -e synology_paperless_apply=true
+
+# Read-only; validate shared group folders after personal provisioning.
+# A failed group audit marks this oneshot service failed, without changing group ACLs.
+ExecStart=%h/bergen-platform/.venv/bin/ansible-playbook -i ldap.thebergens.net, -u supervisor --become ansible/playbooks/preflight-synology-paperless-groups.yml
 
 Environment=ANSIBLE_HOST_KEY_CHECKING=True
 
