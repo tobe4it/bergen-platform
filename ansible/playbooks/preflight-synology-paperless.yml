@@ -1,0 +1,8 @@
+---
+- name: Preflight Synology Paperless directories
+  hosts: all
+  gather_facts: false
+  become: true
+
+  roles:
+    - synology_paperless_inputs

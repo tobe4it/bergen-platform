@@ -1,7 +1,7 @@
 # Bergen Paperless: staged Synology iPhone scans and ASN labels
 
-Status: **design and offline preflight only; no NAS integration or ingestion
-has been enabled**. This change builds on the separate Paperless backend draft
+Status: **personal Synology scan inputs provisioned and ACL-tested; Paperless ingestion
+has not been enabled**. This change builds on the separate Paperless backend draft
 (PR #54), not on the Proxmox backup worktree.
 
 ## Access model (not a tagging convention)
@@ -24,7 +24,23 @@ In the currently deployed Paperless configuration, a document without an
 owner can be visible to ordinary users. Consequently a path filter alone is
 **not** a sufficient fail-closed guarantee.
 
-## Proposed flow (not implemented by this change)
+## Verified Synology NAS preparation (2026-10-12)
+
+- Personal Paperless scan directories provisioned for Thomas, Nadja, Nils and Linda.
+- LDAP group `Familie@bergen.intern` determines eligible personal inputs.
+- LDAP administrator and IoT service accounts are excluded.
+- Local DSM service account `paperless-sync` has no administrator privileges.
+- Synology ACLs grant access to the owner, `paperless-sync` and administrators.
+- Cross-user isolation and inherited file permissions verified successfully.
+- Ansible preflight, provisioning and runtime validation passed.
+- Second provisioning run confirmed idempotency (`changed=0`).
+- Real iPhone SMB scan successfully saved and read by `paperless-sync`.
+- Real PDF access denied to all three other tested family users.
+- Shared `Eltern` and `Familie` inputs remain unprovisioned.
+- Automatic provisioning schedule and Paperless importer are not enabled.
+- Paperless document-level ownership and ACL workflows remain unverified.
+
+## Remaining Paperless ingestion workflow
 
 1. iPhone Files -> SMB -> an existing Synology folder with suitable DSM ACLs.
    First verify whether the three logical areas are shares, `homes` or
