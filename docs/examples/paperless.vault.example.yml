@@ -1,0 +1,7 @@
+---
+# DOCUMENTATION EXAMPLE ONLY. Never use or commit actual secret values here.
+# Create ansible/vars/paperless.vault.yml with ansible-vault create.
+# Values below are deliberately invalid placeholders.
+vault_paperless_secret_key: REPLACE_WITH_RANDOM_SECRET_OF_AT_LEAST_50_CHARACTERS
+vault_paperless_db_password: REPLACE_WITH_RANDOM_SECRET_OF_AT_LEAST_24_CHARACTERS
+vault_paperless_admin_password: REPLACE_WITH_RANDOM_SECRET_OF_AT_LEAST_16_CHARACTERS

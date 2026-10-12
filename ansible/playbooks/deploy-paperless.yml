@@ -1,0 +1,39 @@
+---
+# Dedicated, internal-only Paperless backend. Requires an existing reviewed LXC.
+# All site-specific vars are supplied from a Git-ignored file with mode 0600.
+- name: Install Paperless in one explicitly approved isolated LXC
+  hosts: paperless_nodes
+  gather_facts: false
+  become: true
+  serial: 1
+
+  pre_tasks:
+    - name: Require exact isolated target, PCT-mediated SSH and separate approval
+      ansible.builtin.assert:
+        that:
+          - groups['paperless_nodes'] | length == 1
+          - lxc_hostname is defined
+          - inventory_hostname == lxc_hostname
+          - lxc_vmid is defined
+          - lxc_vmid | int >= 100
+          - ansible_ssh_common_args is defined
+          - "'pct_ssh_proxy.py' in ansible_ssh_common_args"
+          - "('HostKeyAlias=lxc-' ~ (lxc_vmid | string)) in ansible_ssh_common_args"
+          - ansible_ssh_common_args is search('--vmid ' ~ (lxc_vmid | string) ~ '([" ]|$)')
+          - "'StrictHostKeyChecking=yes' in ansible_ssh_common_args"
+          - paperless_deployment_approved | default(false) | bool
+        fail_msg: 'Refusing unapproved Paperless install or an unreviewed LXC transport.'
+
+    - name: Collect guest facts after SSH identity validation
+      ansible.builtin.setup:
+
+    - name: Verify dedicated Debian LXC identity
+      ansible.builtin.assert:
+        that:
+          - ansible_facts['os_family'] == 'Debian'
+          - ansible_facts['hostname'] == lxc_hostname
+          - ansible_facts['virtualization_type'] | default('') == 'lxc'
+        fail_msg: 'Refusing unexpected Paperless target OS, hostname or virtualization.'
+
+  roles:
+    - role: paperless
