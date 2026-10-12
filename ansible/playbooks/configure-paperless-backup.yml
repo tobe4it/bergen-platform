@@ -2,7 +2,7 @@
 # Configures ONLY the chosen Proxmox host, never the Paperless guest itself.
 # No timer is enabled without a separate explicit approval flag.
 - name: Manage isolated Bergen Paperless Proxmox backup timer
-  hosts: "{{ paperless_backup_pve_host | default('__no_backup_host_selected__') }}"
+  hosts: "{{ paperless_backup_pve_host | default('__no_backup_host_selected__', true) }}"
   gather_facts: false
   become: true
   serial: 1
