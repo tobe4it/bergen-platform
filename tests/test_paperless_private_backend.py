@@ -28,6 +28,18 @@ class PaperlessPrivateBackendTests(unittest.TestCase):
                             and "match(" in x and "$" in x for x in assertions))
         self.assertEqual(tasks[-1]["ansible.builtin.debug"]["msg"]["backup_required"], True)
 
+    def test_secret_names_are_vault_prefixed_and_documented(self):
+        example = yaml.safe_load((
+            ROOT / "docs/examples/paperless.vault.example.yml").read_text())
+        self.assertEqual(set(example), {
+            "vault_paperless_secret_key",
+            "vault_paperless_db_password",
+            "vault_paperless_admin_password",
+        })
+        documentation = (ROOT / "docs/PAPERLESS-BACKEND.md").read_text()
+        self.assertIn("ansible-vault create", documentation)
+        self.assertIn("--ask-vault-pass", documentation)
+
     def test_unapproved_by_default(self):
         data = yaml.safe_load((ROLE / "defaults/main.yml").read_text())
         self.assertIs(data["paperless_deployment_approved"], False)
@@ -53,9 +65,20 @@ class PaperlessPrivateBackendTests(unittest.TestCase):
             self.assertIn(path, tasks)
         self.assertIn("mode: '0600'", tasks)
         self.assertIn("no_log: true", tasks)
-        self.assertNotIn("paperless_secret_key:", (ROLE / "defaults/main.yml").read_text())
-        for name in ("PAPERLESS_SECRET_KEY", "PAPERLESS_DBPASS", "PAPERLESS_ADMIN_PASSWORD"):
-            self.assertIn(name, (ROLE / "templates/paperless.env.j2").read_text())
+        defaults = (ROLE / "defaults/main.yml").read_text()
+        tasks = (ROLE / "tasks/main.yml").read_text()
+        for name in ("vault_paperless_secret_key", "vault_paperless_db_password",
+                     "vault_paperless_admin_password"):
+            self.assertNotIn(name + ":", defaults)
+            self.assertIn(name + " is defined", tasks)
+        app_env = (ROLE / "templates/paperless.env.j2").read_text()
+        pg_env = (ROLE / "templates/postgres.env.j2").read_text()
+        for name in ("vault_paperless_secret_key", "vault_paperless_db_password",
+                     "vault_paperless_admin_password"):
+            self.assertTrue(name in app_env or name in pg_env)
+        for name in ("PAPERLESS_SECRET_KEY", "PAPERLESS_DBPASS",
+                     "PAPERLESS_ADMIN_PASSWORD"):
+            self.assertIn(name, app_env)
 
     def test_separate_start_gate_and_target_pinning(self):
         tasks = (ROLE / "tasks/main.yml").read_text()
@@ -78,6 +101,9 @@ class PaperlessPrivateBackendTests(unittest.TestCase):
             self.assertNotIn("BEGIN PRIVATE KEY", contents, str(path))
         ignore = IGNORE.read_text()
         self.assertIn("ansible/vars/paperless.local.yml", ignore)
+        self.assertIn("ansible/vars/paperless.vault.yml", ignore)
+        self.assertNotIn("paperless_secret_key:", (
+            ROOT / "docs/examples/paperless.local.example.yml").read_text())
         self.assertIn("ansible/group_vars/all/bergen-paperless.yml", ignore)
 
     def test_template_syntax_compiles(self):

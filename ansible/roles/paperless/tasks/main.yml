@@ -7,10 +7,10 @@
       - paperless_postgres_image is defined
       - paperless_redis_image is defined
       - paperless_url is defined
-      - paperless_secret_key is defined
-      - paperless_db_password is defined
+      - vault_paperless_secret_key is defined
+      - vault_paperless_db_password is defined
       - paperless_admin_user is defined
-      - paperless_admin_password is defined
+      - vault_paperless_admin_password is defined
       - paperless_listen_address == '127.0.0.1'
       - paperless_listen_port | int == 8000
       - paperless_image is match('^ghcr[.]io/paperless-ngx/paperless-ngx:[A-Za-z0-9][A-Za-z0-9._-]+$')
@@ -22,9 +22,9 @@
       - "'REPLACE' not in paperless_redis_image"
       - "paperless_postgres_image.split(':')[-1] is match('^17[.][0-9]+([.-][A-Za-z0-9_-]+)?$')"
       - paperless_url is match('^https://[A-Za-z0-9-]+([.][A-Za-z0-9-]+)+$')
-      - paperless_secret_key | length >= 50
-      - paperless_db_password | length >= 24
-      - paperless_admin_password | length >= 16
+      - vault_paperless_secret_key | length >= 50
+      - vault_paperless_db_password | length >= 24
+      - vault_paperless_admin_password | length >= 16
       - paperless_admin_user is match('^[A-Za-z0-9_][A-Za-z0-9_-]{1,31}$')
     fail_msg: >-
       Refusing Paperless deployment: set explicit approvals, immutable-reviewed

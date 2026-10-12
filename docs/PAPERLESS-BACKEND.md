@@ -16,7 +16,8 @@ with a private Podman bridge and three Quadlets:
 
 Dedicated bind-mounts under `/srv/bergen-paperless` persist database,
 Redis, data, media, consumption, and export volumes. Root-only `0600`
-configuration files contain database and app secrets. Applications are NOT
+configuration files contain database and app secrets; their source of truth
+is the separate, Ansible-Vault-encrypted local file. Applications are NOT
 started until separately approved.
 
 **Important:** 127.0.0.1 is local to the Paperless LXC. The Nginx proxy in a
@@ -37,9 +38,39 @@ Debian template, storage pool, bridge, CPU and memory. Review data capacity
 and backup storage explicitly; the 16 GiB rootfs gate is a minimum, not a
 recommendation for document archive capacity.
 
-Use the checked-in example under docs/examples/paperless.local.example.yml as a reference, but put all real infrastructure
-and secrets into the Git-ignored, chmod-0600
-`ansible/vars/paperless.local.yml` file. Before live deployment,
+Use the checked-in example under `docs/examples/paperless.local.example.yml`
+for non-secret infrastructure variables in the Git-ignored mode-0600
+`ansible/vars/paperless.local.yml`. **No credentials belong in that file.**
+
+Create the separate encrypted file with Ansible Vault (the existing
+`ansible/group_vars/all/vault.yml` and existing service secrets stay untouched):
+
+```bash
+cd ~/bergen-platform
+umask 077
+ansible-vault create ansible/vars/paperless.vault.yml
+```
+
+Enter the three keys shown in
+`docs/examples/paperless.vault.example.yml` with independently generated,
+high-entropy values. Use `ansible-vault edit` for later changes; never
+temporarily decrypt the file on disk. Verify its header is
+`$ANSIBLE_VAULT;...` and protect it with mode 0600.
+
+The read-only Proxmox preflight uses **only** `paperless.local.yml` and
+does not load the Paperless Vault. Later explicitly approved deployment
+must load both variable sources:
+
+```bash
+ansible-playbook -i ansible/inventory.yml -i ansible/inventory.local.yml \
+  ansible/playbooks/deploy-paperless.yml \
+  -e @ansible/vars/paperless.local.yml \
+  -e @ansible/vars/paperless.vault.yml \
+  --ask-vault-pass
+```
+
+The command above is a **future** deployment step, not authorized by
+this draft. The current deployment flags remain false. Before live deployment,
 add exactly one `paperless_nodes` host to
 `ansible/inventory.local.yml` with verified, pinned PCT-mediated SSH
 transport similar to `bergen-proxy`. Do not reuse VMID 125.
@@ -65,8 +96,9 @@ undersized VM resources.
    reviewed for rootful Podman inside an unprivileged LXC.
 2. Validate real tagged versions of Paperless, PostgreSQL 17.x and Redis
    against upstream release notes and selected image architecture.
-3. Generate secrets only into the local ignored file. Use
-   `chmod 600`, and keep the LXC vars out of Git.
+3. Generate secrets only inside the **encrypted Vault file** and keep
+   infrastructure in the separate ignored local file; never print secrets
+   in task outputs, CI logs or terminal transcripts.
 4. Review LXC creation, secure transport and Ubuntu/Debian packages before
    granting `paperless_deployment_approved: true`.
 5. Review the generated Quadlets and systemd services with
