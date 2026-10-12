@@ -1,0 +1,19 @@
+[Unit]
+Description=Bergen Paperless Redis
+Wants=network-online.target
+After=network-online.target
+
+[Container]
+Image={{ paperless_redis_image }}
+ContainerName=bergen-paperless-redis
+Network=bergen-paperless.network
+Volume={{ paperless_service_root }}/redis:/data
+Exec=redis-server --appendonly yes
+NoNewPrivileges=true
+
+[Service]
+Restart=always
+TimeoutStartSec=300
+
+[Install]
+WantedBy=multi-user.target

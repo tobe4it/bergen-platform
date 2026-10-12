@@ -1,0 +1,19 @@
+[Unit]
+Description=Bergen Paperless PostgreSQL
+Wants=network-online.target
+After=network-online.target
+
+[Container]
+Image={{ paperless_postgres_image }}
+ContainerName=bergen-paperless-db
+Network=bergen-paperless.network
+EnvironmentFile={{ paperless_config_dir }}/postgres.env
+Volume={{ paperless_service_root }}/postgres:/var/lib/postgresql/data
+NoNewPrivileges=true
+
+[Service]
+Restart=always
+TimeoutStartSec=300
+
+[Install]
+WantedBy=multi-user.target

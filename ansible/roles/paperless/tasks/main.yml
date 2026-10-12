@@ -1,0 +1,123 @@
+---
+- name: Reject deployment without explicit site-reviewed authorization
+  ansible.builtin.assert:
+    that:
+      - paperless_deployment_approved | bool
+      - paperless_image is defined
+      - paperless_postgres_image is defined
+      - paperless_redis_image is defined
+      - paperless_url is defined
+      - paperless_secret_key is defined
+      - paperless_db_password is defined
+      - paperless_admin_user is defined
+      - paperless_admin_password is defined
+      - paperless_listen_address == '127.0.0.1'
+      - paperless_listen_port | int == 8000
+      - paperless_image is match('^ghcr[.]io/paperless-ngx/paperless-ngx:[A-Za-z0-9][A-Za-z0-9._-]+$')
+      - paperless_postgres_image is match('^docker[.]io/library/postgres:[A-Za-z0-9][A-Za-z0-9._-]+$')
+      - paperless_redis_image is match('^docker[.]io/library/redis:[A-Za-z0-9][A-Za-z0-9._-]+$')
+      - "'latest' not in [paperless_image.split(':')[-1], paperless_postgres_image.split(':')[-1], paperless_redis_image.split(':')[-1]]"
+      - paperless_url is match('^https://[A-Za-z0-9-]+([.][A-Za-z0-9-]+)+$')
+      - paperless_secret_key | length >= 50
+      - paperless_db_password | length >= 24
+      - paperless_admin_password | length >= 16
+      - paperless_admin_user is match('^[A-Za-z0-9_][A-Za-z0-9_-]{1,31}$')
+    fail_msg: >-
+      Refusing Paperless deployment: set explicit approvals, immutable-reviewed
+      image tags, HTTPS hostname and site-local strong credentials. Initial
+      backend binding is loopback-only; WAN/LAN access is not enabled.
+  no_log: true
+
+- name: Install Podman and host dependencies
+  ansible.builtin.apt:
+    name:
+      - podman
+      - uidmap
+      - fuse-overlayfs
+      - slirp4netns
+    state: present
+    update_cache: true
+    cache_valid_time: 3600
+
+- name: Create protected service and persistent application directories
+  ansible.builtin.file:
+    path: "{{ item.path }}"
+    state: directory
+    owner: "{{ item.uid }}"
+    group: "{{ item.gid }}"
+    mode: "{{ item.mode }}"
+  loop:
+    - { path: "{{ paperless_service_root }}", uid: root, gid: root, mode: '0755' }
+    - { path: "{{ paperless_service_root }}/postgres", uid: "{{ paperless_postgres_uid }}", gid: "{{ paperless_postgres_uid }}", mode: '0700' }
+    - { path: "{{ paperless_service_root }}/redis", uid: "{{ paperless_redis_uid }}", gid: "{{ paperless_redis_uid }}", mode: '0700' }
+    - { path: "{{ paperless_service_root }}/data", uid: "{{ paperless_uid }}", gid: "{{ paperless_gid }}", mode: '0750' }
+    - { path: "{{ paperless_service_root }}/media", uid: "{{ paperless_uid }}", gid: "{{ paperless_gid }}", mode: '0750' }
+    - { path: "{{ paperless_service_root }}/consume", uid: "{{ paperless_uid }}", gid: "{{ paperless_gid }}", mode: '0750' }
+    - { path: "{{ paperless_service_root }}/export", uid: "{{ paperless_uid }}", gid: "{{ paperless_gid }}", mode: '0750' }
+    - { path: "{{ paperless_config_dir }}", uid: root, gid: root, mode: '0700' }
+    - { path: "{{ paperless_quadlet_dir }}", uid: root, gid: root, mode: '0755' }
+
+- name: Render protected Paperless environment
+  ansible.builtin.template:
+    src: paperless.env.j2
+    dest: "{{ paperless_config_dir }}/paperless.env"
+    owner: root
+    group: root
+    mode: '0600'
+  no_log: true
+  register: paperless_env_changed
+
+- name: Render protected PostgreSQL environment
+  ansible.builtin.template:
+    src: postgres.env.j2
+    dest: "{{ paperless_config_dir }}/postgres.env"
+    owner: root
+    group: root
+    mode: '0600'
+  no_log: true
+  register: paperless_postgres_env_changed
+
+- name: Render private Podman network and service Quadlets
+  ansible.builtin.template:
+    src: "{{ item }}.j2"
+    dest: "{{ paperless_quadlet_dir }}/{{ item }}"
+    owner: root
+    group: root
+    mode: '0644'
+  loop:
+    - bergen-paperless.network
+    - bergen-paperless-db.container
+    - bergen-paperless-redis.container
+    - bergen-paperless.container
+  register: paperless_quadlets_changed
+
+- name: Register Paperless Quadlet services without starting them
+  ansible.builtin.systemd:
+    daemon_reload: true
+
+- name: Start PostgreSQL and Redis only when separately approved
+  ansible.builtin.systemd:
+    name: "{{ item }}"
+    enabled: true
+    state: started
+  loop:
+    - bergen-paperless-db.service
+    - bergen-paperless-redis.service
+  when: paperless_start_approved | bool
+
+- name: Start Paperless only when separately approved
+  ansible.builtin.systemd:
+    name: bergen-paperless.service
+    enabled: true
+    state: started
+  when: paperless_start_approved | bool
+
+- name: Explain the limited initial deployment boundary
+  ansible.builtin.debug:
+    msg:
+      state: "{{ 'started' if paperless_start_approved | bool else 'installed_not_started' }}"
+      backend_endpoint: "127.0.0.1:8000"
+      access: localhost_only
+      certificates: not_managed_here
+      proxy_enrollment: disabled
+      backup_required: true

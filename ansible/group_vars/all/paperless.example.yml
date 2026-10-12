@@ -1,0 +1,15 @@
+---
+# EXAMPLE ONLY: copy to a Git-ignored, mode-0600 site-specific vars file.
+# Do not commit real hostnames, secrets, IPs or inventory identity.
+# lxc_hostname: bergen-paperless
+# lxc_vmid: <reserved VMID>
+paperless_deployment_approved: false
+paperless_start_approved: false
+paperless_url: https://paperless.example.invalid
+paperless_image: ghcr.io/paperless-ngx/paperless-ngx:REPLACE_WITH_REVIEWED_VERSION
+paperless_postgres_image: docker.io/library/postgres:REPLACE_WITH_REVIEWED_VERSION
+paperless_redis_image: docker.io/library/redis:REPLACE_WITH_REVIEWED_VERSION
+paperless_secret_key: REPLACE_WITH_AT_LEAST_50_RANDOM_CHARACTERS
+paperless_db_password: REPLACE_WITH_AT_LEAST_24_RANDOM_CHARACTERS
+paperless_admin_user: admin
+paperless_admin_password: REPLACE_WITH_AT_LEAST_16_RANDOM_CHARACTERS
