@@ -3,6 +3,7 @@
   ansible.builtin.assert:
     that:
       - paperless_backup_schedule_approved | bool
+      - paperless_backup_unit == 'bergen-paperless-vzdump'
       - inventory_hostname == paperless_backup_pve_host
       - paperless_backup_vmid | int >= 100
       - paperless_backup_guest_hostname is match('^[a-z][a-z0-9-]+$')
@@ -148,6 +149,7 @@
     daemon_reload: true
     enabled: "{{ paperless_backup_timer_enabled | bool }}"
     state: "{{ 'started' if paperless_backup_timer_enabled | bool else 'stopped' }}"
+  when: not ansible_check_mode
 
 - name: Report scheduled Paperless backup without triggering one
   ansible.builtin.debug:
