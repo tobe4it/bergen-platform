@@ -90,11 +90,27 @@ the minimum required model permissions. It does **not** create per-document
 permissions. Proven trusted NAS source -> owner/group assignment remains
 the separate ingestion safety gate.
 
+## First read-only probe
+
+Run this on `bp-controller` from a reviewed checkout of this branch:
+
+```bash
+python3 ansible/scripts/paperless_ldap_tls_preflight.py
+```
+
+Success prints `LDAPS_TLS_PASS`; certificate validation or DNS/connection
+failures terminate with `LDAPS_TLS_FAIL`. Optionally supply a reviewed
+certificate-authority PEM with `--cafile /path/to/ca-chain.pem`. Never
+disable certificate or hostname verification to obtain a passing result.
+This checks connectivity from the controller **only**. It does not verify
+directory schema, credentials, or reachability from a future authentik
+container.
+
 ## Required gates, in order
 
 1. Read-only LDAPS TLS handshake/hostname/CA verification **from controller**,
    then repeat from the proposed authentik runtime network namespace.
-   See `ansible/scripts/paperless_ldap_tls_preflight.sh`.
+   See `ansible/scripts/paperless_ldap_tls_preflight.py`.
 2. Read-only LDAP schema inspection using a reviewed bind identity: base DN,
    human accounts, group membership attribute and group names. No passwords
    or whole-directory exports in logs.
