@@ -1,0 +1,30 @@
+---
+- name: Harden Synology shared Paperless root ACL
+  hosts: all
+  gather_facts: false
+  become: true
+
+  pre_tasks:
+    - name: Require explicit root ACL change approval
+      ansible.builtin.assert:
+        that:
+          - inventory_hostname == 'ldap.thebergens.net'
+          - synology_paperless_root_harden_approved | default(false) | bool
+          - not ansible_check_mode
+        fail_msg: Root ACL change requires exact NAS and explicit approval
+
+  tasks:
+    - name: Read-only root and shared folders preflight
+      ansible.builtin.include_role:
+        name: synology_paperless_groups
+        tasks_from: preflight
+
+    - name: Harden reviewed root ACL
+      ansible.builtin.include_role:
+        name: synology_paperless_groups
+        tasks_from: harden_root
+
+    - name: Verify hardened root and shared folders
+      ansible.builtin.include_role:
+        name: synology_paperless_groups
+        tasks_from: preflight
