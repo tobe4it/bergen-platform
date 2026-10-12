@@ -20,5 +20,6 @@ NoNewPrivileges=true
 Restart=always
 TimeoutStartSec=900
 
-[Install]
+{% if paperless_start_approved | bool %}[Install]
 WantedBy=multi-user.target
+{% endif %}

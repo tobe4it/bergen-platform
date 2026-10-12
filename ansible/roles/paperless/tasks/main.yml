@@ -32,6 +32,30 @@
       backend binding is loopback-only; WAN/LAN access is not enabled.
   no_log: true
 
+- name: Read dedicated Paperless ZFS document mount
+  ansible.builtin.command:
+    argv:
+      - findmnt
+      - --mountpoint
+      - "{{ paperless_service_root }}"
+      - --noheadings
+      - --output
+      - TARGET,FSTYPE
+  register: paperless_document_mount
+  changed_when: false
+  check_mode: false
+
+- name: Require active dedicated ZFS volume before writing application data
+  ansible.builtin.assert:
+    that:
+      - paperless_service_root == '/srv/bergen-paperless'
+      - paperless_document_mount.stdout.split() | length == 2
+      - paperless_document_mount.stdout.split()[0] == paperless_service_root
+      - paperless_document_mount.stdout.split()[1] == 'zfs'
+    fail_msg: >-
+      Refusing Paperless deployment: /srv/bergen-paperless must be the
+      dedicated mounted ZFS filesystem, not a directory on the guest rootfs.
+
 - name: Install Podman and host dependencies
   ansible.builtin.apt:
     name:
@@ -99,10 +123,31 @@
   ansible.builtin.systemd:
     daemon_reload: true
 
+- name: Inspect staged service activation when start is not approved
+  ansible.builtin.command:
+    argv: [systemctl, is-active, --quiet, "{{ item }}"]
+  loop:
+    - bergen-paperless-db.service
+    - bergen-paperless-redis.service
+    - bergen-paperless.service
+  register: paperless_staged_status
+  changed_when: false
+  failed_when: false
+  check_mode: false
+  when: not (paperless_start_approved | bool)
+
+- name: Refuse unintended Paperless service activation
+  ansible.builtin.assert:
+    that:
+      - paperless_staged_status.results | selectattr('rc', 'equalto', 0) | list | length == 0
+    fail_msg: >-
+      One or more Paperless services were unexpectedly active despite
+      paperless_start_approved=false. Inspect manually before proceeding.
+  when: not (paperless_start_approved | bool)
+
 - name: Start PostgreSQL and Redis only when separately approved
   ansible.builtin.systemd:
     name: "{{ item }}"
-    enabled: true
     state: started
   loop:
     - bergen-paperless-db.service
@@ -112,7 +157,6 @@
 - name: Start Paperless only when separately approved
   ansible.builtin.systemd:
     name: bergen-paperless.service
-    enabled: true
     state: started
   when: paperless_start_approved | bool
 

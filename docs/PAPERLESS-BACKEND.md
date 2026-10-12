@@ -126,6 +126,36 @@ does not pull images, create Quadlets, start databases, or change network
 rules. `paperless_deployment_approved` and `paperless_start_approved`
 remain false; the Paperless Vault is not needed at this stage.
 
+## Initial application stage – strictly no service autostart
+
+The first app deployment must keep
+`paperless_start_approved: false` in the private vars file.
+Without this approval, the templates deliberately omit Quadlet
+`[Install] WantedBy=multi-user.target`; that key automatically enrolls
+generated services for system boot. The role also verifies all three
+services are inactive. Only a separate approved start stage will render
+the boot-start policy and invoke `systemctl start`. Do **not** use
+`systemctl enable` on Quadlet-generated units.
+
+The role fails if `/srv/bergen-paperless` is not mounted as its dedicated
+ZFS filesystem. During `--check`, Ansible can warn about unknown numeric
+UID/GID 999/1000 in this otherwise fresh LXC; container image users are
+distinct from host accounts. Confirm effective ownership after the first
+live directory creation, before launching database services.
+
+```bash
+ansible-playbook -i ansible/inventory.yml -i ansible/inventory.local.yml \
+  ansible/playbooks/deploy-paperless.yml \
+  -e @ansible/vars/paperless.local.yml \
+  -e @ansible/vars/paperless.vault.yml \
+  -e paperless_deployment_approved=true \
+  --vault-id platform@prompt --vault-id paperless@prompt
+```
+
+Review application configuration and generated units *before* approving
+`paperless_start_approved=true`. No reverse-proxy registration or LAN
+port opening is performed at this stage.
+
 ## Requirements before any live deployment
 
 1. Confirm Proxmox VMID, address reservation, guest network bridge and

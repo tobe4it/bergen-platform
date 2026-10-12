@@ -21,7 +21,7 @@ class PaperlessPrivateBackendTests(unittest.TestCase):
     def test_role_task_list_is_unique_and_postgres_validation_complete(self):
         tasks = yaml.safe_load((ROLE / "tasks/main.yml").read_text())
         names = [task["name"] for task in tasks]
-        self.assertEqual(len(names), 10)
+        self.assertEqual(len(names), 14)
         self.assertEqual(len(names), len(set(names)))
         assertions = tasks[0]["ansible.builtin.assert"]["that"]
         self.assertTrue(any("paperless_postgres_image.split" in x
@@ -78,6 +78,28 @@ class PaperlessPrivateBackendTests(unittest.TestCase):
         self.assertIn("Network=bergen-paperless.network", db)
         self.assertIn("Network=bergen-paperless.network", broker)
         self.assertIn("NoNewPrivileges=true", app)
+
+    def test_mount_gate_precedes_filesystem_writes(self):
+        tasks = yaml.safe_load((ROLE / "tasks/main.yml").read_text())
+        names = [task["name"] for task in tasks]
+        require = names.index(
+            "Require active dedicated ZFS volume before writing application data")
+        mkdir = names.index(
+            "Create protected service and persistent application directories")
+        self.assertLess(require, mkdir)
+        assert_lines = tasks[require]["ansible.builtin.assert"]["that"]
+        self.assertTrue(any("paperless_document_mount.stdout" in line
+                            for line in assert_lines))
+        self.assertTrue(any("'zfs'" in line for line in assert_lines))
+
+    def test_quadlets_boot_disabled_until_explicit_start_approval(self):
+        for path in (ROLE / "templates").glob("*.container.j2"):
+            tpl = path.read_text()
+            self.assertIn("{% if paperless_start_approved | bool %}", tpl)
+            self.assertIn("WantedBy=multi-user.target", tpl)
+        tasks = (ROLE / "tasks/main.yml").read_text()
+        self.assertIn("Refuse unintended Paperless service activation", tasks)
+        self.assertNotIn("enabled: true", tasks)
 
     def test_paperless_explicitly_selects_postgresql(self):
         env = (ROLE / "templates/paperless.env.j2").read_text()
