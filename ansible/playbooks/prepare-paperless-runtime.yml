@@ -17,7 +17,8 @@
           - lxc_vmid | int == 126
           - ansible_ssh_common_args is defined
           - "'pct_ssh_proxy.py' in ansible_ssh_common_args"
-          - "ansible_ssh_common_args is search('--vmid 126([\\" ]|$)')"
+          - >-
+            ansible_ssh_common_args is search('--vmid 126([" ]|$)')
           - "'HostKeyAlias=lxc-126' in ansible_ssh_common_args"
           - "'StrictHostKeyChecking=yes' in ansible_ssh_common_args"
           - ansible_check_mode or (paperless_runtime_approved | default(false) | bool)
