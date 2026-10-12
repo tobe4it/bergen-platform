@@ -279,10 +279,13 @@ def main():
         source_fp, source_expiry = perform_sync(
             cfg, args, src_host, src_user, dst_host, dst_user)
         if args.proxy_vars is not None:
-            from tls_proxy_target import audit_proxy_target
-            audit_proxy_target(
-                cfg, source_fp, source_expiry, args.proxy_vars,
-                args.proxy_local_inventory, args.proxy_pve_inventory)
+            from tls_proxy_target import ProxyAuditError, audit_proxy_target
+            try:
+                audit_proxy_target(
+                    cfg, source_fp, source_expiry, args.proxy_vars,
+                    args.proxy_local_inventory, args.proxy_pve_inventory)
+            except ProxyAuditError as exc:
+                raise SyncError(f"Read-only proxy TLS audit failed: {exc}") from exc
 
 
 def perform_sync(cfg, args, src_host, src_user, dst_host, dst_user):
