@@ -103,6 +103,28 @@ class SharedProxyAuditTests(unittest.TestCase):
             pool.return_value.__enter__.return_value = None
             mail.main()
 
+    def test_successful_existing_mail_rotation_keeps_return_contract(self):
+        from types import SimpleNamespace
+        cfg = {
+            "mail_tls_source_cert_file": "/etc/letsencrypt/live/example.invalid/fullchain.pem",
+            "mail_tls_source_key_file": "/etc/letsencrypt/live/example.invalid/privkey.pem",
+            "mail_tls_expected_fqdn": "mail.example.invalid",
+            "mail_tls_target_cert_file": "/etc/ssl/certs/mail.pem",
+            "mail_tls_target_key_file": "/etc/ssl/private/mail.pem",
+        }
+        old = datetime(2026, 10, 1, tzinfo=timezone.utc)
+        new = datetime(2026, 12, 22, tzinfo=timezone.utc)
+        stage = "/etc/ssl/private/.mail-tls-stage.A1B2C3D4"
+        with patch.object(mail, "source_evidence", return_value=("b"*64, new)), \
+             patch.object(mail, "target_evidence", return_value=("a"*64, old)), \
+             patch.object(mail, "ssh_run", return_value=stage), \
+             patch.object(mail, "stage_transfer") as transfer, \
+             patch.object(mail, "run_remote_script", return_value="ROTATED"):
+            evidence = mail.perform_sync(
+                cfg, SimpleNamespace(apply=True), "source", "operator", "target", "root")
+        self.assertEqual(evidence, ("b"*64, new))
+        self.assertEqual(transfer.call_count, 2)
+
     def test_proxy_adapter_never_transfers_secrets_or_modifies_mail_timer(self):
         text = (ROOT / "scripts/tls_proxy_target.py").read_text()
         for name in ("subprocess.run", "StrictHostKeyChecking", "HostKeyAlias",
