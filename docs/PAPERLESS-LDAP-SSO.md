@@ -31,8 +31,22 @@ reachable by default.
   LDAP canonical spelling after inspection).
 - Allowed Paperless authorization groups: exactly `Eltern` and `Familie`.
   The directory's `@bergen.intern` suffix is not the Paperless group name.
-- Expected `Eltern`: thomas and nadja.
-- Expected `Familie`: thomas, nadja, nils and Linda.
+- Verified `Eltern` (GID 1000007): `member` has `uid=nadja` and
+  `uid=thomas`; `memberUid` has `nadja`, `thomas`.
+- Verified `Familie` (GID 1000008): `member` has nested group DNs
+  `cn=Kinder,cn=groups,...` and `cn=Eltern,cn=groups,...`, plus direct
+  `uid=thomas,...`; `memberUid` has **only thomas**.
+- The intended effective `Familie` membership is the four human accounts,
+  but that result **cannot** be inferred from `memberUid` alone; verify
+  `Kinder` membership read-only and test the transitive result.
+- Configure authentik LDAP source with `Group membership field=member`,
+  `User membership attribute=distinguishedName`, `Sync Group Parents`
+  enabled (subject to pinned-version test). The `memberUid/uid` shortcut
+  omits nested memberships and is unsafe here.
+- Validate the effective `Familie` OIDC group claim for all four users
+  **and** deny cases using the actual authentik sync and Paperless login.
+  Do not assume Paperless group-sync or OIDC `groups` claims automatically
+  flatten parent groups.
 - Exclude LDAP `admin`, technical/service accounts and unknown principals
   from family auto-enrollment.
 - No LDAP admin group maps to Paperless admin. The local Paperless `admin`
