@@ -1,0 +1,30 @@
+---
+- name: Roll back Synology shared Paperless root ACL before group folders exist
+  hosts: all
+  gather_facts: false
+  become: true
+
+  pre_tasks:
+    - name: Require explicit rollback approval
+      ansible.builtin.assert:
+        that:
+          - inventory_hostname == 'ldap.thebergens.net'
+          - synology_paperless_root_rollback_approved | default(false) | bool
+          - not ansible_check_mode
+        fail_msg: Root ACL rollback requires exact NAS and explicit approval
+
+  tasks:
+    - name: Preflight reviewed root ACL
+      ansible.builtin.include_role:
+        name: synology_paperless_groups
+        tasks_from: preflight
+
+    - name: Revert root ACL only while both group folders are absent
+      ansible.builtin.include_role:
+        name: synology_paperless_groups
+        tasks_from: rollback_root
+
+    - name: Verify rolled-back root state
+      ansible.builtin.include_role:
+        name: synology_paperless_groups
+        tasks_from: preflight
