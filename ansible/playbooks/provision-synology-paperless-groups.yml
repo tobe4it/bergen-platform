@@ -1,0 +1,30 @@
+---
+- name: Provision Synology shared Paperless group inputs
+  hosts: all
+  gather_facts: false
+  become: true
+
+  pre_tasks:
+    - name: Require explicit shared-group provisioning approval
+      ansible.builtin.assert:
+        that:
+          - inventory_hostname == 'ldap.thebergens.net'
+          - synology_paperless_groups_apply | default(false) | bool
+          - not ansible_check_mode
+        fail_msg: Group folder provisioning requires exact NAS and approval
+
+  tasks:
+    - name: Preflight hardened root and existing group folders
+      ansible.builtin.include_role:
+        name: synology_paperless_groups
+        tasks_from: preflight
+
+    - name: Provision two isolated group folders
+      ansible.builtin.include_role:
+        name: synology_paperless_groups
+        tasks_from: provision
+
+    - name: Validate final group ACLs
+      ansible.builtin.include_role:
+        name: synology_paperless_groups
+        tasks_from: preflight
