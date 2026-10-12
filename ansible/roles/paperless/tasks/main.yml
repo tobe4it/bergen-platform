@@ -124,8 +124,7 @@
       access: localhost_only
       certificates: not_managed_here
       proxy_enrollment: disabled
-      backup_required: true
-)
+      backup_required: true)
       - paperless_url is match('^https://[A-Za-z0-9-]+([.][A-Za-z0-9-]+)+$')
       - paperless_secret_key | length >= 50
       - paperless_db_password | length >= 24
