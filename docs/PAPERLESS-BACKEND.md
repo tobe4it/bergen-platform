@@ -96,6 +96,36 @@ The expected summary is `PREFLIGHT_PASS` and `deployment: not_performed`.
 This will refuse an occupied VMID, missing template, storage, bridge or
 undersized VM resources.
 
+## Separate Podman runtime stage after LXC baseline
+
+After provisioning the dedicated LXC (VMID 126), verifying the pinned
+Proxmox-mediated SSH transport, mounting the dedicated ZFS volume, and
+enabling FUSE, first verify the runtime without deploying the applications:
+
+```bash
+ansible-playbook -i ansible/inventory.yml -i ansible/inventory.local.yml \
+  ansible/playbooks/prepare-paperless-runtime.yml \
+  -e @ansible/vars/paperless.local.yml \
+  --check --diff --ask-vault-pass
+```
+
+Once the check shows only the expected apt changes, explicitly approve
+the one-time runtime installation:
+
+```bash
+ansible-playbook -i ansible/inventory.yml -i ansible/inventory.local.yml \
+  ansible/playbooks/prepare-paperless-runtime.yml \
+  -e @ansible/vars/paperless.local.yml \
+  -e paperless_runtime_approved=true \
+  --ask-vault-pass
+```
+
+This stage only installs `podman`, `uidmap`, `fuse-overlayfs`, and
+`slirp4netns` in the approved guest, then tests `podman info`. It
+does not pull images, create Quadlets, start databases, or change network
+rules. `paperless_deployment_approved` and `paperless_start_approved`
+remain false; the Paperless Vault is not needed at this stage.
+
 ## Requirements before any live deployment
 
 1. Confirm Proxmox VMID, address reservation, guest network bridge and

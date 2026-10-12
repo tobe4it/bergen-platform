@@ -40,6 +40,26 @@ class PaperlessPrivateBackendTests(unittest.TestCase):
         self.assertIn("ansible-vault create", documentation)
         self.assertIn("--ask-vault-pass", documentation)
 
+    def test_separate_runtime_gate_only_installs_podman(self):
+        path = ROOT / "ansible/playbooks/prepare-paperless-runtime.yml"
+        data = yaml.safe_load(path.read_text())
+        self.assertEqual(len(data), 1)
+        stage = data[0]
+        self.assertEqual(stage["hosts"], "paperless_nodes")
+        checks = stage["pre_tasks"][0]["ansible.builtin.assert"]["that"]
+        self.assertTrue(any("paperless_runtime_approved" in x for x in checks))
+        self.assertTrue(any("pct_ssh_proxy.py" in x for x in checks))
+        self.assertTrue(any("StrictHostKeyChecking=yes" in x for x in checks))
+        apt_tasks = [task for task in stage["tasks"] if
+                     "ansible.builtin.apt" in task]
+        self.assertEqual(len(apt_tasks), 1)
+        self.assertEqual(set(apt_tasks[0]["ansible.builtin.apt"]["name"]),
+                         {"podman", "uidmap", "fuse-overlayfs", "slirp4netns"})
+        for task in stage["tasks"]:
+            self.assertNotIn("ansible.builtin.systemd", task)
+            self.assertNotIn("ansible.builtin.template", task)
+        self.assertIn("podman, info, --format, json", path.read_text())
+
     def test_unapproved_by_default(self):
         data = yaml.safe_load((ROLE / "defaults/main.yml").read_text())
         self.assertIs(data["paperless_deployment_approved"], False)

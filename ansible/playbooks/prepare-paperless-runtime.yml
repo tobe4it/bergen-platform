@@ -1,0 +1,116 @@
+---
+# Separate runtime stage. No application, image pull, Quadlet or network rule.
+- name: Validate and install Podman in the isolated Paperless LXC
+  hosts: paperless_nodes
+  become: true
+  gather_facts: false
+  serial: 1
+
+  pre_tasks:
+    - name: Validate exact guest and approved PCT SSH boundary
+      ansible.builtin.assert:
+        that:
+          - groups['paperless_nodes'] | length == 1
+          - lxc_inventory_group | default('') == 'paperless_nodes'
+          - lxc_hostname == 'bergen-paperless'
+          - inventory_hostname == lxc_hostname
+          - lxc_vmid | int == 126
+          - ansible_ssh_common_args is defined
+          - "'pct_ssh_proxy.py' in ansible_ssh_common_args"
+          - "ansible_ssh_common_args is search('--vmid 126([\\" ]|$)')"
+          - "'HostKeyAlias=lxc-126' in ansible_ssh_common_args"
+          - "'StrictHostKeyChecking=yes' in ansible_ssh_common_args"
+          - ansible_check_mode or (paperless_runtime_approved | default(false) | bool)
+        fail_msg: >-
+          Refusing to install runtime: expected reviewed VMID 126 via strict
+          Proxmox-mediated SSH, one Paperless host and explicit live approval.
+
+    - name: Confirm pinned SSH connectivity
+      ansible.builtin.wait_for_connection:
+        connect_timeout: 10
+        timeout: 60
+        delay: 0
+      check_mode: false
+      changed_when: false
+
+    - name: Collect target OS information
+      ansible.builtin.setup:
+      check_mode: false
+
+    - name: Verify the running dedicated Debian LXC
+      ansible.builtin.assert:
+        that:
+          - ansible_facts['os_family'] == 'Debian'
+          - ansible_facts['hostname'] == 'bergen-paperless'
+          - ansible_facts['virtualization_type'] | default('') in ['lxc', 'container']
+        fail_msg: 'Unexpected guest identity, OS or virtualization.'
+
+    - name: Read guest FUSE device
+      ansible.builtin.stat:
+        path: /dev/fuse
+      register: paperless_fuse
+
+    - name: Confirm the separate ZFS-backed document mount
+      ansible.builtin.command:
+        argv: [findmnt, --mountpoint, /srv/bergen-paperless, --noheadings, --output, TARGET]
+      register: paperless_mount
+      changed_when: false
+      check_mode: false
+
+    - name: Require FUSE and the exact document mount before package installation
+      ansible.builtin.assert:
+        that:
+          - paperless_fuse.stat.exists
+          - paperless_fuse.stat.ischr | default(false)
+          - paperless_mount.stdout | trim == '/srv/bergen-paperless'
+        fail_msg: 'FUSE or the dedicated Paperless document volume is missing.'
+
+  tasks:
+    - name: Install Podman and nested-LXC supporting packages
+      ansible.builtin.apt:
+        name:
+          - podman
+          - uidmap
+          - fuse-overlayfs
+          - slirp4netns
+        state: present
+        update_cache: true
+        cache_valid_time: 3600
+
+    - name: Get installed Podman version
+      ansible.builtin.command:
+        argv: [podman, --version]
+      changed_when: false
+      register: paperless_podman_version
+      when: not ansible_check_mode
+
+    - name: Verify Podman storage and OCI runtime are functional
+      ansible.builtin.command:
+        argv: [podman, info, --format, json]
+      register: paperless_podman_info
+      changed_when: false
+      failed_when: false
+      when: not ansible_check_mode
+
+    - name: Fail closed when nested Podman cannot initialize
+      ansible.builtin.assert:
+        that:
+          - paperless_podman_info.rc == 0
+          - (paperless_podman_info.stdout | from_json) is mapping
+        fail_msg: >-
+          Podman information probe failed in the unprivileged LXC. Review
+          the nested container runtime and storage driver before proceeding;
+          do not install Paperless services yet.
+      when: not ansible_check_mode
+
+    - name: Report staged runtime readiness
+      ansible.builtin.debug:
+        msg:
+          target: bergen-paperless
+          mode: "{{ 'dry-run' if ansible_check_mode else 'runtime installed and inspected' }}"
+          podman: "{{ paperless_podman_version.stdout | default('not run in check mode') }}"
+          document_mount: /srv/bergen-paperless
+          paperless_application: not_installed
+          quadlets: not_created
+          image_pulls: none
+          network_rules: unchanged
