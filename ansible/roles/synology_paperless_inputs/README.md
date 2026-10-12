@@ -52,7 +52,7 @@ validate-synology-paperless.yml
 
 - New users require another provisioning run.
 - Only existing DSM LDAP homes are discovered.
-- Shared Eltern/Familie inputs are not provisioned here.
+- Shared Eltern/Familie inputs are provisioned and reviewed via a separate role; the daily job audits them read-only.
 - No automatic Paperless document ingestion is enabled.
 - Paperless document-level ACLs require separate validation.
 
@@ -82,21 +82,27 @@ Runtime:
 - SSH identity: supervisor
 - Remote privilege escalation: sudo
 
-The provisioning playbook performs:
-1. Read-only discovery and ACL preflight
-2. Idempotent provisioning of missing inputs
-3. Final ACL verification
+The daily systemd oneshot executes two ordered Ansible playbooks:
+1. Personal LDAP home Paperless inputs: read-only discovery, idempotent
+   provisioning of missing inputs, final ACL verification.
+2. Shared inputs: `audit-synology-paperless-groups.yml`, read-only.
+   The audit requires `/volume1/paperless-scan` to be hardened and both
+   `Eltern` and `Familie` to exist with exactly the reviewed direct ACLs.
+   Deviations fail the service; there is **no automatic repair** of group ACLs.
+   Periodic runtime probes with synthetic files are not performed.
 
 Operational safeguards:
 - No automatic Git pull
 - No execution from feature worktrees
 - No change to parent LDAP home ACLs
+- No automatic shared-root ACL changes or group-directory creation
 - No NAS-to-Paperless ingestion
 - No periodic creation of synthetic validation files
 - Journal logging through systemd
 
-Deployment is disabled until the reviewed release is
-available in the pinned Paperless runtime checkout.
+The systemd timer was previously activated with the personal-only service.
+The group audit service change is staged until deliberately deployed and
+tested on the pinned runtime checkout. Do not enable any new importer.
 
 After deployment, inspect with:
   systemctl --user status bergen-paperless-autoprovision.timer
