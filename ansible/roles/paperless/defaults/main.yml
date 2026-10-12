@@ -13,3 +13,7 @@ paperless_uid: 1000
 paperless_gid: 1000
 paperless_postgres_uid: 999
 paperless_redis_uid: 999
+
+# Stage 1: ASN labels only. Filesystem ingestion remains non-recursive.
+# No NAS mount, import service, or ACL workflow is activated by these flags.
+paperless_scan_asn_enabled: false
