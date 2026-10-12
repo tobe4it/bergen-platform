@@ -1,0 +1,71 @@
+---
+- name: Harden Synology Paperless shared-root ACL (explicit approval only)
+  ansible.builtin.raw: |
+    set -eu
+    ROOT=/volume1/paperless-scan
+    ACL=/usr/syno/bin/synoacltool
+    OLD='group:Familie@bergen.intern:allow:rwxpdDaARWc--:fd--'
+    NEW='group:Familie@bergen.intern:allow:r-x---a-R-c--:----'
+
+    fail() { echo "ROOT_HARDEN_FAIL: $*" >&2; exit 1; }
+    [ -d "$ROOT" ] && [ ! -L "$ROOT" ] || fail "unexpected root"
+    [ "$(stat -c '%u' "$ROOT")" = 0 ] || fail "root owner changed"
+    for dir in "$ROOT/Eltern" "$ROOT/Familie"; do
+      [ ! -e "$dir" ] && [ ! -L "$dir" ] ||
+        fail "group directory already exists; refusing root migration"
+    done
+
+    archive=$("$ACL" -get-archive "$ROOT")
+    case "$archive" in
+      *is_inherit*) fail "root ACL unexpectedly inherited";;
+      *has_ACL*) ;;
+      *) fail "root ACL missing";;
+    esac
+
+    before=$("$ACL" -get "$ROOT")
+    count=$(printf '%s\n' "$before" |
+      grep -cE '^[[:space:]]*\[[0-9]+\]' || true)
+    [ "$count" -eq 4 ] || fail "unexpected ACL count"
+    for ace in \
+      'group:administrators:allow:rwxpdDaARWc--:fd--' \
+      'user:paperless-sync:allow:rwxpdDaARWc--:fd--' \
+      'group:administrators@bergen.intern:allow:rwxpdDaARWc--:fd--'; do
+      printf '%s\n' "$before" |
+        grep -Fq "$ace (level:0)" || fail "missing ACE: $ace"
+    done
+
+    if printf '%s\n' "$before" |
+      grep -Fq "$NEW (level:0)"; then
+      echo ROOT_HARDEN_UNCHANGED
+    else
+      printf '%s\n' "$before" |
+        grep -Eq '^[[:space:]]*\[3\] group:Familie@bergen\.intern:allow:rwxpdDaARWc--:fd-- \(level:0\)$' ||
+        fail "old family ACE is not exactly at index 3"
+
+      "$ACL" -replace "$ROOT" 3 "$NEW" >/dev/null ||
+        fail "ACL replacement failed"
+      echo ROOT_HARDEN_CHANGED
+    fi
+
+    after=$("$ACL" -get "$ROOT")
+    for ace in \
+      'group:administrators:allow:rwxpdDaARWc--:fd--' \
+      'user:paperless-sync:allow:rwxpdDaARWc--:fd--' \
+      'group:administrators@bergen.intern:allow:rwxpdDaARWc--:fd--' \
+      "$NEW"; do
+      printf '%s\n' "$after" |
+        grep -Fq "$ace (level:0)" || fail "postcondition missing: $ace"
+    done
+    count=$(printf '%s\n' "$after" |
+      grep -cE '^[[:space:]]*\[[0-9]+\]' || true)
+    [ "$count" -eq 4 ] || fail "postcondition: unexpected root ACE count"
+    printf '%s\n' "$after" |
+      grep -Fq "$OLD (level:0)" &&
+      fail "old broad family ACE still present"
+    echo ROOT_HARDEN_POSTCONDITION_PASS
+  register: synology_paperless_root_harden
+  changed_when: "'ROOT_HARDEN_CHANGED' in synology_paperless_root_harden.stdout"
+
+- name: Show root hardening result
+  ansible.builtin.debug:
+    var: synology_paperless_root_harden.stdout_lines
