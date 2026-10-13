@@ -154,6 +154,7 @@
                   KbdInteractiveAuthentication no
                   AuthenticationMethods publickey
                   AllowTcpForwarding local
+                  AllowStreamLocalForwarding no
                   PermitOpen 127.0.0.1:8000
                   PermitListen none
                   GatewayPorts no
@@ -184,6 +185,7 @@
               - "'kbdinteractiveauthentication no' in paperless_tunnel_sshd_effective.stdout_lines"
               - "'authenticationmethods publickey' in paperless_tunnel_sshd_effective.stdout_lines"
               - "'allowtcpforwarding local' in paperless_tunnel_sshd_effective.stdout_lines"
+              - "'allowstreamlocalforwarding no' in paperless_tunnel_sshd_effective.stdout_lines"
               - "'permitopen 127.0.0.1:8000' in paperless_tunnel_sshd_effective.stdout_lines"
               - "'permittty no' in paperless_tunnel_sshd_effective.stdout_lines"
               - "'maxsessions 0' in paperless_tunnel_sshd_effective.stdout_lines"
