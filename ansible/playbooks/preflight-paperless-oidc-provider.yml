@@ -1,0 +1,90 @@
+---
+# Read-only Synology OIDC discovery+JWKS check from inside running Paperless Podman.
+# No tokens, credentials or account changes. Do not use TLS bypass or proxy.
+- name: Validate live Synology OIDC provider from Paperless runtime
+  hosts: bergen-paperless
+  become: true
+  gather_facts: false
+  tasks:
+    - name: Require exact target
+      ansible.builtin.assert:
+        that:
+          - inventory_hostname == 'bergen-paperless'
+        fail_msg: Refusing OIDC runtime validation on unexpected host.
+
+    - name: Check OIDC discovery, CA trust and JWKS from running Paperless container
+      ansible.builtin.command:
+        argv:
+          - podman
+          - exec
+          - bergen-paperless
+          - python3
+          - -c
+          - |
+            import json
+            import ssl
+            from urllib.parse import urlsplit
+            from urllib.request import build_opener, HTTPSHandler, ProxyHandler, Request
+
+            discovery = (
+                "https://sehnde.tbergen.de:5001/webman/sso/"
+                ".well-known/openid-configuration"
+            )
+            expected_issuer = "https://sehnde.tbergen.de:5001/webman/sso"
+            opener = build_opener(
+                ProxyHandler({}),
+                HTTPSHandler(context=ssl.create_default_context()),
+            )
+
+            def get_json(url):
+                with opener.open(
+                    Request(url, headers={"Accept": "application/json"}),
+                    timeout=12,
+                ) as response:
+                    if response.status != 200:
+                        raise RuntimeError("OIDC endpoint returned unexpected HTTP status")
+                    return json.loads(response.read(262144))
+
+            metadata = get_json(discovery)
+            if metadata.get("issuer") != expected_issuer:
+                raise RuntimeError("OIDC issuer does not match the configured provider")
+            origin = urlsplit(expected_issuer)
+            required = ("authorization_endpoint", "token_endpoint", "jwks_uri")
+            for key in required:
+                value = metadata.get(key, "")
+                parts = urlsplit(value)
+                if (
+                    parts.scheme != "https"
+                    or parts.hostname != origin.hostname
+                    or parts.port != origin.port
+                    or not parts.path.startswith(origin.path + "/")
+                ):
+                    raise RuntimeError("OIDC metadata endpoint mismatch: " + key)
+
+            if "RS256" not in metadata.get("id_token_signing_alg_values_supported", []):
+                raise RuntimeError("OIDC issuer does not advertise RS256")
+
+            jwks = get_json(metadata["jwks_uri"])
+            keys = jwks.get("keys", [])
+            if not isinstance(keys, list) or not any(
+                isinstance(key, dict)
+                and key.get("kty") == "RSA"
+                and key.get("n")
+                and key.get("e")
+                for key in keys
+            ):
+                raise RuntimeError("OIDC JWKS lacks a usable RSA public key")
+
+            print("PAPERLESS_OIDC_RUNTIME_PROVIDER_PASS")
+            print("DISCOVERY_TLS_VERIFIED=true")
+            print("ISSUER_MATCH=true")
+            print("ENDPOINT_ORIGIN_MATCH=true")
+            print("JWKS_TLS_VERIFIED=true")
+            print("RS256_KEY_PRESENT=true")
+      register: paperless_oidc_runtime
+      changed_when: false
+      check_mode: false
+
+    - name: Report safe provider validation
+      ansible.builtin.debug:
+        msg: "{{ paperless_oidc_runtime.stdout_lines }}"
