@@ -1,0 +1,242 @@
+---
+# Targeted first-time OIDC activation. Never runs the full Paperless role.
+# Requires a confirmed Proxmox backup and separate explicit approval.
+- name: Enable Synology OIDC for existing Paperless runtime
+  hosts: bergen-paperless
+  gather_facts: false
+  become: true
+  vars:
+    paperless_oidc_env_path: /etc/bergen-paperless/paperless.env
+    paperless_oidc_env_rollback: /etc/bergen-paperless/paperless.env.pre-synology-oidc
+    paperless_oidc_discovery: https://sehnde.tbergen.de:5001/webman/sso/.well-known/openid-configuration
+    paperless_oidc_provider:
+      openid_connect:
+        SCOPE: [openid, profile, email, groups]
+        APPS:
+          - provider_id: synology
+            name: Synology SSO
+            client_id: "{{ vault_paperless_synology_oidc_client_id }}"
+            secret: "{{ vault_paperless_synology_oidc_client_secret }}"
+            settings:
+              server_url: "{{ paperless_oidc_discovery }}"
+  tasks:
+    - name: Require existing backup, review approval and encrypted OIDC client
+      ansible.builtin.assert:
+        that:
+          - inventory_hostname == 'bergen-paperless'
+          - paperless_oidc_activation_approved | default(false) | bool
+          - paperless_oidc_backup_confirmed | default(false) | bool
+          - vault_paperless_synology_oidc_client_id is defined
+          - vault_paperless_synology_oidc_client_secret is defined
+          - vault_paperless_synology_oidc_client_id | length >= 8
+          - vault_paperless_synology_oidc_client_secret | length >= 16
+        fail_msg: Refusing unapproved OIDC activation or missing Vault credentials.
+      no_log: true
+
+    - name: Refuse configuration drift and unexpected group privileges
+      ansible.builtin.command:
+        argv:
+          - podman
+          - exec
+          - bergen-paperless
+          - python3
+          - /usr/src/paperless/src/manage.py
+          - shell
+          - -c
+          - |
+            from django.contrib.auth import get_user_model
+            from django.contrib.auth.models import Group
+            names = ("Familie", "Eltern", "Kinder")
+            assert get_user_model().objects.filter(
+                username="admin", is_active=True, is_staff=True, is_superuser=True
+            ).exists(), "Break-glass administrator missing"
+            for name in names:
+                group = Group.objects.get(name=name)
+                assert not group.permissions.exists(), "Unexpected group permissions"
+                assert not group.user_set.exists(), "Unexpected group memberships"
+            print("PAPERLESS_OIDC_GROUP_PREFLIGHT_PASS")
+      register: paperless_oidc_group_preflight
+      changed_when: false
+      failed_when: paperless_oidc_group_preflight.rc != 0 or 'PAPERLESS_OIDC_GROUP_PREFLIGHT_PASS' not in paperless_oidc_group_preflight.stdout
+
+    - name: Read existing runtime configuration metadata
+      ansible.builtin.stat:
+        path: "{{ paperless_oidc_env_path }}"
+        follow: false
+      register: paperless_oidc_env_stat
+
+    - name: Require protected existing environment file
+      ansible.builtin.assert:
+        that:
+          - paperless_oidc_env_stat.stat.isreg | default(false)
+          - paperless_oidc_env_stat.stat.uid == 0
+          - paperless_oidc_env_stat.stat.mode == '0600'
+          - not (paperless_oidc_env_stat.stat.islnk | default(false))
+        fail_msg: Refusing to modify unexpected Paperless env file.
+
+    - name: Refuse to overwrite any existing OIDC settings
+      ansible.builtin.command:
+        argv:
+          - python3
+          - -c
+          - |
+            from pathlib import Path
+            env = {}
+            for row in Path("/etc/bergen-paperless/paperless.env").read_text().splitlines():
+                row = row.strip()
+                if not row or row.startswith("#"):
+                    continue
+                if "=" not in row:
+                    raise SystemExit("Malformed environment line")
+                key, value = row.split("=", 1)
+                if key in env:
+                    raise SystemExit("Duplicate environment key")
+                env[key] = value
+            expected = "https://paperless.thebergens.net"
+            if env.get("PAPERLESS_URL", "").strip('"') != expected:
+                raise SystemExit("PAPERLESS_URL mismatch")
+            new = (
+                "PAPERLESS_APPS",
+                "PAPERLESS_SOCIALACCOUNT_PROVIDERS",
+                "PAPERLESS_SOCIAL_AUTO_SIGNUP",
+                "PAPERLESS_SOCIALACCOUNT_ALLOW_SIGNUPS",
+                "PAPERLESS_SOCIAL_ACCOUNT_SYNC_GROUPS",
+                "PAPERLESS_DISABLE_REGULAR_LOGIN",
+                "PAPERLESS_REDIRECT_LOGIN_TO_SSO",
+            )
+            if any(k in env for k in new):
+                raise SystemExit("OIDC already configured: refusing to overwrite")
+            print("PAPERLESS_OIDC_ENV_DRIFT_CHECK_PASS")
+      register: paperless_oidc_env_preflight
+      changed_when: false
+
+    - name: Save immutable-in-this-play local rollback copy of the entire existing environment
+      ansible.builtin.copy:
+        src: "{{ paperless_oidc_env_path }}"
+        dest: "{{ paperless_oidc_env_rollback }}"
+        remote_src: true
+        force: false
+        owner: root
+        group: root
+        mode: '0600'
+      register: paperless_oidc_rollback_copy
+      no_log: true
+
+    - name: Require a fresh rollback copy rather than a stale older one
+      ansible.builtin.assert:
+        that:
+          - paperless_oidc_rollback_copy.changed | bool
+        fail_msg: Existing rollback file found; refuse to overwrite or reuse it.
+
+    - name: Activate only Paperless application OIDC environment
+      block:
+        - name: Add OIDC keys without touching existing non-OIDC environment
+          ansible.builtin.blockinfile:
+            path: "{{ paperless_oidc_env_path }}"
+            marker: "# {mark} BERGEN-SYNOLOGY-OIDC"
+            owner: root
+            group: root
+            mode: '0600'
+            block: |
+              PAPERLESS_APPS=allauth.socialaccount.providers.openid_connect
+              PAPERLESS_SOCIALACCOUNT_PROVIDERS={{ paperless_oidc_provider | to_json }}
+              PAPERLESS_SOCIAL_AUTO_SIGNUP=true
+              PAPERLESS_SOCIALACCOUNT_ALLOW_SIGNUPS=true
+              PAPERLESS_SOCIAL_ACCOUNT_SYNC_GROUPS=true
+              PAPERLESS_DISABLE_REGULAR_LOGIN=false
+              PAPERLESS_REDIRECT_LOGIN_TO_SSO=true
+          no_log: true
+
+        - name: Restart only the Paperless application (not database or Redis)
+          ansible.builtin.systemd_service:
+            name: bergen-paperless.service
+            state: restarted
+
+        - name: Confirm live OIDC flags and responsive local HTTP server
+          ansible.builtin.command:
+            argv:
+              - podman
+              - exec
+              - bergen-paperless
+              - python3
+              - -c
+              - |
+                import os
+                from urllib.request import build_opener, HTTPHandler
+                env = os.environ
+                required = {
+                    "PAPERLESS_APPS": "allauth.socialaccount.providers.openid_connect",
+                    "PAPERLESS_SOCIAL_AUTO_SIGNUP": "true",
+                    "PAPERLESS_SOCIALACCOUNT_ALLOW_SIGNUPS": "true",
+                    "PAPERLESS_SOCIAL_ACCOUNT_SYNC_GROUPS": "true",
+                    "PAPERLESS_DISABLE_REGULAR_LOGIN": "false",
+                    "PAPERLESS_REDIRECT_LOGIN_TO_SSO": "true",
+                }
+                for key, value in required.items():
+                    if env.get(key) != value:
+                        raise SystemExit("Incorrect OIDC runtime configuration: " + key)
+                import json
+                provider = json.loads(env["PAPERLESS_SOCIALACCOUNT_PROVIDERS"])["openid_connect"]
+                app = provider["APPS"][0]
+                if app["provider_id"] != "synology" or "groups" not in provider["SCOPE"]:
+                    raise SystemExit("Incorrect Synology provider or group scope")
+                if not (app.get("client_id") and app.get("secret")):
+                    raise SystemExit("Missing Synology OIDC client credentials")
+                print("PAPERLESS_OIDC_RUNTIME_FLAGS_PASS")
+          register: paperless_oidc_runtime_check
+          changed_when: false
+          retries: 8
+          delay: 5
+          until: paperless_oidc_runtime_check.rc == 0
+          no_log: true
+
+        - name: Test local Paperless HTTP response without following external SSO
+          ansible.builtin.command:
+            argv:
+              - python3
+              - -c
+              - |
+                import http.client
+                c = http.client.HTTPConnection("127.0.0.1", 8000, timeout=10)
+                c.request("GET", "/")
+                status = c.getresponse().status
+                c.close()
+                if not 200 <= status < 400:
+                    raise SystemExit("Unexpected Paperless HTTP status")
+                print("PAPERLESS_OIDC_HTTP_PASS")
+          register: paperless_oidc_http_check
+          changed_when: false
+          retries: 12
+          delay: 5
+          until: paperless_oidc_http_check.rc == 0
+
+      rescue:
+        - name: Roll back only the changed application environment
+          ansible.builtin.copy:
+            src: "{{ paperless_oidc_env_rollback }}"
+            dest: "{{ paperless_oidc_env_path }}"
+            remote_src: true
+            owner: root
+            group: root
+            mode: '0600'
+          no_log: true
+        - name: Restart Paperless with the original configuration
+          ansible.builtin.systemd_service:
+            name: bergen-paperless.service
+            state: restarted
+        - name: Mark OIDC activation as failed and rolled back
+          ansible.builtin.fail:
+            msg: OIDC activation failed; original Paperless environment restored. Check service health before retrying.
+
+    - name: Report activation without disclosing client credentials
+      ansible.builtin.debug:
+        msg:
+          - PAPERLESS_OIDC_ACTIVATION_PASS
+          - AUTOMATIC_SIGNUP=true
+          - OIDC_GROUP_SYNC=true
+          - SSO_REDIRECT=true
+          - LOCAL_LOGIN_RETAINED=true
+          - DOCUMENT_PERMISSIONS_UNCHANGED=true
+          - POSTGRESQL_NOT_RESTARTED=true
+          - REDIS_NOT_RESTARTED=true
+          - BROWSER_LOGIN_STILL_TO_TEST=true
