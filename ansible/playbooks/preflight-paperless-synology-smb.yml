@@ -1,0 +1,62 @@
+---
+# Bergen Platform: read-only network preflight for Synology Paperless scan ingress.
+# Intentionally does NOT authenticate, list shares, mount, install packages,
+# start services, consume documents, or access an SMB credential.
+- name: Preflight Synology SMB transport from Paperless LXC
+  hosts: bergen-paperless
+  gather_facts: false
+  become: false
+  vars:
+    paperless_smb_expected_host: "192.168.2.145"
+  tasks:
+    - name: Verify the reviewed source and destination identity
+      ansible.builtin.assert:
+        that:
+          - inventory_hostname == 'bergen-paperless'
+          - synology_paperless_smb_host | default(paperless_smb_expected_host) == paperless_smb_expected_host
+        fail_msg: Refusing an unexpected Paperless host or Synology SMB target.
+
+    - name: Verify TCP 445 from Paperless and inspect available SMB tools
+      ansible.builtin.command:
+        argv:
+          - python3
+          - -c
+          - |
+            import shutil
+            import socket
+            from pathlib import Path
+
+            host, port = '192.168.2.145', 445
+            print('=== READ-ONLY SYNLOGY SMB PREFLIGHT ===')
+            print('SMB_DESTINATION = %s:%d' % (host, port))
+
+            try:
+                with socket.create_connection((host, port), timeout=5):
+                    print('TCP_445 = REACHABLE')
+            except OSError as exc:
+                print('TCP_445 = UNREACHABLE')
+                print('NETWORK_ERROR_CLASS = ' + type(exc).__name__)
+                raise SystemExit(1)
+
+            print('SMBCLIENT_AVAILABLE =', shutil.which('smbclient') is not None)
+            print('MOUNT_CIFS_AVAILABLE =', shutil.which('mount.cifs') is not None)
+
+            mountinfo = Path('/proc/self/mountinfo').read_text(errors='replace')
+            mounted = sum(
+                ' - cifs ' in line or ' - smb3 ' in line
+                for line in mountinfo.splitlines()
+            )
+            print('EXISTING_SMB_MOUNT_COUNT =', mounted)
+
+            print('SMB_AUTHENTICATION_TESTED = False')
+            print('SMB_SHARE_PATHS_VERIFIED = False')
+            print('DOCUMENTS_ACCESSED = False')
+            print('MOUNTS_CHANGED = False')
+            print('SERVICES_CHANGED = False')
+      register: paperless_smb_preflight_result
+      changed_when: false
+      failed_when: paperless_smb_preflight_result.rc != 0
+
+    - name: Report network preflight
+      ansible.builtin.debug:
+        var: paperless_smb_preflight_result.stdout_lines
