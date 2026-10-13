@@ -1,0 +1,308 @@
+---
+# Opt-in, targeted live mitigation. Does not run the full paperless role.
+# Modifies only the Paperless application Quadlet and one read-only Settings module.
+- name: Apply 15-second Synology allauth timeout with rollback
+  hosts: bergen-paperless
+  gather_facts: false
+  become: true
+  vars:
+    paperless_timeout_quadlet: /etc/containers/systemd/bergen-paperless.container
+    paperless_timeout_backup: /etc/bergen-paperless/bergen-paperless.container.pre-allauth-timeout
+    paperless_timeout_module: /etc/bergen-paperless/bergen_paperless_settings.py
+    paperless_timeout_content: |
+      from paperless.settings import *
+
+      SOCIALACCOUNT_REQUESTS_TIMEOUT = 15
+  tasks:
+    - name: Require separate explicit change and restart approvals
+      ansible.builtin.assert:
+        that:
+          - inventory_hostname == 'bergen-paperless'
+          - paperless_allauth_timeout_approved | default(false) | bool
+          - paperless_allauth_restart_approved | default(false) | bool
+        fail_msg: Refusing Paperless change without explicit approvals on the expected host.
+
+    - name: Require all three existing services active
+      ansible.builtin.command:
+        argv: [systemctl, is-active, "{{ item }}"]
+      loop:
+        - bergen-paperless-db.service
+        - bergen-paperless-redis.service
+        - bergen-paperless.service
+      register: paperless_timeout_services
+      changed_when: false
+      failed_when: paperless_timeout_services.rc != 0 or paperless_timeout_services.stdout | trim != 'active'
+
+    - name: Refuse unexpected Quadlet, backup or Settings state
+      ansible.builtin.command:
+        argv:
+          - python3
+          - -c
+          - |
+            from pathlib import Path
+            import stat
+
+            quadlet = Path('/etc/containers/systemd/bergen-paperless.container')
+            backup = Path('/etc/bergen-paperless/bergen-paperless.container.pre-allauth-timeout')
+            module = Path('/etc/bergen-paperless/bergen_paperless_settings.py')
+            env = Path('/etc/bergen-paperless/paperless.env')
+            expected_module = 'from paperless.settings import *\n\nSOCIALACCOUNT_REQUESTS_TIMEOUT = 15\n'
+            block = ('# BEGIN BERGEN-ALLAUTH-TIMEOUT\n'
+                     'Environment=DJANGO_SETTINGS_MODULE=bergen_paperless_settings\n'
+                     'Volume=/etc/bergen-paperless/bergen_paperless_settings.py:'
+                     '/usr/src/paperless/src/bergen_paperless_settings.py:ro\n'
+                     '# END BERGEN-ALLAUTH-TIMEOUT')
+            for path in (quadlet, env):
+                if path.is_symlink() or not path.is_file() or path.stat().st_uid != 0:
+                    raise SystemExit('REFUSE: missing or unexpected protected file')
+            if stat.S_IMODE(env.stat().st_mode) != 0o600:
+                raise SystemExit('REFUSE: environment permissions changed')
+            data = quadlet.read_text()
+            for required in (
+                'ContainerName=bergen-paperless',
+                'PublishPort=127.0.0.1:8000:8000',
+                'EnvironmentFile=/etc/bergen-paperless/paperless.env',
+                'NoNewPrivileges=true',
+            ):
+                if required not in data:
+                    raise SystemExit('REFUSE: Quadlet identity drift')
+
+            if '# BEGIN BERGEN-ALLAUTH-TIMEOUT' in data or '# END BERGEN-ALLAUTH-TIMEOUT' in data:
+                if data.count(block) != 1:
+                    raise SystemExit('REFUSE: unexpected Quadlet override')
+                if module.is_symlink() or not module.is_file() or module.read_text() != expected_module:
+                    raise SystemExit('REFUSE: unexpected Settings module')
+                if backup.is_symlink() or not backup.is_file() or backup.stat().st_uid != 0:
+                    raise SystemExit('REFUSE: missing or unsafe backup')
+                if stat.S_IMODE(backup.stat().st_mode) != 0o600:
+                    raise SystemExit('REFUSE: backup permissions')
+                if '# BEGIN BERGEN-ALLAUTH-TIMEOUT' in backup.read_text():
+                    raise SystemExit('REFUSE: backup already modified')
+                print('DISK_STATE=APPLIED')
+            else:
+                if 'DJANGO_SETTINGS_MODULE=' in data or module.exists() or module.is_symlink():
+                    raise SystemExit('REFUSE: conflicting Settings modification')
+                if backup.exists() or backup.is_symlink():
+                    if (backup.is_symlink() or not backup.is_file()
+                            or backup.stat().st_uid != 0
+                            or stat.S_IMODE(backup.stat().st_mode) != 0o600
+                            or backup.read_bytes() != quadlet.read_bytes()):
+                        raise SystemExit('REFUSE: stale backup or configuration drift')
+                print('DISK_STATE=BASELINE')
+      register: paperless_timeout_disk
+      changed_when: false
+
+    - name: Require exact existing SSO gates and known effective timeout
+      ansible.builtin.command:
+        argv:
+          - podman
+          - exec
+          - bergen-paperless
+          - python3
+          - -c
+          - |
+            import os
+            import django
+            os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'paperless.settings')
+            django.setup()
+            from django.conf import settings
+            from allauth.socialaccount import app_settings
+
+            required = {
+                'PAPERLESS_SOCIAL_AUTO_SIGNUP': 'true',
+                'PAPERLESS_SOCIALACCOUNT_ALLOW_SIGNUPS': 'true',
+                'PAPERLESS_SOCIAL_ACCOUNT_SYNC_GROUPS': 'true',
+                'PAPERLESS_REDIRECT_LOGIN_TO_SSO': 'true',
+                'PAPERLESS_DISABLE_REGULAR_LOGIN': 'false',
+            }
+            if not all(os.environ.get(key) == value for key, value in required.items()):
+                raise SystemExit('REFUSE: SSO or break-glass configuration drift')
+            if 'allauth.socialaccount.providers.openid_connect' not in settings.INSTALLED_APPS:
+                raise SystemExit('REFUSE: OIDC provider is missing')
+            if app_settings.REQUESTS_TIMEOUT not in (5, 15):
+                raise SystemExit('REFUSE: unexpected effective allauth timeout')
+            print('EFFECTIVE_TIMEOUT=' + str(app_settings.REQUESTS_TIMEOUT))
+      register: paperless_timeout_before
+      changed_when: false
+
+    - name: Refuse inconsistent application and disk state
+      ansible.builtin.assert:
+        that:
+          - >-
+            ('DISK_STATE=BASELINE' in paperless_timeout_disk.stdout and
+             'EFFECTIVE_TIMEOUT=5' in paperless_timeout_before.stdout) or
+            ('DISK_STATE=APPLIED' in paperless_timeout_disk.stdout and
+             'EFFECTIVE_TIMEOUT=15' in paperless_timeout_before.stdout)
+        fail_msg: Partial or inconsistent settings state; refusing a potentially unsafe restart.
+
+    - name: Activate only when the original five-second configuration is active
+      when: "'DISK_STATE=BASELINE' in paperless_timeout_disk.stdout"
+      block:
+        - name: Preserve exact original Quadlet for rollback
+          ansible.builtin.copy:
+            src: "{{ paperless_timeout_quadlet }}"
+            dest: "{{ paperless_timeout_backup }}"
+            remote_src: true
+            force: false
+            owner: root
+            group: root
+            mode: '0600'
+
+        - name: Install read-only-container Django Settings override file
+          ansible.builtin.copy:
+            dest: "{{ paperless_timeout_module }}"
+            content: "{{ paperless_timeout_content }}"
+            owner: root
+            group: root
+            mode: '0644'
+
+        - name: Insert explicit module and bind mount in Container section
+          ansible.builtin.blockinfile:
+            path: "{{ paperless_timeout_quadlet }}"
+            insertafter: '^EnvironmentFile=/etc/bergen-paperless/paperless[.]env$'
+            marker: '# {mark} BERGEN-ALLAUTH-TIMEOUT'
+            block: |
+              Environment=DJANGO_SETTINGS_MODULE=bergen_paperless_settings
+              Volume=/etc/bergen-paperless/bergen_paperless_settings.py:/usr/src/paperless/src/bergen_paperless_settings.py:ro
+
+        - name: Regenerate Quadlet unit without stopping database or Redis
+          ansible.builtin.systemd_service:
+            daemon_reload: true
+
+        - name: Restart only the Paperless application
+          ansible.builtin.systemd_service:
+            name: bergen-paperless.service
+            state: restarted
+
+        - name: Verify 15-second setting, module and preserved SSO
+          ansible.builtin.command:
+            argv:
+              - podman
+              - exec
+              - bergen-paperless
+              - python3
+              - -c
+              - |
+                import os
+                import django
+                os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'paperless.settings')
+                django.setup()
+                from django.conf import settings
+                from allauth.socialaccount import app_settings
+                assert settings.SETTINGS_MODULE == 'bergen_paperless_settings'
+                assert app_settings.REQUESTS_TIMEOUT == 15
+                assert os.environ.get('PAPERLESS_SOCIAL_ACCOUNT_SYNC_GROUPS') == 'true'
+                assert os.environ.get('PAPERLESS_DISABLE_REGULAR_LOGIN') == 'false'
+                assert 'allauth.socialaccount.providers.openid_connect' in settings.INSTALLED_APPS
+                print('PAPERLESS_ALLAUTH_TIMEOUT_15_PASS')
+          register: paperless_timeout_check
+          changed_when: false
+          retries: 12
+          delay: 5
+          until: paperless_timeout_check.rc == 0
+
+        - name: Verify responsive existing loopback-only HTTP endpoint
+          ansible.builtin.command:
+            argv:
+              - python3
+              - -c
+              - |
+                import http.client
+                connection = http.client.HTTPConnection('127.0.0.1', 8000, timeout=10)
+                try:
+                    connection.request('GET', '/')
+                    status = connection.getresponse().status
+                finally:
+                    connection.close()
+                assert 200 <= status < 400, 'Paperless HTTP not responsive'
+                print('PAPERLESS_LOCAL_HTTP_PASS')
+          register: paperless_timeout_http
+          changed_when: false
+          retries: 12
+          delay: 5
+          until: paperless_timeout_http.rc == 0
+
+      rescue:
+        - name: Restore original Quadlet from protected snapshot
+          ansible.builtin.copy:
+            src: "{{ paperless_timeout_backup }}"
+            dest: "{{ paperless_timeout_quadlet }}"
+            remote_src: true
+            owner: root
+            group: root
+            mode: '0644'
+
+        - name: Reload original Podman Quadlet
+          ansible.builtin.systemd_service:
+            daemon_reload: true
+
+        - name: Restart Paperless with original settings
+          ansible.builtin.systemd_service:
+            name: bergen-paperless.service
+            state: restarted
+
+        - name: Verify original effective timeout restored
+          ansible.builtin.command:
+            argv:
+              - podman
+              - exec
+              - bergen-paperless
+              - python3
+              - -c
+              - |
+                import os
+                import django
+                os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'paperless.settings')
+                django.setup()
+                from allauth.socialaccount import app_settings
+                assert app_settings.REQUESTS_TIMEOUT == 5
+                print('PAPERLESS_ALLAUTH_ROLLBACK_PASS')
+          register: paperless_timeout_rollback
+          changed_when: false
+          retries: 12
+          delay: 5
+          until: paperless_timeout_rollback.rc == 0
+
+        - name: Remove only the newly staged override module
+          ansible.builtin.file:
+            path: "{{ paperless_timeout_module }}"
+            state: absent
+
+        - name: Mark failed activation explicitly even after verified rollback
+          ansible.builtin.fail:
+            msg: >-
+              Paperless timeout activation failed and original five-second
+              settings were restored. Database and Redis were not restarted.
+
+    - name: Require final 15-second timeout, including on repeated runs
+      ansible.builtin.command:
+        argv:
+          - podman
+          - exec
+          - bergen-paperless
+          - python3
+          - -c
+          - |
+            import os
+            import django
+            os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'paperless.settings')
+            django.setup()
+            from django.conf import settings
+            from allauth.socialaccount import app_settings
+            assert settings.SETTINGS_MODULE == 'bergen_paperless_settings'
+            assert app_settings.REQUESTS_TIMEOUT == 15
+            assert os.environ.get('PAPERLESS_DISABLE_REGULAR_LOGIN') == 'false'
+            assert os.environ.get('PAPERLESS_SOCIAL_ACCOUNT_SYNC_GROUPS') == 'true'
+            print('PAPERLESS_ALLAUTH_TIMEOUT_15_PASS')
+      changed_when: false
+
+    - name: Report scoped result without credential disclosure
+      ansible.builtin.debug:
+        msg:
+          - PAPERLESS_ALLAUTH_TIMEOUT_15_PASS
+          - PAPERLESS_APPLICATION_ONLY_RESTARTED_IF_NEEDED=true
+          - SYNLOGY_OIDC_AND_GROUP_SYNC_UNCHANGED=true
+          - POSTGRESQL_RESTARTED=false
+          - REDIS_RESTARTED=false
+          - NETWORK_AND_DOCUMENT_ACLS_UNCHANGED=true
+          - NEXT_STEP=Test Synology SSO with 2FA interactively
