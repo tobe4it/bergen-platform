@@ -124,43 +124,49 @@ def main() -> None:
     if not args.apply and args.approval:
         raise FirstInstallError("Approval is only valid with --apply")
     cfg = mail.load_config(args.config)
-    source = mail.ssh_args(cfg["mail_tls_source_address"],
-                           cfg["mail_tls_source_ssh_user"], "true")[:-1]
-    ssh, _proxy_cfg = reviewed_target(cfg, args.proxy_vars,
-                                      args.proxy_local_inventory, args.proxy_pve_inventory)
-    source_fp, source_expiry = mail.source_evidence(
-        cfg["mail_tls_source_address"], cfg["mail_tls_source_ssh_user"], cfg
-    )
-    # In both modes, re-audit the target and source directly before any work.
-    preflight(cfg, ssh, source_fp, source_expiry, args.proxy_vars,
-              args.proxy_local_inventory, args.proxy_pve_inventory)
-    if not args.apply:
-        print("PROXY_TLS_FIRST_INSTALL_PLAN_ONLY")
-        return
-    stage = restricted_stage(run_actor(ssh, ["stage"]))
-    activated = False
-    try:
-        for name, source_key in (
-            (CERT_NAME, "mail_tls_source_cert_file"),
-            (KEY_NAME, "mail_tls_source_key_file"),
-        ):
-            transfer_secret(source, ssh, cfg[source_key], f"{stage}/{name}")
-        result = run_actor(ssh, ["activate", stage, source_fp, SITE])
-        if result != "PROXY_TLS_FIRST_INSTALL_PASS":
-            raise FirstInstallError("Unexpected activation result")
-        activated = True
-    finally:
+    src_host = cfg["mail_tls_source_address"]
+    src_user = cfg["mail_tls_source_ssh_user"]
+    # Reuse the *same* authenticated source SSH transport already proven by
+    # mail_tls_sync.py. Without this pool, repeated new connections can fail
+    # during the source_evidence step despite the mail audit succeeding.
+    with mail.reused_ssh_connections(((src_user, src_host),)):
+        source = mail.ssh_args(src_host, src_user, "true")[:-1]
+        ssh, _proxy_cfg = reviewed_target(
+            cfg, args.proxy_vars, args.proxy_local_inventory, args.proxy_pve_inventory
+        )
+        print("PROXY_TLS_FIRST_INSTALL_CHECK=SOURCE_CERT", flush=True)
+        source_fp, source_expiry = mail.source_evidence(src_host, src_user, cfg)
+        print("PROXY_TLS_FIRST_INSTALL_CHECK=PROXY_PREFLIGHT", flush=True)
+        # In both modes, re-audit the target and source directly before work.
+        preflight(cfg, ssh, source_fp, source_expiry, args.proxy_vars,
+                  args.proxy_local_inventory, args.proxy_pve_inventory)
+        if not args.apply:
+            print("PROXY_TLS_FIRST_INSTALL_PLAN_ONLY")
+            return
+        stage = restricted_stage(run_actor(ssh, ["stage"]))
+        activated = False
         try:
-            cleaned = run_actor(ssh, ["cleanup", stage])
-            if cleaned != "PROXY_TLS_STAGE_CLEANED":
-                raise FirstInstallError("Unexpected staging cleanup response")
-        except FirstInstallError:
-            print("PROXY_TLS_CLEANUP_FAILED: manual inspection of protected stage required",
-                  file=sys.stderr)
-            raise
-    if activated:
-        print("PROXY_TLS_FIRST_INSTALL_PASS: certificate/key installed")
-        print("NGINX_UNCHANGED=true MAIL_UNCHANGED=true DNS_UNCHANGED=true")
+            for name, source_key in (
+                (CERT_NAME, "mail_tls_source_cert_file"),
+                (KEY_NAME, "mail_tls_source_key_file"),
+            ):
+                transfer_secret(source, ssh, cfg[source_key], f"{stage}/{name}")
+            result = run_actor(ssh, ["activate", stage, source_fp, SITE])
+            if result != "PROXY_TLS_FIRST_INSTALL_PASS":
+                raise FirstInstallError("Unexpected activation result")
+            activated = True
+        finally:
+            try:
+                cleaned = run_actor(ssh, ["cleanup", stage])
+                if cleaned != "PROXY_TLS_STAGE_CLEANED":
+                    raise FirstInstallError("Unexpected staging cleanup response")
+            except FirstInstallError:
+                print("PROXY_TLS_CLEANUP_FAILED: manual inspection of protected stage required",
+                      file=sys.stderr)
+                raise
+        if activated:
+            print("PROXY_TLS_FIRST_INSTALL_PASS: certificate/key installed")
+            print("NGINX_UNCHANGED=true MAIL_UNCHANGED=true DNS_UNCHANGED=true")
 
 
 if __name__ == "__main__":
