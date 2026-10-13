@@ -23,6 +23,7 @@ class SynologyOIDCStagingTests(unittest.TestCase):
         self.assertIn("vault_paperless_synology_oidc_client_id", template)
         self.assertIn("vault_paperless_synology_oidc_client_secret", template)
         self.assertIn("paperless_synology_oidc_discovery_url", template)
+        self.assertIn("\'SCOPE\': [\'openid\', \'email\']", template)
         for line in (
             "PAPERLESS_SOCIAL_AUTO_SIGNUP=false",
             "PAPERLESS_SOCIALACCOUNT_ALLOW_SIGNUPS=false",
