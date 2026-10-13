@@ -3,14 +3,13 @@
 # Requires the existing encrypted site Vault via -e @ansible/vars/paperless.vault.yml.
 # Does not render env files, change containers, create users or start services.
 - name: Inspect live Paperless safely before Synology OIDC activation
-  hosts: paperless_nodes
+  hosts: bergen-paperless
   become: true
   gather_facts: false
   tasks:
     - name: Require exact existing Paperless host and OIDC Vault keys
       ansible.builtin.assert:
         that:
-          - groups.get('paperless_nodes', []) == ['bergen-paperless']
           - inventory_hostname == 'bergen-paperless'
           - vault_paperless_synology_oidc_client_id is defined
           - vault_paperless_synology_oidc_client_secret is defined
