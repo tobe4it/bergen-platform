@@ -1,0 +1,106 @@
+---
+# Read-only live baseline, before an isolated Synology OIDC deployment.
+# Requires the existing encrypted site Vault via -e @ansible/vars/paperless.vault.yml.
+# Does not render env files, change containers, create users or start services.
+- name: Inspect live Paperless safely before Synology OIDC activation
+  hosts: paperless_nodes
+  become: true
+  gather_facts: false
+  tasks:
+    - name: Require exact existing Paperless host and OIDC Vault keys
+      ansible.builtin.assert:
+        that:
+          - groups.get('paperless_nodes', []) == ['bergen-paperless']
+          - inventory_hostname == 'bergen-paperless'
+          - vault_paperless_synology_oidc_client_id is defined
+          - vault_paperless_synology_oidc_client_secret is defined
+          - vault_paperless_synology_oidc_client_id | length >= 8
+          - vault_paperless_synology_oidc_client_secret | length >= 16
+        fail_msg: Refusing audit on unexpected host or without encrypted OIDC credentials.
+      no_log: true
+
+    - name: Inspect protected environment, Quadlet and running container without printing secrets
+      ansible.builtin.shell: |
+        set -eu
+        python3 - <<'PY'
+        import json
+        import os
+        from pathlib import Path
+        import stat
+        import subprocess
+
+        env_path = Path("/etc/bergen-paperless/paperless.env")
+        quadlet_path = Path("/etc/containers/systemd/bergen-paperless.container")
+        expected_url = "https://paperless.thebergens.net"
+
+        if env_path.is_symlink() or not env_path.is_file():
+            raise SystemExit("PRECHECK_FAIL: protected environment missing or symlinked")
+        meta = env_path.stat()
+        if meta.st_uid != 0 or stat.S_IMODE(meta.st_mode) != 0o600:
+            raise SystemExit("PRECHECK_FAIL: environment must be root-owned mode 0600")
+
+        if quadlet_path.is_symlink() or not quadlet_path.is_file():
+            raise SystemExit("PRECHECK_FAIL: expected Quadlet missing or symlinked")
+        quadlet = quadlet_path.read_text()
+        if "EnvironmentFile=/etc/bergen-paperless/paperless.env" not in quadlet:
+            raise SystemExit("PRECHECK_FAIL: Quadlet uses an unexpected env file")
+        if "PublishPort=127.0.0.1:8000:8000" not in quadlet:
+            raise SystemExit("PRECHECK_FAIL: backend is not configured loopback-only")
+
+        saved = {}
+        for line in env_path.read_text().splitlines():
+            if not line or line.lstrip().startswith("#"):
+                continue
+            if "=" not in line:
+                raise SystemExit("PRECHECK_FAIL: malformed saved env line")
+            k, v = line.split("=", 1)
+            if k in saved:
+                raise SystemExit("PRECHECK_FAIL: duplicated saved env key")
+            saved[k] = v
+
+        result = subprocess.run(
+            ["podman", "inspect", "bergen-paperless"],
+            check=True, capture_output=True, text=True,
+        )
+        obj = json.loads(result.stdout)[0]
+        running = dict(
+            item.split("=", 1) for item in obj["Config"]["Env"] if "=" in item
+        )
+        if obj["State"]["Running"] is not True:
+            raise SystemExit("PRECHECK_FAIL: Paperless is not running")
+
+        for label, source in (("SAVED", saved), ("RUNNING", running)):
+            url = source.get("PAPERLESS_URL", "").strip('"')
+            if url != expected_url:
+                raise SystemExit("PRECHECK_FAIL: " + label + "_PAPERLESS_URL_MISMATCH")
+
+        oidc_keys = (
+            "PAPERLESS_APPS",
+            "PAPERLESS_SOCIALACCOUNT_PROVIDERS",
+            "PAPERLESS_SOCIAL_AUTO_SIGNUP",
+            "PAPERLESS_SOCIALACCOUNT_ALLOW_SIGNUPS",
+            "PAPERLESS_SOCIAL_ACCOUNT_SYNC_GROUPS",
+            "PAPERLESS_DISABLE_REGULAR_LOGIN",
+            "PAPERLESS_REDIRECT_LOGIN_TO_SSO",
+        )
+        for label, source in (("SAVED", saved), ("RUNNING", running)):
+            if any(key in source for key in oidc_keys):
+                raise SystemExit("PRECHECK_FAIL: " + label + "_OIDC_ALREADY_CONFIGURED")
+
+        print("PAPERLESS_OIDC_LIVE_PREFLIGHT_PASS")
+        print("CONTAINER_RUNNING=true")
+        print("ENV_ROOT_ONLY=true")
+        print("QUADLET_ENV_FILE_MATCH=true")
+        print("QUADLET_LOOPBACK_BACKEND=true")
+        print("APP_URL_MATCH=true")
+        print("OIDC_NOT_YET_CONFIGURED=true")
+        print("NO_CREDENTIALS_PRINTED=true")
+        PY
+      register: paperless_oidc_baseline
+      changed_when: false
+      check_mode: false
+      failed_when: paperless_oidc_baseline.rc != 0 or 'PAPERLESS_OIDC_LIVE_PREFLIGHT_PASS' not in paperless_oidc_baseline.stdout
+
+    - name: Report read-only baseline result
+      ansible.builtin.debug:
+        msg: "{{ paperless_oidc_baseline.stdout_lines }}"
