@@ -85,7 +85,10 @@
     - name: Read SSH main-file include and Match boundaries
       ansible.builtin.shell: |
         set -eu
-        grep -nE '^[[:space:]]*(Include|Match)[[:space:]]' /etc/ssh/sshd_config || true
+        # Exclude only our exact managed block, so a repeated preflight
+        # remains usable after staging. Foreign Match blocks still fail.
+        sed '/^# BEGIN ANSIBLE MANAGED PAPERLESS TUNNEL$/,/^# END ANSIBLE MANAGED PAPERLESS TUNNEL$/d' /etc/ssh/sshd_config |
+          grep -nE '^[[:space:]]*(Include|Match)[[:space:]]' || true
         for f in /etc/ssh/sshd_config.d/*.conf; do
           test -f "$f" || continue
           grep -HnE '^[[:space:]]*Match[[:space:]]' "$f" || true
