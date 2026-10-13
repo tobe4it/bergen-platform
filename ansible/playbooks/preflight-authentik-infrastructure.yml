@@ -56,11 +56,11 @@
           - authentik_vmid_check.stdout | trim == '127'
           - >-
             authentik_storage.stdout_lines |
-            select('match', '^local-zfs\\s+\\S+\\s+active\\b') |
+            select('match', '^local-zfs[ ]+zfspool[ ]+active([ ]|$)') |
             list | length == 1
           - >-
             authentik_storage.stdout_lines |
-            select('match', '^bergen-synology-backup\\s+\\S+\\s+active\\b') |
+            select('match', '^bergen-synology-backup[ ]+nfs[ ]+active([ ]|$)') |
             list | length == 1
         fail_msg: >-
           AUTHENTIK_PREFLIGHT_FAIL: VMID 127 unavailable or required storage
