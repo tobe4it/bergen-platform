@@ -48,8 +48,6 @@ def validate_metadata(url: str, data: object) -> None:
         if key not in data:
             raise ValueError(f"missing discovery field: {key}")
         require_https_endpoint(data[key], key)
-    if data["issuer"].endswith("/"):
-        raise ValueError("issuer must not end with a slash")
     # A probe cannot prove that the issuer in future ID tokens will match.
     # That requires a separately reviewed end-to-end OIDC login test.
 
@@ -61,6 +59,8 @@ def probe(url: str) -> None:
         url, headers={"Accept": "application/json", "User-Agent": "bergen-platform-oidc-preflight/1"}
     )
     with urllib.request.urlopen(req, context=ctx, timeout=10) as response:
+        if response.geturl() != url:
+            raise ValueError("discovery URL redirected to an unexpected location")
         if response.status != 200:
             raise ValueError("unexpected HTTP response status")
         body = response.read(65537)
