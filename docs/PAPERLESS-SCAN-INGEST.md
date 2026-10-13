@@ -1,14 +1,12 @@
 # Bergen Paperless: staged Synology iPhone scans and ASN labels
 
-Status: **personal Synology scan inputs provisioned and ACL-tested; Paperless ingestion
-has not been enabled**. This change builds on the separate Paperless backend draft
-(PR #54), not on the Proxmox backup worktree.
+Status (2026-10-13): **the four personal and both shared Synology scan inputs are provisioned**. The Paperless-LXC is not yet connected to them, and ingestion remains disabled. Do not confuse provisioned Synology directories with a verified SMB mapping or document ACLs.
 
 ## Access model (not a tagging convention)
 
 * Each person has a **personal** input on the Synology. Its trusted path
   maps to that exact non-superuser Paperless account (e.g. `Privat/benutzer`).
-* Two shared inputs map to the Paperless groups `Eltern` and `Familie`.
+* Two shared inputs will map to the exact Paperless/OIDC groups `Eltern@bergen.intern` and `Familie@bergen.intern`.
   Group permission is **read**, not an implication that all group members
   may change or delete the document.
 * The Paperless `admin` account is a separate break-glass superuser and
@@ -24,7 +22,7 @@ In the currently deployed Paperless configuration, a document without an
 owner can be visible to ordinary users. Consequently a path filter alone is
 **not** a sufficient fail-closed guarantee.
 
-## Verified Synology NAS preparation (2026-10-12)
+## Synology NAS preparation (2026-10-12/13)
 
 - Personal Paperless scan directories provisioned for Thomas, Nadja, Nils and Linda.
 - LDAP group `Familie@bergen.intern` determines eligible personal inputs.
@@ -36,19 +34,17 @@ owner can be visible to ordinary users. Consequently a path filter alone is
 - Second provisioning run confirmed idempotency (`changed=0`).
 - Real iPhone SMB scan successfully saved and read by `paperless-sync`.
 - Real PDF access denied to all three other tested family users.
-- Shared `Eltern` and `Familie` inputs remain unprovisioned.
+- Shared `Eltern` and `Familie` inputs have also been provisioned, per the current operator confirmation. Their Samba share mapping and the current access restrictions must be separately confirmed from the Paperless LXC before any importer is enabled.
+- The home-directory provisioner identifies personal inputs under `/volume1/homes/@LH-BERGEN.INTERN/61/<LDAP-home>/Paperless`; reported shared inputs are under `/volume1/paperless-scan/{Eltern,Familie}`. These are filesystem locations *on the Synology*, not SMB share names. Use only independently verified Samba share names when building the read-only mapping.
+- The parent accounts `thomas` and `nadja` have tested OIDC membership in `Familie@bergen.intern` and `Eltern@bergen.intern`. Children and group-removal-on-relogin remain untested.
+- The `Familie@bergen.intern` group has only `documents.view_uisettings`; no document ACLs are configured.
 - Automatic provisioning schedule and Paperless importer are not enabled.
 - Paperless document-level ownership and ACL workflows remain unverified.
 
 ## Remaining Paperless ingestion workflow
 
-1. iPhone Files -> SMB -> an existing Synology folder with suitable DSM ACLs.
-   First verify whether the three logical areas are shares, `homes` or
-   subfolders; the example paths below are **not** validated site paths.
-2. A future dedicated, restricted service account may read **only**
-   explicitly allowlisted incoming folders. This service must verify a regular
-   file, allowed type, safe real path (no symlink escape), stable completed
-   upload, deduplication/idempotency, and an available destination.
+1. Existing iPhone Files -> SMB inputs stay on the Synology. Verify the network path from the Paperless LXC with `ansible/playbooks/preflight-paperless-synology-smb.yml`, and independently identify the exact SMB share paths. Do **not** treat a DSM filesystem path under `/volume1/` as a UNC path.
+2. Use the existing, restricted DSM service account `paperless-sync` for a separately reviewed **read-only, authenticated** SMB test limited to the six allowlisted inputs. Do not place passwords in shell arguments, logs, the repository or general application environment. The future importer must verify regular files, permitted types, nonescaping paths, complete uploads, deduplication and a valid owner/group target.
 3. A future staging importer sends each item to the matching local consume
    subdirectory. Unknown paths and principals are denied or quarantined.
    It must not delete originals until a correct Paperless document, ACL
@@ -85,8 +81,26 @@ python3 -m unittest discover -s tests \
 
 This **offline** check rejects unknown scopes, duplicate/overlapping source
 paths, duplicate targets, private-owner mismatches and unknown shared groups.
+**Attention:** The existing validator still accepts logical short labels `Eltern` and `Familie`, but effective Paperless group names now have the LDAP suffix `@bergen.intern`. Update that validator and associated tests before enabling live group routing.
 It does not contact Synology or Paperless, check mount points, verify DSM ACLs,
 provision Paperless users/groups, or enable any import.
+
+## Read-only SMB connectivity preflight
+
+The playbook `ansible/playbooks/preflight-paperless-synology-smb.yml` checks only whether TCP/445 on the internal SDS address is reachable from the Paperless LXC, whether `smbclient` and `mount.cifs` are already available and how many existing CIFS mounts the LXC reports. It **does not authenticate**, enumerate remote shares, mount, install packages, open PDFs, change services or copy files. It has no credential input.
+
+```bash
+cd ~/bergen-platform
+ansible-playbook \
+  -i ansible/inventory.yml \
+  -i ansible/inventory.local.yml \
+  ansible/playbooks/preflight-paperless-synology-smb.yml \
+  --vault-id paperless@prompt \
+  -e @ansible/vars/paperless.vault.yml \
+  -e synology_paperless_smb_host=192.168.2.145
+```
+
+After a successful network preflight, the next gate is a separately approved restricted `paperless-sync` credential-based SMB listing **without mounting** of each pre-existing input and a negative access test. We do not enable a NAS-to-Paperless import until the corresponding Paperless owner/ACL workflow is verified fail-closed.
 
 ## ASN label support (prepared; off by default)
 
