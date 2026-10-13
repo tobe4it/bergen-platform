@@ -37,7 +37,7 @@ If an independently approved deployment enables OIDC, the template stages:
 - provider app `allauth.socialaccount.providers.openid_connect`
 - `provider_id=synology` to match the registered callback
 - client credentials sourced only from existing encrypted Vault keys
-- exact reviewed SSO well-known URL as the provider `server_url`
+- confirmed SSO well-known URL as the provider `server_url`
 - `PAPERLESS_SOCIAL_AUTO_SIGNUP=false`
 - `PAPERLESS_SOCIALACCOUNT_ALLOW_SIGNUPS=false`
 - `PAPERLESS_SOCIAL_ACCOUNT_SYNC_GROUPS=false`
@@ -48,32 +48,53 @@ The local Paperless `admin` remains the break-glass account.
 Group sync, administrative claims, identity auto-creation and document
 ingestion are not part of this stage.
 
-## Next safe action — OIDC Discovery only
+## Verified Synology OIDC discovery (2026-10-13)
 
-Synology's official sequence is **SSO Server → Dienst → OIDC**. Copy the
-**Well-known URL** from the Synology screen, *not* the secret. The URL is
-not an access token.
-
-From the staged review worktree on `bp-controller`:
+From an SSH session on the NAS, the following test returned a fully parsed
+OIDC metadata JSON document with validated HTTPS **without** `-k`:
 
 ```bash
-python3 -m unittest discover -s tests -p 'test_paperless_synology_oidc.py' -v
-python3 ansible/scripts/paperless_synology_oidc_preflight.py \
-  'https://ldap.thebergens.net:5001/EXACT_PATH_COPIED_FROM_DSM/.well-known/openid-configuration'
+curl --noproxy '*' --fail --silent --show-error \\
+  --resolve 'sehnde.tbergen.de:5001:127.0.0.1' \\
+  'https://sehnde.tbergen.de:5001/webman/sso/.well-known/openid-configuration'
 ```
 
-Replace the sample **entire URL** with the exact DSM value.
-The preflight checks HTTPS, validated TLS certificate, expected host,
-redirect rejection, JSON metadata and same-host OIDC endpoints.
-It performs no login, token exchange, data modification or credential use.
+Confirmed:
+- Exact discovery URL:
+  `https://sehnde.tbergen.de:5001/webman/sso/.well-known/openid-configuration`
+- Issuer: `https://sehnde.tbergen.de:5001/webman/sso`
+- Authorization: `https://sehnde.tbergen.de:5001/webman/sso/SSOOauth.cgi`
+- Token: `https://sehnde.tbergen.de:5001/webman/sso/SSOAccessToken.cgi`
+- JWKS: `https://sehnde.tbergen.de:5001/webman/sso/openid-jwks.json`
+- Userinfo: `https://sehnde.tbergen.de:5001/webman/sso/SSOUserInfo.cgi`
+- RS256, authorization code, PKCE S256, groups scope/claim supported.
+- Claim support does **not** establish correct nested LDAP group expansion.
 
-**Read-only run only from the controller does not prove** that the
-Paperless container can reach the provider or trust its TLS chain. Verify
-that separately before any approved activation.
+**Network caveat:** The controller previously resolved
+`ldap.thebergens.net -> 192.168.6.11`; TCP 636 succeeded but TCP 5001
+timed out. Local verified HTTPS on the NAS does not prove that either
+`bp-controller` or the Paperless LXC can reach SSO on 5001.
+
+Run offline tests in the review worktree:
+
+```bash
+python3 -m unittest discover -s tests -p 'test_paperless_synology_oidc*.py' -v
+```
+
+Run the strict no-credentials probe from a host only **after** it has a
+reviewed network route to the Synology SSO port:
+
+```bash
+python3 ansible/scripts/paperless_synology_oidc_preflight.py \\
+ 'https://sehnde.tbergen.de:5001/webman/sso/.well-known/openid-configuration'
+```
+
+The preflight validates HTTPS, certificate, issuer and observed OIDC endpoints
+without login or modification. It does not substitute for login testing.
 
 ## Subsequent gates
 
-1. Verify real Well-known URL and signed issuer/JWKS/token flow; refuse
+1. Verify Paperless-runtime reachability of the confirmed Well-known URL and signed issuer/JWKS/token flow; refuse
    missing or inconsistent issuer, audience, redirect, nonce, state or TLS.
    Synology SSO versions may differ; do not assume a fixed issuer path.
 2. Verify restricted, TLS-protected `paperless.thebergens.net` proxy route
