@@ -67,6 +67,7 @@ class BackendTunnelStagingTests(unittest.TestCase):
             "PasswordAuthentication no",
             "KbdInteractiveAuthentication no",
             "AllowTcpForwarding local",
+            "AllowStreamLocalForwarding no",
             "PermitOpen 127.0.0.1:8000",
             "PermitTTY no",
             "MaxSessions 0",
