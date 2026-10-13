@@ -51,6 +51,7 @@ class ProxyTLSFirstInstallTests(unittest.TestCase):
             "proxy_tls_first_install.py", "--config", "conf.yml",
             "--proxy-vars", "proxy.yml",
         ]), patch.object(installer.mail, "load_config", return_value=cfg), \
+            patch.object(installer.mail, "reused_ssh_connections") as pool, \
             patch.object(installer, "reviewed_target", return_value=(["ssh"], {})), \
             patch.object(installer.mail, "source_evidence", return_value=("a"*64, None)), \
             patch.object(installer, "preflight") as preflight, \
@@ -58,6 +59,7 @@ class ProxyTLSFirstInstallTests(unittest.TestCase):
             patch.object(installer, "transfer_secret", side_effect=AssertionError("transferred")):
             installer.main()
             preflight.assert_called_once()
+            pool.assert_called_once_with((("operator", "source.example.invalid"),))
 
 
     def test_apply_refuses_when_preflight_fails_before_staging(self):
@@ -72,6 +74,7 @@ class ProxyTLSFirstInstallTests(unittest.TestCase):
         ]
         with patch.object(sys, "argv", args), \
             patch.object(installer.mail, "load_config", return_value=cfg), \
+            patch.object(installer.mail, "reused_ssh_connections"), \
             patch.object(installer, "reviewed_target", return_value=(["ssh"], {})), \
             patch.object(installer.mail, "source_evidence", return_value=("a"*64, None)), \
             patch.object(installer, "preflight",
