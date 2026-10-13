@@ -33,6 +33,29 @@
   loop_control:
     label: '{{ item.hostname | default("invalid") }}'
 
+- name: Refuse documentation-only backend addresses before Nginx deployment
+  ansible.builtin.assert:
+    that:
+      - item.backend_url is not match('^https?://(192[.]0[.]2[.]|198[.]51[.]100[.]|203[.]0[.]113[.]).*')
+    fail_msg: >-
+      The backend URL is a documentation-only TEST-NET address.
+      Replace it with an independently verified real backend before deployment.
+  loop: '{{ reverse_proxy_sites }}'
+  loop_control:
+    label: '{{ item.hostname | default("unnamed") }}'
+
+- name: Require the reviewed Paperless backend via proxy-local SSH tunnel
+  ansible.builtin.assert:
+    that:
+      - item.backend_url == 'http://127.0.0.1:18000'
+    fail_msg: >-
+      paperless.thebergens.net must only proxy to the reviewed, local
+      127.0.0.1:18000 SSH tunnel; never directly to Paperless TCP 8000.
+  loop: '{{ reverse_proxy_sites }}'
+  loop_control:
+    label: '{{ item.hostname | default("unnamed") }}'
+  when: item.hostname | default('') == 'paperless.thebergens.net'
+
 - name: Refuse malformed client allowlist entries
   ansible.builtin.assert:
     that:
