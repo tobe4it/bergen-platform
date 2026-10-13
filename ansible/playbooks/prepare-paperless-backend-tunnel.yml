@@ -21,10 +21,16 @@
           - paperless_tunnel_backend_ip is match('^[0-9]{1,3}([.][0-9]{1,3}){3}$')
         fail_msg: Use read-only tunnel preflight first; stage only with reviewed exact addresses and approval.
 
+    - name: Create dedicated tunnel client group
+      ansible.builtin.group:
+        name: paperless-tunnel-client
+        system: true
+
     - name: Create noninteractive proxy tunnel service account and ED25519 key
       ansible.builtin.user:
         name: paperless-tunnel-client
         system: true
+        group: paperless-tunnel-client
         home: /var/lib/bergen-paperless-tunnel
         create_home: true
         shell: /usr/sbin/nologin
@@ -102,10 +108,16 @@
         grep -qE '^Include /etc/ssh/sshd_config.d/[*][.]conf$' /etc/ssh/sshd_config
       changed_when: false
 
+    - name: Create dedicated tunnel backend group
+      ansible.builtin.group:
+        name: paperless-tunnel
+        system: true
+
     - name: Create backend key-only account with no usable login shell
       ansible.builtin.user:
         name: paperless-tunnel
         system: true
+        group: paperless-tunnel
         home: /var/lib/paperless-tunnel
         create_home: true
         shell: /usr/sbin/nologin
@@ -229,10 +241,9 @@
     - name: Install source-IP-bound, destination-restricted public key
       ansible.builtin.copy:
         dest: /var/lib/paperless-tunnel/.ssh/authorized_keys
-        content: >-
+        content: >
           from="{{ paperless_tunnel_proxy_ip }}",restrict,port-forwarding,permitopen="127.0.0.1:8000"
           {{ hostvars['bergen-proxy'].paperless_tunnel_forward_public_key }}
-          {{ '\n' }}
         owner: paperless-tunnel
         group: paperless-tunnel
         mode: '0600'
