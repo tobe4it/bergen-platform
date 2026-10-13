@@ -122,11 +122,31 @@
       register: paperless_oidc_rollback_copy
       no_log: true
 
-    - name: Require a fresh rollback copy rather than a stale older one
-      ansible.builtin.assert:
-        that:
-          - paperless_oidc_rollback_copy.changed | bool
-        fail_msg: Existing rollback file found; refuse to overwrite or reuse it.
+    - name: Verify preserved rollback matches the active pre-OIDC environment
+      ansible.builtin.command:
+        argv:
+          - python3
+          - -c
+          - |
+            from pathlib import Path
+            import stat
+
+            live = Path("/etc/bergen-paperless/paperless.env")
+            rollback = Path("/etc/bergen-paperless/paperless.env.pre-synology-oidc")
+            for path in (live, rollback):
+                if path.is_symlink() or not path.is_file():
+                    raise SystemExit("OIDC_ROLLBACK_REFUSED: missing file or symlink")
+                meta = path.stat()
+                if meta.st_uid != 0 or stat.S_IMODE(meta.st_mode) != 0o600:
+                    raise SystemExit("OIDC_ROLLBACK_REFUSED: file ownership or mode")
+            if live.read_bytes() != rollback.read_bytes():
+                raise SystemExit("OIDC_ROLLBACK_REFUSED: baseline content mismatch")
+            print("PAPERLESS_OIDC_ROLLBACK_BASELINE_PASS")
+      register: paperless_oidc_rollback_verified
+      changed_when: false
+      failed_when: >-
+        paperless_oidc_rollback_verified.rc != 0 or
+        'PAPERLESS_OIDC_ROLLBACK_BASELINE_PASS' not in paperless_oidc_rollback_verified.stdout
 
     - name: Activate only Paperless application OIDC environment
       block:
