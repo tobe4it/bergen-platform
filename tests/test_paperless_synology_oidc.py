@@ -11,10 +11,13 @@ spec.loader.exec_module(mod)
 
 URL = "https://sehnde.tbergen.de:5001/webman/sso/.well-known/openid-configuration"
 META = {
-    "issuer": "https://ldap.thebergens.net:5001/webman/sso",
-    "authorization_endpoint": "https://ldap.thebergens.net:5001/webman/sso/SSOOauth.cgi",
-    "token_endpoint": "https://ldap.thebergens.net:5001/webman/sso/SSOAccessToken.cgi",
-    "jwks_uri": "https://ldap.thebergens.net:5001/webman/sso/openid-jwks.json",
+    "issuer": "https://sehnde.tbergen.de:5001/webman/sso",
+    "authorization_endpoint": "https://sehnde.tbergen.de:5001/webman/sso/SSOOauth.cgi",
+    "token_endpoint": "https://sehnde.tbergen.de:5001/webman/sso/SSOAccessToken.cgi",
+    "jwks_uri": "https://sehnde.tbergen.de:5001/webman/sso/openid-jwks.json",
+    "id_token_signing_alg_values_supported": ["RS256"],
+    "response_types_supported": ["code", "code id_token", "id_token", "id_token token"],
+    "scopes_supported": ["email", "groups", "openid"],
 }
 
 
@@ -52,6 +55,11 @@ class SynologyOIDCPreflightTests(unittest.TestCase):
             with self.subTest(url=url), self.assertRaises(ValueError):
                 mod.validate_metadata(url, META)
 
+    def test_rejects_wrong_old_ldap_hostname(self):
+        modified = dict(META, issuer="https://ldap.thebergens.net:5001/webman/sso")
+        with self.assertRaises(ValueError):
+            mod.validate_metadata(URL, modified)
+
     def test_rejects_unexpected_issuer(self):
         modified = dict(META, issuer="https://sehnde.tbergen.de:5001/other")
         with self.assertRaises(ValueError):
@@ -71,7 +79,7 @@ class SynologyOIDCPreflightTests(unittest.TestCase):
         import json
 
         response = FakeResponse(
-            "https://ldap.thebergens.net:5001/moved",
+            "https://sehnde.tbergen.de:5001/moved",
             json.dumps(META).encode(),
         )
         with patch.object(mod.urllib.request, "urlopen", return_value=response):
