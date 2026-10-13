@@ -14,7 +14,9 @@ import urllib.error
 import urllib.parse
 import urllib.request
 
-HOST = "ldap.thebergens.net"
+HOST = "sehnde.tbergen.de"
+DISCOVERY_URL = "https://sehnde.tbergen.de:5001/webman/sso/.well-known/openid-configuration"
+ISSUER = "https://sehnde.tbergen.de:5001/webman/sso"
 REQUIRED_KEYS = ("issuer", "authorization_endpoint", "token_endpoint", "jwks_uri")
 
 
@@ -29,25 +31,37 @@ def require_https_endpoint(value: str, label: str, *, well_known: bool = False) 
     if (
         uri.scheme != "https"
         or uri.hostname != HOST
-        or port not in (None, 443, 5001)
+        or port != 5001
         or uri.username is not None
         or uri.password is not None
         or uri.fragment
         or uri.query
     ):
         raise ValueError(f"{label}: unexpected scheme, host, port or URL parameters")
-    if well_known and not uri.path.endswith("/.well-known/openid-configuration"):
-        raise ValueError("well-known URL must end in /.well-known/openid-configuration")
+    if well_known and value != DISCOVERY_URL:
+        raise ValueError("discovery URL does not match reviewed Synology OIDC endpoint")
 
 
 def validate_metadata(url: str, data: object) -> None:
     require_https_endpoint(url, "discovery", well_known=True)
     if not isinstance(data, dict):
         raise ValueError("discovery response must be a JSON object")
+    expected = {
+        "issuer": ISSUER,
+        "authorization_endpoint": ISSUER + "/SSOOauth.cgi",
+        "token_endpoint": ISSUER + "/SSOAccessToken.cgi",
+        "jwks_uri": ISSUER + "/openid-jwks.json",
+    }
     for key in REQUIRED_KEYS:
-        if key not in data:
-            raise ValueError(f"missing discovery field: {key}")
+        if data.get(key) != expected[key]:
+            raise ValueError(f"unexpected OIDC metadata: {key}")
         require_https_endpoint(data[key], key)
+    if "RS256" not in data.get("id_token_signing_alg_values_supported", []):
+        raise ValueError("OIDC metadata does not support RS256")
+    if "code" not in data.get("response_types_supported", []):
+        raise ValueError("OIDC metadata does not support authorization code")
+    if "openid" not in data.get("scopes_supported", []):
+        raise ValueError("OIDC metadata does not support openid scope")
     # A probe cannot prove that the issuer in future ID tokens will match.
     # That requires a separately reviewed end-to-end OIDC login test.
 
