@@ -1,0 +1,270 @@
+---
+# This playbook mutates both LXCs only with explicit approval.
+# It does not configure DNS, WAN, firewall or Nginx.
+- name: Stage unprivileged SSH forwarding client on the internal proxy
+  hosts: reverse_proxy_nodes
+  become: true
+  gather_facts: true
+  tasks:
+    - name: Require named hosts, confirmed addresses, and preparation approval
+      ansible.builtin.assert:
+        that:
+          - paperless_tunnel_prepare_approved | default(false) | bool
+          - not ansible_check_mode
+          - groups.get('reverse_proxy_nodes', []) == ['bergen-proxy']
+          - groups.get('paperless_nodes', []) == ['bergen-paperless']
+          - inventory_hostname == 'bergen-proxy'
+          - ansible_facts['default_ipv4']['address'] == paperless_tunnel_proxy_ip
+          - paperless_tunnel_local_port | default(18000) | int == 18000
+          - paperless_tunnel_backend_port | default(8000) | int == 8000
+          - paperless_tunnel_proxy_ip is match('^[0-9]{1,3}([.][0-9]{1,3}){3}$')
+          - paperless_tunnel_backend_ip is match('^[0-9]{1,3}([.][0-9]{1,3}){3}$')
+        fail_msg: Use read-only tunnel preflight first; stage only with reviewed exact addresses and approval.
+
+    - name: Create noninteractive proxy tunnel service account
+      ansible.builtin.user:
+        name: paperless-tunnel-client
+        system: true
+        home: /var/lib/bergen-paperless-tunnel
+        create_home: true
+        shell: /usr/sbin/nologin
+        password_lock: true
+
+    - name: Create private proxy SSH key directory
+      ansible.builtin.file:
+        path: /var/lib/bergen-paperless-tunnel/.ssh
+        state: directory
+        owner: paperless-tunnel-client
+        group: paperless-tunnel-client
+        mode: '0700'
+
+    - name: Generate private ED25519 tunnel key only inside proxy LXC
+      ansible.builtin.command:
+        argv:
+          - ssh-keygen
+          - -q
+          - -t
+          - ed25519
+          - -N
+          - ''
+          - -f
+          - /var/lib/bergen-paperless-tunnel/.ssh/id_ed25519
+          - -C
+          - bergen-proxy-paperless-only
+        creates: /var/lib/bergen-paperless-tunnel/.ssh/id_ed25519
+      become_user: paperless-tunnel-client
+      no_log: true
+
+    - name: Enforce private SSH key permissions
+      ansible.builtin.file:
+        path: /var/lib/bergen-paperless-tunnel/.ssh/id_ed25519
+        state: file
+        owner: paperless-tunnel-client
+        group: paperless-tunnel-client
+        mode: '0600'
+      no_log: true
+
+    - name: Read only the public tunnel key
+      ansible.builtin.slurp:
+        src: /var/lib/bergen-paperless-tunnel/.ssh/id_ed25519.pub
+      register: paperless_tunnel_proxy_key_pub
+
+    - name: Retain public identity for backend account staging
+      ansible.builtin.set_fact:
+        paperless_tunnel_forward_public_key: "{{ paperless_tunnel_proxy_key_pub.content | b64decode | trim }}"
+
+    - name: Validate public key algorithm
+      ansible.builtin.assert:
+        that:
+          - paperless_tunnel_forward_public_key is match('^ssh-ed25519 [A-Za-z0-9+/=]+( [A-Za-z0-9-]+)?$')
+        fail_msg: Unexpected SSH public key; refuse authorization.
+
+- name: Harden dedicated Paperless SSH account before key authorization
+  hosts: paperless_nodes
+  become: true
+  gather_facts: true
+  tasks:
+    - name: Require protected backend and previously prepared proxy public key
+      ansible.builtin.assert:
+        that:
+          - paperless_tunnel_prepare_approved | default(false) | bool
+          - not ansible_check_mode
+          - inventory_hostname == 'bergen-paperless'
+          - ansible_facts['default_ipv4']['address'] == paperless_tunnel_backend_ip
+          - paperless_tunnel_proxy_ip != paperless_tunnel_backend_ip
+          - hostvars['bergen-proxy'].paperless_tunnel_forward_public_key is defined
+        fail_msg: Refusing unsafe or incomplete tunnel account setup.
+
+    - name: Verify SSH config before touching it
+      ansible.builtin.command:
+        argv: [/usr/sbin/sshd, -t]
+      changed_when: false
+
+    - name: Check for independent existing Match blocks
+      ansible.builtin.shell: |
+        set -eu
+        # The main file may already contain OUR block on idempotent reruns.
+        sed '/^# BEGIN ANSIBLE MANAGED PAPERLESS TUNNEL$/,/^# END ANSIBLE MANAGED PAPERLESS TUNNEL$/d' /etc/ssh/sshd_config |
+          grep -Eq '^[[:space:]]*Match[[:space:]]' && exit 1
+        for f in /etc/ssh/sshd_config.d/*.conf; do
+          test -f "$f" || continue
+          ! grep -Eq '^[[:space:]]*Match[[:space:]]' "$f" || exit 1
+        done
+        grep -qE '^Include /etc/ssh/sshd_config.d/[*][.]conf$' /etc/ssh/sshd_config
+      changed_when: false
+
+    - name: Create backend key-only account with no usable login shell
+      ansible.builtin.user:
+        name: paperless-tunnel
+        system: true
+        home: /var/lib/paperless-tunnel
+        create_home: true
+        shell: /usr/sbin/nologin
+        password_lock: true
+
+    - name: Create protected backend authorized-keys directory
+      ansible.builtin.file:
+        path: /var/lib/paperless-tunnel/.ssh
+        state: directory
+        owner: paperless-tunnel
+        group: paperless-tunnel
+        mode: '0700'
+
+    - name: Append dedicated SSH policy after all existing global directives
+      ansible.builtin.blockinfile:
+        path: /etc/ssh/sshd_config
+        insertafter: EOF
+        marker: "# {mark} ANSIBLE MANAGED PAPERLESS TUNNEL"
+        block: |
+          Match User paperless-tunnel
+              PubkeyAuthentication yes
+              PasswordAuthentication no
+              KbdInteractiveAuthentication no
+              AuthenticationMethods publickey
+              AllowTcpForwarding local
+              PermitOpen 127.0.0.1:8000
+              PermitListen none
+              GatewayPorts no
+              AllowAgentForwarding no
+              X11Forwarding no
+              PermitTunnel no
+              PermitTTY no
+              PermitUserRC no
+              MaxSessions 0
+        validate: /usr/sbin/sshd -t -f %s
+        backup: true
+      register: paperless_tunnel_sshd_config
+
+    - name: Read exact effective technical-account SSH settings before reload
+      ansible.builtin.command:
+        argv:
+          - /usr/sbin/sshd
+          - -T
+          - -C
+          - "user=paperless-tunnel,addr={{ paperless_tunnel_proxy_ip }},host=bergen-proxy,laddr={{ paperless_tunnel_backend_ip }},lport=22"
+      changed_when: false
+      register: paperless_tunnel_sshd_effective
+
+    - name: Fail closed if dedicated account retains general SSH capabilities
+      ansible.builtin.assert:
+        that:
+          - "'passwordauthentication no' in paperless_tunnel_sshd_effective.stdout_lines"
+          - "'kbdinteractiveauthentication no' in paperless_tunnel_sshd_effective.stdout_lines"
+          - "'authenticationmethods publickey' in paperless_tunnel_sshd_effective.stdout_lines"
+          - "'allowtcpforwarding local' in paperless_tunnel_sshd_effective.stdout_lines"
+          - "'permitopen 127.0.0.1:8000' in paperless_tunnel_sshd_effective.stdout_lines"
+          - "'permittty no' in paperless_tunnel_sshd_effective.stdout_lines"
+          - "'maxsessions 0' in paperless_tunnel_sshd_effective.stdout_lines"
+          - "'allowagentforwarding no' in paperless_tunnel_sshd_effective.stdout_lines"
+          - "'x11forwarding no' in paperless_tunnel_sshd_effective.stdout_lines"
+        fail_msg: SSH policy not restricted; do NOT authorize the tunnel account.
+
+    - name: Reload validated SSH policy before authorizing a public key
+      ansible.builtin.systemd:
+        name: ssh
+        state: reloaded
+      when: paperless_tunnel_sshd_config.changed
+
+    - name: Install source-IP-bound, destination-restricted public key
+      ansible.builtin.copy:
+        dest: /var/lib/paperless-tunnel/.ssh/authorized_keys
+        content: >-
+          from="{{ paperless_tunnel_proxy_ip }}",restrict,port-forwarding,permitopen="127.0.0.1:8000"
+          {{ hostvars['bergen-proxy'].paperless_tunnel_forward_public_key }}
+          {{ '\n' }}
+        owner: paperless-tunnel
+        group: paperless-tunnel
+        mode: '0600'
+      no_log: true
+
+    - name: Read trusted Paperless LXC ED25519 SSH host public key
+      ansible.builtin.slurp:
+        src: /etc/ssh/ssh_host_ed25519_key.pub
+      register: paperless_tunnel_backend_host_pub
+
+    - name: Verify trusted host key algorithm and pass to proxy
+      ansible.builtin.set_fact:
+        paperless_tunnel_backend_ssh_host_public_key: "{{ paperless_tunnel_backend_host_pub.content | b64decode | trim }}"
+
+    - name: Require a valid ED25519 host public key
+      ansible.builtin.assert:
+        that:
+          - paperless_tunnel_backend_ssh_host_public_key is match('^ssh-ed25519 [A-Za-z0-9+/=]+( [A-Za-z0-9@._-]+)?$')
+
+- name: Stage proxy-local tunnel systemd unit, start only with separate approval
+  hosts: reverse_proxy_nodes
+  become: true
+  gather_facts: false
+  tasks:
+    - name: Require preparation and a pinned guest host key
+      ansible.builtin.assert:
+        that:
+          - paperless_tunnel_prepare_approved | default(false) | bool
+          - hostvars['bergen-paperless'].paperless_tunnel_backend_ssh_host_public_key is defined
+          - not ansible_check_mode
+
+    - name: Install trusted backend host key without ssh-keyscan or TOFU
+      ansible.builtin.copy:
+        dest: /var/lib/bergen-paperless-tunnel/.ssh/known_hosts
+        content: "{{ paperless_tunnel_backend_ip }} {{ hostvars['bergen-paperless'].paperless_tunnel_backend_ssh_host_public_key.split()[0:2] | join(' ') }}\n"
+        owner: paperless-tunnel-client
+        group: paperless-tunnel-client
+        mode: '0600'
+
+    - name: Stage local-only SSH tunnel unit
+      ansible.builtin.template:
+        src: "{{ playbook_dir }}/../roles/paperless_ssh_tunnel/templates/bergen-paperless-tunnel.service.j2"
+        dest: /etc/systemd/system/bergen-paperless-tunnel.service
+        owner: root
+        group: root
+        mode: '0644'
+
+    - name: Register staged systemd unit without starting it
+      ansible.builtin.systemd:
+        daemon_reload: true
+
+    - name: Require DHCP reservation confirmation before activation
+      ansible.builtin.assert:
+        that:
+          - paperless_tunnel_dhcp_reservations_confirmed | default(false) | bool
+          - paperless_tunnel_activation_approved | default(false) | bool
+        fail_msg: Tunnel activation requires explicit DHCP reservation confirmation.
+      when: paperless_tunnel_activation_approved | default(false) | bool
+
+    - name: Enable and start tunnel only after separate activation approval
+      ansible.builtin.systemd:
+        name: bergen-paperless-tunnel
+        state: started
+        enabled: true
+      when: paperless_tunnel_activation_approved | default(false) | bool
+
+    - name: Report safe staging state
+      ansible.builtin.debug:
+        msg:
+          status: "{{ 'TUNNEL_STARTED' if (paperless_tunnel_activation_approved | default(false) | bool) else 'STAGED_NOT_STARTED' }}"
+          client_endpoint: 127.0.0.1:18000
+          server_endpoint: 127.0.0.1:8000
+          global_ssh_users_changed: false
+          nginx_changed: false
+          firewall_changed: false
+          dns_changed: false
