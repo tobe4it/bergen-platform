@@ -108,6 +108,24 @@
         grep -qE '^Include /etc/ssh/sshd_config.d/[*][.]conf$' /etc/ssh/sshd_config
       changed_when: false
 
+    - name: Inspect active systemd-managed SSH service and socket
+      ansible.builtin.command:
+        argv: [systemctl, is-active, "{{ item }}"]
+      loop:
+        - ssh.socket
+        - ssh.service
+      changed_when: false
+      register: paperless_tunnel_ssh_systemd_preflight
+
+    - name: Require healthy socket-activated SSH before modifying SSH policy
+      ansible.builtin.assert:
+        that:
+          - paperless_tunnel_ssh_systemd_preflight.results | length == 2
+          - paperless_tunnel_ssh_systemd_preflight.results | selectattr('stdout', 'equalto', 'active') | list | length == 2
+        fail_msg: >-
+          Socket-activated ssh.service must already be running with an active
+          ssh.socket; refusing to modify the SSH server under another runtime mode.
+
     - name: Create dedicated tunnel backend group
       ansible.builtin.group:
         name: paperless-tunnel
@@ -209,6 +227,29 @@
             that:
               - paperless_tunnel_admin_policy_after.stdout == paperless_tunnel_admin_policy_before.stdout
             fail_msg: A new tunnel Match unexpectedly modified administrator SSH settings.
+
+        - name: Restart SSH service through active systemd socket after a config change
+          ansible.builtin.systemd:
+            name: ssh.service
+            state: restarted
+          when: paperless_tunnel_sshd_config.changed
+
+        - name: Verify SSH socket and service remain active before installing any key
+          ansible.builtin.command:
+            argv: [systemctl, is-active, "{{ item }}"]
+          loop:
+            - ssh.socket
+            - ssh.service
+          changed_when: false
+          register: paperless_tunnel_ssh_after
+
+        - name: Fail closed if SSH server is not operational after configuration
+          ansible.builtin.assert:
+            that:
+              - paperless_tunnel_ssh_after.results | length == 2
+              - paperless_tunnel_ssh_after.results | selectattr('stdout', 'equalto', 'active') | list | length == 2
+            fail_msg: SSH socket/service is not operational; do not authorize forwarding.
+
       rescue:
         - name: Restore original SSH configuration after policy validation failure
           ansible.builtin.copy:
@@ -231,12 +272,6 @@
         - name: Stop deployment after unapproved effective SSH policy
           ansible.builtin.fail:
             msg: Restricted SSH policy failed validation; authorization was not installed.
-
-    - name: Reload validated SSH policy before authorizing a public key
-      ansible.builtin.systemd:
-        name: ssh
-        state: reloaded
-      when: paperless_tunnel_sshd_config.changed
 
     - name: Install source-IP-bound, destination-restricted public key
       ansible.builtin.copy:
