@@ -1,0 +1,108 @@
+---
+# Targeted mitigation for Podman 5.4 network namespaces under /run/user/0.
+# No Podman restart, Podman network recreation or full Paperless role.
+- name: Keep systemd root runtime available before Paperless Quadlets
+  hosts: bergen-paperless
+  gather_facts: false
+  become: true
+  vars:
+    paperless_units:
+      - bergen-paperless-db.service
+      - bergen-paperless-redis.service
+      - bergen-paperless.service
+    paperless_runtime_dependency: user-runtime-dir@0.service
+  tasks:
+    - name: Require explicit approval and exact host
+      ansible.builtin.assert:
+        that:
+          - inventory_hostname == 'bergen-paperless'
+          - paperless_podman_runtime_order_approved | default(false) | bool
+        fail_msg: Runtime-order mitigation requires explicit approval.
+
+    - name: Inspect linger setting for root
+      ansible.builtin.command:
+        argv: [loginctl, show-user, root, -p, Linger, --value]
+      register: paperless_root_linger
+      changed_when: false
+
+    - name: Require permanently enabled root runtime
+      ansible.builtin.assert:
+        that:
+          - paperless_root_linger.stdout | trim == 'yes'
+        fail_msg: Root linger is not enabled; refusing partial mitigation.
+
+    - name: Require active root runtime before applying dependency
+      ansible.builtin.command:
+        argv: [systemctl, is-active, user-runtime-dir@0.service]
+      register: paperless_root_runtime
+      changed_when: false
+      failed_when: paperless_root_runtime.stdout | trim != 'active'
+
+    - name: Inspect existing Paperless generated services
+      ansible.builtin.command:
+        argv: [systemctl, show, "{{ item }}", -p, LoadState, --value]
+      loop: "{{ paperless_units }}"
+      register: paperless_units_loaded
+      changed_when: false
+
+    - name: Refuse absent Paperless units
+      ansible.builtin.assert:
+        that:
+          - item.stdout | trim == 'loaded'
+        fail_msg: "Expected unit is not loaded: {{ item.item }}"
+      loop: "{{ paperless_units_loaded.results }}"
+
+    - name: Create systemd drop-in directories
+      ansible.builtin.file:
+        path: "/etc/systemd/system/{{ item }}.d"
+        state: directory
+        owner: root
+        group: root
+        mode: '0755'
+      loop: "{{ paperless_units }}"
+
+    - name: Ensure root runtime is mounted before any Paperless Podman Quadlet starts
+      ansible.builtin.copy:
+        dest: "/etc/systemd/system/{{ item }}.d/10-root-runtime.conf"
+        content: |
+          # Bergen Platform: protect Podman namespaces in /run/user/0
+          [Unit]
+          Requires={{ paperless_runtime_dependency }}
+          After={{ paperless_runtime_dependency }}
+        owner: root
+        group: root
+        mode: '0644'
+      loop: "{{ paperless_units }}"
+      register: paperless_runtime_dropins
+
+    - name: Reload systemd configuration only, without restarting services
+      ansible.builtin.systemd_service:
+        daemon_reload: true
+      when: paperless_runtime_dropins is changed
+
+    - name: Inspect effective service ordering
+      ansible.builtin.command:
+        argv: [systemctl, show, "{{ item }}", -p, Requires, -p, After]
+      loop: "{{ paperless_units }}"
+      changed_when: false
+      register: paperless_runtime_verified
+
+    - name: Assert all three units depend on root runtime
+      ansible.builtin.assert:
+        that:
+          - "'Requires=' in item.stdout"
+          - "'After=' in item.stdout"
+          - "paperless_runtime_dependency in (item.stdout_lines | select('match', '^Requires=') | first)"
+          - "paperless_runtime_dependency in (item.stdout_lines | select('match', '^After=') | first)"
+        fail_msg: "Effective systemd ordering was not applied for {{ item.item }}"
+      loop: "{{ paperless_runtime_verified.results }}"
+
+    - name: Confirm Podman services were not restarted
+      ansible.builtin.debug:
+        msg:
+          - PAPERLESS_ROOT_RUNTIME_ORDER_PASS
+          - LINGER_ROOT_ENABLED=true
+          - ROOT_RUNTIME_ACTIVE=true
+          - QUADLET_RUNTIME_DEPENDENCY_VERIFIED=true
+          - SERVICE_RESTARTS_PERFORMED=false
+          - LXC_RESTART_STILL_REQUIRED=true
