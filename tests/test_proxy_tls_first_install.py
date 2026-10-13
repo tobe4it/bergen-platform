@@ -105,6 +105,7 @@ class ProxyTLSFirstInstallTests(unittest.TestCase):
             raise AssertionError("must not activate after transfer failure")
         with patch.object(sys, "argv", args), \
             patch.object(installer.mail, "load_config", return_value=cfg), \
+            patch.object(installer.mail, "reused_ssh_connections"), \
             patch.object(installer, "reviewed_target", return_value=(["ssh"], {})), \
             patch.object(installer.mail, "source_evidence", return_value=("a"*64, None)), \
             patch.object(installer, "preflight"), \
