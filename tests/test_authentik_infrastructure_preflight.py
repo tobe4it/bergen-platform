@@ -26,7 +26,7 @@ class AuthentikInfrastructurePreflightTests(unittest.TestCase):
             self.assertIn(expected, text)
         self.assertEqual(6, text.count("changed_when: false"))
         for denied in (
-            "pct create",
+            "argv: [pct, create",
             "qm create",
             "ansible.builtin.file:",
             "ansible.builtin.copy:",
