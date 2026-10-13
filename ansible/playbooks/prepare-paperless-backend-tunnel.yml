@@ -273,7 +273,7 @@
           - hostvars['bergen-paperless'].paperless_tunnel_backend_ssh_host_public_key is defined
           - not ansible_check_mode
 
-    - name: Install trusted backend host key without ssh-keyscan or TOFU
+    - name: Install trusted backend host key from pinned Ansible backend identity
       ansible.builtin.copy:
         dest: /var/lib/bergen-paperless-tunnel/.ssh/known_hosts
         content: "{{ paperless_tunnel_backend_ip }} {{ hostvars['bergen-paperless'].paperless_tunnel_backend_ssh_host_public_key.split()[0:2] | join(' ') }}\n"
