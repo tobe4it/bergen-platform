@@ -83,6 +83,26 @@ class BackendTunnelStagingTests(unittest.TestCase):
         self.assertIn("shell: /usr/sbin/nologin", self.prep_raw)
         self.assertIn("password_lock: true", self.prep_raw)
 
+    def test_key_creation_uses_ansible_user_not_shell_login(self):
+        raw = self.prep_raw
+        self.assertIn("generate_ssh_key: true", raw)
+        self.assertIn("ssh_key_type: ed25519", raw)
+        self.assertIn("ssh_key_file: .ssh/id_ed25519", raw)
+        self.assertIn("group: paperless-tunnel-client", raw)
+        self.assertIn("group: paperless-tunnel", raw)
+        self.assertNotIn("become_user: paperless-tunnel-client", raw)
+        self.assertNotIn("ssh-keygen -q", raw)
+
+    def test_authorized_keys_has_one_finite_line_and_trailing_newline(self):
+        task = next(t for t in self.plays[1]["tasks"]
+                    if t["name"] == "Install source-IP-bound, destination-restricted public key")
+        content = task["ansible.builtin.copy"]["content"]
+        self.assertEqual(content.count("\n"), 1)
+        self.assertTrue(content.endswith("\n"))
+        self.assertIn('from="{{ paperless_tunnel_proxy_ip }}"', content)
+        self.assertIn('restrict,port-forwarding,permitopen="127.0.0.1:8000"', content)
+        self.assertIn("paperless_tunnel_forward_public_key", content)
+
     def test_validate_and_rollback_prior_to_public_key_authorization(self):
         raw = self.prep_raw
         i_valid = raw.index("validate: /usr/sbin/sshd -t -f %s")
