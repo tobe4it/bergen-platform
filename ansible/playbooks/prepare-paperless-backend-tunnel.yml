@@ -21,7 +21,7 @@
           - paperless_tunnel_backend_ip is match('^[0-9]{1,3}([.][0-9]{1,3}){3}$')
         fail_msg: Use read-only tunnel preflight first; stage only with reviewed exact addresses and approval.
 
-    - name: Create noninteractive proxy tunnel service account
+    - name: Create noninteractive proxy tunnel service account and ED25519 key
       ansible.builtin.user:
         name: paperless-tunnel-client
         system: true
@@ -29,6 +29,12 @@
         create_home: true
         shell: /usr/sbin/nologin
         password_lock: true
+        generate_ssh_key: true
+        ssh_key_type: ed25519
+        ssh_key_file: .ssh/id_ed25519
+        ssh_key_passphrase: ''
+        ssh_key_comment: bergen-proxy-paperless-only
+      no_log: true
 
     - name: Create private proxy SSH key directory
       ansible.builtin.file:
@@ -37,23 +43,6 @@
         owner: paperless-tunnel-client
         group: paperless-tunnel-client
         mode: '0700'
-
-    - name: Generate private ED25519 tunnel key only inside proxy LXC
-      ansible.builtin.command:
-        argv:
-          - ssh-keygen
-          - -q
-          - -t
-          - ed25519
-          - -N
-          - ''
-          - -f
-          - /var/lib/bergen-paperless-tunnel/.ssh/id_ed25519
-          - -C
-          - bergen-proxy-paperless-only
-        creates: /var/lib/bergen-paperless-tunnel/.ssh/id_ed25519
-      become_user: paperless-tunnel-client
-      no_log: true
 
     - name: Enforce private SSH key permissions
       ansible.builtin.file:
