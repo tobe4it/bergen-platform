@@ -1,0 +1,95 @@
+---
+# Read-only preflight only. No pct create, firewall writes or VMID reservation.
+- name: Read-only Proxmox readiness review for isolated authentik LXC
+  hosts: venombox
+  gather_facts: false
+  become: true
+
+  tasks:
+    - name: Check candidate VMID 127 across the cluster
+      ansible.builtin.command:
+        argv: [pvesh, get, /cluster/nextid, --vmid, "127"]
+      register: authentik_vmid_check
+      changed_when: false
+      failed_when: false
+      check_mode: false
+
+    - name: Inspect available storage
+      ansible.builtin.command:
+        argv: [pvesm, status]
+      register: authentik_storage
+      changed_when: false
+      check_mode: false
+
+    - name: Read locally available Debian LXC templates
+      ansible.builtin.command:
+        argv: [pvesm, list, local, --content, vztmpl]
+      register: authentik_templates
+      changed_when: false
+      check_mode: false
+
+    - name: Read the existing Paperless guest network as a reference
+      ansible.builtin.command:
+        argv: [pct, config, "126"]
+      register: authentik_paperless_config
+      changed_when: false
+      check_mode: false
+
+    - name: Read Proxmox bridge inventory
+      ansible.builtin.command:
+        argv: [pvesh, get, /nodes/venombox/network, --output-format, json]
+      register: authentik_network
+      changed_when: false
+      check_mode: false
+
+    - name: Read existing scheduled cluster backups
+      ansible.builtin.command:
+        argv: [pvesh, get, /cluster/backup, --output-format, json]
+      register: authentik_backups
+      changed_when: false
+      check_mode: false
+
+    - name: Require unused candidate VMID and available local ZFS and NAS backup
+      ansible.builtin.assert:
+        that:
+          - authentik_vmid_check.rc == 0
+          - authentik_vmid_check.stdout | trim == '127'
+          - >-
+            authentik_storage.stdout_lines |
+            select('match', '^local-zfs\\s+\\S+\\s+active\\b') |
+            list | length == 1
+          - >-
+            authentik_storage.stdout_lines |
+            select('match', '^bergen-synology-backup\\s+\\S+\\s+active\\b') |
+            list | length == 1
+        fail_msg: >-
+          AUTHENTIK_PREFLIGHT_FAIL: VMID 127 unavailable or required storage
+          not active. No changes made.
+        success_msg: AUTHENTIK_VMID_STORAGE_PREFLIGHT_PASS
+
+    - name: Report review facts without making changes
+      ansible.builtin.debug:
+        msg:
+          state: AUTHENTIK_PREFLIGHT_READONLY_PASS
+          vmid_127: free_at_time_of_check_not_reserved
+          planned_guest: bergen-authentik
+          recommended_cpu_cores: 2
+          recommended_memory_mib: 4096
+          candidate_rootfs_gib: 32
+          reference_paperless_net0: >-
+            {{ authentik_paperless_config.stdout_lines |
+               select('match', '^net0:') | list }}
+          network_bridges: >-
+            {{ (authentik_network.stdout | from_json) |
+               selectattr('type', 'equalto', 'bridge') |
+               map(attribute='iface') | list }}
+          available_debian_templates: >-
+            {{ authentik_templates.stdout_lines |
+               select('search', 'debian-') | list }}
+          scheduled_backup_jobs: >-
+            {{ (authentik_backups.stdout | from_json) |
+               map(attribute='id') | list }}
+          backup_job_coverage: must_be_confirmed_for_vmid_127
+          network_vlan_and_address: require_review
+          version_images: require_pinned_review
+          deployment: not_performed
