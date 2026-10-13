@@ -130,54 +130,104 @@
         group: paperless-tunnel
         mode: '0700'
 
-    - name: Append dedicated SSH policy after all existing global directives
-      ansible.builtin.blockinfile:
-        path: /etc/ssh/sshd_config
-        insertafter: EOF
-        marker: "# {mark} ANSIBLE MANAGED PAPERLESS TUNNEL"
-        block: |
-          Match User paperless-tunnel
-              PubkeyAuthentication yes
-              PasswordAuthentication no
-              KbdInteractiveAuthentication no
-              AuthenticationMethods publickey
-              AllowTcpForwarding local
-              PermitOpen 127.0.0.1:8000
-              PermitListen none
-              GatewayPorts no
-              AllowAgentForwarding no
-              X11Forwarding no
-              PermitTunnel no
-              PermitTTY no
-              PermitUserRC no
-              MaxSessions 0
-        validate: /usr/sbin/sshd -t -f %s
-        backup: true
-      register: paperless_tunnel_sshd_config
-
-    - name: Read exact effective technical-account SSH settings before reload
+    - name: Preserve existing administrator SSH policy
       ansible.builtin.command:
         argv:
           - /usr/sbin/sshd
           - -T
           - -C
-          - "user=paperless-tunnel,addr={{ paperless_tunnel_proxy_ip }},host=bergen-proxy,laddr={{ paperless_tunnel_backend_ip }},lport=22"
+          - "user=root,addr={{ paperless_tunnel_proxy_ip }},host=bergen-proxy,laddr={{ paperless_tunnel_backend_ip }},lport=22"
       changed_when: false
-      register: paperless_tunnel_sshd_effective
+      register: paperless_tunnel_admin_policy_before
 
-    - name: Fail closed if dedicated account retains general SSH capabilities
-      ansible.builtin.assert:
-        that:
-          - "'passwordauthentication no' in paperless_tunnel_sshd_effective.stdout_lines"
-          - "'kbdinteractiveauthentication no' in paperless_tunnel_sshd_effective.stdout_lines"
-          - "'authenticationmethods publickey' in paperless_tunnel_sshd_effective.stdout_lines"
-          - "'allowtcpforwarding local' in paperless_tunnel_sshd_effective.stdout_lines"
-          - "'permitopen 127.0.0.1:8000' in paperless_tunnel_sshd_effective.stdout_lines"
-          - "'permittty no' in paperless_tunnel_sshd_effective.stdout_lines"
-          - "'maxsessions 0' in paperless_tunnel_sshd_effective.stdout_lines"
-          - "'allowagentforwarding no' in paperless_tunnel_sshd_effective.stdout_lines"
-          - "'x11forwarding no' in paperless_tunnel_sshd_effective.stdout_lines"
-        fail_msg: SSH policy not restricted; do NOT authorize the tunnel account.
+    - name: Apply new restricted SSH match with rollback on validation failure
+      block:
+        - name: Append dedicated SSH policy after all existing global directives
+          ansible.builtin.blockinfile:
+            path: /etc/ssh/sshd_config
+            insertafter: EOF
+            marker: "# {mark} ANSIBLE MANAGED PAPERLESS TUNNEL"
+            block: |
+              Match User paperless-tunnel
+                  PubkeyAuthentication yes
+                  PasswordAuthentication no
+                  KbdInteractiveAuthentication no
+                  AuthenticationMethods publickey
+                  AllowTcpForwarding local
+                  PermitOpen 127.0.0.1:8000
+                  PermitListen none
+                  GatewayPorts no
+                  AllowAgentForwarding no
+                  X11Forwarding no
+                  PermitTunnel no
+                  PermitTTY no
+                  PermitUserRC no
+                  MaxSessions 0
+            validate: /usr/sbin/sshd -t -f %s
+            backup: true
+          register: paperless_tunnel_sshd_config
+
+        - name: Read exact effective technical-account SSH settings before reload
+          ansible.builtin.command:
+            argv:
+              - /usr/sbin/sshd
+              - -T
+              - -C
+              - "user=paperless-tunnel,addr={{ paperless_tunnel_proxy_ip }},host=bergen-proxy,laddr={{ paperless_tunnel_backend_ip }},lport=22"
+          changed_when: false
+          register: paperless_tunnel_sshd_effective
+
+        - name: Fail closed if dedicated account retains general SSH capabilities
+          ansible.builtin.assert:
+            that:
+              - "'passwordauthentication no' in paperless_tunnel_sshd_effective.stdout_lines"
+              - "'kbdinteractiveauthentication no' in paperless_tunnel_sshd_effective.stdout_lines"
+              - "'authenticationmethods publickey' in paperless_tunnel_sshd_effective.stdout_lines"
+              - "'allowtcpforwarding local' in paperless_tunnel_sshd_effective.stdout_lines"
+              - "'permitopen 127.0.0.1:8000' in paperless_tunnel_sshd_effective.stdout_lines"
+              - "'permittty no' in paperless_tunnel_sshd_effective.stdout_lines"
+              - "'maxsessions 0' in paperless_tunnel_sshd_effective.stdout_lines"
+              - "'allowagentforwarding no' in paperless_tunnel_sshd_effective.stdout_lines"
+              - "'x11forwarding no' in paperless_tunnel_sshd_effective.stdout_lines"
+            fail_msg: SSH policy not restricted; do NOT authorize the tunnel account.
+
+        - name: Read administrator policy after adding dedicated tunnel Match
+          ansible.builtin.command:
+            argv:
+              - /usr/sbin/sshd
+              - -T
+              - -C
+              - "user=root,addr={{ paperless_tunnel_proxy_ip }},host=bergen-proxy,laddr={{ paperless_tunnel_backend_ip }},lport=22"
+          changed_when: false
+          register: paperless_tunnel_admin_policy_after
+
+        - name: Ensure root SSH access policy was not modified
+          ansible.builtin.assert:
+            that:
+              - paperless_tunnel_admin_policy_after.stdout == paperless_tunnel_admin_policy_before.stdout
+            fail_msg: A new tunnel Match unexpectedly modified administrator SSH settings.
+      rescue:
+        - name: Restore original SSH configuration after policy validation failure
+          ansible.builtin.copy:
+            src: "{{ paperless_tunnel_sshd_config.backup_file }}"
+            dest: /etc/ssh/sshd_config
+            remote_src: true
+            owner: root
+            group: root
+            mode: preserve
+          when:
+            - paperless_tunnel_sshd_config is defined
+            - paperless_tunnel_sshd_config.changed | default(false)
+            - paperless_tunnel_sshd_config.backup_file is defined
+
+        - name: Verify restored SSH daemon syntax
+          ansible.builtin.command:
+            argv: [/usr/sbin/sshd, -t]
+          changed_when: false
+
+        - name: Stop deployment after unapproved effective SSH policy
+          ansible.builtin.fail:
+            msg: Restricted SSH policy failed validation; authorization was not installed.
 
     - name: Reload validated SSH policy before authorizing a public key
       ansible.builtin.systemd:
