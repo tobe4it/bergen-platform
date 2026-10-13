@@ -1,0 +1,124 @@
+---
+# READ ONLY. Does not create users, keys, tunnels, SSH policy, DNS or firewalls.
+# Site variables must come from a local git-ignored vars file.
+- name: Inspect existing proxy for a dedicated backend SSH tunnel
+  hosts: reverse_proxy_nodes
+  become: true
+  gather_facts: true
+  tasks:
+    - name: Reject unexpected proxy inventory and address
+      ansible.builtin.assert:
+        that:
+          - groups.get('reverse_proxy_nodes', []) | length == 1
+          - groups.get('paperless_nodes', []) | length == 1
+          - inventory_hostname == 'bergen-proxy'
+          - paperless_tunnel_proxy_ip is defined
+          - paperless_tunnel_backend_ip is defined
+          - ansible_facts['default_ipv4']['address'] == paperless_tunnel_proxy_ip
+          - paperless_tunnel_backend_port | default(8000) | int == 8000
+          - paperless_tunnel_local_port | default(18000) | int == 18000
+        fail_msg: Refusing an unreviewed proxy host, target or listening port.
+
+    - name: Check direct SSH connectivity to Paperless without credentials
+      ansible.builtin.wait_for:
+        host: "{{ paperless_tunnel_backend_ip }}"
+        port: 22
+        timeout: 5
+        state: started
+      changed_when: false
+      check_mode: false
+
+    - name: Read listeners on tunnel local port
+      ansible.builtin.command:
+        argv: [ss, -H, -lnt]
+      changed_when: false
+      check_mode: false
+      register: proxy_backend_tunnel_listeners
+
+    - name: Refuse port collision before staging
+      ansible.builtin.assert:
+        that:
+          - "'127.0.0.1:18000' not in proxy_backend_tunnel_listeners.stdout"
+          - "'0.0.0.0:18000' not in proxy_backend_tunnel_listeners.stdout"
+          - "'[::]:18000' not in proxy_backend_tunnel_listeners.stdout"
+        fail_msg: A tunnel candidate already listens on TCP 18000. Stop and inspect.
+
+    - name: Report proxy-only validation
+      ansible.builtin.debug:
+        msg:
+          state: PROXY_PREFLIGHT_PASS
+          address: "{{ paperless_tunnel_proxy_ip }}"
+          dns_changed: false
+          daemon_changed: false
+
+- name: Inspect existing Paperless SSH and loopback backend
+  hosts: paperless_nodes
+  become: true
+  gather_facts: true
+  tasks:
+    - name: Reject unexpected backend inventory and address
+      ansible.builtin.assert:
+        that:
+          - groups.get('paperless_nodes', []) | length == 1
+          - inventory_hostname == 'bergen-paperless'
+          - ansible_facts['default_ipv4']['address'] == paperless_tunnel_backend_ip
+          - paperless_tunnel_proxy_ip != paperless_tunnel_backend_ip
+        fail_msg: Refusing an unreviewed Paperless target.
+
+    - name: Check running SSH server configuration
+      ansible.builtin.command:
+        argv: [/usr/sbin/sshd, -t]
+      changed_when: false
+      check_mode: false
+
+    - name: Inspect current effective SSH policy for reserved technical account
+      ansible.builtin.command:
+        argv:
+          - /usr/sbin/sshd
+          - -T
+          - -C
+          - "user=paperless-tunnel,addr={{ paperless_tunnel_proxy_ip }},host=bergen-proxy,laddr={{ paperless_tunnel_backend_ip }},lport=22"
+      changed_when: false
+      check_mode: false
+      register: paperless_tunnel_current_sshd_policy
+
+    - name: Read SSH main-file include and Match boundaries
+      ansible.builtin.shell: |
+        set -eu
+        grep -nE '^[[:space:]]*(Include|Match)[[:space:]]' /etc/ssh/sshd_config || true
+        for f in /etc/ssh/sshd_config.d/*.conf; do
+          test -f "$f" || continue
+          grep -HnE '^[[:space:]]*Match[[:space:]]' "$f" || true
+        done
+      changed_when: false
+      check_mode: false
+      register: paperless_tunnel_ssh_structure
+
+    - name: Inspect Paperless backend TCP listener without changing it
+      ansible.builtin.command:
+        argv: [ss, -H, -lnt]
+      changed_when: false
+      check_mode: false
+      register: paperless_tunnel_backend_listeners
+
+    - name: Verify loopback-only application bind and sshd include structure
+      ansible.builtin.assert:
+        that:
+          - "'127.0.0.1:8000' in paperless_tunnel_backend_listeners.stdout"
+          - "'0.0.0.0:8000' not in paperless_tunnel_backend_listeners.stdout"
+          - "'[::]:8000' not in paperless_tunnel_backend_listeners.stdout"
+          - "'Include /etc/ssh/sshd_config.d/*.conf' in paperless_tunnel_ssh_structure.stdout"
+          - "'Match ' not in paperless_tunnel_ssh_structure.stdout"
+        fail_msg: Unexpected Paperless listener or existing SSH Match scope; manual review required.
+
+    - name: Report SSH baseline and missing change authorization
+      ansible.builtin.debug:
+        msg:
+          state: BACKEND_PREFLIGHT_PASS
+          planned_account: paperless-tunnel
+          planned_ssh_policy: local_forward_to_127.0.0.1_8000_only
+          existing_ssh_policy: "{{ paperless_tunnel_current_sshd_policy.stdout_lines | select('match', '^(passwordauthentication|allowtcpforwarding|permitopen|maxsessions|permittty|authenticationmethods) ') | list }}"
+          user_changed: false
+          sshd_changed: false
+          tunnel_changed: false
+          dhcp_reservations_confirmed: "{{ paperless_tunnel_dhcp_reservations_confirmed | default(false) | bool }}"
