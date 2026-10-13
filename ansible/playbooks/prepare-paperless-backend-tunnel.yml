@@ -269,6 +269,23 @@
             argv: [/usr/sbin/sshd, -t]
           changed_when: false
 
+        - name: Attempt to restore original running SSH configuration
+          ansible.builtin.systemd:
+            name: ssh.service
+            state: restarted
+          when:
+            - paperless_tunnel_sshd_config is defined
+            - paperless_tunnel_sshd_config.changed | default(false)
+            - paperless_tunnel_sshd_config.backup_file is defined
+
+        - name: Confirm SSH socket and service recovered after rollback
+          ansible.builtin.command:
+            argv: [systemctl, is-active, "{{ item }}"]
+          loop:
+            - ssh.socket
+            - ssh.service
+          changed_when: false
+
         - name: Stop deployment after unapproved effective SSH policy
           ansible.builtin.fail:
             msg: Restricted SSH policy failed validation; authorization was not installed.
