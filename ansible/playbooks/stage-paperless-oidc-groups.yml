@@ -1,0 +1,69 @@
+---
+# Deliberate, idempotent test-stage creation of empty local Django groups.
+# Does not grant global permissions, document ACLs, or create users.
+# Requires -e paperless_oidc_group_stage_approved=true.
+- name: Stage exact Paperless groups for Synology OIDC login tests
+  hosts: bergen-paperless
+  become: true
+  gather_facts: false
+  tasks:
+    - name: Require explicit approval and exact host
+      ansible.builtin.assert:
+        that:
+          - inventory_hostname == 'bergen-paperless'
+          - paperless_oidc_group_stage_approved | default(false) | bool
+        fail_msg: Refusing group provisioning without explicit approval.
+
+    - name: Create only the expected empty Django groups
+      ansible.builtin.command:
+        argv:
+          - podman
+          - exec
+          - bergen-paperless
+          - python3
+          - /usr/src/paperless/src/manage.py
+          - shell
+          - -c
+          - |
+            from django.contrib.auth import get_user_model
+            from django.contrib.auth.models import Group
+            from django.db import transaction
+
+            expected = ("Familie", "Eltern", "Kinder")
+            User = get_user_model()
+
+            with transaction.atomic():
+                if not User.objects.filter(
+                    username="admin", is_superuser=True, is_staff=True, is_active=True
+                ).exists():
+                    raise RuntimeError("GROUP_STAGE_REFUSED: breakglass admin missing")
+                for name in expected:
+                    existing = Group.objects.filter(name=name).first()
+                    if existing is not None and (
+                        existing.permissions.exists() or existing.user_set.exists()
+                    ):
+                        raise RuntimeError(
+                            "GROUP_STAGE_REFUSED: existing group has permissions or members: " + name
+                        )
+                created_count = 0
+                for name in expected:
+                    group, created = Group.objects.get_or_create(name=name)
+                    if created:
+                        created_count += 1
+                    if group.permissions.exists() or group.user_set.exists():
+                        raise RuntimeError("GROUP_STAGE_REFUSED: group is not empty")
+
+            print("PAPERLESS_OIDC_GROUP_STAGE_PASS")
+            print("GROUPS=Familie,Eltern,Kinder")
+            print("GROUP_CREATED_COUNT=" + str(created_count))
+            print("GROUP_PERMISSION_COUNT=0")
+            print("GROUP_MEMBERSHIP_COUNT=0")
+            print("DOCUMENT_ACLS_UNCHANGED=true")
+      register: paperless_oidc_group_stage
+      changed_when: "'GROUP_CREATED_COUNT=0' not in paperless_oidc_group_stage.stdout"
+      failed_when: paperless_oidc_group_stage.rc != 0 or 'PAPERLESS_OIDC_GROUP_STAGE_PASS' not in paperless_oidc_group_stage.stdout
+      check_mode: false
+
+    - name: Report group staging state
+      ansible.builtin.debug:
+        msg: "{{ paperless_oidc_group_stage.stdout_lines }}"
