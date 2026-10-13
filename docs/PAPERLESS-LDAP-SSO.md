@@ -1,4 +1,9 @@
-# Paperless-ngx LDAP sign-in via authentik / OIDC (staged design)
+# Paperless-ngx LDAP sign-in via authentik / OIDC (superseded plan)
+
+> **SUPERSEDED** (2026-10-13): Bergen Paperless will integrate directly with
+> the existing Synology SSO Server via OIDC. Do not deploy authentik or its
+> proposed VMID 127. See `docs/PAPERLESS-SYNOLOGY-OIDC.md` for the current
+> staged integration. The authentik text below is historical planning only.
 
 Status: **DESIGN ONLY**. No IdP, SSO, group auto-sync, proxy route or importer is deployed by this branch. The running Paperless instance stays unchanged, including the admin break-glass login.
 
