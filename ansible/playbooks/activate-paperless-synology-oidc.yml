@@ -167,6 +167,47 @@
               PAPERLESS_REDIRECT_LOGIN_TO_SSO=true
           no_log: true
 
+        - name: Verify Podman env-file contains valid raw JSON before application restart
+          ansible.builtin.command:
+            argv:
+              - python3
+              - -c
+              - |
+                import json
+                from pathlib import Path
+
+                env_path = Path("/etc/bergen-paperless/paperless.env")
+                values = {}
+                for line in env_path.read_text().splitlines():
+                    if not line or line.lstrip().startswith("#"):
+                        continue
+                    if "=" not in line:
+                        raise SystemExit("OIDC_ENV_INVALID: malformed line")
+                    key, value = line.split("=", 1)
+                    if key in values:
+                        raise SystemExit("OIDC_ENV_INVALID: duplicate key")
+                    values[key] = value
+                raw = values.get("PAPERLESS_SOCIALACCOUNT_PROVIDERS", "")
+                if not (raw.startswith("{") and raw.endswith("}")):
+                    raise SystemExit("OIDC_ENV_INVALID: expected unquoted JSON object")
+                try:
+                    provider = json.loads(raw).get("openid_connect", {})
+                except (json.JSONDecodeError, AttributeError):
+                    raise SystemExit("OIDC_ENV_INVALID: cannot parse provider JSON")
+                apps = provider.get("APPS", [])
+                if (
+                    not isinstance(apps, list)
+                    or len(apps) != 1
+                    or apps[0].get("provider_id") != "synology"
+                    or not apps[0].get("client_id")
+                    or not apps[0].get("secret")
+                    or "groups" not in provider.get("SCOPE", [])
+                ):
+                    raise SystemExit("OIDC_ENV_INVALID: provider structure incomplete")
+                print("PAPERLESS_OIDC_JSON_ENV_PASS")
+          register: paperless_oidc_json_validation
+          changed_when: false
+
         - name: Restart only the Paperless application (not database or Redis)
           ansible.builtin.systemd_service:
             name: bergen-paperless.service
