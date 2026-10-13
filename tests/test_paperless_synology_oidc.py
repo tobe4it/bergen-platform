@@ -9,12 +9,12 @@ spec = importlib.util.spec_from_file_location("synology_oidc_preflight", SCRIPT)
 mod = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(mod)
 
-URL = "https://ldap.thebergens.net:5001/webman/sso/.well-known/openid-configuration"
+URL = "https://sehnde.tbergen.de:5001/webman/sso/.well-known/openid-configuration"
 META = {
     "issuer": "https://ldap.thebergens.net:5001/webman/sso",
-    "authorization_endpoint": "https://ldap.thebergens.net:5001/webman/sso/authorize",
-    "token_endpoint": "https://ldap.thebergens.net:5001/webman/sso/token",
-    "jwks_uri": "https://ldap.thebergens.net:5001/webman/sso/jwks",
+    "authorization_endpoint": "https://ldap.thebergens.net:5001/webman/sso/SSOOauth.cgi",
+    "token_endpoint": "https://ldap.thebergens.net:5001/webman/sso/SSOAccessToken.cgi",
+    "jwks_uri": "https://ldap.thebergens.net:5001/webman/sso/openid-jwks.json",
 }
 
 
@@ -51,6 +51,16 @@ class SynologyOIDCPreflightTests(unittest.TestCase):
         ):
             with self.subTest(url=url), self.assertRaises(ValueError):
                 mod.validate_metadata(url, META)
+
+    def test_rejects_unexpected_issuer(self):
+        modified = dict(META, issuer="https://sehnde.tbergen.de:5001/other")
+        with self.assertRaises(ValueError):
+            mod.validate_metadata(URL, modified)
+
+    def test_rejects_missing_rs256(self):
+        modified = dict(META, id_token_signing_alg_values_supported=["none"])
+        with self.assertRaises(ValueError):
+            mod.validate_metadata(URL, modified)
 
     def test_rejects_foreign_token_endpoint(self):
         modified = dict(META, token_endpoint="https://evil.example/oauth/token")
