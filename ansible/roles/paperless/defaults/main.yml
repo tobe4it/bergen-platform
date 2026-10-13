@@ -14,6 +14,11 @@ paperless_gid: 1000
 paperless_postgres_uid: 999
 paperless_redis_uid: 999
 
+# Stage 0: Synology SSO OIDC remains opt-in. No automatic signup or group sync.
+# The exact Well-known URL must be copied from DSM SSO Server > Dienst > OIDC.
+paperless_synology_oidc_enabled: false
+paperless_synology_oidc_discovery_url: ''
+
 # Stage 1: ASN labels only. Filesystem ingestion remains non-recursive.
 # No NAS mount, import service, or ACL workflow is activated by these flags.
 paperless_scan_asn_enabled: false
