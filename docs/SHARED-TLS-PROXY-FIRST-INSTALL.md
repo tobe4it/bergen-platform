@@ -48,9 +48,50 @@ source. A separate reviewed and approved activation stage must re-check target
 state immediately before writing and provide rollback; later automated Nginx
 rotation must be a distinct operation.
 
+
+## New isolated first-install candidate (unapproved)
+
+The `feat/paperless-proxy-tls-first-install-20261013` branch
+contains a **separate** `scripts/proxy_tls_first_install.py`
+candidate. This does not alter the existing mail distributor, mail timer or
+read-only `--proxy-vars` mode of `mail_tls_sync.py`.
+The new routine **has not been authorized for production use**. Complete
+its offline safety tests and code review before permitting any write.
+
+The default mode is a read-only confirmation of the exact already reviewed
+LXC inventory, certificate source and missing proxy TLS files:
+
+```bash
+python3 -m unittest discover -s tests \
+  -p 'test_proxy_tls_first_install.py' -v
+
+python3 scripts/proxy_tls_first_install.py \
+  --config ~/bergen-platform/ansible/vars/mail-tls.local.yml \
+  --proxy-vars ~/bergen-platform/ansible/group_vars/all/bergen-proxy.yml \
+  --proxy-local-inventory ~/bergen-platform/ansible/inventory.local.yml \
+  --proxy-pve-inventory ~/bergen-platform/ansible/inventory.yml
+```
+
+Expected dry-run result includes `PROXY_TLS_FIRST_INSTALL_PLAN_ONLY`.
+The routine uses pinned SSH to validate the certificate source and isolated
+proxy and deliberately requires a distinct explicit approval before writing.
+An approved, future first install would stream the certificate and private
+key from the existing source to a protected root-only directory **without
+writing either to controller disk**. It then checks source fingerprint,
+expiration, hostname match, and cert/key pairing. Refuse existing TLS
+destinations, existing Nginx, unexpectedly broad site lists, or any failed
+validation. There is no Nginx installation, DNS update, external ingress,
+firewall modification, or mail service activation.
+
+No commands that enable writes are documented here pending review and
+observed offline test results. Afterwards, independently review wildcard
+key exposure to the proxy, renewal synchronization, its DHCP reservation,
+private ingress CIDRs, the backend tunnel/allowlist and the Paperless HTTPS
+route before activating Nginx or an OIDC login.
+
 ## Not yet implemented
 
-- Certificate transfer and live first installation
+- Production-approved certificate transfer and live first installation (candidate only)
 - Nginx installation/configuration and private ingress
 - Nginx cert/key rotation, reload, endpoint TLS health checks and rollback
 - Automatic proxy enrollment in the existing mail timer
