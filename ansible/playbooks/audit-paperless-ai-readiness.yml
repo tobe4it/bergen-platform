@@ -1,0 +1,73 @@
+---
+# Read-only, allowlisted Open WebUI environment preflight.
+# Does not inspect or print credentials, LDAP bind details, session keys,
+# bearer tokens, user records or document data.
+# Reports configuration hints, NOT a successful end-to-end auth proof.
+- name: Inspect Bergen-AI authentication readiness (read-only)
+  hosts: bergen-ai
+  become: true
+  gather_facts: false
+
+  tasks:
+    - name: Verify intended AI guest
+      ansible.builtin.command:
+        argv: [hostname, -s]
+      register: paperless_ai_hostname
+      changed_when: false
+      failed_when: paperless_ai_hostname.stdout | trim != 'bergen-ai'
+
+    - name: Inspect allowlisted Open WebUI authentication flags only
+      ansible.builtin.command:
+        argv:
+          - podman
+          - exec
+          - open-webui
+          - python
+          - -c
+          - |
+            import os
+            from importlib import metadata
+
+            try:
+                version = metadata.version("open-webui")
+            except metadata.PackageNotFoundError:
+                version = "unknown (inspect image/version separately)"
+            print("OPEN_WEBUI_VERSION", version)
+
+            keys = [
+                "WEBUI_AUTH",
+                "ENABLE_SIGNUP",
+                "ENABLE_PERSISTENT_CONFIG",
+                "ENABLE_LDAP",
+                "LDAP_USE_TLS",
+                "LDAP_VALIDATE_CERT",
+            ]
+            for key in keys:
+                value = os.environ.get(key)
+                if value is None:
+                    safe = "UNSET"
+                elif value.lower() in ("true", "1", "yes"):
+                    safe = "TRUE"
+                elif value.lower() in ("false", "0", "no"):
+                    safe = "FALSE"
+                else:
+                    safe = "SET_NONBOOLEAN_REDACTED"
+                print(key, safe)
+            print("NOTICE env flags do not establish effective runtime authentication or trusted user delegation")
+      register: paperless_ai_readiness
+      changed_when: false
+      failed_when: false
+
+    - name: Report sanitized readiness indicators
+      ansible.builtin.debug:
+        var: paperless_ai_readiness.stdout_lines
+
+    - name: Fail closed if the Open WebUI container could not be inspected
+      ansible.builtin.assert:
+        that:
+          - paperless_ai_readiness.rc == 0
+          - "'WEBUI_AUTH' in paperless_ai_readiness.stdout"
+        fail_msg: >-
+          Read-only Open WebUI preflight failed. No Paperless/AI
+          integration is authorized; inspect the container manually
+          without exposing secrets.
