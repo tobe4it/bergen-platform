@@ -151,3 +151,55 @@ Sender-Journal, Importnachweis, Archivjournal und Crash-Recovery gemeinsam
 umgesetzt und mit Regressionstests geprüft werden.
 
 Auch bei positivem Preflight wird dadurch kein Archivdienst aktiviert.
+
+
+## Staging 2026-10-14: versionierte Quittungen und alternative Archivorte
+
+Der Synology-Sender bleibt **unverändert**. Die neue Hilfsdatei
+`synology_receipt_versions.py` definiert ausschließlich eine zukünftige
+`v2-<sha256>.json`-Identität, gebunden an Scope, Dateiname, SHA-256 und
+NAS-Dateisignatur. Sie schreibt keine Quittungen und wird vom aktiven Sender
+noch nicht importiert. Die vorhandenen v1-Quittungen bleiben unangetastet.
+Die Tests prüfen Namenswiederholung, identischen Inhalt mit neuer Datei,
+PREPARED-Sperre, Replay und ungültige Pfade. Solange ein belastbarer
+ARCHIVED-Nachweis fehlt, blockiert die Policy eine neue Inkarnation unter
+bereits verwendeten Dateinamen.
+
+**Noch offen:** Der rsync-Zielname muss ebenfalls pro Datei-Inkarnation
+eindeutig sein; allein eine neue Journal-ID verhindert keine Kollision mit
+`--ignore-existing`. Identische Inhalte können von Paperless als Duplikat
+abgelehnt werden und benötigen eine eigene bestätigte Entscheidung. Eine
+Migration oder produktive Aktivierung der v2-Logik ist noch nicht erfolgt.
+
+Die bisherige Quarantäne unter `state_parent/paperless-archive` liegt laut
+Preflight auf einem anderen Dateisystem als alle vier Scan-Eingänge.
+Als Alternative wird ein versteckter, nicht überwachter Unterordner
+`.paperless-archive` **innerhalb jedes Scan-Eingangs** untersucht.
+Der aktuelle inotify-Watcher überwacht nur die konfigurierten Eingangsordner,
+nicht rekursiv; der Sender ignoriert Unterverzeichnisse. Eine gleichnamige
+versteckte Archivablage wird damit nicht automatisch erneut importiert.
+Die Zielverzeichnisse sind noch nicht angelegt.
+
+Read-only-Mount-/Berechtigungsprüfung:
+
+```bash
+ansible-playbook \
+  -i ansible/inventory.yml \
+  -i ansible/inventory.local.yml \
+  ansible/playbooks/audit-paperless-synology-same-volume.yml \
+  --vault-id paperless@prompt \
+  -e @ansible/vars/paperless.vault.yml \
+  -e @ansible/vars/paperless-synology.local.yml
+```
+
+Der Audit meldet Gerätekennung, Eigentümer, Modus und Zugriff des
+`paperless-sync` auf den Eingangsordner sowie Existenz und Gerätekennung
+einer eventuellen versteckten Quarantäne. Eine **fehlende** Quarantäne
+ist keine Bestätigung gleicher Gerätekennung; erst nach kontrollierter
+Bereitstellung kann dies geprüft werden. `os.access` ersetzt keine
+DSM-ACL-Prüfung von Delete-Child/Rename. Das Audit verändert nichts.
+
+**Freigabegates:** privates Archiv ohne ungewollte ACL-Vererbung,
+gleiche Dateisystemkennung, gültige Live-Importnachweise,
+durables Archivjournal und Crash-Recovery, v2-Sender und
+rsync-Zielversionierung sowie sichere Backup-gesteuerte Aufbewahrung.
