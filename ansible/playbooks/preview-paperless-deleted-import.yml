@@ -1,0 +1,92 @@
+---
+# Read-only, manually approved deletion-exception preview. No mutation.
+# The regular archive-imports audit deliberately remains fail-closed.
+- name: Preview consciously deleted Paperless import without reimport or NAS changes
+  hosts: venombox
+  gather_facts: false
+  become: true
+  vars:
+    approved_deleted_document_id: 26
+    approved_deleted_bridge_receipt: 1ebb2c1d26d7b1494d28d9cd.json
+  tasks:
+    - name: Require known site-local Synology configuration
+      ansible.builtin.assert:
+        that:
+          - inventory_hostname == 'venombox'
+          - not ansible_check_mode
+          - synology_admin is defined
+          - synology_config is defined
+          - synology_config.schema_version == 1
+          - synology_config.state_parent is match('^/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$')
+          - synology_config.sync_user is match('^[a-z_][a-z0-9_-]{0,31}$')
+
+    - name: Check expected Paperless guest
+      ansible.builtin.command:
+        argv: [pct, config, '126']
+      register: deleted_guest_config
+      changed_when: false
+
+    - name: Require confined guest identity
+      ansible.builtin.assert:
+        that:
+          - "'hostname: bergen-paperless' in deleted_guest_config.stdout_lines"
+          - "'unprivileged: 1' in deleted_guest_config.stdout_lines"
+          - "'lxc.apparmor.profile: unconfined' not in deleted_guest_config.stdout"
+
+    - name: Read and verify absence of approved deleted Paperless document
+      ansible.builtin.command:
+        argv:
+          - pct
+          - exec
+          - '126'
+          - --
+          - python3
+          - '-'
+          - "{{ approved_deleted_bridge_receipt }}"
+          - "{{ approved_deleted_document_id | string }}"
+        stdin: "{{ lookup('ansible.builtin.file', playbook_dir + '/../files/paperless/export_deleted_import_candidate.py', rstrip=False) }}"
+      register: deleted_paperless_proof
+      changed_when: false
+
+    - name: Verify all original NAS PDFs and SENT receipts under sender lock
+      ansible.builtin.command:
+        argv:
+          - ssh
+          - -T
+          - -o
+          - BatchMode=yes
+          - -o
+          - StrictHostKeyChecking=yes
+          - -o
+          - ConnectTimeout=15
+          - "{{ synology_admin }}"
+          - >-
+            sudo -n -u {{ synology_config.sync_user | quote }}
+            /usr/bin/python3 - {{ synology_config.state_parent | quote }}
+        stdin: "{{ lookup('ansible.builtin.file', playbook_dir + '/../files/paperless/audit_synology_archive_candidates.py', rstrip=False) }}"
+      delegate_to: localhost
+      become: false
+      register: deleted_nas_proof
+      changed_when: false
+
+    - name: Compare verified source and confirmed deletion without writing
+      ansible.builtin.command:
+        argv:
+          - python3
+          - "{{ playbook_dir }}/../files/paperless/preview_deleted_import_policy.py"
+        stdin: "{{ {'nas': deleted_nas_proof.stdout, 'deleted': deleted_paperless_proof.stdout, 'approved_document_id': approved_deleted_document_id, 'approved_bridge_receipt': approved_deleted_bridge_receipt} | to_json }}"
+      delegate_to: localhost
+      become: false
+      register: deleted_policy_preview
+      changed_when: false
+
+    - name: Show deletion policy preview
+      ansible.builtin.debug:
+        var: deleted_policy_preview.stdout_lines
+
+    - name: Assert no archival authorisation or file mutation
+      ansible.builtin.assert:
+        that:
+          - "'EXCLUDED_FROM_ARCHIVE_MATCH_READY' in deleted_policy_preview.stdout_lines"
+          - "'NO_RECEIPT_STATUS_CHANGED' in deleted_policy_preview.stdout_lines"
+          - "'NO_FILES_CHANGED' in deleted_policy_preview.stdout_lines"
