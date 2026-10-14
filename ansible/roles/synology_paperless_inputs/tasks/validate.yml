@@ -1,0 +1,119 @@
+---
+- name: Validate real Synology Paperless permissions
+  ansible.builtin.raw: |
+    set -eu
+
+    BASE=/volume1/homes/@LH-BERGEN.INTERN/61
+    SYNC=paperless-sync
+    principals=
+
+    for home in "$BASE"/*; do
+      [ -d "$home" ] || continue
+      test ! -L "$home" || exit 1
+
+      owner=$(stat -c '%U' "$home")
+      case "$owner" in
+        *@bergen.intern) ;;
+        *) echo "FAIL: Unexpected owner"; exit 1 ;;
+      esac
+
+      id "$owner" >/dev/null
+
+      case " $(id -nG "$owner") " in
+        *" Familie@bergen.intern "*)
+          principals="$principals $owner"
+          ;;
+      esac
+    done
+
+    set -- $principals
+    test "$#" -ge 2 || {
+      echo "FAIL: Insufficient users for isolation test"
+      exit 1
+    }
+
+    owner_file=
+    sync_file=
+
+    cleanup() {
+      [ -z "$owner_file" ] || rm -f "$owner_file"
+      [ -z "$sync_file" ] || rm -f "$sync_file"
+    }
+    trap cleanup EXIT
+
+    tested=0
+
+    for home in "$BASE"/*; do
+      [ -d "$home" ] || continue
+      owner=$(stat -c '%U' "$home")
+
+      case " $principals " in
+        *" $owner "*) ;;
+        *) continue ;;
+      esac
+
+      dir="$home/Paperless"
+      test -d "$dir"
+      test ! -L "$dir"
+      test "$(stat -c '%u' "$dir")" = "$(id -u "$owner")"
+
+      owner_file="$dir/.bergen-owner-test-$$"
+      sync_file="$dir/.bergen-sync-test-$$"
+
+      test ! -e "$owner_file"
+      test ! -L "$owner_file"
+      test ! -e "$sync_file"
+      test ! -L "$sync_file"
+
+      sudo -n -u "$owner" sh -c \
+        'umask 077; printf "OWNER_OK\n" > "$1"' \
+        sh "$owner_file"
+
+      sudo -n -u "$SYNC" grep -qx OWNER_OK "$owner_file"
+
+      sudo -n -u "$SYNC" sh -c \
+        'umask 077; printf "SYNC_OK\n" > "$1"' \
+        sh "$sync_file"
+
+      sudo -n -u "$owner" grep -qx SYNC_OK "$sync_file"
+
+      for other in $principals; do
+        [ "$other" != "$owner" ] || continue
+
+        if sudo -n -u "$other" \
+          cat "$owner_file" >/dev/null 2>&1; then
+          echo "FAIL: Cross-user read: $other -> $owner"
+          exit 1
+        fi
+
+        if sudo -n -u "$other" sh -c \
+          'printf X >> "$1"' sh "$owner_file" 2>/dev/null; then
+          echo "FAIL: Cross-user write: $other -> $owner"
+          exit 1
+        fi
+      done
+
+      sudo -n -u "$SYNC" rm "$owner_file"
+      owner_file=
+
+      sudo -n -u "$owner" rm "$sync_file"
+      sync_file=
+
+      if sudo -n -u "$SYNC" \
+        ls -A "$home" >/dev/null 2>&1; then
+        echo "FAIL: Private home readable: $owner"
+        exit 1
+      fi
+
+      echo "PASS: $owner"
+      tested=$((tested + 1))
+    done
+
+    echo "ACL_RUNTIME_PASS users=$tested"
+  register: synology_paperless_validation
+  changed_when: false
+  check_mode: false
+
+- name: Show ACL validation
+  ansible.builtin.debug:
+    var: synology_paperless_validation.stdout_lines

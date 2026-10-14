@@ -1,0 +1,21 @@
+---
+# Example only. Do not commit actual NAS mount points or user identities.
+# Copy to ansible/vars/paperless.scan-ingest.local.yml (ignored by Git).
+# No files are imported by this map until a separately reviewed import service
+# and Paperless ACL workflows are deployed and successfully tested.
+sources:
+  - id: privat-beispielnutzer
+    source_path: /mnt/sds/homes/beispielnutzer/Paperless-Eingang
+    consume_subdir: Privat/beispielnutzer
+    scope: private
+    principal: beispielnutzer
+  - id: eltern
+    source_path: /mnt/sds/Eltern/Paperless-Eingang
+    consume_subdir: Eltern
+    scope: group
+    principal: Eltern
+  - id: familie
+    source_path: /mnt/sds/Familie/Paperless-Eingang
+    consume_subdir: Familie
+    scope: group
+    principal: Familie

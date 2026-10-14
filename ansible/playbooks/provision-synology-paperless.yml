@@ -1,0 +1,30 @@
+---
+- name: Provision Synology personal Paperless inputs
+  hosts: all
+  gather_facts: false
+  become: true
+
+  pre_tasks:
+    - name: Require explicit deployment approval and exact target
+      ansible.builtin.assert:
+        that:
+          - inventory_hostname == 'ldap.thebergens.net'
+          - synology_paperless_apply | default(false) | bool
+          - not ansible_check_mode
+        fail_msg: >-
+          Refusing changes: exact NAS, explicit approval
+          and normal execution mode are required.
+
+  tasks:
+    - name: Run read-only preflight
+      ansible.builtin.include_role:
+        name: synology_paperless_inputs
+
+    - name: Provision approved directories
+      ansible.builtin.include_role:
+        name: synology_paperless_inputs
+        tasks_from: provision
+
+    - name: Validate final ACL configuration
+      ansible.builtin.include_role:
+        name: synology_paperless_inputs

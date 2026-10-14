@@ -1,0 +1,108 @@
+---
+- name: Discover and validate Synology Paperless inputs
+  ansible.builtin.raw: |
+    set -eu
+
+    BASE=/volume1/homes/@LH-BERGEN.INTERN/61
+    ACL=/usr/syno/bin/synoacltool
+    SYNC=paperless-sync
+
+    test -d "$BASE"
+    test -x "$ACL"
+    id "$SYNC" >/dev/null
+
+    case " $(id -nG "$SYNC") " in
+      *" administrators "*)
+        echo "FAIL: Sync account is administrator"
+        exit 1
+        ;;
+    esac
+
+    eligible=0
+    missing=0
+    existing=0
+    excluded=0
+
+    for home in "$BASE"/*; do
+      [ -d "$home" ] || continue
+
+      if [ -L "$home" ]; then
+        echo "FAIL: Symlink home: $home"
+        exit 1
+      fi
+
+      owner=$(stat -c '%U' "$home")
+
+      case "$owner" in
+        *@bergen.intern) ;;
+        *)
+          echo "FAIL: Unexpected owner: $home"
+          exit 1
+          ;;
+      esac
+
+      if ! id "$owner" >/dev/null 2>&1; then
+        echo "FAIL: Unresolved owner: $owner"
+        exit 1
+      fi
+
+      case " $(id -nG "$owner") " in
+        *" Familie@bergen.intern "*) ;;
+        *)
+          echo "EXCLUDED: $owner"
+          excluded=$((excluded + 1))
+          continue
+          ;;
+      esac
+
+      eligible=$((eligible + 1))
+      dir="$home/Paperless"
+
+      if [ -e "$dir" ] || [ -L "$dir" ]; then
+        if [ ! -d "$dir" ] || [ -L "$dir" ]; then
+          echo "FAIL: Invalid Paperless path: $dir"
+          exit 1
+        fi
+
+        if [ "$(stat -c '%u' "$dir")" != "$(id -u "$owner")" ]; then
+          echo "FAIL: Wrong owner: $dir"
+          exit 1
+        fi
+
+        acl=$("$ACL" -get "$dir")
+
+        for entry in \
+          "user:$SYNC:allow:rwxpdDaARWc--:fd--" \
+          "user:$owner:allow:rwxpdDaARWcCo:fd--" \
+          "group:administrators:allow:rwxpdDaARWc--:fd--"
+        do
+          if ! printf '%s\n' "$acl" | grep -Fq "$entry"; then
+            echo "FAIL: Missing ACL: $entry"
+            exit 1
+          fi
+        done
+
+        count=$(printf '%s\n' "$acl" |
+          grep -cE '^[[:space:]]*\[[0-9]+\]' || true)
+
+        if [ "$count" -ne 3 ]; then
+          echo "FAIL: Unexpected ACL entries: $dir"
+          exit 1
+        fi
+
+        echo "PRESENT: $owner"
+        existing=$((existing + 1))
+      else
+        echo "MISSING: $owner"
+        missing=$((missing + 1))
+      fi
+    done
+
+    echo "PREFLIGHT_PASS eligible=$eligible existing=$existing missing=$missing excluded=$excluded"
+  register: synology_paperless_preflight
+  changed_when: false
+  check_mode: false
+
+- name: Show Synology Paperless preflight
+  ansible.builtin.debug:
+    var: synology_paperless_preflight.stdout_lines

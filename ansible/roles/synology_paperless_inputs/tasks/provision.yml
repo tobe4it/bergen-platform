@@ -1,0 +1,73 @@
+---
+- name: Provision missing personal Paperless directories
+  ansible.builtin.raw: |
+    set -eu
+
+    BASE=/volume1/homes/@LH-BERGEN.INTERN/61
+    ACL=/usr/syno/bin/synoacltool
+    SYNC=paperless-sync
+
+    test -d "$BASE"
+    test -x "$ACL"
+    id "$SYNC" >/dev/null
+
+    case " $(id -nG "$SYNC") " in
+      *" administrators "*)
+        echo "FAIL: Sync account is administrator"
+        exit 1
+        ;;
+    esac
+
+    for home in "$BASE"/*; do
+      [ -d "$home" ] || continue
+
+      if [ -L "$home" ]; then
+        echo "FAIL: Symlink home: $home"
+        exit 1
+      fi
+
+      owner=$(stat -c '%U' "$home")
+
+      case "$owner" in
+        *@bergen.intern) ;;
+        *)
+          echo "FAIL: Unexpected owner: $home"
+          exit 1
+          ;;
+      esac
+
+      id "$owner" >/dev/null || exit 1
+
+      case " $(id -nG "$owner") " in
+        *" Familie@bergen.intern "*) ;;
+        *) continue ;;
+      esac
+
+      dir="$home/Paperless"
+
+      if [ -e "$dir" ] || [ -L "$dir" ]; then
+        test -d "$dir" && test ! -L "$dir" || exit 1
+        echo "UNCHANGED: $owner"
+        continue
+      fi
+
+      mkdir -m 0700 "$dir"
+      chown "$(stat -c '%u:%g' "$home")" "$dir"
+
+      "$ACL" -add "$dir" \
+        "user:$owner:allow:rwxpdDaARWcCo:fd--" >/dev/null
+
+      "$ACL" -add "$dir" \
+        'group:administrators:allow:rwxpdDaARWc--:fd--' >/dev/null
+
+      "$ACL" -add "$dir" \
+        "user:$SYNC:allow:rwxpdDaARWc--:fd--" >/dev/null
+
+      echo "CREATED: $owner"
+    done
+  register: synology_paperless_provision
+  changed_when: "'CREATED:' in synology_paperless_provision.stdout"
+
+- name: Show provisioned directories
+  ansible.builtin.debug:
+    var: synology_paperless_provision.stdout_lines

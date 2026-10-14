@@ -1,0 +1,24 @@
+---
+- name: Validate Synology Paperless access isolation
+  hosts: all
+  gather_facts: false
+  become: true
+
+  pre_tasks:
+    - name: Require exact target and validation approval
+      ansible.builtin.assert:
+        that:
+          - inventory_hostname == 'ldap.thebergens.net'
+          - synology_paperless_validation_approved | default(false) | bool
+          - not ansible_check_mode
+        fail_msg: "Synology ACL validation not approved"
+
+  tasks:
+    - name: Validate configured directories and ACLs
+      ansible.builtin.include_role:
+        name: synology_paperless_inputs
+
+    - name: Test actual user permissions
+      ansible.builtin.include_role:
+        name: synology_paperless_inputs
+        tasks_from: validate
