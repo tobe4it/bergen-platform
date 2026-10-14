@@ -49,7 +49,8 @@ und alle Sicherheitsblocker für `delete_tag`.
 
 Nach Prüfung und ausdrücklicher Freigabe aktiviert
 `-e paperless_user_rights_apply=true` **ausschließlich**
-`documents.delete_tag` ausschließlich für die aktiven erwachsenen Tag-Verwalter\n\`nadja\` und \`thomas\` (nicht \`thomas3\`).
+`documents.delete_tag` für die aktiven erwachsenen Tag-Verwalter
+`nadja` und `thomas` (nicht `thomas3`).
 Vor dem Commit werden die Tag-Editor-Basisrechte, unbesessene Tags und fremde
 Löschobjektberechtigungen erneut überprüft. Es werden keine
 Objektberechtigungen hinzugefügt und keine Tags oder Dokumente
