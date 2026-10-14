@@ -86,6 +86,16 @@ bergen-platform/
 
 Project documentation can be found in the **docs/** directory.
 
+User handbook for beginners and deployment handover:
+
+- [Deutsch](docs/handbook/wiki/DE-Start.md)
+- [English](docs/handbook/wiki/EN-Start.md)
+- [Blank recovery printouts and wiki publishing](docs/handbook/README.md)
+
+The handbook source is reviewed with this repository and can be published to
+the GitHub Wiki. Only blank recovery templates are public; completed sheets and
+private deployment inventories remain outside Git.
+
 - ARCHITECTURE.md
 - CHANGELOG.md
 - DAYTRADING.md
