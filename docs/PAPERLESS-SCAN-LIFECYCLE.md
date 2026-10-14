@@ -224,8 +224,10 @@ The existing private quarantine is
 inheriting hidden archives inside scanner folders.
 
 The evidence matcher now prints `PREVIEW_ARCHIVE_COPY` for each verified
-sender receipt, using a deterministic `<scope>/<UTC sent month>/<64-character
-sender receipt ID>.pdf` target. This is **only a logical plan**: it does not
+sender receipt, using a deterministic `<scope>/<current UTC preview month>/<64-character
+sender receipt ID>.pdf` target. The actual archive month and the start of
+30-day retention must be persisted at successful archival, never derived from
+`sent_at` or `reconciled_at`. This is **only a logical plan**: it does not
 check live destination ACLs or write a file, and
 `ARCHIVE_COPY_NOT_IMPLEMENTED` is always printed. Production archival
 remains blocked until native DSM archive ACL verification, crash-safe
@@ -233,3 +235,9 @@ cross-subvolume copy journal, replay recovery, versioned sender receipts and
 collision-safe receiver filenames are implemented and tested. Expiry additionally
 requires fresh backup health evidence. Do not run the old
 `prepare-paperless-synology-archives.yml` as a fix for cross-device rename.
+
+The 2026-10-14 preview run initially failed on a missing optional `sent_at`
+field after 14 matches. No NAS or Paperless files were changed. The evidence
+format was reverted to the original timestamp-independent schema. Sender
+receipts repaired via live proof may use `reconciled_at` instead of `sent_at`;
+neither field is needed for a logical archive target preview.
