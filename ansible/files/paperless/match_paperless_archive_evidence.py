@@ -32,11 +32,12 @@ def parse(lines, keys, label):
 
 def compare(nas_lines, paperless_lines):
     nas = parse(nas_lines, ("sender_receipt", "scope", "source", "receiver_source", "sha256"), "NAS")
-    imported = parse(paperless_lines, ("bridge_receipt", "receiver_source", "sha256", "document_id"), "PAPERLESS")
+    imported = parse(paperless_lines, ("schema_version", "bridge_receipt", "receiver_source", "sha256", "document_id"), "PAPERLESS")
     by_receiver = {}
     for item in imported:
         dest = item["receiver_source"]
-        if (not isinstance(dest, str) or dest in by_receiver
+        if (item["schema_version"] != 1 or type(item["schema_version"]) is not int
+                or not isinstance(dest, str) or dest in by_receiver
                 or not BRIDGE_ID.fullmatch(item["bridge_receipt"])
                 or not DIGEST.fullmatch(item["sha256"])
                 or type(item["document_id"]) is not int or item["document_id"] <= 0):
