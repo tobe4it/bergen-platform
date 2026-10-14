@@ -38,9 +38,11 @@ IN_IGNORED = 0x00008000
 IN_ONLYDIR = 0x01000000
 IN_ISDIR = 0x40000000
 
-WATCH_MASK = (IN_ATTRIB | IN_CLOSE_WRITE | IN_MOVED_TO | IN_CREATE
-              | IN_DELETE_SELF | IN_MOVE_SELF | IN_UNMOUNT | IN_ONLYDIR)
-SIGNAL_MASK = IN_ATTRIB | IN_CLOSE_WRITE | IN_MOVED_TO | IN_CREATE
+WATCH_MASK = (IN_CLOSE_WRITE | IN_MOVED_TO | IN_DELETE_SELF
+              | IN_MOVE_SELF | IN_UNMOUNT | IN_ONLYDIR)
+# Only completed file writes or atomic moves trigger the short-term scan.
+# Incomplete CREATE/ATTRIB events must not trigger ingestion.
+SIGNAL_MASK = IN_CLOSE_WRITE | IN_MOVED_TO
 LOST_MASK = IN_DELETE_SELF | IN_MOVE_SELF | IN_UNMOUNT | IN_IGNORED
 
 QUIET_AFTER_EVENT = 65    # Sender requires 60 seconds since last mtime/ctime.
