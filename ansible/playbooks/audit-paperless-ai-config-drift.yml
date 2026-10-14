@@ -1,0 +1,98 @@
+---
+# Read-only Open WebUI runtime/Quadlet drift diagnostic.
+# Only allowlisted metadata and boolean flags are printed. Never dump
+# podman inspect JSON, environment files, passwords or full systemd units.
+- name: Audit Bergen-AI Open WebUI configuration provenance
+  hosts: venombox
+  become: true
+  gather_facts: false
+
+  tasks:
+    - name: Verify intended AI guest via Proxmox
+      ansible.builtin.command:
+        argv: [pct, exec, '110', --, hostname, -s]
+      register: ai_drift_hostname
+      changed_when: false
+      failed_when: ai_drift_hostname.stdout | trim != 'bergen-ai'
+
+    - name: Inspect sanitized container metadata and Quadlet flags
+      ansible.builtin.command:
+        argv:
+          - pct
+          - exec
+          - '110'
+          - --
+          - python3
+          - -c
+          - |
+            import json
+            import pathlib
+            import re
+            import subprocess
+            import sys
+
+            result = subprocess.run(
+                ["podman", "inspect", "--type", "container", "open-webui"],
+                capture_output=True, text=True, timeout=15, check=False
+            )
+            if result.returncode:
+                print("FAIL podman container inspection unavailable")
+                sys.exit(1)
+            try:
+                data = json.loads(result.stdout)
+                obj = data[0]
+                image = obj.get("ImageName") or obj.get("Config", {}).get("Image") or "UNKNOWN"
+                labels = obj.get("Config", {}).get("Labels") or {}
+                version = labels.get("org.opencontainers.image.version", "UNAVAILABLE")
+                print("IMAGE_REFERENCE", image)
+                print("IMAGE_VERSION_LABEL", version)
+                print("CONTAINER_CREATED", obj.get("Created", "UNKNOWN"))
+                print("CONTAINER_STARTED", (obj.get("State") or {}).get("StartedAt", "UNKNOWN"))
+
+                keys = ("ENABLE_PERSISTENT_CONFIG", "ENABLE_SIGNUP", "WEBUI_AUTH")
+                env = obj.get("Config", {}).get("Env") or []
+                env_map = dict(item.split("=", 1) for item in env if "=" in item)
+                def safe_bool(value):
+                    if value is None:
+                        return "UNSET"
+                    if value.lower() in ("true", "1", "yes"):
+                        return "TRUE"
+                    if value.lower() in ("false", "0", "no"):
+                        return "FALSE"
+                    return "NONBOOLEAN_REDACTED"
+                for key in keys:
+                    print("CONTAINER_ENV", key, safe_bool(env_map.get(key)))
+
+                quadlet = pathlib.Path("/etc/containers/systemd/open-webui.container")
+                print("QUADLET_EXISTS", quadlet.is_file())
+                if quadlet.is_file():
+                    lines = quadlet.read_text(encoding="utf-8").splitlines()
+                    for key in keys:
+                        matches = [
+                            line.split("=", 2)[2].strip()
+                            for line in lines
+                            if line.strip().startswith("Environment=" + key + "=")
+                        ]
+                        print("QUADLET_ENV", key,
+                              safe_bool(matches[-1]) if matches else "UNSET")
+                print("NOTICE metadata is not proof of effective app settings or user identity")
+            except (ValueError, TypeError, KeyError, IndexError, OSError) as exc:
+                print("FAIL unexpected inspect/Quadlet format", type(exc).__name__)
+                sys.exit(1)
+      register: ai_drift_report
+      changed_when: false
+      failed_when: false
+
+    - name: Display sanitized diagnostic report
+      ansible.builtin.debug:
+        var: ai_drift_report.stdout_lines
+
+    - name: Require successful read-only diagnostic
+      ansible.builtin.assert:
+        that:
+          - ai_drift_report.rc == 0
+          - "'CONTAINER_ENV ENABLE_PERSISTENT_CONFIG' in ai_drift_report.stdout"
+          - "'QUADLET_EXISTS' in ai_drift_report.stdout"
+        fail_msg: >-
+          Open WebUI drift diagnostic incomplete. Do not deploy or enable
+          Paperless AI retrieval before resolving the configuration source.
