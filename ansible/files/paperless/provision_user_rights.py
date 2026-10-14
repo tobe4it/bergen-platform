@@ -1,7 +1,7 @@
 """Bergen Paperless 3.3: audit end-user permissions; enable own-tag deletion.
 
 Default: read-only. Set BP_USER_RIGHTS_APPLY=1 to grant ONLY delete_tag
-to active non-staff accounts. No object ACLs, documents, or metadata changed.
+to active adult accounts thomas and nadja. No object ACLs, documents, or metadata changed.
 
 PaperlessObjectPermissions checks both model delete_tag and owner/object
 permission. A tag without an owner bypasses object checks, so such tags
@@ -17,6 +17,7 @@ from guardian.shortcuts import get_groups_with_perms, get_users_with_perms
 
 FLAG = os.environ.get("BP_USER_RIGHTS_APPLY", "0")
 TARGET_RIGHT = "documents.delete_tag"
+ADULT_TAG_EDITORS = ("nadja", "thomas")
 # App label, model, permissions: audit only; no automatic grants.
 # The audit enumerates the real Permission rows from the live Paperless DB.
 # This avoids assuming app labels for optional plugins or newly added models.
@@ -43,6 +44,16 @@ def regular_users():
     if not users:
         fail("NO_ACTIVE_REGULAR_USERS")
     return users
+
+
+def adult_tag_editors(users):
+    by_name = {user.username: user for user in users}
+    if not all(name in by_name for name in ADULT_TAG_EDITORS):
+        fail("MISSING_ACTIVE_ADULT_TAG_EDITOR")
+    for name in ADULT_TAG_EDITORS:
+        if not by_name[name].has_perm("documents.add_tag") or not by_name[name].has_perm("documents.change_tag"):
+            fail("MISSING_TAG_EDITOR_BASELINE " + name)
+    return [by_name[name] for name in ADULT_TAG_EDITORS]
 
 
 def tag_delete_blockers():
@@ -85,6 +96,7 @@ def main():
     if FLAG not in ("0", "1"):
         fail("INVALID_APPLY_FLAG")
     users = regular_users()
+    editors = adult_tag_editors(users)
     perm = Permission.objects.get(
         content_type=ContentType.objects.get_for_model(Tag),
         codename="delete_tag",
@@ -94,10 +106,13 @@ def main():
     blockers = tag_delete_blockers()
     print("MODE", "APPLY" if FLAG == "1" else "DRY_RUN")
     print("REGULAR_USERS", ",".join(user.username for user in users))
+    print("TAG_DELETE_TARGET_USERS", ",".join(user.username for user in editors))
     print("TARGET", TARGET_RIGHT, "MODEL_ONLY")
     print("OBJECT_ACLS_AND_DOCUMENTS_UNCHANGED")
     for blocker in blockers:
         print("BLOCKER", blocker)
+    if not blockers:
+        print("BLOCKERS_NONE")
     for user in users:
         audit_user(user)
     print("FUTURE_USERS_REQUIRE_BASELINE_PROVISIONING")
@@ -112,11 +127,11 @@ def main():
         # unsafe for a model-level delete permission.
         if tag_delete_blockers():
             fail("TAG_DELETE_PRECONDITIONS_CHANGED")
-        for user in users:
+        for user in editors:
             if not user.has_perm(TARGET_RIGHT):
                 user.user_permissions.add(perm)
                 changed += 1
-        for user in users:
+        for user in editors:
             fresh = User.objects.get(pk=user.pk)
             if not fresh.has_perm(TARGET_RIGHT):
                 fail("MISSING_DELETE_TAG " + fresh.username)
