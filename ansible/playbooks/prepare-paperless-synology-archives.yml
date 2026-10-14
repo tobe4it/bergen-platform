@@ -1,0 +1,92 @@
+---
+# Safe, idempotent NAS quarantine directory provisioning.
+# Does not archive, move, chmod existing paths, enable sync, or delete files.
+# Can be run while the Synology ingest watcher is live.
+- name: Prepare private NAS short-term Paperless quarantine directories
+  hosts: localhost
+  connection: local
+  gather_facts: false
+
+  tasks:
+    - name: Require NAS site-local settings
+      ansible.builtin.assert:
+        that:
+          - synology_admin is defined
+          - synology_admin is match('^[A-Za-z_][A-Za-z0-9_.-]*@[A-Za-z0-9][A-Za-z0-9.-]+$')
+          - synology_config is defined
+          - synology_config.schema_version == 1
+          - synology_config.state_parent is match('^/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$')
+          - synology_config.sources is defined
+        fail_msg: "Pass the existing ignored paperless-synology.local.yml"
+
+    - name: Create only locked-down root-owned quarantine directory structure
+      ansible.builtin.command:
+        argv:
+          - ssh
+          - -T
+          - -o
+          - BatchMode=yes
+          - -o
+          - ConnectTimeout=15
+          - "{{ synology_admin }}"
+          - "sudo -n /usr/bin/python3 - {{ synology_config.state_parent | quote }}"
+        stdin: |
+          import datetime
+          import os
+          import stat
+          import sys
+          from pathlib import Path
+
+          if os.geteuid() != 0:
+              raise SystemExit("ROOT_REQUIRED")
+          os.umask(0o077)
+          parent = Path(sys.argv[1])
+          root = parent.parent
+          bindir = parent / "bin"
+
+          def safe_dir(path, mode):
+              st = path.lstat()
+              if not stat.S_ISDIR(st.st_mode) or st.st_uid != 0 or st.st_gid != 0 or stat.S_IMODE(st.st_mode) != mode:
+                  raise RuntimeError("UNSAFE_EXISTING_DIRECTORY " + str(path))
+
+          safe_dir(root, 0o755)
+          safe_dir(parent, 0o755)
+          safe_dir(bindir, 0o755)
+          sys.path.insert(0, str(bindir))
+          from synology_config import SETTINGS
+          if SETTINGS["parent"] != parent:
+              raise RuntimeError("CONFIG_PARENT_MISMATCH")
+          archive = parent / "paperless-archive"
+          month = datetime.date.today().strftime("%Y-%m")
+          wanted = {archive}
+          for _source, scope in SETTINGS["sources"]:
+              dest = archive
+              for part in scope.split("/"):
+                  dest = dest / part
+                  wanted.add(dest)
+              wanted.add(dest / month)
+
+          ordered = sorted(wanted, key=lambda p: (len(p.parts), str(p)))
+          # Fail before any mkdir if there are conflicting or unsafe existing paths.
+          for path in ordered:
+              try:
+                  safe_dir(path, 0o700)
+              except FileNotFoundError:
+                  continue
+
+          for path in ordered:
+              try:
+                  os.mkdir(str(path), 0o700)
+                  print("CREATED", str(path), flush=True)
+              except FileExistsError:
+                  safe_dir(path, 0o700)
+                  print("EXISTS", str(path), flush=True)
+              safe_dir(path, 0o700)
+
+          print("PAPERLESS_QUARANTINE_DIRS_READY", len(SETTINGS["sources"]), "scopes", flush=True)
+      register: paperless_archive_prep
+      changed_when: "'CREATED ' in paperless_archive_prep.stdout"
+
+    - name: Display NAS archive provisioning status
+      ansible.builtin.debug:
+        var: paperless_archive_prep.stdout_lines
