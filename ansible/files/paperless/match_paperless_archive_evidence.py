@@ -5,7 +5,6 @@ Consumes one JSON object from stdin with NAS and Paperless JSONL strings.
 No filesystem writes, no archive authorisation or deletion.
 """
 import json
-import math
 import re
 import sys
 from datetime import datetime, timezone
@@ -33,7 +32,7 @@ def parse(lines, keys, label):
 
 
 def compare(nas_lines, paperless_lines):
-    nas = parse(nas_lines, ("sender_receipt", "scope", "source", "receiver_source", "sha256", "sent_at"), "NAS")
+    nas = parse(nas_lines, ("sender_receipt", "scope", "source", "receiver_source", "sha256"), "NAS")
     imported = parse(paperless_lines, ("schema_version", "bridge_receipt", "receiver_source", "sha256", "document_id"), "PAPERLESS")
     by_receiver = {}
     for item in imported:
@@ -49,6 +48,7 @@ def compare(nas_lines, paperless_lines):
     eligible = 0
     missing = []
     counts = {scope: [0, 0, 0] for scope in SCOPES}
+    preview_month = datetime.now(timezone.utc).strftime("%Y-%m")
     for item in nas:
         dest = item["receiver_source"]
         scope = item["scope"]
@@ -57,10 +57,7 @@ def compare(nas_lines, paperless_lines):
                 or name in (".", "..") or "/" in name or "\\" in name
                 or not isinstance(dest, str) or not dest.startswith(scope + "/")
                 or dest in seen or not SENDER_ID.fullmatch(item["sender_receipt"])
-                or not DIGEST.fullmatch(item["sha256"])
-                or type(item["sent_at"]) not in (int, float)
-                or not math.isfinite(item["sent_at"])
-                or not 946684800 <= item["sent_at"] <= datetime.now(timezone.utc).timestamp() + 3600):
+                or not DIGEST.fullmatch(item["sha256"])):
             raise RuntimeError("INVALID_OR_DUPLICATE_NAS_RECORD")
         seen.add(dest)
         counts[scope][0] += 1
@@ -77,8 +74,10 @@ def compare(nas_lines, paperless_lines):
                   "bridge", proof["bridge_receipt"], "sender", item["sender_receipt"])
             # Stable, collision-resistant quarantine identity: sender receipt ID.
             # Never derive archive paths from untrusted scanner names.
-            month = datetime.fromtimestamp(item["sent_at"], timezone.utc).strftime("%Y-%m")
-            relative = scope + "/" + month + "/" + item["sender_receipt"][:-5] + ".pdf"
+            # Preview month is the current UTC month. Actual archive date and
+            # quarantine expiry must be fixed by the future durable archive
+            # journal at successful copy time, never by sender timestamps.
+            relative = scope + "/" + preview_month + "/" + item["sender_receipt"][:-5] + ".pdf"
             print("PREVIEW_ARCHIVE_COPY", scope, "source", name, "target", relative,
                   "sha256", item["sha256"])
     print("NAS_SENT_VERIFIED", len(nas))
@@ -92,6 +91,7 @@ def compare(nas_lines, paperless_lines):
     if not nas:
         print("BLOCKER NO_NAS_SOURCES")
     print("ARCHIVE_MATCH_READY" if nas and not missing else "ARCHIVE_MATCH_BLOCKED")
+    print("ARCHIVE_MONTH_PREVIEW_ONLY", preview_month)
     print("ARCHIVE_COPY_NOT_IMPLEMENTED")
     print("ARCHIVE_ACL_AND_BACKUP_GATES_NOT_YET_PASSED")
     print("NO_FILES_CHANGED")
