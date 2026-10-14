@@ -372,3 +372,40 @@ Umbenennen des bestehenden Ereignistyps gespeichert werden: Zunächst
 sind ein separates Schema, Nachweisbindung, Tests und die Freigabe
 einer produktiven Integration erforderlich. Der bisherige
 Archivabgleich bleibt fail-closed.
+
+### Journalentwurf für `DELETED_BY_USER` – ausschließlich Dry-Run
+
+`ansible/files/paperless/deleted_by_user_decision_journal.py` definiert
+ein **separates Schema v2** für den ausdrücklich bestätigten beidseitigen
+Löschfall von Dokument 26. Das frühere v1-Journal für
+`DELETED_IN_PAPERLESS` bleibt unverändert. Der neue Entwurf enthält
+die historischen Sender-/Bridge-IDs, den SHA-256, Quell- und
+Empfängerkennung, die zwei geprüften Abwesenheitszustände und die
+explizite Nutzerbestätigung vom 14.10.2026. Ein domänenseparierter
+`event_id` wird aus der historischen Dokumentidentität abgeleitet.
+
+Der bestehende Live-Dry-Run
+`ansible/playbooks/preview-paperless-deleted-by-user.yml` führt
+zusätzlich eine **rein lesende Journalvorschau** aus. Sie gibt den
+vorgeschlagenen Dateinamen, SHA-256 des kanonischen JSON-Inhalts
+und den vollständigen JSON-Entwurf aus. Die Ausgabe
+`NO_JOURNAL_WRITTEN` bestätigt, dass der Entwurf nicht persistiert
+wird. Es gibt **keinen** produktiven Writer, kein automatisch
+erzeugtes Journalverzeichnis, keinen neuen Sender-/Receiver-Code und
+keine Freigabe für Wiederimport oder Archivierung.
+
+Regressionstests:
+
+```bash
+python3 -m unittest discover \
+  -s tests \
+  -p 'test_paperless_deleted_by_user_decision_journal.py' -v
+```
+
+Eine spätere echte Persistierung benötigt eine ausdrücklich
+freigegebene sichere Speicherposition, erneute Live-Nachweise,
+separat geprüfte atomare Schreiblogik und den versionierten
+Sender-/Empfänger-Lebenszyklus. Ein erneuter Scan mit demselben
+Dateinamen wird durch diese Vorschau **nicht** automatisch
+freigegeben; der bestehende Sender blockiert abweichende Signaturen
+weiterhin fail-closed.
