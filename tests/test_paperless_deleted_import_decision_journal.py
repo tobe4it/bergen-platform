@@ -1,4 +1,5 @@
 """Offline-only deletion journal schema, immutability, and crash-safety tests."""
+import ast
 import copy
 import importlib.util
 import json
@@ -140,7 +141,24 @@ class DeletedDecisionJournalTests(unittest.TestCase):
         self.assertNotIn("/srv/bergen-paperless", source)
         self.assertNotIn("/volume1", source)
         self.assertNotIn("os.replace(", source)
-        self.assertNotIn(".unlink(", source)
+        # Only cleanup of the newly created temporary journal file is allowed.
+        # Reject deletion of existing journal entries, NAS files, or other paths.
+        deletion_calls = []
+        for node in ast.walk(ast.parse(source)):
+            if not isinstance(node, ast.Call) or not isinstance(node.func, ast.Attribute):
+                continue
+            if node.func.attr not in ("unlink", "remove", "rmdir", "rmtree"):
+                continue
+            deletion_calls.append(node)
+        self.assertEqual(len(deletion_calls), 1)
+        call = deletion_calls[0]
+        self.assertIsInstance(call.func.value, ast.Name)
+        self.assertEqual(call.func.value.id, "os")
+        self.assertEqual(call.func.attr, "unlink")
+        self.assertEqual(len(call.args), 1)
+        self.assertIsInstance(call.args[0], ast.Name)
+        self.assertEqual(call.args[0].id, "temporary")
+        self.assertEqual(call.keywords, [])
 
 
 if __name__ == "__main__":
