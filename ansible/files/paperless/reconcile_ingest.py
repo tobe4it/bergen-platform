@@ -29,7 +29,7 @@ import os
 from documents.models import Document
 from guardian.shortcuts import get_groups_with_perms, get_users_with_perms
 from documents.permissions import permitted_document_ids
-from django.contrib.auth.models import User
+from django.contrib.auth.models import Group, User
 name = os.environ['BP_FILENAME']
 expected_owner = os.environ['BP_OWNER']
 checksum = os.environ['BP_SHA256']
@@ -44,21 +44,34 @@ else:
     assert doc.checksum == checksum, 'checksum differs'
     assert doc.owner is not None and doc.owner.username == expected_owner, 'wrong owner'
     assert doc.page_count is not None and doc.page_count > 0, 'no valid pages'
+
+    group = Group.objects.get(name=scope) if scope else None
     actual_groups = {
-        group.name: sorted(perms)
-        for group, perms in get_groups_with_perms(doc, attach_perms=True).items()
+        group_obj.name: sorted(perms)
+        for group_obj, perms in get_groups_with_perms(doc, attach_perms=True).items()
     }
     expected_groups = {scope: ['view_document']} if scope else {}
     assert actual_groups == expected_groups, 'group permissions differ'
-    assert not get_users_with_perms(doc).exists(), 'unexpected direct user grants'
-    expected_visible = {
-        'thomas': scope in ('Eltern@bergen.intern','Familie@bergen.intern') or expected_owner == 'thomas',
-        'nadja': scope in ('Eltern@bergen.intern','Familie@bergen.intern') or expected_owner == 'nadja',
-        'thomas8': False,
-    }
-    for username, expected in expected_visible.items():
-        user = User.objects.get(username=username)
-        assert permitted_document_ids(user).filter(pk=doc.pk).exists() == expected, 'visibility differs for ' + username
+
+    # Shared workflows also grant direct read permissions to existing group
+    # members. Allow only redundant view grants to CURRENT members of the
+    # expected group, never grants to outsiders or elevated permissions.
+    direct_grants = get_users_with_perms(doc, attach_perms=True)
+    for grantee, perms in direct_grants.items():
+        assert group is not None, 'unexpected private-document direct grant'
+        assert sorted(perms) == ['view_document'], 'unexpected direct permission'
+        assert grantee.groups.filter(pk=group.pk).exists(), 'direct grant to outsider'
+
+    # Verify the full active-user population, not a hardcoded test account.
+    # A group member may be added later; a removed user need not remain here.
+    for user in User.objects.filter(is_active=True).iterator():
+        expected = (
+            user.is_superuser
+            or user.pk == doc.owner_id
+            or (group is not None and user.groups.filter(pk=group.pk).exists())
+        )
+        visible = permitted_document_ids(user).filter(pk=doc.pk).exists()
+        assert visible == expected, 'visibility differs for ' + user.username
     print('BP_IMPORT:VERIFIED:' + str(doc.pk))
 """
 
