@@ -16,7 +16,7 @@ m = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(m)
 D = "a" * 64
 DEST = "Familie/scan--nas-" + D + ".pdf"
-N = {"sender_receipt": "b" * 64 + ".json", "scope": "Familie", "source": "scan.pdf", "receiver_source": DEST, "sha256": D, "sent_at": 1791972000.0}
+N = {"sender_receipt": "b" * 64 + ".json", "scope": "Familie", "source": "scan.pdf", "receiver_source": DEST, "sha256": D}
 P = {"schema_version": 1, "bridge_receipt": "c" * 24 + ".json", "receiver_source": DEST, "sha256": D, "document_id": 23}
 
 
@@ -32,17 +32,19 @@ class ArchiveEvidenceTests(unittest.TestCase):
         result = output(json.dumps(N), json.dumps(P))
         self.assertIn("ARCHIVE_MATCH_READY", result)
         self.assertIn("MATCHED 1", result)
-        self.assertIn("PREVIEW_ARCHIVE_COPY Familie source scan.pdf target Familie/2026-10/" + "b" * 64 + ".pdf", result)
+        preview_month = datetime.now(timezone.utc).strftime("%Y-%m")
+        self.assertIn("PREVIEW_ARCHIVE_COPY Familie source scan.pdf target Familie/" + preview_month + "/" + "b" * 64 + ".pdf", result)
+        self.assertIn("ARCHIVE_MONTH_PREVIEW_ONLY " + preview_month, result)
         self.assertIn("ARCHIVE_COPY_NOT_IMPLEMENTED", result)
         self.assertIn("NO_FILES_CHANGED", result)
 
-    def test_missing_timestamp_fails_closed(self):
-        with self.assertRaisesRegex(RuntimeError, "INVALID_OR_DUPLICATE_NAS_RECORD"):
-            output(json.dumps(dict(N, sent_at=None)), json.dumps(P))
+    def test_sender_receipt_without_sent_at_is_accepted(self):
+        # Legacy and manually reconciled SENT receipts need no send timestamp.
+        self.assertIn("ARCHIVE_MATCH_READY", output(json.dumps(N), json.dumps(P)))
 
-    def test_nonfinite_timestamp_fails_closed(self):
-        with self.assertRaisesRegex(RuntimeError, "INVALID_OR_DUPLICATE_NAS_RECORD"):
-            output(json.dumps(dict(N, sent_at=float("nan"))), json.dumps(P))
+    def test_sender_receipt_extra_timestamp_is_rejected(self):
+        with self.assertRaisesRegex(RuntimeError, "INVALID_NAS_RECORD"):
+            output(json.dumps(dict(N, sent_at=1791972000.0)), json.dumps(P))
 
     def test_unknown_schema_fails_closed(self):
         with self.assertRaisesRegex(RuntimeError, "INVALID_OR_DUPLICATE_PAPERLESS_PROOF"):
