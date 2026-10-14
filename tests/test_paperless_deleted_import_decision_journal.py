@@ -98,7 +98,7 @@ class DeletedDecisionJournalTests(unittest.TestCase):
     def test_modified_digest_rejected(self):
         rec = decision()
         rec["sha256"] = "d" * 64
-        with self.assertRaisesRegex(ValueError, "DECISION_IDENTITY_MISMATCH"):
+        with self.assertRaisesRegex(ValueError, "INVALID_DECISION_FIELDS"):
             journal.validate_record(rec)
 
     def test_modified_document_id_rejected(self):
