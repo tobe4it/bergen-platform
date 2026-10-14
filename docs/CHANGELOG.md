@@ -10,6 +10,8 @@ The project follows **Semantic Versioning (SemVer)** and the changelog format is
 
 ### Paperless checkpoint (2026-10-15; development, not a release)
 
+- Added a static review of nine controller-local Paperless setup files, recording security/least-privilege gaps, code provenance and an explicitly read-only archival handoff for the next work session (`docs/PAPERLESS-CODE-REVIEW-2026-10-15.md`).
+- Clarified that these nine setup files and the unreviewed `bergen-proxy.yml` remain **outside Git**; `*.local.yml` is globally ignored. The review neither deploys the scripts nor authorizes an archive operation.
 - Documented the live read-only two-journal import lifecycle reconciliation:
   17 live Paperless imports matched to 17 NAS SENT originals, plus exactly
   two independently verified user deletions (documents 15 and 26).
