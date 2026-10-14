@@ -55,7 +55,7 @@ class DeletedImportPolicyTests(unittest.TestCase):
                       "NO_RECEIPT_STATUS_CHANGED",
                       "NO_FILES_CHANGED"):
             self.assertIn(token, out)
-        self.assertNotIn("ARCHIVE_MATCH_READY\n", out)
+        self.assertNotIn("ARCHIVE_MATCH_READY", out.splitlines())
 
     def test_document_still_exists_blocks(self):
         with self.assertRaisesRegex(RuntimeError, "INVALID_DELETION_EVIDENCE"):
