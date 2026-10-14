@@ -8,6 +8,18 @@ The project follows **Semantic Versioning (SemVer)** and the changelog format is
 
 ## [Unreleased]
 
+### Paperless checkpoint (2026-10-15; development, not a release)
+
+- Documented the live read-only two-journal import lifecycle reconciliation:
+  17 live Paperless imports matched to 17 NAS SENT originals, plus exactly
+  two independently verified user deletions (documents 15 and 26).
+- Preserved immutable per-document deletion decisions and historical receipts;
+  no archive, purge, restore or reimport permission was granted.
+- Recorded backup evidence limits, Synology ACL/Btrfs cross-device blockers,
+  receipt-versioning work, unreviewed local files, and AI identity isolation
+  as deferred work in `docs/PAPERLESS-CHECKPOINT-2026-10-15.md`.
+- The checkpoint is not a tagged release. Current stable version remains v0.9.2.
+
 ### Added
 
 - Guarded two-QMgr/client audit harness with Java MQI probes for TLS/password
