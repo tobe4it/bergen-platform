@@ -120,3 +120,34 @@ fresh successful live ACL and SHA-256 audit. **No NAS archival or purge
 mechanism is deployed yet.** Do not infer that this design document activates
 it. Implement, test in dry-run and deploy the archive stage separately;
 enable automatic expiry only after backup verification.
+
+## Archivierungs-Preflight (nur lesend)
+
+Vor der Archivverschiebung den Zustand des NAS, die Quellverzeichnisse und
+die bisherigen Sender-Receipts untersuchen:
+
+```bash
+ansible-playbook \
+  -i ansible/inventory.yml \
+  -i ansible/inventory.local.yml \
+  ansible/playbooks/audit-paperless-synology-archive.yml \
+  --vault-id paperless@prompt \
+  -e @ansible/vars/paperless.vault.yml \
+  -e @ansible/vars/paperless-synology.local.yml
+```
+
+Der Audit wird als eingeschränkter `paperless-sync`-Benutzer auf der Synology
+ausgeführt und schreibt **nichts**. Er kontrolliert:
+
+- Eigentümer und Modi der privaten Archiv-/Statusverzeichnisse
+- identisches Dateisystem für eine atomare `rename`-Operation je Scope
+- bisherige `PREPARED`-/`SENT`-Journale und ersetzte Scans mit gleichem Namen
+- manuellen DSM-ACL-Prüfbedarf für `delete-child` und Umbenennung
+
+**Absichtlich immer blockiert:** Die bisherigen Sender-Receipts verwenden
+`SHA256(scope + NUL + basename)` und können wiederverwendete Scannamen
+noch nicht sicher versionieren. Vor einem produktiven Archiver müssen
+Sender-Journal, Importnachweis, Archivjournal und Crash-Recovery gemeinsam
+umgesetzt und mit Regressionstests geprüft werden.
+
+Auch bei positivem Preflight wird dadurch kein Archivdienst aktiviert.
