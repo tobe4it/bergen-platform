@@ -11,6 +11,7 @@
     synology_root: /volume1/.bergen-platform-state
     synology_target: /volume1/.bergen-platform-state/bin/synology_inotify_watch.py
     synology_src: "{{ playbook_dir }}/../files/paperless/synology_inotify_watch.py"
+    sender_src: "{{ playbook_dir }}/../files/paperless/synology_scan_sync.py"
     supervisor_target: /volume1/.bergen-platform-state/bin/synology_watcher_supervisor.py
     supervisor_src: "{{ playbook_dir }}/../files/paperless/synology_watcher_supervisor.py"
   tasks:
@@ -19,6 +20,34 @@
         that:
           - inventory_hostname == 'localhost'
           - not ansible_check_mode
+
+    - name: Hash required sender source on controller
+      ansible.builtin.stat:
+        path: "{{ sender_src }}"
+        checksum_algorithm: sha256
+      register: sender_file
+      failed_when: >-
+        not sender_file.stat.exists or
+        not sender_file.stat.isreg or
+        sender_file.stat.islnk
+
+    - name: Hash deployed sender on Synology
+      ansible.builtin.command:
+        argv:
+          - ssh
+          - -T
+          - -o
+          - BatchMode=yes
+          - "{{ synology_admin }}"
+          - sha256sum /volume1/.bergen-platform-state/bin/synology_scan_sync.py
+      register: sender_installed
+      changed_when: false
+
+    - name: Require up-to-date sender deployed first
+      ansible.builtin.assert:
+        that:
+          - sender_installed.stdout.split()[0] == sender_file.stat.checksum
+        fail_msg: "Deploy current sender first using prepare-paperless-synology-scan-sync.yml"
 
     - name: Hash source on controller
       ansible.builtin.stat:
