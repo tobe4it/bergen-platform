@@ -1,0 +1,147 @@
+---
+# Read-only preflight for the existing Paperless reverse proxy, LXC 125.
+# Never reads private-key contents, secret env files, or full proxy configs.
+- name: Inspect existing bergen-proxy for Bergen-AI routing
+  hosts: venombox
+  become: true
+  gather_facts: false
+
+  tasks:
+    - name: Verify exact Proxmox guest identity
+      ansible.builtin.command:
+        argv: [pct, exec, '125', --, hostname, -s]
+      register: bergen_proxy_identity
+      changed_when: false
+      failed_when: bergen_proxy_identity.stdout | trim != 'bergen-proxy'
+
+    - name: Collect allowlisted proxy, TLS and renewal indicators
+      ansible.builtin.command:
+        argv:
+          - pct
+          - exec
+          - '125'
+          - --
+          - python3
+          - -c
+          - |
+            import pathlib
+            import re
+            import shutil
+            import subprocess
+
+            def run(args):
+                try:
+                    return subprocess.run(
+                        args, capture_output=True, text=True,
+                        check=False, timeout=8
+                    )
+                except (OSError, subprocess.TimeoutExpired):
+                    return None
+
+            listeners = run(["ss", "-ltnH"])
+            if listeners is None or listeners.returncode:
+                print("LISTENER_INSPECTION UNAVAILABLE")
+            else:
+                ports = set()
+                for line in listeners.stdout.splitlines():
+                    fields = line.split()
+                    if len(fields) > 3:
+                        port = fields[3].rsplit(":", 1)[-1]
+                        if port.isdigit():
+                            ports.add(int(port))
+                for port in (80, 443):
+                    print("PROXY_LISTENING_TCP_" + str(port),
+                          port in ports)
+
+            for service in ("nginx", "caddy", "traefik",
+                            "haproxy", "apache2"):
+                status = run(["systemctl", "is-active", service])
+                active = bool(status and status.stdout.strip() == "active")
+                print("SERVICE_" + service.upper(), "ACTIVE" if active else "NOT_ACTIVE")
+
+            # Only parse selected non-secret directives from bounded config files.
+            # Never print a full configuration or read an EnvironmentFile.
+            roots = [
+                pathlib.Path("/etc/nginx/conf.d"),
+                pathlib.Path("/etc/nginx/sites-enabled"),
+            ]
+            paths = []
+            for root in roots:
+                if root.is_dir():
+                    paths.extend(sorted(p for p in root.iterdir()
+                                        if p.is_file() and not p.name.startswith(".")))
+            seen = set()
+            for path in paths[:60]:
+                try:
+                    real = path.resolve(strict=True)
+                    if real in seen or real.stat().st_size > 262144:
+                        continue
+                    seen.add(real)
+                    data = real.read_text(encoding="utf-8", errors="replace")
+                except (OSError, ValueError):
+                    continue
+                names = []
+                targets = []
+                certs = []
+                for raw in data.splitlines():
+                    line = raw.split("#", 1)[0].strip()
+                    if not line:
+                        continue
+                    m = re.match(r"^server_name\s+([^;]+);", line)
+                    if m:
+                        for name in m.group(1).split():
+                            if name in ("paperless.thebergens.net",
+                                        "ai.thebergens.net"):
+                                names.append(name)
+                    m = re.match(r"^proxy_pass\s+(https?://[^\s;]+);", line)
+                    if m:
+                        url = m.group(1)
+                        if re.fullmatch(r"https?://[a-zA-Z0-9._:\[\]-]+(?:/)?", url):
+                            targets.append(url)
+                        else:
+                            targets.append("PRESENT_REDACTED")
+                    m = re.match(r"^ssl_certificate\s+([^;]+);", line)
+                    if m:
+                        value = m.group(1).strip()
+                        if re.fullmatch(r"/[a-zA-Z0-9_./-]+", value):
+                            certs.append(value)
+                        else:
+                            certs.append("PRESENT_REDACTED")
+                if names or targets or certs:
+                    print("NGINX_VHOST", path.name)
+                    print("  KNOWN_SERVER_NAMES", ",".join(sorted(set(names))) or "NONE")
+                    print("  PROXY_TARGETS", ",".join(sorted(set(targets))) or "NONE")
+                    print("  CERTIFICATE_PATHS", ",".join(sorted(set(certs))) or "NONE")
+
+            for root in ("/etc/letsencrypt/live", "/etc/letsencrypt/renewal"):
+                path = pathlib.Path(root)
+                print("CERTBOT_PATH_PRESENT", root, path.is_dir())
+
+            timers = run(["systemctl", "list-timers", "--all",
+                          "--no-legend", "--no-pager"])
+            if timers and timers.returncode == 0:
+                # Unit names only, no commands, credentials or log content.
+                units = set()
+                for line in timers.stdout.splitlines():
+                    for word in line.split():
+                        if word.endswith(".timer") and re.search(
+                                r"certbot|acme|tls", word, re.I):
+                            units.add(word)
+                print("RELEVANT_TIMERS", ",".join(sorted(units)) or "NONE")
+            print("NOTICE sanitized read-only indicators; no private keys")
+      register: bergen_proxy_preflight
+      changed_when: false
+      failed_when: false
+
+    - name: Display sanitized proxy indicators
+      ansible.builtin.debug:
+        var: bergen_proxy_preflight.stdout_lines
+
+    - name: Require successful proxy inspection
+      ansible.builtin.assert:
+        that:
+          - bergen_proxy_preflight.rc == 0
+          - "'NOTICE sanitized read-only indicators' in bergen_proxy_preflight.stdout"
+        fail_msg: >-
+          bergen-proxy inspection incomplete. Do not change TLS, DNS,
+          proxy configuration or service state.
