@@ -66,6 +66,25 @@ proof that the unattended job continues to work.
    must refuse ambiguous/missing evidence, and never touch inbox files.
    Once enabled, preview the exact purge candidates before the first deletion.
 
+## Required sender-journal change for reused scanner filenames
+
+The current NAS sender keys a receipt by `(scope, basename)` and refuses a
+different signature at the same path with `MANUAL_REVIEW_SOURCE_CHANGED`.
+Once quarantine empties an input directory, scanners may legitimately create
+another file such as `Gescanntes Dokument.pdf`. **Do not deploy automatic
+quarantine before changing this rule.** Introduce an append-only, per-version
+receipt identity using an unambiguous, validated source fingerprint including
+SHA-256; retain old SENT journal entries for backward compatibility. Refuse
+ambiguous/prepared outcomes, never overwrite prior receipts, and add regression
+tests for identical names across multiple successive imports, replay, modified
+content and crash recovery.
+
+Also verify the future archiver's month rollover provisioning and privacy
+boundary: existing NAS scanner folders may have Synology-specific ACLs, while
+the technical root-only quarantine must not inherit an unintended shared ACL.
+A new LDAP home requires per-home safe provision and explicit Paperless
+workflow/ACL activation before its scope may be monitored.
+
 ## Threats/tests to cover before deployment
 
 - Wrong owner/group or privacy ACL, missing active-user visibility, digest
