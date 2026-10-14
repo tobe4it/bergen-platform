@@ -192,7 +192,7 @@ def persist(path, receipt):
         tmp.unlink(missing_ok=True)
 
 
-def main(commit):
+def main(commit, audit_imported=False):
     if os.geteuid() != 0:
         raise RuntimeError("root required")
     os.umask(0o077)
@@ -207,7 +207,13 @@ def main(commit):
             try:
                 receipt, name, (owner, group) = load_receipt(path)
                 if receipt["status"] == "IMPORTED":
-                    print("ALREADY_IMPORTED", path.name, receipt.get("document_id"))
+                    if audit_imported:
+                        document_id = verify(name, receipt["sha256"], owner, group)
+                        if document_id != receipt.get("document_id"):
+                            raise RuntimeError("imported receipt document ID or ACL differs")
+                        print("AUDITED_IMPORTED", path.name, document_id)
+                    else:
+                        print("ALREADY_IMPORTED", path.name, receipt.get("document_id"))
                     continue
                 if receipt["status"] == "PREPARED":
                     print("MANUAL_REVIEW", path.name, "PREPARED")
@@ -233,4 +239,9 @@ def main(commit):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--commit", action="store_true")
-    main(parser.parse_args().commit)
+    parser.add_argument("--audit-imported", action="store_true",
+                        help="read-only live ACL + digest recheck of all IMPORTED receipts")
+    args = parser.parse_args()
+    if args.commit and args.audit_imported:
+        parser.error("--audit-imported must not be combined with --commit")
+    main(args.commit, args.audit_imported)
