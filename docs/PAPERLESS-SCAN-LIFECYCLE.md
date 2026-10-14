@@ -799,3 +799,49 @@ Die Dry-run-Ausgabe enthält `READY_TO_PUBLISH`,
 Es gibt weiterhin **keine** produktive Schreibintegration,
 keine Freigabe für die zweite Journal-Publikation und
 keine Archivierungs- oder Reimportfreigabe.
+
+### Separat gesperrte Publikation für Dokument 15 – noch nicht freigegeben
+
+Nach erfolgreichem Live-Dry-Run (`ok=15 changed=0 failed=0`)
+wurde das produktive Schreib-Playbook
+`ansible/playbooks/publish-paperless-deleted-by-user-15-journal.yml`
+**ausschließlich im Git-Branch vorbereitet, nicht ausgeführt**.
+
+Die erste Task verweigert jede Ausführung ohne die
+**separate** Variable
+`paperless_user_deletion_15_journal_apply_approved=true`.
+Diese Variable wird **nicht** vom früheren Dokument-26-Gate
+`paperless_user_deletion_journal_apply_approved` abgeleitet.
+Eine Freigabe muss sich explizit auf Dokument 15 beziehen.
+`--check` ist kein Freigabeweg.
+
+Bei expliziter Freigabe verifiziert das Playbook erneut
+die unveränderten Paperless- und NAS-Beweise, den privaten
+Journal-Zielpfad, die exakte v2-Event-ID und den SHA-256 des
+kanonischen JSON; es prüft die bereits veröffentlichte
+Entscheidung für Dokument 26 vor und nach der Publikation.
+Der Schreibschritt läuft als `paperless-ingest` und nutzt
+den bestehenden atomaren No-Overwrite-Store.
+Die Zieldatei muss vor dem ersten Lauf fehlen; bei
+ungewissem Teilerfolg ist vor einem erneuten Lauf eine
+gesonderte Bestandsprüfung erforderlich.
+
+Für die reine technische Vorabprüfung **ohne** Schreibfreigabe:
+
+```bash
+python3 -m unittest discover -s tests -p 'test_paperless_deleted_by_user_15_journal_plan.py' -v
+python3 -m unittest discover -s tests -p 'test_paperless_deleted_by_user_15_publish.py' -v
+ansible-playbook \
+  -i ansible/inventory.yml \
+  -i ansible/inventory.local.yml \
+  ansible/playbooks/publish-paperless-deleted-by-user-15-journal.yml \
+  --vault-id paperless@prompt \
+  -e @ansible/vars/paperless.vault.yml \
+  -e @ansible/vars/paperless-synology.local.yml \
+  --syntax-check
+```
+
+**Keine produktive Ausführung ohne zusätzliche Bestätigung.**
+Eine Veröffentlichung erlaubt weder Reimport noch Restore,
+Änderung historischer Receipts oder Archivierung.
+Der ältere Eintrag für Dokument 26 wird nicht überschrieben.
