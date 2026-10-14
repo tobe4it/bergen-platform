@@ -75,6 +75,19 @@
       become: false
       register: deleted_user_preview
       changed_when: false
+    - name: Preview proposed DELETED_BY_USER journal record without writing
+      ansible.builtin.command:
+        argv:
+          - python3
+          - "{{ playbook_dir }}/../files/paperless/deleted_by_user_decision_journal.py"
+        stdin: "{{ {'nas': deleted_nas_proof.stdout, 'deleted': deleted_paperless_proof.stdout} | to_json }}"
+      delegate_to: localhost
+      become: false
+      register: deleted_user_journal_preview
+      changed_when: false
+    - name: Show proposed journal identity and payload
+      ansible.builtin.debug:
+        var: deleted_user_journal_preview.stdout_lines
     - name: Show read-only deletion preview
       ansible.builtin.debug:
         var: deleted_user_preview.stdout_lines
@@ -84,3 +97,6 @@
           - "'EXCLUDED_FROM_ARCHIVE_MATCH_READY' in deleted_user_preview.stdout_lines"
           - "'NO_RECEIPT_STATUS_CHANGED' in deleted_user_preview.stdout_lines"
           - "'NO_FILES_CHANGED' in deleted_user_preview.stdout_lines"
+          - "'NO_JOURNAL_WRITTEN' in deleted_user_journal_preview.stdout_lines"
+          - "'EXCLUDED_FROM_ARCHIVE_MATCH_READY' in deleted_user_journal_preview.stdout_lines"
+          - "'NO_FILES_CHANGED' in deleted_user_journal_preview.stdout_lines"
