@@ -37,11 +37,11 @@ class ArchiveEvidenceTests(unittest.TestCase):
         self.assertIn("NO_FILES_CHANGED", result)
 
     def test_missing_timestamp_fails_closed(self):
-        with self.assertRaisesRegex(RuntimeError, "INVALID_NAS_RECORD"):
+        with self.assertRaisesRegex(RuntimeError, "INVALID_OR_DUPLICATE_NAS_RECORD"):
             output(json.dumps(dict(N, sent_at=None)), json.dumps(P))
 
     def test_nonfinite_timestamp_fails_closed(self):
-        with self.assertRaisesRegex(RuntimeError, "INVALID_NAS_RECORD"):
+        with self.assertRaisesRegex(RuntimeError, "INVALID_OR_DUPLICATE_NAS_RECORD"):
             output(json.dumps(dict(N, sent_at=float("nan"))), json.dumps(P))
 
     def test_unknown_schema_fails_closed(self):
