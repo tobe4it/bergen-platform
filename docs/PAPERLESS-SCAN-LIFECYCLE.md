@@ -731,3 +731,30 @@ ansible-playbook \
   -e @ansible/vars/paperless.vault.yml \
   -e @ansible/vars/paperless-synology.local.yml
 ```
+
+#### Live-Ergebnis für Dokument 15
+
+Am 14.10.2026 wurde der rein lesende NAS-/Paperless-Preflight
+erfolgreich ausgeführt: `ok=8 changed=0 failed=0`.
+Ermittelte historische NAS-Quelldatei:
+`Privat/thomas/Gebuehren.pdf`,
+Sender-Receipt:
+`adbbbd6b2ca9b6189da559a5e4d303e03eed2cb2403efaf14d343d02fd042b53.json`,
+SHA-256:
+`bb2a4b44d6d34b8aad29716129c16cdcf6fd2e00fc45a1c6990de8f23086ed7c`.
+Sowohl NAS-Original als auch Paperless-Dokument 15 und dessen
+ursprünglicher Dateiname sind aktuell nicht vorhanden.
+Die Prüfsumme ist identisch zu Dokument 26 (`Gebuehren 2.pdf`);
+die getrennten Sender- und Bridge-Receipts bleiben jedoch
+unabhängige historische Identitäten.
+
+Der erste Lauf der 13 Offline-Tests ergab 12 Erfolge und einen
+Testfehler wegen einer uneinheitlichen Fehlermeldung bei fehlendem
+NAS-`NO_FILES_CHANGED`-Marker. Der Matcher verweigerte den
+fehlenden Marker bereits korrekt; die Meldung wurde auf
+`NAS_READ_ONLY_MARKER_MISSING` vereinheitlicht. Erneuter
+Testlauf ist noch ausstehend.
+
+Es existiert weiterhin **kein zweiter Journaleintrag für
+Dokument 15**. Keine Reimport-, Wiederherstellungs-, Lösch-
+oder Archivierungsfreigabe.
