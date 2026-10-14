@@ -409,3 +409,44 @@ Sender-/Empfänger-Lebenszyklus. Ein erneuter Scan mit demselben
 Dateinamen wird durch diese Vorschau **nicht** automatisch
 freigegeben; der bestehende Sender blockiert abweichende Signaturen
 weiterhin fail-closed.
+
+### Persistenzbaustein v2: atomarer Writer (noch nicht aktiviert)
+
+Der separate Offline-Baustein
+`ansible/files/paperless/deleted_by_user_decision_store.py`
+stellt `publish_once(directory, record)` bereit. Er hat **keinen
+CLI-Einstiegspunkt, keine produktiven Pfadvorgaben und keinen Aufruf
+durch Ansible**. Er schreibt nur in ein bereits vorhandenes absolutes
+Verzeichnis, das dem ausführenden Benutzer gehört und Modus `0700`
+besitzt; es werden keine Verzeichnisse angelegt. Das kanonische
+v2-JSON wird in einer privaten `0600`-Temporärdatei geschrieben,
+`fsync`-gesichert, durch atomaren Hardlink **ohne Überschreiben**
+veröffentlicht und anschließend per Verzeichnis-`fsync` gesichert.
+Nur die selbst angelegte Temporärdatei wird entfernt.
+
+Ein erneuter Aufruf mit identischem Inhalt ist idempotent; ein
+abweichender, unsicherer oder symbolisch verlinkter Eintrag wird
+abgewiesen. Bei einem simulierten Absturz vor Veröffentlichung darf
+kein publizierter Eintrag entstehen; bei einem Fehler nach der
+Veröffentlichung muss der Retry den vorhandenen Eintrag unverändert
+akzeptieren. Fremde verwaiste Temporärdateien werden nicht automatisch
+entfernt.
+
+```bash
+python3 -m unittest discover \
+  -s tests \
+  -p 'test_paperless_deleted_by_user_decision_store.py' -v
+```
+
+**Speicherort noch offen:** bevorzugt ein gesondertes privates
+persistentes Verzeichnis auf dem Paperless-LXC-Dateisystem, dessen
+Einbindung in die Proxmox-Sicherung und Restore-Praxis vorher
+nachgewiesen wird. Nicht stillschweigend das Synology-Verzeichnis
+`/volume1/.bergen-platform-state` verwenden: DSM-Unterstützung,
+Subvolume-/ACL-Grenzen und Sicherung sind dafür nicht abschließend
+geprüft. Der Writer benötigt vor produktivem Einsatz eine gesonderte
+Freigabe, einen verifizierten Dienstbenutzer, frische Live-Beweise,
+die explizite Nutzerentscheidung und eine Freigabe für den
+tatsächlichen Schreibvorgang. Kein automatisches Archivieren,
+Wiederimportieren, Wiederherstellen oder Entsperren wiederverwendeter
+Dateinamen.
