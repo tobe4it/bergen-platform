@@ -58,6 +58,37 @@ Open-WebUI-Einstellungen von den Umgebungswerten abweichen.
 Environmentabfrage waren erreichbar. Es ist **kein** Security-Gate-PASS
 für Authentisierung, LDAP oder Paperless-RAG.
 
+## Zielarchitektur: zentrales OIDC-SSO statt direktem LDAP-Login
+
+**Entscheidungsvorschlag (nicht ausgerollt):** Open WebUI und Paperless als
+OIDC-Clients an denselben vertrauenswürdigen Identity Provider anbinden.
+LDAP bleibt Benutzerverzeichnis hinter dem IdP; Open WebUI soll
+LDAP-Passwörter nicht mehr selbst prüfen. Die konkrete OIDC-Fähigkeit
+der produktiven Paperless-Version und der bereits betriebenen
+SSO-Komponente ist vor Änderungen zu verifizieren.
+
+Ein Synology **SSO Server** ist als IdP grundsätzlich geeignet, wenn er
+OIDC Discovery, stabile `sub`-Claims, `email`, HTTPS mit geprüftem Zertifikat,
+korrekte Redirect-URIs und gewünschte MFA-Faktoren bereitstellt.
+Synology Secure SignIn ist ein möglicher Faktor am SSO-Server, aber
+weder LDAP noch RADIUS-Authentisierung allein ist eine OIDC-Session.
+
+Open WebUI unterstützt OIDC über `OPENID_PROVIDER_URL`,
+`OAUTH_CLIENT_ID`, `OAUTH_CLIENT_SECRET` und den Callback
+`/oauth/oidc/callback`. Secrets gehören in Vault, nicht ins Repository.
+`ENABLE_OAUTH_SIGNUP` ist von `ENABLE_SIGNUP` getrennt; das automatische
+Anlegen von Konten muss auf die zugelassenen IdP-Benutzer beschränkt
+werden. Keine unkontrollierte E-Mail-basierte Kontenzusammenführung.
+Bestehende lokale/LDAP-Konten und Administratorzugriff vor der Migration
+zuordnen; keine Anmeldungsmethode abschalten, bevor ein erfolgreicher
+SSO-Rollbacktest vorliegt.
+
+**Wichtig:** Gemeinsames OIDC-SSO garantiert nur dieselbe Identität
+beim Login. Ein Paperless-Token aus der Open-WebUI-Session entsteht
+dadurch **nicht** automatisch. Benutzergebundene API-Delegation,
+Tool-Identitätsbindung und Paperless-ACLs bleiben separate Sicherheitsgates.
+Insbesondere ist ein globaler Paperless-Admin-Token weiterhin verboten.
+
 ## Sicherheitsinvarianten (verbindlich)
 
 1. **Identität:** Jede Anfrage an die Dokumentensuche besitzt eine durch den
