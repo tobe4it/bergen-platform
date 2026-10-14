@@ -16,10 +16,21 @@ und kein neues Zertifikat.
   und kein lokaler Certbot/TLS-Timer im Audit nachgewiesen.
 - `bergen-ai` LXC 110: Open WebUI auf TCP 3000 (bereits separat geprüft).
 
-**Nicht belegt:** der genaue SSH-Transport/Key des produktiven
-Paperless-Tunnels, der automatische Wildcard-Renewal-Distributionsweg zum
-Proxy und die lokale, gitignorierte Proxy-Konfiguration. Diese Fakten
-dürfen nicht aus generischen Beispielen abgeleitet werden.
+- Nachträglich per `ps -ww -C ssh` nachgewiesen: Paperless verwendet einen
+  **direkten SSH-Forward** aus LXC 125, mit an die interne Proxy-IPv4
+  gebundenem SSH-Client, dedizierter Tunnelidentität, gepinntem Ed25519-
+  Hostschlüssel, ausschließlich Public-Key-Authentifizierung und
+  `-L 127.0.0.1:18000:127.0.0.1:8000`. Der AI-Tunnel übernimmt dieses
+  Transportmuster, aber **nicht** die Paperless-Identität.
+- Read-only AI-Preflight: `ai.thebergens.net` und
+  `paperless.thebergens.net` lösen im Proxy beide auf dessen interne
+  Adresse auf; der lokale Port 13000 ist frei; das vorhandene Zertifikat
+  deckt `ai.thebergens.net` ab; `nginx -t` besteht.
+
+**Noch nicht belegt:** der automatische Wildcard-Renewal-Distributionsweg
+zum Proxy, die lokale gitignorierte Proxy-Konfiguration, die tatsächliche
+AI-LXC-SSH-Identität/Hostkey-Prüfung und die End-to-End-Tunnel-Erreichbarkeit.
+Diese Fakten dürfen nicht aus generischen Beispielen abgeleitet werden.
 
 ## Ziel und Grenzen
 
@@ -42,14 +53,17 @@ Das Deployment legt **keine** SSH-Schlüssel an, verteilt keine Keys und
 ändert weder `authorized_keys` noch `known_hosts`. Vor Aktivierung muss
 im Proxy-LXC eine root-eigene SSH-Konfigurationsdatei existieren, die den
 Alias `ai_proxy_ssh_alias` über den geprüften Pfad zum KI-LXC auflöst.
-Wenn die LXC-Isolation einen Proxmox/PCT-ProxyCommand erfordert, muss dieser
-dort korrekt und ohne Passwortinteraktion hinterlegt sein. Die Host-Key-
+Der produktive Paperless-Tunnel verwendet ausdrücklich keinen PCT-ProxyCommand
+(`ProxyCommand=none`), sondern eine direkte SSH-Verbindung. Für AI ist
+dieses bewährte Muster vorgesehen; die tatsächliche AI-LXC-Adresse und
+der SSH-Server müssen separat bestätigt werden. Die Host-Key-
 Prüfung bleibt zwingend aktiv; ein eigener minimal berechtigter Tunnel-Key
 ist zu bevorzugen. Die genaue Konfiguration ist **standortspezifisch** und
 wird nicht im öffentlichen Repository erfunden.
 
-Der Tunnel-Unit-Entwurf verwendet `ssh -F ... -N -T -L
-127.0.0.1:13000:127.0.0.1:3000` mit `BatchMode=yes`,
+Der Tunnel-Unit-Entwurf verwendet `ssh -4 -b <lokale Proxy-IPv4> -F ...`
+mit `-N -T -L 127.0.0.1:13000:127.0.0.1:3000`,
+`BatchMode=yes`, `IdentitiesOnly=yes`, deaktivierter Passwortanmeldung,
 `StrictHostKeyChecking=yes` und `ExitOnForwardFailure=yes`.
 Damit bleibt Open WebUI nur über den authentisierten SSH-Transport
 erreichbar. Der Dienst wird bei Fehlern neu gestartet.
@@ -73,8 +87,8 @@ Der Playbook-Preflight prüft die Zertifikatsabdeckung für
 Es kopiert/erneuert keine Schlüssel. Vor einer produktiven Freigabe muss
 die existierende Verteilung und Aktivierung nach Renewal nachgewiesen werden.
 
-Die interne DNS-Zone muss `ai.thebergens.net` auf dieselbe interne
-Proxy-Adresse wie `paperless.thebergens.net` zeigen. Dieser PR ändert
+Die interne DNS-Zone **löst im Proxy bereits** `ai.thebergens.net` auf
+dieselbe interne Proxy-Adresse wie `paperless.thebergens.net` auf. Dieser PR ändert
 keine DNS-Einträge. Die interne Auflösung und unerwünschte externe
 Erreichbarkeit müssen separat kontrolliert werden. Die vorhandene
 Produktionskonfiguration lauscht nicht auf Port 80: **HTTP→HTTPS-Redirect
