@@ -659,3 +659,38 @@ Das bisherige strengere
 dort weiterhin die Archiveignung. Der neue Audit ist
 eine eigenständige Reconciliation-Sicht, kein
 Ersatz für spätere Archive-Sicherheitsgates.
+
+### Live-Audit 14.10.2026: zweiter ungeklärter Import
+
+Die 18 Offline-Tests des Import-Lifecycle-Audits sind bestanden.
+Die erste produktive read-only Ausführung ist mit
+`LIVE_IMPORT_VERIFICATION_FAILED 7a92b91deb7b2e8e35f9f710.json`
+abgebrochen (`changed=0`). Die Prüfung der gespeicherten
+Benutzerlöschung 26, des privaten Journals und der NAS-Inventur
+war bis dahin erfolgreich. Für den zweiten Receipt wurde
+**keine** weitere Benutzerlöschung unterstellt.
+
+Das neue rein lesende
+`ansible/playbooks/diagnose-paperless-import-7a92.yml`
+liest genau diesen historischen IMPORTED-Receipt über den
+bestehenden Reconciler, überprüft die ursprüngliche
+Dokument-ID und vergleicht bei vorhandenen Dokumenten
+Originaldateiname, Prüfsumme, Eigentümer und Seitenzahl.
+Bei umbenanntem Dateinamen wird die vollständige effektive
+ACL-Verifikation erneut mit dem tatsächlichen Dateinamen
+versucht. Ergebnis ist ausschließlich eine Diagnose, keine
+Receipt- oder Dokumentänderung.
+
+```bash
+python3 -m unittest discover -s tests -p 'test_paperless_import_7a92_diagnostic.py' -v
+ansible-playbook \
+  -i ansible/inventory.yml \
+  -i ansible/inventory.local.yml \
+  ansible/playbooks/diagnose-paperless-import-7a92.yml \
+  --vault-id paperless@prompt \
+  -e @ansible/vars/paperless.vault.yml \
+  -e @ansible/vars/paperless-synology.local.yml
+```
+
+Die Import-Lifecycle-Reconciliation bleibt bis zur
+Klärung dieses zweiten Receipts fail-closed.
