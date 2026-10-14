@@ -105,6 +105,26 @@
       changed_when: false
       no_log: true
 
+    - name: Resolve existing Paperless and proposed AI names internally
+      ansible.builtin.command:
+        argv:
+          - python3
+          - -c
+          - "import socket,sys; print(','.join(sorted({x[4][0] for x in socket.getaddrinfo(sys.argv[1], None, family=socket.AF_INET)})))"
+          - '{{ item }}'
+      loop:
+        - paperless.thebergens.net
+        - '{{ ai_proxy_hostname }}'
+      register: ai_proxy_dns
+      changed_when: false
+
+    - name: Require AI and Paperless to resolve to the same internal proxy
+      ansible.builtin.assert:
+        that:
+          - ai_proxy_dns.results[0].stdout | trim | length > 0
+          - ai_proxy_dns.results[0].stdout == ai_proxy_dns.results[1].stdout
+        fail_msg: 'Internal DNS is not ready; no DNS change is attempted.'
+
     - name: Require working Nginx before any changes
       ansible.builtin.command:
         argv: [nginx, -t]
