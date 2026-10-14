@@ -33,6 +33,12 @@ Der E-Mail-Anhang ist ein **Review-Beleg außerhalb von Git**, kein dauerhaftes 
 
 **Geheimnisprüfung (statisch, neun Dateien):** Kein hartcodiertes Passwort, Token oder privater SSH-Schlüssel im geprüften Inhalt erkennbar. Der öffentliche SSH-Schlüssel, interne Adresse, Nutzernamen, UID/GID und Gruppennamen sind **standortspezifische Infrastrukturangaben** und sollten vor öffentlicher Wiederverwendung parametrisiert werden. Das nicht geprüfte `bergen-proxy.yml` ist ausdrücklich nicht von dieser Aussage erfasst.
 
+## Identität und Passwort-Zuständigkeit
+
+Für zentral verwaltete menschliche Konten ist der **Synology Directory Server (DS)** die maßgebliche Passwortinstanz. Paperless darf für diese Konten keine parallele, unabhängig zu pflegende Passwortquelle etablieren. LDAP-Anmeldung, Gruppen-Synchronisation, Anwendungsberechtigungen und mögliche SSO-/2FA-Komponenten sind **getrennte** Kontrollschichten; ein erfolgreiches LDAP-Login belegt noch keine korrekte Dokumentberechtigung.
+
+**Offener technischer Sonderfall:** `paperless-sync` auf der Synology muss anhand der realen Kontoquelle klassifiziert werden: lokaler DSM-Benutzer oder Directory-Server-/LDAP-Benutzer. Das lokale Werkzeug `/usr/syno/sbin/synouser --setpw` adressiert DSM-Benutzerverwaltung und darf **nicht** als allgemeine LDAP-DS-Passwortrotation verstanden werden. Der feste UID-Test `1048` ist kein Nachweis der Authentifizierungsquelle. Das unversionierte Playbook `set-synology-paperless-sync-password.yml` bleibt bis zur Klärung gesperrt; keine Rotation ist Teil des Checkpoints. Geheimnisse bleiben außerhalb von Git in den dafür vorgesehenen geschützten Konfigurationen.
+
 ## Heute eingefrorener Funktionsumfang
 
 1. **Versioniert:** Bridge-/Sender-Reconciliation, zwei separate `DELETED_BY_USER`-v2-Journale, lesender Audit `audit-paperless-import-lifecycle-15-26.yml`, dazu Tests und Dokumentation im Feature-Branch.
