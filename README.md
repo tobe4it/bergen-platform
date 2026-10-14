@@ -217,7 +217,10 @@ The read-only scan-import lifecycle was reconciled on 2026-10-14: 17 live
 imports and two independently journaled user deletions. **NAS archival,
 source deletion and retention are not authorized.** See the
 [Paperless checkpoint and deferred work](docs/PAPERLESS-CHECKPOINT-2026-10-15.md)
-and the [detailed scan lifecycle](docs/PAPERLESS-SCAN-LIFECYCLE.md).
+the [detailed scan lifecycle](docs/PAPERLESS-SCAN-LIFECYCLE.md), and the
+[local code-review / archival handoff](docs/PAPERLESS-CODE-REVIEW-2026-10-15.md).
+Nine local setup files are reviewed but not yet committed; the development
+checkpoint is not a tagged release.
 
 ---
 
