@@ -38,7 +38,9 @@
         argv: [pct, status, "{{ paperless_bridge_vmid }}"]
       register: paperless_bridge_guest_status
       changed_when: false
-      failed_when: paperless_bridge_guest_status.rc != 0 or paperless_bridge_guest_status.stdout | trim != 'status: running'
+      failed_when: >-
+        paperless_bridge_guest_status.rc != 0 or
+        (paperless_bridge_guest_status.stdout | trim) != 'status: running'
 
     - name: Verify guest hostname directly through pct
       ansible.builtin.command:
