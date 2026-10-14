@@ -58,36 +58,45 @@ Open-WebUI-Einstellungen von den Umgebungswerten abweichen.
 Environmentabfrage waren erreichbar. Es ist **kein** Security-Gate-PASS
 für Authentisierung, LDAP oder Paperless-RAG.
 
-## Zielarchitektur: zentrales OIDC-SSO statt direktem LDAP-Login
+## Bereits produktiv: Paperless über Synology OIDC-SSO
 
-**Entscheidungsvorschlag (nicht ausgerollt):** Open WebUI und Paperless als
-OIDC-Clients an denselben vertrauenswürdigen Identity Provider anbinden.
-LDAP bleibt Benutzerverzeichnis hinter dem IdP; Open WebUI soll
-LDAP-Passwörter nicht mehr selbst prüfen. Die konkrete OIDC-Fähigkeit
-der produktiven Paperless-Version und der bereits betriebenen
-SSO-Komponente ist vor Änderungen zu verifizieren.
+**Bestätigter Ist-Zustand (13.10.2026):** Paperless-ngx auf LXC 126 ist
+bereits erfolgreich als OIDC-Client des Synology SSO Servers auf
+MountainCloud eingerichtet. IdP-Endpunkt:
+`https://ldap.thebergens.net:5001`; Paperless:
+`https://paperless.thebergens.net`. Ein echter Benutzerlogin mit
+SSO und 2FA wurde erfolgreich durchgeführt. Der `groups`-Claim
+überträgt u. a. `Eltern@bergen.intern` und
+`Familie@bergen.intern`; die Paperless-Gruppen sind darauf
+abgestimmt. Der lokale Paperless-Admin bleibt als Notfallzugang.
+**Paperless-OIDC muss nicht neu eingerichtet oder erneut ausgewählt werden.**
 
-Ein Synology **SSO Server** ist als IdP grundsätzlich geeignet, wenn er
-OIDC Discovery, stabile `sub`-Claims, `email`, HTTPS mit geprüftem Zertifikat,
-korrekte Redirect-URIs und gewünschte MFA-Faktoren bereitstellt.
-Synology Secure SignIn ist ein möglicher Faktor am SSO-Server, aber
-weder LDAP noch RADIUS-Authentisierung allein ist eine OIDC-Session.
+## Noch umzusetzen: Open WebUI an denselben IdP anbinden
 
-Open WebUI unterstützt OIDC über `OPENID_PROVIDER_URL`,
-`OAUTH_CLIENT_ID`, `OAUTH_CLIENT_SECRET` und den Callback
-`/oauth/oidc/callback`. Secrets gehören in Vault, nicht ins Repository.
-`ENABLE_OAUTH_SIGNUP` ist von `ENABLE_SIGNUP` getrennt; das automatische
-Anlegen von Konten muss auf die zugelassenen IdP-Benutzer beschränkt
-werden. Keine unkontrollierte E-Mail-basierte Kontenzusammenführung.
-Bestehende lokale/LDAP-Konten und Administratorzugriff vor der Migration
-zuordnen; keine Anmeldungsmethode abschalten, bevor ein erfolgreicher
-SSO-Rollbacktest vorliegt.
+**Ziel:** Nur Bergen-AI/Open WebUI (LXC 110) von direkter LDAP-Anmeldung
+auf den **bereits produktiven** Synology OIDC-Provider umstellen.
+LDAP bleibt das Benutzerverzeichnis hinter dem IdP. Die vorhandene
+Paperless-Konfiguration ist die Referenz für Issuer, Zertifikatskette,
+Gruppenclaims und Login-/MFA-Erfahrung; OIDC-Client-ID, Client-Secret
+und Redirect-URI müssen für Open WebUI separat registriert werden.
+
+Vor Umstellung die tatsächlich installierte Open-WebUI-Version,
+OIDC-Callback und unterstützte Einstellungen verifizieren.
+`OPENID_PROVIDER_URL`, `OAUTH_CLIENT_ID`, `OAUTH_CLIENT_SECRET`
+und `/oauth/oidc/callback` sind mögliche Open-WebUI-OIDC-Parameter;
+ihre konkrete Unterstützung und erwartete Werte müssen anhand der
+laufenden Version bestätigt werden. Secrets nur im Vault.
+`ENABLE_OAUTH_SIGNUP` und `ENABLE_SIGNUP` getrennt bewerten;
+Registrierung nur für autorisierte IdP-Benutzer zulassen.
+Vorhandene LDAP-/lokale Open-WebUI-Konten vor der Migration eindeutig
+zuordnen, Administrator-Notfallzugang und Rückfallweg testen.
+Nicht vorschnell lokale Anmeldung deaktivieren.
 
 **Wichtig:** Gemeinsames OIDC-SSO garantiert nur dieselbe Identität
 beim Login. Ein Paperless-Token aus der Open-WebUI-Session entsteht
 dadurch **nicht** automatisch. Benutzergebundene API-Delegation,
 Tool-Identitätsbindung und Paperless-ACLs bleiben separate Sicherheitsgates.
-Insbesondere ist ein globaler Paperless-Admin-Token weiterhin verboten.
+Ein globaler Paperless-Admin-Token ist weiterhin ausgeschlossen.
 
 ## Sicherheitsinvarianten (verbindlich)
 
