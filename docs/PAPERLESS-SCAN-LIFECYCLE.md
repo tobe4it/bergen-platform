@@ -1,0 +1,88 @@
+# Paperless scan inbox lifecycle: verified import, NAS quarantine, expiry
+
+Status: **design approved, implementation NOT deployed** (2026-10-14). The active
+Synology sender and Paperless ingest pipeline remain copy-only. In particular,
+no script or timer may delete or rename an original scan based solely on SENT.
+
+## Objective
+
+Keep the source Paperless scan folders flat and empty after *verified* import,
+without inventing a permanent folder hierarchy on Synology. Paperless is the
+authoritative searchable archive. The NAS holds a short-lived, private
+recovery copy after acknowledgement, not a second organised document library.
+
+Current enabled scopes: Privat/thomas, Privat/nadja, Eltern, Familie. Do not
+enable any additional private scopes until the Paperless account, workflow
+and ACL checks exist.
+
+## Backup baseline (verified separately)
+
+Proxmox guest 126 `bergen-paperless`: 32 GiB rootfs plus 100 GiB `mp0`
+document volume with `backup=1`. Backup destination
+`bergen-synology-backup` on Synology NFS. `vzdump` stop mode + zstd.
+A full recovery into isolated test guest 901 was completed on 2026-10-12,
+including PostgreSQL, Redis, Paperless and an OCR test document; the test
+guest was subsequently removed. Additional protected archive created
+2026-10-13. The systemd units `bergen-paperless-vzdump.service` and
+`.timer` were installed and enabled for 03:00 Europe/Berlin with a proposed
+7-daily/4-weekly/12-monthly retention setting. **Verify** the timer's last
+successful run, service exit status, current backup destination, and actual
+retention before allowing expiry. A successful historical restore is not
+proof that the unattended job continues to work.
+
+## Fail-closed workflow
+
+1. Synology sender detects a stable PDF and copies it through the existing
+   restricted rsync receiver. It records SHA-256, sender source filename,
+   scope, destination and signature in its private SENT journal.
+2. Paperless LXC stages and imports the document. Its reconciliation journal
+   records IMPORTED only after a live document-ID, checksum, owner, group,
+   direct-permissions and active-user visibility verification.
+3. A trusted controller workflow via **existing** access
+   `bp-controller -> venombox -> pct exec 126` re-verifies the live Paperless
+   document and emits a narrow acknowledgement containing the receiver-side
+   destination name, SHA-256, document ID and bridge receipt identity.
+   No new inbound NAS, Paperless or SSH connection is necessary.
+4. Through the existing NAS administrative connection, a *short-lived* NAS
+   archiver validates that acknowledgement against its own SENT receipt and
+   verifies the original source is the *same* file with the *same* digest
+   and signature. The archiver has a lock and durable journal. If any
+   comparison fails, it must leave the original source in place.
+5. A narrowly privileged administrative NAS operation (not a continuous
+   root watcher) atomically moves the original PDF from the monitored input
+   into a root-protected, non-watched quarantine within
+   `state_parent/paperless-archive/<scope>/YYYY-MM/`. Private and shared
+   scopes remain separated; no new read grants are created. The existing
+   `paperless-sync` account currently has only minimal read rights in
+   source folders, so it must **not** be granted broad write/delete rights
+   just to implement archiving.
+6. The NAS receipt remains durable, so the same scan cannot be resent merely
+   because it has disappeared from the inbox. A crash after rename and before
+   journal update must be recoverable by examining the quarantine target
+   and its digest, never by blindly repeating a destructive rename.
+7. Purge after >=30 full days in quarantine must be a **separate, disabled-by-
+   default** operation. It must require a verified recent successful backup
+   on the configured target (covering rootfs and mp0) and a healthy timer,
+   must refuse ambiguous/missing evidence, and never touch inbox files.
+   Once enabled, preview the exact purge candidates before the first deletion.
+
+## Threats/tests to cover before deployment
+
+- Wrong owner/group or privacy ACL, missing active-user visibility, digest
+  mismatch, missing or forged receipt, PREPARED/SUBMITTED/PENDING state.
+- Replaced/edited source since SENT, symlinks, multiple hardlinks, invalid
+  input path, directory traversal, unsafe file permissions, mount loss.
+- Interrupted copy or rename, destination already exists, cross-device
+  rename, repeated acknowledgement, partial receipt write.
+- Unexpected Paperless downtime or failed daily backup: *do not purge*.
+- New scans arriving while archiving: sender lock and journal invariants hold.
+- Manual NAS recovery from quarantine remains possible for 30 days.
+
+## Current status / deployment gate
+
+On 2026-10-14 the live sender completed startup with `SYNC_END STARTUP rc=0`.
+Nine Paperless documents (IDs 5-13) were imported; IDs 10-13 underwent a
+fresh successful live ACL and SHA-256 audit. **No NAS archival or purge
+mechanism is deployed yet.** Do not infer that this design document activates
+it. Implement, test in dry-run and deploy the archive stage separately;
+enable automatic expiry only after backup verification.
