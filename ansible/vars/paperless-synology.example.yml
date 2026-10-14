@@ -1,0 +1,26 @@
+---
+# Copy to ansible/vars/paperless-synology.local.yml (ignored by Git).
+# No passwords or private SSH keys belong in this file.
+# "sync_user" must exist on the NAS and have read-only access to sources.
+# "state_root" and "state_parent" must be root:root mode 0755,
+# with state_parent directly inside state_root (e.g. /volume1/.paperless-state).
+# A private state_parent/<sync_user> 0700 must be provisioned.
+synology_admin: admin@example-nas.example
+synology_config:
+  schema_version: 1
+  state_root: /volume1
+  state_parent: /volume1/.paperless-state
+  sync_user: paperless-sync
+  sources:
+    - path: /volume1/homes/example-user/Paperless
+      scope: Privat/example-user
+    - path: /volume1/paperless-scan/Family
+      scope: Family
+  ssh_identity: ~/.ssh/id_ed25519_paperless_ingest
+  destination: paperless-ingest@paperless.example.net
+  quiet_seconds: 60
+  max_size_bytes: 536870912
+  max_files_per_run: 100
+  quiet_after_event_seconds: 65
+  full_scan_seconds: 900
+  sender_timeout_seconds: 3600
