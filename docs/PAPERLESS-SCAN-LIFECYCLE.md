@@ -450,3 +450,50 @@ die explizite Nutzerentscheidung und eine Freigabe für den
 tatsächlichen Schreibvorgang. Kein automatisches Archivieren,
 Wiederimportieren, Wiederherstellen oder Entsperren wiederverwendeter
 Dateinamen.
+
+### Geplante Journalverzeichnis-Anlage (getrennte Freigabe)
+
+Der read-only Audit vom 14.10.2026 hat bestätigt:
+LXC 126 `bergen-paperless`, ZFS-Rootfs
+`rpool/data/subvol-126-disk-0`,
+`/var/lib/paperless-ingest` als `root:988` mit `0750`,
+`paperless-ingest` als UID 997/GID 988. Das vorgesehene
+Unterverzeichnis `deletion-decisions` war nicht vorhanden.
+Das erfolgreiche `vzdump` vom 14.10.2026 um 03:00
+enthielt `rootfs` und `mp0` und ging nach
+`bergen-synology-backup`. Ein Restore des späteren Journals
+ist damit noch nicht nachgewiesen.
+
+Zwei separate Ansible-Playbooks verwenden denselben eng
+begrenzten, über stdin ausgeführten Python-Helfer:
+`plan-paperless-deletion-journal-directory.yml` ist
+**rein lesend** und prüft Identität, Mount und
+Verzeichnisrechte. Das zweite
+`create-paperless-deletion-journal-directory.yml` benötigt
+eine **zusätzliche explizite Freigabevariable** und darf erst
+nach separater Benutzerzustimmung ausgeführt werden. Es legt
+ausschließlich `/var/lib/paperless-ingest/deletion-decisions`
+als UID 997/GID 988, Modus `0700` an. Bestehende
+abweichende Verzeichnisse werden nicht repariert oder
+überschrieben. Ein Journal wird dadurch **nicht** angelegt.
+
+Offline-Test:
+```bash
+python3 -m unittest discover -s tests -p 'test_paperless_deletion_journal_directory.py' -v
+```
+
+Read-only Preflight:
+```bash
+ansible-playbook \
+  -i ansible/inventory.yml \
+  -i ansible/inventory.local.yml \
+  ansible/playbooks/plan-paperless-deletion-journal-directory.yml \
+  --vault-id paperless@prompt \
+  -e @ansible/vars/paperless.vault.yml \
+  -e @ansible/vars/paperless-synology.local.yml
+```
+
+Die Schreiboperation ist bewusst **nicht** Bestandteil des
+Preflight-Kommandos. Die notwendige Freigabe für die
+Verzeichnisanlage ist unabhängig von einer späteren
+Freigabe zur Speicherung des Löschentscheids.
