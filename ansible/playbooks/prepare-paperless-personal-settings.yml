@@ -1,0 +1,94 @@
+---
+# Personal UI preferences for every active non-technical Paperless account.
+# No document ACLs, admin flags, workflows, or system configuration modified.
+# Default mode is read-only and reports eligible users.
+- name: Prepare universal Paperless personal UI settings
+  hosts: venombox
+  become: true
+  gather_facts: false
+
+  vars:
+    paperless_ui_script: "{{ playbook_dir }}/../files/paperless/enable_personal_settings.py"
+    paperless_ui_commit: "{{ paperless_ui_settings_apply | default(false) | bool }}"
+
+  tasks:
+    - name: Require the expected Proxmox target
+      ansible.builtin.assert:
+        that:
+          - inventory_hostname == "venombox"
+          - not ansible_check_mode
+
+    - name: Verify intended Paperless LXC
+      ansible.builtin.command:
+        argv: [pct, config, '126']
+      changed_when: false
+      register: paperless_ui_ct
+
+    - name: Require confined Paperless guest
+      ansible.builtin.assert:
+        that:
+          - "'hostname: bergen-paperless' in paperless_ui_ct.stdout_lines"
+          - "'unprivileged: 1' in paperless_ui_ct.stdout_lines"
+          - "'lxc.apparmor.profile: unconfined' not in paperless_ui_ct.stdout"
+
+    - name: Preview eligible users and personal settings rights
+      ansible.builtin.command:
+        argv:
+          - pct
+          - exec
+          - '126'
+          - --
+          - podman
+          - exec
+          - -e
+          - BP_UI_SETTINGS_APPLY=0
+          - bergen-paperless
+          - python
+          - /usr/src/paperless/src/manage.py
+          - shell
+          - -c
+          - "{{ lookup('ansible.builtin.file', paperless_ui_script, rstrip=False) }}"
+      changed_when: false
+      register: paperless_ui_preview
+
+    - name: Require successful read-only preview
+      ansible.builtin.assert:
+        that:
+          - "'DRY_RUN_NO_CHANGES' in paperless_ui_preview.stdout"
+          - "'ELIGIBLE_USERS ' in paperless_ui_preview.stdout"
+
+    - name: Display personal settings assignment preview
+      ansible.builtin.debug:
+        var: paperless_ui_preview.stdout_lines
+
+    - name: Grant only personal UI settings permissions when explicitly authorised
+      ansible.builtin.command:
+        argv:
+          - pct
+          - exec
+          - '126'
+          - --
+          - podman
+          - exec
+          - -e
+          - BP_UI_SETTINGS_APPLY=1
+          - bergen-paperless
+          - python
+          - /usr/src/paperless/src/manage.py
+          - shell
+          - -c
+          - "{{ lookup('ansible.builtin.file', paperless_ui_script, rstrip=False) }}"
+      changed_when: true
+      register: paperless_ui_result
+      when: paperless_ui_commit
+
+    - name: Verify personal UI settings were committed
+      ansible.builtin.assert:
+        that:
+          - "'PERSONAL_UI_SETTINGS_COMMITTED_AND_VERIFIED' in paperless_ui_result.stdout"
+      when: paperless_ui_commit
+
+    - name: Display personal UI settings verification
+      ansible.builtin.debug:
+        var: paperless_ui_result.stdout_lines
+      when: paperless_ui_commit
