@@ -241,3 +241,48 @@ field after 14 matches. No NAS or Paperless files were changed. The evidence
 format was reverted to the original timestamp-independent schema. Sender
 receipts repaired via live proof may use `reconciled_at` instead of `sent_at`;
 neither field is needed for a logical archive target preview.
+
+## Bewusst in Paperless gelöschte Importe (Dry-Run, 2026-10-14)
+
+Dokument-ID 26 (`Privat/thomas`) wurde nach erfolgreichem Import bewusst
+aus Paperless gelöscht. Das unveränderte Bridge-Journal zeigt weiterhin
+`IMPORTED`, während die Live-Datenbankprüfung sowohl ID 26 als auch den
+ursprünglichen Importdateinamen als nicht vorhanden meldet. Diese Situation
+ist **kein** positiver Importnachweis und darf **keine** Archivierung oder
+NAS-Quelllöschung freigeben.
+
+`preview-paperless-deleted-import.yml` prüft ausschließlich lesend:
+
+1. Das ursprüngliche Bridge-Receipt gehört zur ausdrücklich bestätigten
+   Dokument-ID und enthält `IMPORTED`.
+2. Die Live-Paperless-Datenbank enthält weder diese ID noch den ursprünglichen
+   Importdateinamen. Eine fehlgeschlagene ACL-/Checksum-Prüfung wird nicht
+   als Löschbeweis akzeptiert.
+3. Die ursprüngliche NAS-Datei und ihr `SENT`-Receipt werden unter dem
+   bestehenden Sender-Lock anhand Signatur und SHA-256 erneut geprüft.
+4. Eine reine Policy-Funktion verbindet beide Belege und gibt ausschließlich
+   `PREVIEW_DELETED_IN_PAPERLESS`, `EXCLUDED_FROM_ARCHIVE_MATCH_READY`
+   und `NO_FILES_CHANGED` aus.
+
+Die Entscheidung `DELETED_IN_PAPERLESS` ist **noch nicht im Journal
+persistiert**; die aktive Sender-/Receiver-Logik wird nicht verändert.
+Der vorhandene Sender-Receipt blockiert weiterhin das erneute Senden
+derselben unveränderten Dateiversion. Die bisherige reguläre
+`audit-paperless-archive-imports.yml`-Prüfung bleibt bei gelöschtem
+Dokument absichtlich fehlgeschlagen. Eine künftige dauerhaft dokumentierte
+Löschentscheidung muss versioniert und unveränderlich an
+Sender-Receipt, Bridge-Receipt, SHA-256 und Dokument-ID gebunden sein,
+bevor die Archivpipeline sie berücksichtigen darf. Sie darf weder
+Reimport noch Archivierung oder Löschung des NAS-Originals auslösen.
+
+Read-only-Aufruf (Vault und lokale NAS-Variablen erforderlich):
+
+```bash
+ansible-playbook \
+  -i ansible/inventory.yml \
+  -i ansible/inventory.local.yml \
+  ansible/playbooks/preview-paperless-deleted-import.yml \
+  --vault-id paperless@prompt \
+  -e @ansible/vars/paperless.vault.yml \
+  -e @ansible/vars/paperless-synology.local.yml
+```
