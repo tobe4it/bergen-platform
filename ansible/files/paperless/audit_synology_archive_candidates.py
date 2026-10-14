@@ -84,7 +84,6 @@ def main(parent):
                     "source": path.name,
                     "receiver_source": destination,
                     "sha256": digest,
-                    "sent_at": receipt.get("sent_at"),
                 }, sort_keys=True, ensure_ascii=True), flush=True)
 
 
