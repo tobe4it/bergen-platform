@@ -23,28 +23,36 @@ für Open WebUI ist voraussichtlich
 Bestätigung anhand der laufenden Open-WebUI-Version. Open WebUI bekommt
 einen **eigenen** OIDC-Client; Paperless bleibt unverändert.
 
-## TLS-Architektur: zuerst Terminierung feststellen
+## TLS-Architektur: bestehenden bergen-proxy verwenden
 
-Die eingecheckte Open-WebUI-Quadlet-Vorlage startet die Anwendung mit
-Host-Netzwerk und HTTP-Port 3000. **Kein HTTPS-Listener oder Reverse Proxy
-ist in dieser Rolle definiert.** Der Ist-Zustand ist vor jeder Änderung
-read-only zu prüfen:
-`ansible/playbooks/audit-open-webui-tls-readiness.yml`.
+**Betreiberbestätigung (15.10.2026):** `bergen-proxy` ist bereits als
+Reverse-Proxy-LXC für `paperless.thebergens.net` eingerichtet. **Dieser
+LXC ist der verbindliche TLS-Einstiegspunkt für Bergen-AI.** Es wird
+kein zweiter Reverse Proxy und kein eigener HTTPS-Listener in LXC 110
+eingerichtet.
 
-Bevorzugte Architektur: HTTPS an einem vorhandenen, vertrauenswürdigen
-Reverse Proxy terminieren, der bereits am automatischen Wildcard-
-Erneuerungsprozess teilnimmt. Von dort ausschließlich den notwendigen
-internen Upstream zu Open WebUI (Port 3000) erlauben, Host-/Forwarded-
-Header sauber setzen und den Upstream netzseitig begrenzen. DNS kann
-Split-Horizon nutzen; es ist kein öffentlicher Zugang erforderlich.
+Ziel-Routing:
+`https://ai.thebergens.net` → HTTPS-Virtual-Host auf
+`bergen-proxy` → interner HTTP-Upstream `bergen-ai:3000`
+(tatsächlicher DNS-Name, Erreichbarkeit und Proxy-Software noch
+read-only zu prüfen). Den bestehenden Paperless-Virtual-Host
+**nicht verändern**. Externe Erreichbarkeit nicht voraussetzen;
+DNS-/Firewall-Exposition getrennt prüfen.
 
-**Wenn ein bestehender Gateway-Proxy terminiert, darf der Wildcard-
-Private-Key nicht zusätzlich in LXC 110 verteilt werden.** Nur der
-terminierende TLS-Endpunkt benötigt ihn. Wenn stattdessen eine
-separate TLS-Terminierung im KI-LXC zwingend erforderlich ist, muss
-zunächst ein eigener geprüfter Distributions-Adapter mit eingeschränktem
-Zielpfad, atomarem Austausch, Reload, Fingerprint-/SAN-/Ablaufprüfung,
-Rollback und Zertifikats-Liveprüfung entwickelt werden.
+`bergen-proxy` soll das vorhandene `*.thebergens.net`-Zertifikat
+verwenden. **Kein Wildcard-Private-Key im KI-LXC**. Die konkrete
+Zertifikatsquelle, bestehende Verteilung/Erneuerung und der Live-
+Zertifikatspfad des Paperless-Virtual-Hosts auf `bergen-proxy`
+müssen vor einer Änderung festgestellt werden. Den bestehenden
+funktionierenden Paperless-Proxy-VHost als Konfigurationsreferenz
+verwenden; Software (Nginx/Caddy/andere) nicht raten.
+
+Das vorhandene read-only
+`ansible/playbooks/audit-open-webui-tls-readiness.yml`
+prüft nur den KI-Gast und dessen DNS/Listener, **nicht** den
+Proxy. Es ist kein vollständiger TLS-/Proxy-Preflight.
+Für eine produktive Änderung sind zuerst Proxy-Inventar, TLS-
+Listener, Wildcard-SAN und Erneuerungsweg lesend nachzuweisen.
 
 ## Anschluss an die vorhandene Zertifikatsverteilung
 
@@ -59,12 +67,13 @@ werden.
 Die Zertifikatserneuerung soll **einmal zentral** erfolgen. Ein
 zusätzlicher Consumer `ai.thebergens.net` wird erst nach Festlegung
 der HTTPS-Terminierung in die vorhandene Deploy-/Sync-Kette aufgenommen:
-- Bei bestehendem Gateway: vorhandenes Wildcard-Zertifikat und
-  Renewal-Hook/Reload des Gateways nutzen; ggf. nur neuen Virtual Host
-  hinzufügen, **keine** zusätzliche Schlüsselverteilung.
-- Bei eigenem TLS-Endpunkt: separaten, streng eingeschränkten Consumer
-  mit geprüftem SSH-/Proxmox-Transport, Dateirechten, SAN und Ablauf,
-  Transaktions-/Rollback-Logik und TLS-Listener-Tests implementieren.
+- `bergen-proxy`: vorhandene Wildcard-Zertifikatsverteilung und
+  den Renewal-/Reload-Weg **für diesen LXC** nachweisen und um den
+  neuen Virtual Host ergänzen. Falls das Zertifikat bereits dort
+  vorhanden ist, ist keine zusätzliche Kopie nötig.
+- Keine Zertifikatsverteilung nach `bergen-ai` und keine neue
+  KI-seitige TLS-Terminierung. Vorhandene Consumer (Mail, Paperless)
+  unverändert lassen.
 - Keine privaten Schlüssel, Token, Host-IP-Adressen oder DNS-API-Secrets
   ins Git-Repository; standortspezifische Angaben nur in ignorierten
   lokalen Variablen und Secrets im Vault.
@@ -86,6 +95,8 @@ der HTTPS-Terminierung in die vorhandene Deploy-/Sync-Kette aufgenommen:
    Benutzeridentität in der späteren Paperless-KI-Abfrage ist
    serverseitig vertrauenswürdig gebunden; Paperless-ACLs bleiben aktiv.
 
-**Stand:** Zielname und Integrationsabsicht dokumentiert.
-Weder DNS noch TLS-Terminierung noch ein neuer Zertifikats-Consumer
-wurden bislang produktiv eingerichtet.
+**Stand:** Bestehender Proxy-LXC und produktives Paperless-Routing
+durch Betreiber bestätigt; Zielname und Erweiterung dokumentiert.
+Ob `bergen-proxy` das Wildcard-Zertifikat bereits automatisch
+erhält, ist noch zu prüfen. Kein neuer DNS-Eintrag, Virtual Host
+oder Zertifikats-Consumer produktiv eingerichtet.
