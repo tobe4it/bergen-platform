@@ -758,3 +758,44 @@ Testlauf ist noch ausstehend.
 Es existiert weiterhin **kein zweiter Journaleintrag für
 Dokument 15**. Keine Reimport-, Wiederherstellungs-, Lösch-
 oder Archivierungsfreigabe.
+
+### Dry-run für zweiten DELETED_BY_USER-v2-Eintrag (Dokument 15)
+
+Für die zweite bestätigte Benutzerlöschung wurde ein **eigenständiges,
+noch nicht live getestetes read-only Journal-Planungsplaybook**
+`ansible/playbooks/plan-paperless-deleted-by-user-15-journal.yml`
+ergänzt. Es wiederholt die aktuellen Abwesenheitsnachweise
+in Paperless und auf der Synology, verifiziert den historischen
+SENT-Receipt und gleicht beide Beweise unabhängig ab.
+Ein separates v2-Schema für Dokument 15 fixiert Dokument-ID,
+Sender- und Bridge-Receipt, Scan-Dateinamen, Prüfsumme,
+Bestätigungsdatum und Löschgrund. Der Plan prüft das private
+Journal-Verzeichnis als `paperless-ingest` (UID 997, GID 988)
+und verlangt, dass der neue Zieldateiname **noch nicht existiert**.
+Der bisherige Journaleintrag für Dokument 26 wird unabhängig
+rein lesend erneut geprüft.
+
+Vorgesehener neuer Event:
+`2a6d73664436c1a3e0432d7a07911feab86ba2a617a185b81bc30580fdd67e90`,
+vorgesehener kanonischer JSON-SHA-256:
+`7529da0e6f0b6dd33ee868e12f282a0c7d4b6392883d13992d81902b9dbdd34b`.
+Der gemeinsame Inhalts-SHA-256 von Dokument 15 und 26
+ändert **nicht** deren getrennte Event-Identitäten.
+
+```bash
+python3 -m unittest discover -s tests -p 'test_paperless_deleted_by_user_15_journal_plan.py' -v
+ansible-playbook \
+  -i ansible/inventory.yml \
+  -i ansible/inventory.local.yml \
+  ansible/playbooks/plan-paperless-deleted-by-user-15-journal.yml \
+  --vault-id paperless@prompt \
+  -e @ansible/vars/paperless.vault.yml \
+  -e @ansible/vars/paperless-synology.local.yml
+```
+
+Die Dry-run-Ausgabe enthält `READY_TO_PUBLISH`,
+`JOURNAL_DIRECTORY_PRIVATE_VERIFIED`,
+`DOCUMENT_26_JOURNAL_INTACT` und `NO_JOURNAL_WRITTEN`.
+Es gibt weiterhin **keine** produktive Schreibintegration,
+keine Freigabe für die zweite Journal-Publikation und
+keine Archivierungs- oder Reimportfreigabe.
