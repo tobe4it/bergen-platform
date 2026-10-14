@@ -257,7 +257,17 @@ def main():
     parser.add_argument("--config", required=True, type=Path)
     parser.add_argument("--apply", action="store_true",
                         help="Authorize live certificate/key transfer and service rotation")
+    parser.add_argument("--proxy-vars", type=Path, default=None,
+                        help="Optional read-only audit of one isolated HTTPS proxy")
+    parser.add_argument("--proxy-local-inventory", type=Path,
+                        default=Path("ansible/inventory.local.yml"),
+                        help="Ignored inventory with verified guest SSH transport")
+    parser.add_argument("--proxy-pve-inventory", type=Path,
+                        default=Path("ansible/inventory.yml"))
     args = parser.parse_args()
+    # Never allow --apply to imply that a new proxy target may be modified.
+    if args.proxy_vars is not None and args.apply:
+        raise SyncError("Proxy extension is AUDIT ONLY; --apply is refused")
     cfg = load_config(args.config)
     src_host = cfg["mail_tls_source_address"]
     src_user = cfg["mail_tls_source_ssh_user"]
@@ -266,7 +276,16 @@ def main():
     if dst_user != "root":
         raise SyncError("Target SSH user must be root for protected atomic activation")
     with reused_ssh_connections(((src_user, src_host), (dst_user, dst_host))):
-        perform_sync(cfg, args, src_host, src_user, dst_host, dst_user)
+        source_fp, source_expiry = perform_sync(
+            cfg, args, src_host, src_user, dst_host, dst_user)
+        if args.proxy_vars is not None:
+            from tls_proxy_target import ProxyAuditError, audit_proxy_target
+            try:
+                audit_proxy_target(
+                    cfg, source_fp, source_expiry, args.proxy_vars,
+                    args.proxy_local_inventory, args.proxy_pve_inventory)
+            except ProxyAuditError as exc:
+                raise SyncError(f"Read-only proxy TLS audit failed: {exc}") from exc
 
 
 def perform_sync(cfg, args, src_host, src_user, dst_host, dst_user):
@@ -285,10 +304,10 @@ def perform_sync(cfg, args, src_host, src_user, dst_host, dst_user):
     if action == "NO_CHANGE":
         remote_args[0] = "CHECK_ONLY"
         print(run_remote_script(dst_host, dst_user, remote_script, remote_args))
-        return
+        return source_fp, source_expiry
     if not args.apply:
         print("READ_ONLY: Use --apply to authorize staging and rotation.")
-        return
+        return source_fp, source_expiry
     stage = ssh_run(dst_host, dst_user,
                     "umask 077; mktemp -d /etc/ssl/private/.mail-tls-stage.XXXXXXXX")
     if not STAGE_PATTERN.fullmatch(stage):
@@ -308,6 +327,7 @@ def perform_sync(cfg, args, src_host, src_user, dst_host, dst_user):
                     q(stage + "/privkey.pem") + "; rmdir -- " + q(stage))
         except SyncError:
             print("WARNING: Restricted staging directory requires manual cleanup", file=sys.stderr)
+    return source_fp, source_expiry
 
 
 if __name__ == "__main__":
