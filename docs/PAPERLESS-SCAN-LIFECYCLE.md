@@ -286,3 +286,42 @@ ansible-playbook \
   -e @ansible/vars/paperless.vault.yml \
   -e @ansible/vars/paperless-synology.local.yml
 ```
+
+### Separates Löschentscheidungsjournal – Implementierungsvorbereitung
+
+`ansible/files/paperless/deleted_import_decision_journal.py` stellt eine
+**offline-only** Bibliothek bereit. Es gibt bewusst **keinen CLI-Einstieg,
+keinen produktiven Journalpfad und keine Ansible-Einbindung**. Das
+Journalformat Version 1 bindet `DELETED_IN_PAPERLESS` an Dokument-ID,
+Bridge-Receipt-ID, Sender-Receipt-ID, Quell-Scope, NAS-Dateiname,
+Receiver-Quelle und SHA-256. Hinzu kommen explizite Bestätigung
+(`confirmed_by`), UTC-Bestätigungszeit (`confirmed_at`) und der Grund
+`explicit_user_deletion`.
+
+Der deterministische `event_id` wird aus Dokument-ID, Bridge-Receipt-ID,
+Sender-Receipt-ID und SHA-256 gebildet. Eine abweichende zweite Bestätigung
+mit derselben Identität wird nicht überschrieben, sondern als Konflikt
+abgewiesen. Die Publikation verwendet eine 0600-Temporärdatei,
+`fsync` auf deren Inhalt, einen atomaren Hardlink ohne Überschreiben und
+`fsync` des 0700-Journalverzeichnisses. Ein bereits vorhandener
+byteidentischer Eintrag ist idempotent. Nach einem Absturz kann eine
+`.decision-*.tmp`-Datei übrig bleiben; sie erfordert kontrollierte
+Bereinigung, ohne bestehende Journaldateien zu verändern.
+
+**Wichtig:** Dies ist nur ein vorbereiteter append-only Mechanismus,
+keine unveränderliche/WORM-Speicherung. Ein privilegierter Administrator
+könnte Journaldateien weiterhin ändern. Eine spätere Produktivintegration
+muss unmittelbar vor der Journalerstellung die Herkunft und Aktualität
+der NAS-/Paperless-Nachweise erneut prüfen, die Entscheidung
+autorisieren, den Journalpfad mit Backup- und Zugriffsschutz festlegen
+und eine Revisions-/Recoverystrategie definieren. Der Status ist noch
+nicht persistiert; der reguläre Archivabgleich bleibt absichtlich
+fail-closed und die NAS-Originaldatei bleibt erhalten.
+
+Offline-Regressionstests:
+
+```bash
+python3 -m unittest discover \
+  -s tests \
+  -p 'test_paperless_deleted_import_decision_journal.py' -v
+```
