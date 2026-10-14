@@ -14,7 +14,7 @@ from deleted_by_user_decision_journal import canonical, validate
 
 
 def _open_private_directory(directory):
-    if (type(directory) is not Path or not directory.is_absolute()
+    if (not isinstance(directory, Path) or not directory.is_absolute()
             or directory == Path("/") or ".." in directory.parts):
         raise ValueError("ABSOLUTE_PRIVATE_JOURNAL_DIRECTORY_REQUIRED")
     st = directory.lstat()
