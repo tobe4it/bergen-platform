@@ -130,3 +130,22 @@ offen.
 NAS-Quarantäne/30-Tage-Retention bleibt ein eigener, deaktivierter
 Lebenszyklus-Workstream. Sie darf nicht mit AI-Zugriffsrechten gekoppelt
 oder durch das Mergen dieses Entwurfs aktiviert werden.
+
+## Ansible-Zieladressierung (DHCP und Git)
+
+`ansible/inventory.yml` enthält nur logische Hostnamen, **keine**
+standortspezifischen IPv4-Adressen. Die SSH-Verbindung verwendet entweder
+die Namensauflösung für `bp-controller`, `venombox` und `bergen-ai`
+oder eine lokale, nicht versionierte `ansible/inventory.local.yml` mit
+`ansible_host`-Overrides. Vor einem allgemeinen Ansible-Deploy die
+tatsächliche Namensauflösung prüfen; das Entfernen einer IP allein
+garantiert noch keine SSH-Erreichbarkeit.
+
+`bergen-ai` bezieht seine Adresse laut IaC per DHCP; die frühere
+festgeschriebene Adresse war daher kein verlässliches Betriebsmerkmal.
+Das lesende Preflight-Playbook
+`ansible/playbooks/audit-paperless-ai-readiness.yml` verbindet sich
+ausschließlich mit dem Proxmox-Host `venombox` und führt dort
+`pct exec 110 -- podman exec open-webui ...` aus. Ein SSH-Server im
+AI-Gast und dessen IP-Adresse sind dafür nicht erforderlich.
+Der Hostname des Gasts wird vor dem eigentlichen Test überprüft.
