@@ -110,7 +110,7 @@
             synology_transfer_manifest: >-
               {{ (synology_files | map(attribute='name') | list)
                  + ['synology-paperless.json'] }}
-            synology_config_json: "{{ synology_config | to_nice_json(indent=2) ~ '\n' }}"
+            synology_config_json: "{{ synology_config | to_nice_json(indent=2) }}"
           no_log: true
 
         - name: Copy program files with SSH stdin
