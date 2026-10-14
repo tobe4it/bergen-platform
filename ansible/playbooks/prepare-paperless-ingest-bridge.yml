@@ -1,0 +1,46 @@
+---
+- name: Prepare guarded Paperless staging bridge
+  hosts: bergen-paperless
+  gather_facts: false
+  become: true
+
+  tasks:
+    - name: Create bridge state directories
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: directory
+        owner: root
+        group: root
+        mode: '0700'
+      loop:
+        - /srv/bergen-paperless/ingest-bridge-state
+        - /srv/bergen-paperless/ingest-bridge-state/tmp
+        - /srv/bergen-paperless/ingest-bridge-state/receipts
+
+    - name: Ensure script directory
+      ansible.builtin.file:
+        path: /usr/local/libexec
+        state: directory
+        owner: root
+        group: root
+        mode: '0755'
+
+    - name: Install bridge script
+      ansible.builtin.copy:
+        src: ../files/paperless/ingest_bridge.py
+        dest: /usr/local/libexec/bergen-paperless-ingest-bridge.py
+        owner: root
+        group: root
+        mode: '0750'
+
+    - name: Run guarded dry run only
+      ansible.builtin.command:
+        argv:
+          - /usr/bin/python3
+          - /usr/local/libexec/bergen-paperless-ingest-bridge.py
+      register: bridge_check
+      changed_when: false
+
+    - name: Display dry-run output
+      ansible.builtin.debug:
+        var: bridge_check.stdout_lines
