@@ -11,6 +11,8 @@
     synology_root: /volume1/.bergen-platform-state
     synology_target: /volume1/.bergen-platform-state/bin/synology_inotify_watch.py
     synology_src: "{{ playbook_dir }}/../files/paperless/synology_inotify_watch.py"
+    supervisor_target: /volume1/.bergen-platform-state/bin/synology_watcher_supervisor.py
+    supervisor_src: "{{ playbook_dir }}/../files/paperless/synology_watcher_supervisor.py"
   tasks:
     - name: Require local controller execution
       ansible.builtin.assert:
@@ -27,6 +29,16 @@
         not source_file.stat.exists or
         not source_file.stat.isreg or
         source_file.stat.islnk
+
+    - name: Hash supervisor source on controller
+      ansible.builtin.stat:
+        path: "{{ supervisor_src }}"
+        checksum_algorithm: sha256
+      register: supervisor_file
+      failed_when: >-
+        not supervisor_file.stat.exists or
+        not supervisor_file.stat.isreg or
+        supervisor_file.stat.islnk
 
     - name: Check NAS root, private journal, destination and disabled gate
       ansible.builtin.command:
@@ -45,6 +57,7 @@
           STATE=$ROOT/paperless-sync
           BIN=$ROOT/bin
           TARGET=$BIN/synology_inotify_watch.py
+          SUPERVISOR=$BIN/synology_watcher_supervisor.py
           test "$(stat -c '%u:%g:%a' /volume1)" = "0:0:755"
           test "$(stat -c '%u:%g:%a' "$ROOT")" = "0:0:755"
           test "$(stat -c '%u:%g:%a' "$STATE")" = "1048:100:700"
@@ -63,6 +76,11 @@
             test ! -L "$TARGET"
             test -f "$TARGET"
             test "$(stat -c '%u:%g' "$TARGET")" = "0:0"
+          fi
+          if test -e "$SUPERVISOR" || test -L "$SUPERVISOR"; then
+            test ! -L "$SUPERVISOR"
+            test -f "$SUPERVISOR"
+            test "$(stat -c '%u:%g' "$SUPERVISOR")" = "0:0"
           fi
           echo NAS_DEPLOY_PREFLIGHT_OK
       changed_when: false
@@ -99,6 +117,36 @@
             stdin_add_newline: false
           no_log: true
 
+        - name: Stream supervisor into private temporary location over SSH
+          ansible.builtin.command:
+            argv:
+              - ssh
+              - -T
+              - -o
+              - BatchMode=yes
+              - "{{ synology_admin }}"
+              - umask 077; cat > {{ remote_tmp.stdout | trim }}/synology_watcher_supervisor.py
+            stdin: "{{ lookup('ansible.builtin.file', supervisor_src, rstrip=False) }}"
+            stdin_add_newline: false
+          no_log: true
+
+        - name: Hash transferred supervisor on Synology
+          ansible.builtin.command:
+            argv:
+              - ssh
+              - -T
+              - -o
+              - BatchMode=yes
+              - "{{ synology_admin }}"
+              - sha256sum {{ remote_tmp.stdout | trim }}/synology_watcher_supervisor.py
+          register: remote_supervisor_hash
+          changed_when: false
+
+        - name: Require unchanged supervisor transfer
+          ansible.builtin.assert:
+            that:
+              - remote_supervisor_hash.stdout.split()[0] == supervisor_file.stat.checksum
+
         - name: Hash transferred source on Synology
           ansible.builtin.command:
             argv:
@@ -131,6 +179,8 @@
               BIN=$ROOT/bin
               TARGET=$BIN/synology_inotify_watch.py
               SOURCE={{ remote_tmp.stdout | trim }}/synology_inotify_watch.py
+              SUPERVISOR=$BIN/synology_watcher_supervisor.py
+              SUPERVISOR_SOURCE={{ remote_tmp.stdout | trim }}/synology_watcher_supervisor.py
               install -d -o root -g root -m 0755 "$BIN"
               if test -e "$TARGET" || test -L "$TARGET"; then
                 test ! -L "$TARGET"
@@ -141,6 +191,15 @@
               install -o root -g root -m 0755 "$SOURCE" "$tmp"
               test "$(sha256sum "$SOURCE" | cut -d " " -f1)" = "$(sha256sum "$tmp" | cut -d " " -f1)"
               mv -f "$tmp" "$TARGET"
+              if test -e "$SUPERVISOR" || test -L "$SUPERVISOR"; then
+                test ! -L "$SUPERVISOR"
+                test "$(stat -c '%u:%g' "$SUPERVISOR")" = "0:0"
+              fi
+              tmp_supervisor=$(mktemp "$BIN/.synology_watcher_supervisor.py.XXXXXXXX")
+              trap 'rm -f "$tmp_supervisor"' EXIT
+              install -o root -g root -m 0755 "$SUPERVISOR_SOURCE" "$tmp_supervisor"
+              test "$(sha256sum "$SUPERVISOR_SOURCE" | cut -d " " -f1)" = "$(sha256sum "$tmp_supervisor" | cut -d " " -f1)"
+              mv -f "$tmp_supervisor" "$SUPERVISOR"
               test ! -e "$ROOT/synology-sync.enabled"
               test ! -L "$ROOT/synology-sync.enabled"
               echo NAS_SCRIPT_INSTALLED
@@ -162,6 +221,40 @@
           ansible.builtin.assert:
             that:
               - installed_hash.stdout.split()[0] == source_file.stat.checksum
+
+        - name: Hash installed startup supervisor
+          ansible.builtin.command:
+            argv:
+              - ssh
+              - -T
+              - -o
+              - BatchMode=yes
+              - "{{ synology_admin }}"
+              - sha256sum {{ supervisor_target }}
+          register: installed_supervisor_hash
+          changed_when: false
+
+        - name: Validate installed supervisor bytes
+          ansible.builtin.assert:
+            that:
+              - installed_supervisor_hash.stdout.split()[0] == supervisor_file.stat.checksum
+
+        - name: Verify startup supervisor command as paperless-sync (help only)
+          ansible.builtin.command:
+            argv:
+              - ssh
+              - -T
+              - -o
+              - BatchMode=yes
+              - "{{ synology_admin }}"
+              - sudo -n -H -u paperless-sync python3 {{ supervisor_target }} --help
+          register: supervisor_help
+          changed_when: false
+
+        - name: Require startup supervisor entry point
+          ansible.builtin.assert:
+            that:
+              - "'--boot' in supervisor_help.stdout"
 
         - name: Probe inotify source watches as paperless-sync without --commit
           ansible.builtin.command:
@@ -204,7 +297,7 @@
               - -o
               - BatchMode=yes
               - "{{ synology_admin }}"
-              - rm -f {{ remote_tmp.stdout | trim }}/synology_inotify_watch.py && rmdir {{ remote_tmp.stdout | trim }}
+              - rm -f {{ remote_tmp.stdout | trim }}/synology_inotify_watch.py {{ remote_tmp.stdout | trim }}/synology_watcher_supervisor.py && rmdir {{ remote_tmp.stdout | trim }}
           when:
             - remote_tmp is defined
             - remote_tmp.stdout is defined
