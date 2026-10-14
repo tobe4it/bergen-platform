@@ -67,6 +67,35 @@ class PaperlessACLContract(unittest.TestCase):
         self.assertNotIn('assign_perm("delete_document"', self.migration)
         self.assertNotIn('assign_perm("delete_document"', self.reconciler)
 
+    def test_parent_edit_rights_on_eltern_group_and_effective_user_grants(self):
+        # Regression: group change rights appear for each parent when
+        # get_users_with_perms combines group and user grants. The previous
+        # postcondition rejected those legitimate effective permissions.
+        self.assertIn(
+            'expected_users = {name: {"view_document", "change_document"} for name in PARENTS}',
+            self.migration,
+        )
+        self.assertIn(
+            'actions[4].assign_change_users.add(*(users[name] for name in PARENTS))',
+            self.migration,
+        )
+        self.assertIn(
+            'assign_perm("change_document", users[name], doc)',
+            self.migration,
+        )
+        self.assertIn(
+            'allowed = ({"view_document"}, {"view_document", "change_document"})',
+            self.migration,
+        )
+
+    def test_private_document_edit_and_visibility_are_checked(self):
+        self.assertIn("def audit_private_documents(users, after=False):", self.migration)
+        self.assertIn("audit_private_documents(users, after=False)", self.migration)
+        self.assertIn("audit_private_documents(users, after=True)", self.migration)
+        self.assertIn("UNEXPECTED_PRIVATE_GRANT", self.migration)
+        self.assertIn("PRIVATE_ACCESS_DIFFERENCE", self.migration)
+        self.assertIn("PRIVATE_GLOBAL_PERMISSION_MISSING", self.migration)
+
     def test_family_parent_edit_is_individual_not_family_group(self):
         inner = top_level_literal(self.reconciler_tree, "DJANGO_VERIFY")
         self.assertIn("scope == 'Familie@bergen.intern'", inner)
