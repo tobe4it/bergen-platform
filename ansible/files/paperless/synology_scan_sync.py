@@ -144,11 +144,19 @@ def send(snap, filename, scope):
         " -o BatchMode=yes -o IdentitiesOnly=yes"
         " -o StrictHostKeyChecking=yes -o ConnectTimeout=15"
     )
-    subprocess.run(
-        ["rsync", "-av", "--ignore-existing", "-e", ssh,
+    result = subprocess.run(
+        ["rsync", "-av", "--ignore-existing", "--out-format=%i %n", "-e", ssh,
          str(snap), DESTINATION + ":" + scope + "/"],
-        check=True, timeout=900,
+        check=True, timeout=900, capture_output=True, text=True,
+        encoding="utf-8", errors="surrogateescape",
     )
+    # rsync --ignore-existing can return exit code 0 without writing a file!
+    # Require the itemized 'new file' record for the one intended basename.
+    # In the ambiguous crash-after-transfer-before-receipt case this rejects
+    # and requires operator reconciliation instead of falsely saying SENT.
+    expected = ">f+++++++++ " + filename
+    if result.stdout.splitlines().count(expected) != 1:
+        raise RuntimeError("RSYNC_NOT_CONFIRMED_NEW_FILE " + scope + "/" + filename)
 
 
 def scan(commit):
@@ -168,10 +176,6 @@ def scan(commit):
             for path in sorted(folder.iterdir()):
                 if path.name.startswith(".") or path.suffix.lower() != ".pdf":
                     continue
-                if processed >= MAX_FILES_PER_RUN:
-                    print("LIMIT_REACHED", MAX_FILES_PER_RUN)
-                    return
-                processed += 1
                 try:
                     st = metadata(path)
                     if time.time_ns() - max(st.st_mtime_ns, st.st_ctime_ns) < QUIET_SECONDS * 1000000000:
@@ -182,6 +186,11 @@ def scan(commit):
                     if old is not None and old["signature"] == signature(st):
                         print("TRACKED", scope + "/" + path.name)
                         continue
+                    if processed >= MAX_FILES_PER_RUN:
+                        print("DEFERRED", scope + "/" + path.name,
+                              "(new-candidate limit reached)")
+                        continue
+                    processed += 1
                     with tempfile.TemporaryDirectory(dir=STATE, prefix="snapshot-") as tmpdir:
                         snap = Path(tmpdir) / "snapshot.pdf"
                         checked = snapshot(path, snap)
