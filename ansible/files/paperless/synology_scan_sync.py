@@ -9,6 +9,7 @@ import argparse
 import hashlib
 import json
 import os
+import pwd
 import re
 import shlex
 import shutil
@@ -20,26 +21,24 @@ import time
 from fcntl import LOCK_EX, LOCK_NB, flock
 from pathlib import Path
 
-SOURCES = (
-    (Path("/volume1/homes/@LH-BERGEN.INTERN/61/thomas-1000001/Paperless"), "Privat/thomas"),
-    (Path("/volume1/homes/@LH-BERGEN.INTERN/61/nadja-1000003/Paperless"), "Privat/nadja"),
-    (Path("/volume1/paperless-scan/Eltern"), "Eltern"),
-    (Path("/volume1/paperless-scan/Familie"), "Familie"),
-)
-HOME = Path.home()
-STATE_ROOT = Path("/volume1")
-STATE_PARENT = STATE_ROOT / ".bergen-platform-state"
-STATE = STATE_PARENT / "paperless-sync"
-SCHEDULE_GATE = STATE_PARENT / "synology-sync.enabled"
-IDENTITY = HOME / ".ssh" / "id_ed25519_paperless_ingest"
-DESTINATION = "paperless-ingest@bergen-paperless"
-QUIET_SECONDS = 60
-MAX_SIZE = 512 * 1024 * 1024
-MAX_FILES_PER_RUN = 100
+from synology_config import SETTINGS
+
+SOURCES = SETTINGS["sources"]
+STATE_ROOT = SETTINGS["root"]
+STATE_PARENT = SETTINGS["parent"]
+STATE = SETTINGS["state"]
+SCHEDULE_GATE = SETTINGS["gate"]
+IDENTITY = SETTINGS["identity"]
+DESTINATION = SETTINGS["destination"]
+QUIET_SECONDS = SETTINGS["quiet"]
+MAX_SIZE = SETTINGS["max_size"]
+MAX_FILES_PER_RUN = SETTINGS["max_files"]
 
 
 def secure_state():
     os.umask(0o077)
+    if os.geteuid() != pwd.getpwnam(SETTINGS["sync_user"]).pw_uid:
+        raise RuntimeError("RUN_AS_CONFIGURED_SYNC_USER_ONLY")
     # DSM Home directories can appear world-writable (0777) with Synology
     # ACLs. The sync receipts must not live below such a directory.
     # Provision STATE_PARENT as root:root 0755 and STATE as
