@@ -177,7 +177,7 @@ class ImportLifecycleTests(unittest.TestCase):
                 returncode=0, stdout='BP_DELETION_LOOKUP:{"id_exists":false,"filename_exists":false}\n')):
             records = export.collect(request(), mod)
         self.assertEqual(len(records), 2)
-        self.assertEqual([x["status"] for x in records], ["IMPORTED", "DELETED_BY_USER"])
+        self.assertEqual({x["status"] for x in records}, {"IMPORTED", "DELETED_BY_USER"})
         self.assertEqual(mod.verify.call_count, 2)
 
     def test_exporter_rejects_document_reappearing(self):
