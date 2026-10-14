@@ -19,10 +19,11 @@ def one(lines, marker=False):
     if not isinstance(lines, str):
         raise RuntimeError("INVALID_EVIDENCE_STREAM")
     values = [line for line in lines.splitlines() if line.strip()]
-    if len(values) != (2 if marker else 1):
+    if marker:
+        if len(values) != 2 or values[1] != "NO_FILES_CHANGED":
+            raise RuntimeError("NAS_READ_ONLY_MARKER_MISSING")
+    elif len(values) != 1:
         raise RuntimeError("INVALID_EVIDENCE_COUNT")
-    if marker and values[1] != "NO_FILES_CHANGED":
-        raise RuntimeError("NAS_READ_ONLY_MARKER_MISSING")
     item = json.loads(values[0])
     if not isinstance(item, dict):
         raise RuntimeError("INVALID_EVIDENCE_OBJECT")
