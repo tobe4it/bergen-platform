@@ -29,6 +29,8 @@
           - inventory_hostname in groups.get('reverse_proxy_nodes', [])
           - ai_proxy_ssh_config_path is defined
           - ai_proxy_ssh_config_path is match('^/[a-zA-Z0-9_./-]+$')
+          - ai_proxy_source_address is defined
+          - ai_proxy_source_address == '192.168.3.144'
           - ai_proxy_ssh_alias is defined
           - ai_proxy_ssh_alias is match('^[a-zA-Z0-9._-]+$')
           - reverse_proxy_allow_cidrs is defined
@@ -38,8 +40,9 @@
           - "'0.0.0.0/0' not in reverse_proxy_allow_cidrs"
           - "'::/0' not in reverse_proxy_allow_cidrs"
         fail_msg: >-
-          Refusing activation without reviewed PCT inventory, site-local SSH
-          tunnel config, private client allowlist and explicit approval.
+          Refusing activation without reviewed LXC inventory, existing proxy
+          source address, site-local SSH tunnel config, private client allowlist
+          and explicit approval.
 
     - name: Verify existing Paperless HTTPS vhost without changing it
       ansible.builtin.stat:
@@ -76,6 +79,7 @@
           - not (ai_proxy_files.results[2].stat.exists | default(false))
           - ai_proxy_files.results[3].stat.isreg | default(false)
           - ai_proxy_files.results[3].stat.pw_name | default('') == 'root'
+          - ai_proxy_files.results[3].stat.mode | default('') in ['0600', '0400']
           - ai_proxy_files.results[4].stat.isreg | default(false)
           - ai_proxy_files.results[5].stat.isreg | default(false)
           - ai_proxy_key.stat.isreg | default(false)
