@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Unprivileged, single-instance DSM startup supervisor for Paperless inotify.
 
-Run on DSM boot as paperless-sync. It waits for the root-owned activation
+Run on DSM boot as the configured unprivileged sync user. It waits for the root-owned activation
 gate and restarts the inotify worker 60 s after unexpected exit. Never runs
 as root and never sends a document directly.
 """
@@ -28,7 +28,7 @@ def stop(_signum, _frame):
 
 
 def boot():
-    if os.geteuid() == 0 or os.geteuid() != pwd.getpwnam("paperless-sync").pw_uid:
+    if os.geteuid() == 0 or os.geteuid() != pwd.getpwnam(sync.SETTINGS["sync_user"]).pw_uid:
         raise RuntimeError("RUN_AS_PAPERLESS_SYNC_ONLY")
     sync.secure_state()
     os.umask(0o077)
