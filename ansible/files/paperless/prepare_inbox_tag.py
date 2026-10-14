@@ -60,9 +60,10 @@ def inspect_existing(admin):
             abort("TAG_NOT_ADMIN_OWNED " + name)
         if tag.get_parent() is not None or tag.match:
             abort("EXISTING_TAG_HAS_PARENT_OR_MATCH " + name)
-        # Only upgrade a manually created, nonmatching tag to AUTO. Do not
-        # silently replace regex, literal or learned rules configured by users.
-        allowed = {MatchingModel.MATCH_NONE}
+        # Paperless defaults new manually-created tags to MATCH_ANY even with
+        # an empty match string. Such tags are safe to adopt. Never
+        # overwrite a configured regex, literal or nonempty match.
+        allowed = {MatchingModel.MATCH_NONE, MatchingModel.MATCH_ANY}
         if learn:
             allowed.add(MatchingModel.MATCH_AUTO)
         if tag.matching_algorithm not in allowed:
