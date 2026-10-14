@@ -33,7 +33,7 @@
         argv: [pct, status, '126']
       register: paperless_tag_status
       changed_when: false
-      failed_when: paperless_tag_status.rc != 0 or 'status: running' not in paperless_tag_status.stdout
+      failed_when: "paperless_tag_status.rc != 0 or 'status: running' not in paperless_tag_status.stdout"
 
     - name: Preview managed tags, matching algorithms and settings
       ansible.builtin.command:
