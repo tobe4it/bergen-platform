@@ -30,6 +30,7 @@ HOME = Path.home()
 STATE_ROOT = Path("/volume1")
 STATE_PARENT = STATE_ROOT / ".bergen-platform-state"
 STATE = STATE_PARENT / "paperless-sync"
+SCHEDULE_GATE = STATE_PARENT / "synology-sync.enabled"
 IDENTITY = HOME / ".ssh" / "id_ed25519_paperless_ingest"
 DESTINATION = "paperless-ingest@bergen-paperless"
 QUIET_SECONDS = 60
@@ -217,10 +218,20 @@ def acknowledge_verified_import(only, expected_digest, bridge_receipt):
         print("ACKNOWLEDGED_VERIFIED_IMPORT", only, "bridge=" + bridge_receipt)
 
 
-def scan(commit, only=None):
+def require_schedule_gate():
+    """Scheduled transfers require root-authorized activation."""
+    info = SCHEDULE_GATE.lstat()
+    if (not stat.S_ISREG(info.st_mode) or info.st_uid != 0
+            or info.st_nlink != 1 or stat.S_IMODE(info.st_mode) != 0o644):
+        raise RuntimeError("SCHEDULE_GATE_UNSAFE " + str(SCHEDULE_GATE))
+
+
+def scan(commit, only=None, scheduled=False):
     if os.geteuid() == 0:
         raise RuntimeError("DO_NOT_RUN_AS_ROOT")
     secure_state()
+    if scheduled:
+        require_schedule_gate()
     if commit and not IDENTITY.is_file():
         raise RuntimeError("MISSING_SSH_IDENTITY")
     with (STATE / "sync.lock").open("a+") as lock:
@@ -300,6 +311,8 @@ def scan(commit, only=None):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--commit", action="store_true", help="actually rsync eligible snapshots")
+    parser.add_argument("--scheduled", action="store_true",
+                        help="require root-owned enable gate for scheduled runs")
     parser.add_argument("--only", metavar="SCOPE/FILENAME",
                         help="process exactly one approved PDF (fail if not found)")
     parser.add_argument("--ack-verified-import", action="store_true",
@@ -319,10 +332,12 @@ if __name__ == "__main__":
         if len(matches) != 1 or not matches[0].is_file():
             parser.error("--only must refer to an existing PDF in an enabled directory")
     if args.ack_verified_import:
-        if args.commit or not args.only or not args.expected_sha256 or not args.bridge_receipt:
+        if args.commit or args.scheduled or not args.only or not args.expected_sha256 or not args.bridge_receipt:
             parser.error("--ack-verified-import requires --only, --expected-sha256 and --bridge-receipt, never --commit")
         acknowledge_verified_import(args.only, args.expected_sha256, args.bridge_receipt)
     else:
         if args.expected_sha256 or args.bridge_receipt:
             parser.error("verified-import proof arguments require --ack-verified-import")
-        scan(args.commit, args.only)
+        if args.scheduled and not args.commit:
+            parser.error("--scheduled requires --commit")
+        scan(args.commit, args.only, args.scheduled)
