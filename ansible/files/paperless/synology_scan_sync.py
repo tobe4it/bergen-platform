@@ -159,7 +159,7 @@ def send(snap, filename, scope):
         raise RuntimeError("RSYNC_NOT_CONFIRMED_NEW_FILE " + scope + "/" + filename)
 
 
-def scan(commit):
+def scan(commit, only=None):
     if os.geteuid() == 0:
         raise RuntimeError("DO_NOT_RUN_AS_ROOT")
     secure_state()
@@ -175,6 +175,8 @@ def scan(commit):
                 raise RuntimeError("UNSAFE_SOURCE_DIR " + str(folder))
             for path in sorted(folder.iterdir()):
                 if path.name.startswith(".") or path.suffix.lower() != ".pdf":
+                    continue
+                if only is not None and scope + "/" + path.name != only:
                     continue
                 try:
                     st = metadata(path)
@@ -228,4 +230,16 @@ def scan(commit):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--commit", action="store_true", help="actually rsync eligible snapshots")
-    scan(parser.parse_args().commit)
+    parser.add_argument("--only", metavar="SCOPE/FILENAME",
+                        help="process exactly one approved PDF (fail if not found)")
+    args = parser.parse_args()
+    if args.only is not None:
+        matches = [
+            folder / name for folder, scope in SOURCES
+            for name in [args.only[len(scope) + 1:]]
+            if args.only.startswith(scope + "/")
+            and name and "/" not in name and name not in (".", "..")
+        ]
+        if len(matches) != 1 or not matches[0].is_file():
+            parser.error("--only must refer to an existing PDF in an enabled directory")
+    scan(args.commit, args.only)
