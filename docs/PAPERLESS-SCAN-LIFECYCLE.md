@@ -49,8 +49,9 @@ proof that the unattended job continues to work.
    verifies the original source is the *same* file with the *same* digest
    and signature. The archiver has a lock and durable journal. If any
    comparison fails, it must leave the original source in place.
-5. After validated live import proof, the archive step atomically moves
-   the original PDF from the monitored input into a private,
+5. After validated live import proof, the archive step creates a durable,
+   SHA-256-verified copy (not a cross-device rename) of the original PDF
+   from the monitored input into a private,
    non-watched quarantine owned by the restricted sync account within
    `state_parent/paperless-archive/<scope>/YYYY-MM/`. Private and shared
    scopes remain separated; no new read grants are created.
@@ -65,16 +66,19 @@ proof that the unattended job continues to work.
    The quarantine directory and its scope/month subdirectories are owned by
    the configured `paperless-sync` account (group `users`) and use mode `0700`.
    Its application parent and code/config remain root:root `0755` / root-owned.
-   The same account is authorised to move verified originals into this
-   quarantine and to delete expired archived PDFs. Time-based deletion is
+   The same account is intended to copy verified originals into this
+   quarantine and, only after durable journal acknowledgement, remove the
+   unchanged original from the scan input; deletion of expired archive PDFs
+   is a separate operation. Time-based deletion is
    enforced by the scheduled application logic, **not by the filesystem ACL**;
    thus compromise of the sync account can also cause early deletion. Run
    the expiry worker as `paperless-sync` with no elevation. Minimise its
    capabilities, keep durable audit receipts and verify periodic backups.
 6. The NAS receipt remains durable, so the same scan cannot be resent merely
-   because it has disappeared from the inbox. A crash after rename and before
-   journal update must be recoverable by examining the quarantine target
-   and its digest, never by blindly repeating a destructive rename.
+   because it has disappeared from the inbox. A crash between temporary copy,
+   fsync, target publish, archive journal commit and source removal must be
+   recoverable by checking the source signature, target digest and journal,
+   never by blindly repeating a deletion.
 7. Purge after >=30 full days in quarantine must be a **separate, disabled-by-
    default** operation. It must require a verified recent successful backup
    on the configured target (covering rootfs and mp0) and a healthy timer,
@@ -203,3 +207,29 @@ DSM-ACL-Prüfung von Delete-Child/Rename. Das Audit verändert nichts.
 gleiche Dateisystemkennung, gültige Live-Importnachweise,
 durables Archivjournal und Crash-Recovery, v2-Sender und
 rsync-Zielversionierung sowie sichere Backup-gesteuerte Aufbewahrung.
+
+## Live evidence reconciliation and archive planning (2026-10-14)
+
+The read-only `audit-paperless-archive-imports.yml` successfully matched **19
+of 19** NAS `SENT` source PDFs to live Paperless `IMPORTED` document evidence:
+7 Privat/thomas, 0 Privat/nadja, 7 Eltern, 5 Familie. The previously repaired
+document 23 is included. The exporter rechecks live document SHA-256, owner,
+group, direct grants and active-user effective visibility.
+
+NAS `st_dev` values differ across Btrfs subvolumes despite the shared
+`/volume1` mount: private scan inputs 47, shared scan inputs 1048641,
+private quarantine 40. **No atomic cross-device rename is permitted.**
+The existing private quarantine is
+`/volume1/.bergen-platform-state/paperless-archive`; do not create
+inheriting hidden archives inside scanner folders.
+
+The evidence matcher now prints `PREVIEW_ARCHIVE_COPY` for each verified
+sender receipt, using a deterministic `<scope>/<UTC sent month>/<64-character
+sender receipt ID>.pdf` target. This is **only a logical plan**: it does not
+check live destination ACLs or write a file, and
+`ARCHIVE_COPY_NOT_IMPLEMENTED` is always printed. Production archival
+remains blocked until native DSM archive ACL verification, crash-safe
+cross-subvolume copy journal, replay recovery, versioned sender receipts and
+collision-safe receiver filenames are implemented and tested. Expiry additionally
+requires fresh backup health evidence. Do not run the old
+`prepare-paperless-synology-archives.yml` as a fix for cross-device rename.
