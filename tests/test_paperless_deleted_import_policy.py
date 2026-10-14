@@ -55,7 +55,7 @@ class DeletedImportPolicyTests(unittest.TestCase):
                       "NO_RECEIPT_STATUS_CHANGED",
                       "NO_FILES_CHANGED"):
             self.assertIn(token, out)
-        self.assertNotIn("ARCHIVE_MATCH_READY\\n", out)
+        self.assertNotIn("ARCHIVE_MATCH_READY\n", out)
 
     def test_document_still_exists_blocks(self):
         with self.assertRaisesRegex(RuntimeError, "INVALID_DELETION_EVIDENCE"):
@@ -85,7 +85,7 @@ class DeletedImportPolicyTests(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError, "INVALID_OR_DUPLICATE_NAS_EVIDENCE"):
             stdout = io.StringIO()
             with redirect_stdout(stdout):
-                policy.preview(json.dumps(NAS) + "\\n" + json.dumps(NAS),
+                policy.preview(json.dumps(NAS) + "\n" + json.dumps(NAS),
                                json.dumps(DELETED), 26, BRIDGE)
 
     def test_invalid_status_blocks(self):
