@@ -211,6 +211,16 @@ See **docs/ROADMAP.md** for the complete roadmap.
 
 ---
 
+## Paperless checkpoint (development)
+
+The read-only scan-import lifecycle was reconciled on 2026-10-14: 17 live
+imports and two independently journaled user deletions. **NAS archival,
+source deletion and retention are not authorized.** See the
+[Paperless checkpoint and deferred work](docs/PAPERLESS-CHECKPOINT-2026-10-15.md)
+and the [detailed scan lifecycle](docs/PAPERLESS-SCAN-LIFECYCLE.md).
+
+---
+
 ## Releases
 
 The Bergen Platform follows Semantic Versioning.
