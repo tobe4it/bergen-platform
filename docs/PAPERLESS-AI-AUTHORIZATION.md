@@ -62,8 +62,8 @@ für Authentisierung, LDAP oder Paperless-RAG.
 
 **Bestätigter Ist-Zustand (13.10.2026):** Paperless-ngx auf LXC 126 ist
 bereits erfolgreich als OIDC-Client des Synology SSO Servers auf
-MountainCloud eingerichtet. IdP-Endpunkt:
-`https://ldap.thebergens.net:5001`; Paperless:
+MountainCloud eingerichtet. SSO-HTTPS-Endpunkt (Zertifikatsname):
+`https://sehnde.tbergen.de:5001`; Paperless:
 `https://paperless.thebergens.net`. Ein echter Benutzerlogin mit
 SSO und 2FA wurde erfolgreich durchgeführt. Der `groups`-Claim
 überträgt u. a. `Eltern@bergen.intern` und
@@ -76,7 +76,7 @@ abgestimmt. Der lokale Paperless-Admin bleibt als Notfallzugang.
 **Ziel:** Nur Bergen-AI/Open WebUI (LXC 110) von direkter LDAP-Anmeldung
 auf den **bereits produktiven** Synology OIDC-Provider umstellen.
 LDAP bleibt das Benutzerverzeichnis hinter dem IdP. Die vorhandene
-Paperless-Konfiguration ist die Referenz für Issuer, Zertifikatskette,
+Paperless-Konfiguration ist die Referenz für den tatsächlich konfigurierten OIDC-Issuer, Zertifikatskette,
 Gruppenclaims und Login-/MFA-Erfahrung; OIDC-Client-ID, Client-Secret
 und Redirect-URI müssen für Open WebUI separat registriert werden.
 
