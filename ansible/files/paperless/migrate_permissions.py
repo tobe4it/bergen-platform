@@ -72,7 +72,7 @@ def verify_workflow(workflow_id, expected):
         fail("WRONG_WORKFLOW_CHANGE_GROUPS " + name)
     if actual_view_users not in (set(), expected_parents):
         fail("WRONG_WORKFLOW_VIEW_USERS " + name)
-    if actual_change_users not in (set(), expected_parents if workflow_id == 5 else set()):
+    if actual_change_users not in (set(), expected_parents if workflow_id in (4, 5) else set()):
         fail("WRONG_WORKFLOW_CHANGE_USERS " + name)
     return action
 
@@ -93,7 +93,7 @@ def collect_documents(admin):
         if not set(object_users).issubset(set(PARENTS)):
             fail("UNEXPECTED_DIRECT_USER_ON_DOC " + str(doc.pk))
         for username, perms in object_users.items():
-            allowed = ({"view_document"}, {"view_document", "change_document"}) if group_name == FAMILIE else ({"view_document"},)
+            allowed = ({"view_document"}, {"view_document", "change_document"})
             if perms not in allowed:
                 fail("UNEXPECTED_USER_PERMISSION_ON_DOC %s/%s" % (doc.pk, username))
         found.append((doc, group_name))
@@ -108,8 +108,7 @@ def assert_final(document, group_name):
     object_groups, object_users = object_permissions(document)
     if object_groups != expected_groups:
         fail("POST_GROUP_PERMS %s %s" % (document.pk, repr(object_groups)))
-    expected_users = ({name: {"view_document"} for name in PARENTS} if group_name == ELTERN
-                      else {name: {"view_document", "change_document"} for name in PARENTS})
+    expected_users = {name: {"view_document", "change_document"} for name in PARENTS}
     if object_users != expected_users:
         fail("POST_USER_PERMS %s %s" % (document.pk, repr(object_users)))
     for user in User.objects.filter(is_active=True):
@@ -126,6 +125,38 @@ def assert_final(document, group_name):
                      (document.pk, user.username, perm, effective, expected))
             if expected and not user.has_perm("documents." + perm):
                 fail("MISSING_MODEL_PERMISSION doc=%s user=%s perm=%s" % (document.pk, user.username, perm))
+
+
+
+def audit_private_documents(users, after=False):
+    """Require private documents of both parents remain isolated."""
+    count = 0
+    population = list(User.objects.filter(is_active=True).order_by("pk"))
+    for username in PARENTS:
+        owner = users[username]
+        for document in Document.objects.filter(owner=owner).order_by("pk"):
+            count += 1
+            object_groups, object_users = object_permissions(document)
+            if object_groups or object_users:
+                fail("UNEXPECTED_PRIVATE_GRANT %s owner=%s" % (document.pk, username))
+            if not after:
+                continue
+            for actor in population:
+                expected = actor.is_superuser or actor.pk == owner.pk
+                for permission in ("view_document", "change_document", "delete_document"):
+                    actual = permitted_document_ids(actor, perm=permission).filter(
+                        pk=document.pk
+                    ).exists()
+                    if actual != expected:
+                        fail("PRIVATE_ACCESS_DIFFERENCE doc=%s actor=%s perm=%s" % (
+                            document.pk, actor.username, permission
+                        ))
+                    if expected and not actor.has_perm("documents." + permission):
+                        fail("PRIVATE_GLOBAL_PERMISSION_MISSING doc=%s actor=%s perm=%s" % (
+                            document.pk, actor.username, permission
+                        ))
+    print("PRIVATE_DOCUMENTS_AUDITED", count, "after_commit=", after)
+
 
 
 def main():
@@ -154,6 +185,7 @@ def main():
             fail("SHARED_GROUP_HAS_GLOBAL_DELETE " + name)
     actions = {number: verify_workflow(number, expected) for number, expected in WORKFLOWS.items()}
     documents = collect_documents(users["admin"])
+    audit_private_documents(users, after=False)
     permissions = {
         codename: Permission.objects.get(content_type__app_label="documents", codename=codename)
         for codename in ADULT_GLOBAL | {"delete_document"}
@@ -173,6 +205,7 @@ def main():
             users[name].user_permissions.add(permissions["delete_document"])
         actions[4].assign_change_groups.add(groups[ELTERN])
         actions[4].assign_view_users.add(*(users[name] for name in PARENTS))
+        actions[4].assign_change_users.add(*(users[name] for name in PARENTS))
         actions[5].assign_view_users.add(*(users[name] for name in PARENTS))
         actions[5].assign_change_users.add(*(users[name] for name in PARENTS))
         for doc, group_name in documents:
@@ -180,12 +213,14 @@ def main():
                 assign_perm("change_document", groups[ELTERN], doc)
                 for name in PARENTS:
                     assign_perm("view_document", users[name], doc)
+                    assign_perm("change_document", users[name], doc)
             else:
                 for name in PARENTS:
                     assign_perm("view_document", users[name], doc)
                     assign_perm("change_document", users[name], doc)
         for doc, group in documents:
             assert_final(doc, group)
+        audit_private_documents(users, after=True)
         for number, expected in WORKFLOWS.items():
             verify_workflow(number, expected)
     print("PAPERLESS_ACL_MIGRATION_COMMITTED_AND_VERIFIED")
