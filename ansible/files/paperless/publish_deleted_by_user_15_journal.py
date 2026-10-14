@@ -54,6 +54,10 @@ def main(request):
             or hashlib.sha256(payload).hexdigest() != EXPECTED_RECORD_SHA):
         raise RuntimeError("UNEXPECTED_APPROVED_JOURNAL_IDENTITY")
 
+    # Independent target validation pins the full canonical record and digest.
+    if plan.validate(record) != payload:
+        raise RuntimeError("INDEPENDENT_DOCUMENT_15_TARGET_MISMATCH")
+
     # Only the exact, separately approved document 15 event may be published.
     # This check includes the parent rootfs and expected ownership/modes.
     directory_fd = plan.check_directory(DIRECTORY)
