@@ -133,6 +133,11 @@ def main():
         fail("INVALID_COMMIT_FLAG")
     if Workflow.objects.count() != len(WORKFLOWS):
         fail("UNEXPECTED_WORKFLOW_COUNT")
+    # In this Paperless version, unowned documents can be visible to any
+    # active user for some object-level actions. Do not grant delete model
+    # permission to normal accounts until ownership is complete.
+    if Document.objects.filter(owner__isnull=True).exists():
+        fail("UNOWNED_DOCUMENTS_BLOCK_MODEL_DELETE_PERMISSION")
     users = {name: User.objects.get(username=name) for name in ("admin",) + PARENTS}
     if any(not user.is_active for user in users.values()):
         fail("INACTIVE_REQUIRED_USER")
