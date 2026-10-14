@@ -1,0 +1,47 @@
+---
+# Read-only native DSM ACL inspection. No chmod, setfacl, mkdir or rename.
+- name: Inspect Synology ACLs before per-scope Paperless quarantine provisioning
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  tasks:
+    - name: Validate site-local Synology settings
+      ansible.builtin.assert:
+        that:
+          - synology_admin is defined
+          - synology_admin is match('^[A-Za-z_][A-Za-z0-9_.-]*@[A-Za-z0-9][A-Za-z0-9.-]+$')
+          - synology_config is defined
+          - synology_config.schema_version == 1
+          - synology_config.state_parent is match('^/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$')
+          - synology_config.sync_user is match('^[a-z_][a-z0-9_-]{0,31}$')
+
+    - name: Query native DSM ACLs on NAS using root read-only introspection
+      ansible.builtin.command:
+        argv:
+          - ssh
+          - -T
+          - -o
+          - BatchMode=yes
+          - -o
+          - StrictHostKeyChecking=yes
+          - -o
+          - ConnectTimeout=15
+          - "{{ synology_admin }}"
+          - >-
+            sudo -n /usr/bin/python3 - {{ synology_config.state_parent | quote }}
+        stdin: "{{ lookup('ansible.builtin.file', playbook_dir + '/../files/paperless/audit_synology_scan_acls.py', rstrip=False) }}"
+      register: paperless_dsm_acl_audit
+      changed_when: false
+
+    - name: Require complete read-only report
+      ansible.builtin.assert:
+        that:
+          - "'NO_FILES_CHANGED' in paperless_dsm_acl_audit.stdout_lines"
+          - "'REVIEW_REQUIRED Familie SYNC_USER_DELETE_CHILD_RENAME_AND_ACL_INHERITANCE' in paperless_dsm_acl_audit.stdout_lines"
+          - "'REVIEW_REQUIRED Eltern SYNC_USER_DELETE_CHILD_RENAME_AND_ACL_INHERITANCE' in paperless_dsm_acl_audit.stdout_lines"
+          - "'REVIEW_REQUIRED Privat/thomas SYNC_USER_DELETE_CHILD_RENAME_AND_ACL_INHERITANCE' in paperless_dsm_acl_audit.stdout_lines"
+          - "'REVIEW_REQUIRED Privat/nadja SYNC_USER_DELETE_CHILD_RENAME_AND_ACL_INHERITANCE' in paperless_dsm_acl_audit.stdout_lines"
+
+    - name: Display ACL evidence for manual DSM review
+      ansible.builtin.debug:
+        var: paperless_dsm_acl_audit.stdout_lines
