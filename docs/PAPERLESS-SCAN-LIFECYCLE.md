@@ -586,3 +586,76 @@ Zur erneuten **rein lesenden** Live-Prüfung weiterhin:
 
 Der produktive Apply-Aufruf wird erst nach separater,
 auf Dokument 26 bezogener Freigabe kommuniziert.
+
+### Read-only Import-Lifecycle-Audit mit DELETED_BY_USER (14.10.2026)
+
+Die vom Benutzer gesondert freigegebene atomare Veröffentlichung
+für Dokument 26 wurde produktiv ausgeführt:
+`JOURNAL_CREATED_AND_VERIFIED`,
+`NO_RECEIPTS_CHANGED`,
+`NO_REIMPORT_OR_RESTORE`,
+`NO_ARCHIVE_AUTHORIZATION`;
+Ansible `ok=22 changed=1 failed=0`.
+Die private v2-Datei liegt unter
+`/var/lib/paperless-ingest/deletion-decisions/`,
+Event-ID
+`f4ec236e1eec5af84a73a3fa528c7bd2afa41307c4319a2ac8b26643dbdb0e26`,
+kanonischer SHA-256
+`5e0030686637d7feb85d7a8607ada78d22c224e31d77f053ba14f4dc6ace7d0a`.
+
+**Neu, noch nicht live getestet:** Das unabhängige,
+rein lesende Playbook
+`ansible/playbooks/audit-paperless-import-lifecycle.yml`.
+Es liest die gespeicherte v2-Entscheidung als
+`paperless-ingest` und prüft Eigentümer, private
+Berechtigungen, Linkzahl und die fixierte SHA-256.
+Es überprüft erneut das Fehlen von Dokument 26 in
+Paperless und des NAS-Originals unter Sender-Lock.
+Die NAS-Inventur prüft weiterhin alle vorhandenen
+Originale gegen `SENT`-Receipts und SHA-256.
+Ein eigener Gast-Exporter validiert alle anderen
+`IMPORTED`-Receipts weiterhin mit der vollständigen
+live-Dokument-, Owner-, Gruppen- und effektiven ACL-Prüfung;
+für genau Dokument 26 akzeptiert er den Zustand
+`DELETED_BY_USER` **nur** bei passender Journal-Identität
+und erneutem Live-Abwesenheitsnachweis (Dokument-ID
+und Originaldateiname). Jeder andere fehlende oder
+abweichende Import bleibt ein Fehler.
+
+Der abschließende reine Matcher verlangt eine vollständige
+1:1-Zuordnung aller noch vorhandenen NAS-Originale zu
+live-verifizierten Imports und genau einen
+journalbestätigten Löschfall. Erwartete Marker:
+`DELETED_BY_USER_CONFIRMED 26`,
+`IMPORT_LIFECYCLE_RECONCILED`,
+`ARCHIVE_NOT_AUTHORIZED`,
+`NO_RECEIPTS_CHANGED`,
+`NO_FILES_CHANGED`.
+Er erteilt **keine** Freigabe für Quarantäne,
+Archivierung, Receipt-Statusänderung, Wiederimport oder
+Dateinamen-Recycling.
+
+```bash
+python3 -m unittest discover -s tests -p 'test_paperless_import_lifecycle.py' -v
+ansible-playbook --syntax-check \
+  -i ansible/inventory.yml \
+  -i ansible/inventory.local.yml \
+  ansible/playbooks/audit-paperless-import-lifecycle.yml \
+  --vault-id paperless@prompt \
+  -e @ansible/vars/paperless.vault.yml \
+  -e @ansible/vars/paperless-synology.local.yml
+ansible-playbook \
+  -i ansible/inventory.yml \
+  -i ansible/inventory.local.yml \
+  ansible/playbooks/audit-paperless-import-lifecycle.yml \
+  --vault-id paperless@prompt \
+  -e @ansible/vars/paperless.vault.yml \
+  -e @ansible/vars/paperless-synology.local.yml
+```
+
+Das bisherige strengere
+`audit-paperless-archive-imports.yml` bleibt
+**unverändert**: Ein fehlendes live-Dokument blockiert
+dort weiterhin die Archiveignung. Der neue Audit ist
+eine eigenständige Reconciliation-Sicht, kein
+Ersatz für spätere Archive-Sicherheitsgates.
