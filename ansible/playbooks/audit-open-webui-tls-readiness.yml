@@ -1,0 +1,76 @@
+---
+# Read-only: locate the current Bergen-AI TLS termination and DNS readiness.
+# No network changes, certificate/private-key access, service reloads or restarts.
+- name: Inspect Bergen-AI HTTPS entrypoint readiness
+  hosts: venombox
+  become: true
+  gather_facts: false
+
+  tasks:
+    - name: Verify Proxmox guest identity
+      ansible.builtin.command:
+        argv: [pct, exec, '110', --, hostname, -s]
+      register: ai_tls_guest
+      changed_when: false
+      failed_when: ai_tls_guest.stdout | trim != 'bergen-ai'
+
+    - name: Read sanitized guest listener and DNS indicators
+      ansible.builtin.command:
+        argv:
+          - pct
+          - exec
+          - '110'
+          - --
+          - python3
+          - -c
+          - |
+            import shutil
+            import subprocess
+
+            def run(argv):
+                try:
+                    return subprocess.run(
+                        argv, capture_output=True, text=True, timeout=8,
+                        check=False
+                    )
+                except (OSError, subprocess.TimeoutExpired):
+                    return None
+
+            dns = run(["getent", "ahosts", "ai.thebergens.net"])
+            print("AI_FQDN_DNS_RESOLVES", bool(dns and dns.returncode == 0))
+
+            sockets = run(["ss", "-ltnH"])
+            if sockets is None or sockets.returncode:
+                print("LISTENER_INSPECTION", "UNAVAILABLE")
+            else:
+                listening_ports = set()
+                for line in sockets.stdout.splitlines():
+                    fields = line.split()
+                    if len(fields) >= 4:
+                        endpoint = fields[3]
+                        port = endpoint.rsplit(":", 1)[-1]
+                        if port.isdigit():
+                            listening_ports.add(int(port))
+                for port in (80, 443, 3000):
+                    print("GUEST_LISTENING_TCP_" + str(port),
+                          port in listening_ports)
+
+            for name in ("nginx", "caddy", "traefik", "apache2"):
+                print("GUEST_BINARY_" + name.upper(), bool(shutil.which(name)))
+            print("NOTICE no inspection of private keys or app credentials")
+      register: ai_tls_readiness
+      changed_when: false
+      failed_when: false
+
+    - name: Display non-sensitive readiness indicators
+      ansible.builtin.debug:
+        var: ai_tls_readiness.stdout_lines
+
+    - name: Require successful guest inspection
+      ansible.builtin.assert:
+        that:
+          - ai_tls_readiness.rc == 0
+          - "'AI_FQDN_DNS_RESOLVES' in ai_tls_readiness.stdout"
+        fail_msg: >-
+          Read-only HTTPS entrypoint inspection incomplete; do not
+          change DNS, certificate distribution or Open WebUI service.
