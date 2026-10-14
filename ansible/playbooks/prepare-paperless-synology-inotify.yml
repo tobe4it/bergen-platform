@@ -1,0 +1,212 @@
+---
+# Prepare ONLY: no DSM boot task, no --commit and no activation gate.
+# SSH to Synology is via supervisor; script is installed root-owned.
+# The executable is run only as the unprivileged paperless-sync account.
+- name: Prepare Synology Paperless inotify watcher (inactive)
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  vars:
+    synology_admin: supervisor@ldap.thebergens.net
+    synology_root: /volume1/.bergen-platform-state
+    synology_target: /volume1/.bergen-platform-state/bin/synology_inotify_watch.py
+    synology_src: "{{ playbook_dir }}/../files/paperless/synology_inotify_watch.py"
+  tasks:
+    - name: Require local controller execution
+      ansible.builtin.assert:
+        that:
+          - inventory_hostname == 'localhost'
+          - not ansible_check_mode
+
+    - name: Hash source on controller
+      ansible.builtin.stat:
+        path: "{{ synology_src }}"
+        checksum_algorithm: sha256
+      register: source_file
+      failed_when: >-
+        not source_file.stat.exists or
+        not source_file.stat.isreg or
+        source_file.stat.islnk
+
+    - name: Check NAS root, private journal, destination and disabled gate
+      ansible.builtin.command:
+        argv:
+          - ssh
+          - -T
+          - -o
+          - BatchMode=yes
+          - -o
+          - ConnectTimeout=15
+          - "{{ synology_admin }}"
+          - sudo -n /bin/sh -s
+        stdin: |
+          set -eu
+          ROOT=/volume1/.bergen-platform-state
+          STATE=$ROOT/paperless-sync
+          BIN=$ROOT/bin
+          TARGET=$BIN/synology_inotify_watch.py
+          test "$(stat -c '%u:%g:%a' /volume1)" = "0:0:755"
+          test "$(stat -c '%u:%g:%a' "$ROOT")" = "0:0:755"
+          test "$(stat -c '%u:%g:%a' "$STATE")" = "1048:100:700"
+          test ! -L "$ROOT"
+          test ! -L "$STATE"
+          test ! -e "$ROOT/synology-sync.enabled"
+          test ! -L "$ROOT/synology-sync.enabled"
+          test ! -L "$BIN/synology_scan_sync.py"
+          test -f "$BIN/synology_scan_sync.py"
+          test "$(stat -c '%u:%g:%a' "$BIN/synology_scan_sync.py")" = "0:0:755"
+          if test -e "$BIN" || test -L "$BIN"; then
+            test ! -L "$BIN"
+            test "$(stat -c '%u:%g:%a' "$BIN")" = "0:0:755"
+          fi
+          if test -e "$TARGET" || test -L "$TARGET"; then
+            test ! -L "$TARGET"
+            test -f "$TARGET"
+            test "$(stat -c '%u:%g' "$TARGET")" = "0:0"
+          fi
+          echo NAS_DEPLOY_PREFLIGHT_OK
+      changed_when: false
+
+    - name: Prepare verified transfer and dry-run
+      block:
+        - name: Allocate private temporary Synology directory
+          ansible.builtin.command:
+            argv:
+              - ssh
+              - -T
+              - -o
+              - BatchMode=yes
+              - "{{ synology_admin }}"
+              - umask 077; mktemp -d /tmp/bergen-paperless-sync.XXXXXXXX
+          register: remote_tmp
+          changed_when: true
+
+        - name: Validate temporary path
+          ansible.builtin.assert:
+            that:
+              - remote_tmp.stdout | trim is match('^/tmp/bergen-paperless-sync\\.[A-Za-z0-9]{8}$')
+
+        - name: Stream source into private temporary location over SSH
+          ansible.builtin.command:
+            argv:
+              - ssh
+              - -T
+              - -o
+              - BatchMode=yes
+              - "{{ synology_admin }}"
+              - umask 077; cat > {{ remote_tmp.stdout | trim }}/synology_inotify_watch.py
+            stdin: "{{ lookup('ansible.builtin.file', synology_src, rstrip=False) }}"
+            stdin_add_newline: false
+          no_log: true
+
+        - name: Hash transferred source on Synology
+          ansible.builtin.command:
+            argv:
+              - ssh
+              - -T
+              - -o
+              - BatchMode=yes
+              - "{{ synology_admin }}"
+              - sha256sum {{ remote_tmp.stdout | trim }}/synology_inotify_watch.py
+          register: remote_source_hash
+          changed_when: false
+
+        - name: Require unchanged transfer
+          ansible.builtin.assert:
+            that:
+              - remote_source_hash.stdout.split()[0] == source_file.stat.checksum
+
+        - name: Install root-owned code atomically
+          ansible.builtin.command:
+            argv:
+              - ssh
+              - -T
+              - -o
+              - BatchMode=yes
+              - "{{ synology_admin }}"
+              - sudo -n /bin/sh -s
+            stdin: |
+              set -eu
+              ROOT=/volume1/.bergen-platform-state
+              BIN=$ROOT/bin
+              TARGET=$BIN/synology_inotify_watch.py
+              SOURCE={{ remote_tmp.stdout | trim }}/synology_inotify_watch.py
+              install -d -o root -g root -m 0755 "$BIN"
+              if test -e "$TARGET" || test -L "$TARGET"; then
+                test ! -L "$TARGET"
+                test "$(stat -c '%u:%g' "$TARGET")" = "0:0"
+              fi
+              tmp=$(mktemp "$BIN/.synology_inotify_watch.py.XXXXXXXX")
+              trap 'rm -f "$tmp"' EXIT
+              install -o root -g root -m 0755 "$SOURCE" "$tmp"
+              test "$(sha256sum "$SOURCE" | cut -d " " -f1)" = "$(sha256sum "$tmp" | cut -d " " -f1)"
+              mv -f "$tmp" "$TARGET"
+              test ! -e "$ROOT/synology-sync.enabled"
+              test ! -L "$ROOT/synology-sync.enabled"
+              echo NAS_SCRIPT_INSTALLED
+          changed_when: true
+
+        - name: Hash installed script
+          ansible.builtin.command:
+            argv:
+              - ssh
+              - -T
+              - -o
+              - BatchMode=yes
+              - "{{ synology_admin }}"
+              - sha256sum {{ synology_target }}
+          register: installed_hash
+          changed_when: false
+
+        - name: Validate installed script bytes
+          ansible.builtin.assert:
+            that:
+              - installed_hash.stdout.split()[0] == source_file.stat.checksum
+
+        - name: Probe inotify source watches as paperless-sync without --commit
+          ansible.builtin.command:
+            argv:
+              - ssh
+              - -T
+              - -o
+              - BatchMode=yes
+              - "{{ synology_admin }}"
+              - sudo -n -H -u paperless-sync python3 {{ synology_target }} --probe
+          register: watcher_probe
+          changed_when: false
+
+        - name: Require successful kernel inotify probe
+          ansible.builtin.assert:
+            that:
+              - "'INOTIFY_PROBE_OK' in watcher_probe.stdout"
+
+        - name: Report watcher probe
+          ansible.builtin.debug:
+            var: watcher_probe.stdout_lines
+
+        - name: Confirm activation gate still absent
+          ansible.builtin.command:
+            argv:
+              - ssh
+              - -T
+              - -o
+              - BatchMode=yes
+              - "{{ synology_admin }}"
+              - sudo -n test ! -e /volume1/.bergen-platform-state/synology-sync.enabled
+          changed_when: false
+
+      always:
+        - name: Clean up temporary NAS staging
+          ansible.builtin.command:
+            argv:
+              - ssh
+              - -T
+              - -o
+              - BatchMode=yes
+              - "{{ synology_admin }}"
+              - rm -f {{ remote_tmp.stdout | trim }}/synology_inotify_watch.py && rmdir {{ remote_tmp.stdout | trim }}
+          when:
+            - remote_tmp is defined
+            - remote_tmp.stdout is defined
+            - remote_tmp.stdout | trim is match('^/tmp/bergen-paperless-sync\\.[A-Za-z0-9]{8}$')
+          changed_when: false
