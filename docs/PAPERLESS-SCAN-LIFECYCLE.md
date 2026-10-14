@@ -845,3 +845,44 @@ ansible-playbook \
 Eine Veröffentlichung erlaubt weder Reimport noch Restore,
 Änderung historischer Receipts oder Archivierung.
 Der ältere Eintrag für Dokument 26 wird nicht überschrieben.
+
+### Live-Publikation des zweiten DELETED_BY_USER-Journals (14.10.2026)
+
+Nach gesonderter ausdrücklicher Benutzerfreigabe wurde
+`ansible/playbooks/publish-paperless-deleted-by-user-15-journal.yml`
+mit `paperless_user_deletion_15_journal_apply_approved=true`
+auf `bp-controller` ausgeführt.
+
+Bestätigter Ansible-Abschluss: `venombox: ok=28 changed=1 failed=0`.
+
+Ausgabe des auf `paperless-ingest` beschränkten Publikationsschritts:
+
+```text
+JOURNAL_CREATED_AND_VERIFIED
+JOURNAL_FILENAME 2a6d73664436c1a3e0432d7a07911feab86ba2a617a185b81bc30580fdd67e90.json
+JOURNAL_SHA256 7529da0e6f0b6dd33ee868e12f282a0c7d4b6392883d13992d81902b9dbdd34b
+NO_RECEIPTS_CHANGED
+NO_REIMPORT_OR_RESTORE
+NO_ARCHIVE_AUTHORIZATION
+```
+
+Die unmittelbar zuvor erneut erhobenen NAS- und Paperless-Beweise
+waren unverändert. Die bereits veröffentlichte Entscheidung für
+Dokument 26 wurde nach dem Schreibvorgang nochmals verifiziert
+(`Require existing document 26 journal unchanged after publication: ok`).
+Die beiden Löschentscheidungen sind getrennte v2-Events trotz
+identischen Dokumentinhalts.
+
+**Wichtig für Folgearbeiten:** Der bestehende read-only
+`audit-paperless-import-lifecycle.yml`-Exporter erkennt derzeit
+nur die fest verdrahtete Entscheidung für Dokument 26. Die
+Integration und erneute Live-Verifikation beider Journal-Einträge
+ist noch ausstehend. Ein Audit-Fehlschlag auf dem Receipt von
+Dokument 15 ist bis dahin zu erwarten und darf nicht als
+Reimport- oder Archivierungsfreigabe interpretiert werden.
+
+**Backup-Status:** Ein Backup **nach** der Veröffentlichung
+beider Journale ist noch nicht nachgewiesen. Beim nächsten
+planmäßigen Backup den erfolgreichen Lauf und die Aufnahme
+des privaten Journal-Verzeichnisses prüfen. Kein weiterer
+Schreibvorgang allein aus diesem Protokoll autorisiert.
