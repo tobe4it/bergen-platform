@@ -29,7 +29,8 @@ ansible/vars/paperless-synology.local.yml~
 ansible/vars/paperless-synology.local.yml.*~
 ansible/vars/paperless.vault.yml
 
-# Local Paperless site overrides: review and vault any required secrets; never commit
-ansible/vars/paperless.local.yml
-ansible/vars/paperless.local.yml~
-ansible/vars/paperless.local.yml.*~
+# All site-local YAML overrides are private and must never be committed
+
+*.local.yml
+*.local.yml~
+*.local.yml.*~
