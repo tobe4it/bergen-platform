@@ -13,7 +13,7 @@ import sys
 from pathlib import Path
 
 RECONCILER = Path("/usr/local/libexec/bergen-paperless-reconcile-ingest.py")
-BRIDGE_ID = re.compile(r"[a-f0-9]{24}\\.json\\Z")
+BRIDGE_ID = re.compile(r"[a-f0-9]{24}\.json\Z")
 DJANGO_CHECK = """
 import json
 import os
