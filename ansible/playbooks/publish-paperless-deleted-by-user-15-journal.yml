@@ -1,0 +1,332 @@
+---
+# GATED WRITE: publish exactly one immutable document 15 DELETED_BY_USER v2 record.
+# Requires separate explicit approval; no import, receipt changes, archive, restore or source deletion.
+- name: Explicitly gated publication of DELETED_BY_USER journal for document 15
+  hosts: venombox
+  gather_facts: false
+  become: true
+  tasks:
+    - name: Require separately granted approval for exact document 15 journal publication
+      ansible.builtin.assert:
+        that:
+          - paperless_user_deletion_15_journal_apply_approved | default(false) | bool
+          - not ansible_check_mode
+          - inventory_hostname == 'venombox'
+        fail_msg: DOCUMENT_15_JOURNAL_WRITE_NOT_APPROVED
+
+    - name: Require expected guest and NAS configuration
+      ansible.builtin.assert:
+        that:
+          - inventory_hostname == 'venombox'
+          - not ansible_check_mode
+          - synology_admin is defined
+          - synology_config is defined
+          - synology_config.schema_version == 1
+          - synology_config.state_parent is match('^/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$')
+          - synology_config.sync_user is match('^[a-z_][a-z0-9_-]{0,31}$')
+
+    - name: Verify expected Paperless LXC configuration
+      ansible.builtin.command:
+        argv: [pct, config, '126']
+      register: deleted_15_lxc
+      changed_when: false
+
+    - name: Require unprivileged confined Paperless guest
+      ansible.builtin.assert:
+        that:
+          - "'hostname: bergen-paperless' in deleted_15_lxc.stdout_lines"
+          - "'unprivileged: 1' in deleted_15_lxc.stdout_lines"
+          - "'lxc.apparmor.profile: unconfined' not in deleted_15_lxc.stdout"
+
+    - name: Verify live Paperless absence and original filename absence for document 15
+      ansible.builtin.command:
+        argv:
+          - pct
+          - exec
+          - '126'
+          - --
+          - python3
+          - '-'
+          - 7a92b91deb7b2e8e35f9f710.json
+          - '15'
+        stdin: "{{ lookup('ansible.builtin.file', playbook_dir + '/../files/paperless/export_deleted_import_candidate.py', rstrip=False) }}"
+      register: deleted_15_paperless
+      changed_when: false
+
+    - name: Find matching historical NAS sender receipt under exclusive sender lock
+      ansible.builtin.command:
+        argv:
+          - ssh
+          - -T
+          - -o
+          - BatchMode=yes
+          - -o
+          - StrictHostKeyChecking=yes
+          - -o
+          - ConnectTimeout=15
+          - "{{ synology_admin }}"
+          - >-
+            sudo -n -u {{ synology_config.sync_user | quote }}
+            /usr/bin/python3 - {{ synology_config.state_parent | quote }}
+            {{ (deleted_15_paperless.stdout | from_json).receiver_source | quote }}
+            {{ (deleted_15_paperless.stdout | from_json).sha256 | quote }}
+        stdin: "{{ lookup('ansible.builtin.file', playbook_dir + '/../files/paperless/diagnose_deleted_import_15_nas.py', rstrip=False) }}"
+      delegate_to: localhost
+      become: false
+      register: deleted_15_nas
+      changed_when: false
+
+    - name: Match historical sender and current Paperless absence without writing
+      ansible.builtin.command:
+        argv:
+          - python3
+          - "{{ playbook_dir }}/../files/paperless/preview_deleted_import_15.py"
+        stdin: "{{ {'paperless': deleted_15_paperless.stdout, 'nas': deleted_15_nas.stdout} | to_json }}"
+      delegate_to: localhost
+      become: false
+      register: deleted_15_preview
+      changed_when: false
+
+    - name: Require exact absence proofs and no mutation
+      ansible.builtin.assert:
+        that:
+          - "'PREVIEW_DELETED_BY_USER 15 bridge 7a92b91deb7b2e8e35f9f710.json' in deleted_15_preview.stdout_lines"
+          - "'NAS_ORIGINAL_CONFIRMED_ABSENT' in deleted_15_preview.stdout_lines"
+          - "'PAPERLESS_DOCUMENT_CONFIRMED_ABSENT' in deleted_15_preview.stdout_lines"
+          - "'NO_JOURNAL_WRITTEN' in deleted_15_preview.stdout_lines"
+          - "'NO_RECEIPTS_CHANGED' in deleted_15_preview.stdout_lines"
+          - "'ARCHIVE_NOT_AUTHORIZED' in deleted_15_preview.stdout_lines"
+          - "'NO_FILES_CHANGED' in deleted_15_preview.stdout_lines"
+
+    - name: Display read-only proof and original NAS filename
+      ansible.builtin.debug:
+        var: deleted_15_preview.stdout_lines
+
+    - name: Preview pinned v2 journal record for document 15 without writing
+      ansible.builtin.command:
+        argv:
+          - python3
+          - "{{ playbook_dir }}/../files/paperless/deleted_by_user_15_decision_journal.py"
+        stdin: "{{ {'nas': deleted_15_nas.stdout, 'deleted': deleted_15_paperless.stdout} | to_json }}"
+      delegate_to: localhost
+      become: false
+      register: deleted_15_journal_preview
+      changed_when: false
+
+    - name: Require independently fixed document 15 journal identity and hash
+      ansible.builtin.assert:
+        that:
+          - "'PROPOSED_USER_DELETION_JOURNAL_FILENAME 2a6d73664436c1a3e0432d7a07911feab86ba2a617a185b81bc30580fdd67e90.json' in deleted_15_journal_preview.stdout_lines"
+          - "'PROPOSED_USER_DELETION_JOURNAL_SHA256 7529da0e6f0b6dd33ee868e12f282a0c7d4b6392883d13992d81902b9dbdd34b' in deleted_15_journal_preview.stdout_lines"
+          - "'NO_JOURNAL_WRITTEN' in deleted_15_journal_preview.stdout_lines"
+          - "'NO_FILES_CHANGED' in deleted_15_journal_preview.stdout_lines"
+
+    - name: Check exact document 15 journal target as restricted ingest user
+      ansible.builtin.command:
+        argv:
+          - pct
+          - exec
+          - '126'
+          - --
+          - runuser
+          - -u
+          - paperless-ingest
+          - --
+          - python3
+          - -c
+          - "{{ lookup('ansible.builtin.file', playbook_dir + '/../files/paperless/plan_deleted_by_user_15_journal_target.py', rstrip=False) }}"
+        stdin: >-
+          {{ (deleted_15_journal_preview.stdout_lines
+              | select('match', '^PROPOSED_USER_DELETION_JOURNAL_JSON ')
+              | list | first
+              | regex_replace('^PROPOSED_USER_DELETION_JOURNAL_JSON ', '')) }}
+      register: deleted_15_journal_target
+      changed_when: false
+
+    - name: Require private target and no publication
+      ansible.builtin.assert:
+        that:
+          - "'READY_TO_PUBLISH 2a6d73664436c1a3e0432d7a07911feab86ba2a617a185b81bc30580fdd67e90.json' in deleted_15_journal_target.stdout_lines"
+          - "'JOURNAL_DIRECTORY_PRIVATE_VERIFIED' in deleted_15_journal_target.stdout_lines"
+          - "'JOURNAL_SHA256 7529da0e6f0b6dd33ee868e12f282a0c7d4b6392883d13992d81902b9dbdd34b' in deleted_15_journal_target.stdout_lines"
+          - "'NO_JOURNAL_WRITTEN' in deleted_15_journal_target.stdout_lines"
+          - "'NO_RECEIPTS_CHANGED' in deleted_15_journal_target.stdout_lines"
+          - "'NO_FILES_CHANGED' in deleted_15_journal_target.stdout_lines"
+
+    - name: Independently verify previously published document 26 journal is intact
+      ansible.builtin.command:
+        argv:
+          - pct
+          - exec
+          - '126'
+          - --
+          - runuser
+          - -u
+          - paperless-ingest
+          - --
+          - python3
+          - '-'
+        stdin: "{{ lookup('ansible.builtin.file', playbook_dir + '/../files/paperless/export_verified_user_deletion_journal.py', rstrip=False) }}"
+      register: deleted_15_prior_journal
+      changed_when: false
+
+    - name: Require prior journal unchanged and no write
+      ansible.builtin.assert:
+        that:
+          - "'NO_FILES_CHANGED' in deleted_15_prior_journal.stdout_lines"
+          - "(deleted_15_prior_journal.stdout_lines | length) == 2"
+          - "'2a6d73664436c1a3e0432d7a07911feab86ba2a617a185b81bc30580fdd67e90' not in deleted_15_prior_journal.stdout"
+          - "'NO_JOURNAL_WRITTEN' in deleted_15_journal_target.stdout_lines"
+
+    - name: Show proposed document 15 journal identity and target readiness before gated write
+      ansible.builtin.debug:
+        msg:
+          - "{{ deleted_15_journal_preview.stdout_lines | reject('match', '^PROPOSED_USER_DELETION_JOURNAL_JSON ') | list }}"
+          - "{{ deleted_15_journal_target.stdout_lines }}"
+          - "DOCUMENT_26_JOURNAL_INTACT"
+          - "NO_JOURNAL_WRITTEN"
+          - "ARCHIVE_NOT_AUTHORIZED"
+
+    - name: Recheck Paperless document 15 absence immediately before gated publication
+      ansible.builtin.command:
+        argv:
+          - pct
+          - exec
+          - '126'
+          - --
+          - python3
+          - '-'
+          - 7a92b91deb7b2e8e35f9f710.json
+          - '15'
+        stdin: "{{ lookup('ansible.builtin.file', playbook_dir + '/../files/paperless/export_deleted_import_candidate.py', rstrip=False) }}"
+      register: deleted_15_paperless_final
+      changed_when: false
+
+    - name: Recheck NAS absence and historical sender receipt under sender lock
+      ansible.builtin.command:
+        argv:
+          - ssh
+          - -T
+          - -o
+          - BatchMode=yes
+          - -o
+          - StrictHostKeyChecking=yes
+          - -o
+          - ConnectTimeout=15
+          - "{{ synology_admin }}"
+          - >-
+            sudo -n -u {{ synology_config.sync_user | quote }}
+            /usr/bin/python3 - {{ synology_config.state_parent | quote }}
+            {{ (deleted_15_paperless_final.stdout | from_json).receiver_source | quote }}
+            {{ (deleted_15_paperless_final.stdout | from_json).sha256 | quote }}
+        stdin: "{{ lookup('ansible.builtin.file', playbook_dir + '/../files/paperless/diagnose_deleted_import_15_nas.py', rstrip=False) }}"
+      delegate_to: localhost
+      become: false
+      register: deleted_15_nas_final
+      changed_when: false
+
+    - name: Require final live evidence unchanged from read-only plan
+      ansible.builtin.assert:
+        that:
+          - deleted_15_paperless_final.stdout == deleted_15_paperless.stdout
+          - deleted_15_nas_final.stdout == deleted_15_nas.stdout
+
+    - name: Independently compare fresh evidence before only write
+      ansible.builtin.command:
+        argv: [python3, "{{ playbook_dir }}/../files/paperless/preview_deleted_import_15.py"]
+        stdin: "{{ {'paperless': deleted_15_paperless_final.stdout, 'nas': deleted_15_nas_final.stdout} | to_json }}"
+      delegate_to: localhost
+      become: false
+      register: deleted_15_final_policy
+      changed_when: false
+
+    - name: Require fresh two-sided policy and exact original source before publication
+      ansible.builtin.assert:
+        that:
+          - "'PREVIEW_DELETED_BY_USER 15 bridge 7a92b91deb7b2e8e35f9f710.json' in deleted_15_final_policy.stdout_lines"
+          - "'NAS_ORIGINAL_FILENAME Gebuehren.pdf' in deleted_15_final_policy.stdout_lines"
+          - "'NAS_ORIGINAL_CONFIRMED_ABSENT' in deleted_15_final_policy.stdout_lines"
+          - "'PAPERLESS_DOCUMENT_CONFIRMED_ABSENT' in deleted_15_final_policy.stdout_lines"
+          - "'MATCHING_CONTENT_SHA256 bb2a4b44d6d34b8aad29716129c16cdcf6fd2e00fc45a1c6990de8f23086ed7c' in deleted_15_final_policy.stdout_lines"
+          - "'NO_JOURNAL_WRITTEN' in deleted_15_final_policy.stdout_lines"
+          - "'ARCHIVE_NOT_AUTHORIZED' in deleted_15_final_policy.stdout_lines"
+
+    - name: Recompute pinned journal payload from final live evidence without writing
+      ansible.builtin.command:
+        argv: [python3, "{{ playbook_dir }}/../files/paperless/deleted_by_user_15_decision_journal.py"]
+        stdin: "{{ {'nas': deleted_15_nas_final.stdout, 'deleted': deleted_15_paperless_final.stdout} | to_json }}"
+      delegate_to: localhost
+      become: false
+      register: deleted_15_final_journal_preview
+      changed_when: false
+
+    - name: Require unchanged exact canonical journal preview
+      ansible.builtin.assert:
+        that:
+          - deleted_15_final_journal_preview.stdout == deleted_15_journal_preview.stdout
+          - "'PROPOSED_USER_DELETION_JOURNAL_FILENAME 2a6d73664436c1a3e0432d7a07911feab86ba2a617a185b81bc30580fdd67e90.json' in deleted_15_final_journal_preview.stdout_lines"
+          - "'PROPOSED_USER_DELETION_JOURNAL_SHA256 7529da0e6f0b6dd33ee868e12f282a0c7d4b6392883d13992d81902b9dbdd34b' in deleted_15_final_journal_preview.stdout_lines"
+          - "'NO_JOURNAL_WRITTEN' in deleted_15_final_journal_preview.stdout_lines"
+
+    - name: Publish only document 15 immutable journal as restricted ingest user
+      ansible.builtin.command:
+        argv:
+          - pct
+          - exec
+          - '126'
+          - --
+          - runuser
+          - -u
+          - paperless-ingest
+          - --
+          - python3
+          - -c
+          - "{{ lookup('ansible.builtin.file', playbook_dir + '/../files/paperless/publish_deleted_by_user_15_journal.py', rstrip=False) }}"
+          - --apply
+        stdin: >-
+          {{ {
+            'nas': deleted_15_nas_final.stdout,
+            'deleted': deleted_15_paperless_final.stdout,
+            'schema_source': lookup('ansible.builtin.file', playbook_dir + '/../files/paperless/deleted_by_user_15_decision_journal.py', rstrip=False),
+            'store_source': lookup('ansible.builtin.file', playbook_dir + '/../files/paperless/deleted_by_user_decision_store.py', rstrip=False),
+            'plan_source': lookup('ansible.builtin.file', playbook_dir + '/../files/paperless/plan_deleted_by_user_15_journal_target.py', rstrip=False)
+          } | to_json }}
+      register: deleted_15_journal_published
+      changed_when: "'JOURNAL_CREATED_AND_VERIFIED' in deleted_15_journal_published.stdout_lines"
+
+    - name: Require durable exact journal and unchanged receipts
+      ansible.builtin.assert:
+        that:
+          - "'JOURNAL_CREATED_AND_VERIFIED' in deleted_15_journal_published.stdout_lines"
+          - "'JOURNAL_FILENAME 2a6d73664436c1a3e0432d7a07911feab86ba2a617a185b81bc30580fdd67e90.json' in deleted_15_journal_published.stdout_lines"
+          - "'JOURNAL_SHA256 7529da0e6f0b6dd33ee868e12f282a0c7d4b6392883d13992d81902b9dbdd34b' in deleted_15_journal_published.stdout_lines"
+          - "'NO_RECEIPTS_CHANGED' in deleted_15_journal_published.stdout_lines"
+          - "'NO_REIMPORT_OR_RESTORE' in deleted_15_journal_published.stdout_lines"
+          - "'NO_ARCHIVE_AUTHORIZATION' in deleted_15_journal_published.stdout_lines"
+
+    - name: Reverify existing document 26 journal after publication
+      ansible.builtin.command:
+        argv:
+          - pct
+          - exec
+          - '126'
+          - --
+          - runuser
+          - -u
+          - paperless-ingest
+          - --
+          - python3
+          - '-'
+        stdin: "{{ lookup('ansible.builtin.file', playbook_dir + '/../files/paperless/export_verified_user_deletion_journal.py', rstrip=False) }}"
+      register: deleted_15_prior_journal_after
+      changed_when: false
+
+    - name: Require existing document 26 journal unchanged after publication
+      ansible.builtin.assert:
+        that:
+          - deleted_15_prior_journal_after.stdout == deleted_15_prior_journal.stdout
+          - "'NO_FILES_CHANGED' in deleted_15_prior_journal_after.stdout_lines"
+
+    - name: Show exact gated journal publication result
+      ansible.builtin.debug:
+        var: deleted_15_journal_published.stdout_lines
