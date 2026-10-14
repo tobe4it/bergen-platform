@@ -497,3 +497,46 @@ Die Schreiboperation ist bewusst **nicht** Bestandteil des
 Preflight-Kommandos. Die notwendige Freigabe für die
 Verzeichnisanlage ist unabhängig von einer späteren
 Freigabe zur Speicherung des Löschentscheids.
+
+### Löschjournal v2 – produktionsnaher Dry-Run ohne Schreiben
+
+Nach gesonderter Freigabe wurde das private Verzeichnis
+`/var/lib/paperless-ingest/deletion-decisions` in LXC 126
+als UID 997/GID 988, Modus `0700`, erstellt und vom
+Ansible-Playbook verifiziert (`CREATED_AND_VERIFIED`,
+`NO_JOURNAL_WRITTEN`, `NO_RECEIPTS_CHANGED`).
+Die Verzeichnisfreigabe **umfasst nicht** die Freigabe zur
+Speicherung eines Löschentscheids.
+
+`plan-paperless-deleted-by-user-journal.yml` ist ein
+rein lesender Ende-zu-Ende-Preflight für genau Dokument 26.
+Es prüft erneut das Fehlen des Paperless-Dokuments,
+den historischen NAS-`SENT`-Receipt unter Sender-Lock
+und das Fehlen der NAS-Quelldatei. Die Policy und
+v2-Journalschema werden auf dem Controller validiert.
+Der anschließende Gast-Preflight läuft **als**
+`paperless-ingest` (nicht root) und kontrolliert die
+private Verzeichnisablage und den konkreten
+Zielnamen. Erwartet:
+`READY_TO_PUBLISH` (oder bei exakt identischem
+Bestand `ALREADY_IDENTICAL`),
+`JOURNAL_DIRECTORY_PRIVATE_VERIFIED`,
+`NO_JOURNAL_WRITTEN`, `NO_RECEIPTS_CHANGED`,
+`NO_FILES_CHANGED`; Ansible `changed=0`.
+
+```bash
+python3 -m unittest discover -s tests -p 'test_paperless_deleted_by_user_journal_target.py' -v
+ansible-playbook \
+  -i ansible/inventory.yml \
+  -i ansible/inventory.local.yml \
+  ansible/playbooks/plan-paperless-deleted-by-user-journal.yml \
+  --vault-id paperless@prompt \
+  -e @ansible/vars/paperless.vault.yml \
+  -e @ansible/vars/paperless-synology.local.yml
+```
+
+Der Dry-Run schreibt weder Journal noch Receipt, verändert
+keine Originale und autorisiert keine Archivierung.
+Die tatsächliche atomare Veröffentlichung ist **nicht**
+mit diesem Playbook verbunden und benötigt ein gesondertes
+Approval mit erneuter frischer Beweiserhebung.
