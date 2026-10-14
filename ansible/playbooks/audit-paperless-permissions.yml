@@ -1,0 +1,78 @@
+---
+# Read-only Django permissions inventory for active Paperless users, groups,
+# and representative scanned documents. No ACL changes, no credentials printed.
+- name: Audit effective Paperless permissions
+  hosts: venombox
+  become: true
+  gather_facts: false
+
+  tasks:
+    - name: Require expected guest identity
+      ansible.builtin.command:
+        argv: [pct, exec, '126', --, hostname, -s]
+      register: paperless_audit_hostname
+      changed_when: false
+      failed_when: paperless_audit_hostname.stdout | trim != 'bergen-paperless'
+
+    - name: Inspect model permissions, active users and object grants
+      ansible.builtin.command:
+        argv:
+          - pct
+          - exec
+          - '126'
+          - --
+          - podman
+          - exec
+          - bergen-paperless
+          - python
+          - /usr/src/paperless/src/manage.py
+          - shell
+          - -c
+          - |
+            from django.contrib.auth.models import Group, User
+            from documents.models import Document
+            from guardian.shortcuts import get_groups_with_perms, get_users_with_perms
+
+            relevant = {
+                "add_document", "change_document", "delete_document", "view_document",
+                "add_tag", "change_tag", "delete_tag", "view_tag",
+                "add_correspondent", "change_correspondent", "delete_correspondent", "view_correspondent",
+                "add_documenttype", "change_documenttype", "delete_documenttype", "view_documenttype",
+                "add_storagepath", "change_storagepath", "delete_storagepath", "view_storagepath",
+                "add_customfield", "change_customfield", "delete_customfield", "view_customfield",
+            }
+            def relevant_perms(values):
+                return sorted(p for p in values if p.startswith("documents.") and p.rsplit(".", 1)[-1] in relevant)
+
+            print("=== ACTIVE USERS AND MODEL-LEVEL PERMISSIONS ===")
+            for user in User.objects.filter(is_active=True).order_by("username"):
+                print("USER", user.username, "staff=", user.is_staff, "superuser=", user.is_superuser)
+                print("  GROUPS", sorted(user.groups.values_list("name", flat=True)))
+                print("  GLOBAL", relevant_perms(user.get_all_permissions()))
+
+            print("=== GROUP MODEL-LEVEL PERMISSIONS ===")
+            for group in Group.objects.order_by("name"):
+                perms = (
+                    "%s.%s" % (p.content_type.app_label, p.codename)
+                    for p in group.permissions.select_related("content_type").all()
+                )
+                print("GROUP", group.name, relevant_perms(perms))
+
+            print("=== REPRESENTATIVE DOCUMENT OBJECT GRANTS ===")
+            for doc in Document.objects.filter(pk__in=[10, 11, 12, 13]).order_by("pk"):
+                owner = doc.owner.username if doc.owner else "<none>"
+                print("DOC", doc.pk, "owner=", owner, "original=", doc.original_filename)
+                groups = get_groups_with_perms(doc, attach_perms=True)
+                users = get_users_with_perms(doc, attach_perms=True)
+                print("  OBJECT_GROUPS", {
+                    group.name: sorted(perms) for group, perms in groups.items()
+                })
+                print("  OBJECT_USERS", {
+                    user.username: sorted(perms) for user, perms in users.items()
+                })
+      register: paperless_permission_audit
+      changed_when: false
+
+    - name: Show Paperless access report
+      ansible.builtin.debug:
+        var: paperless_permission_audit.stdout_lines
