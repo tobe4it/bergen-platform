@@ -894,3 +894,9 @@ Neues separates Playbook: `ansible/playbooks/audit-paperless-import-lifecycle-15
 Tests: `python3 -m unittest discover -s tests -p 'test_paperless_import_lifecycle_15_26.py' -v`.
 
 Der Audit ist bisher **nicht live getestet**. Erwartete Marker: `DELETED_BY_USER 2`, `IMPORT_LIFECYCLE_RECONCILED`, `ARCHIVE_NOT_AUTHORIZED`, `NO_FILES_CHANGED`. Keine Receipt-Änderung, kein Reimport und keine Archivierungsfreigabe. Der alte Ein-Journal-Audit bleibt unverändert und ist nicht für den neuen Zustand geeignet. Die DSM-Archivierungsblocker und der Backup-Nachweis nach Journalpublikation bleiben offen.
+
+### Live-Abnahme des Dual-Journal-Lifecycle-Audits (14.10.2026)
+
+Der Nutzer hat `ansible/playbooks/audit-paperless-import-lifecycle-15-26.yml` auf `bp-controller` ausgeführt. Live-Ergebnis: `venombox ok=14 changed=0 unreachable=0 failed=0 skipped=0`. Die beiden v2-Journale wurden mit eingeschränktem Benutzer und Hashprüfung gelesen; beide Paperless-Dokumente und NAS-Originaldateien blieben nachweislich abwesend. Alle verbleibenden NAS-Originale und Paperless-Importe wurden live abgeglichen: `PAPERLESS_LIVE_IMPORTED 17`, `NAS_SENT_VERIFIED 17`, Scope-Zahlen `Privat/thomas 5`, `Privat/nadja 0`, `Eltern 7`, `Familie 5`. Die beiden separaten Ereignisse `DELETED_BY_USER_CONFIRMED 15` und `DELETED_BY_USER_CONFIRMED 26` wurden bestätigt; `DELETED_BY_USER 2`, `IMPORT_LIFECYCLE_RECONCILED`, `ARCHIVE_NOT_AUTHORIZED`, `NO_RECEIPTS_CHANGED`, `NO_FILES_CHANGED` wurden ausgegeben.
+
+Dies ist eine **Live-Abnahme nur des lesenden Import-Lifecycle-Audits**. Die Offline-Testausgabe wurde im selben Nutzerprotokoll nicht sichtbar übermittelt. Der Backup-Nachweis nach Veröffentlichung beider Journale, DSM-konforme Archivablage, Cross-Subvolume-Verarbeitung und Sender-Receipt-Versionierung bleiben offen. Keine Archivierungs- oder Reimportfreigabe.
