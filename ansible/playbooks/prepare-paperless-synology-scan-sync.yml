@@ -83,15 +83,18 @@
             that:
               - remote_tmp.stdout | trim is match('^/tmp/bergen-paperless-sync\\.[A-Za-z0-9]{8}$')
 
-        - name: Transfer source into private temporary location
+        - name: Stream source into private temporary location over SSH
           ansible.builtin.command:
             argv:
-              - scp
-              - -q
+              - ssh
+              - -T
               - -o
               - BatchMode=yes
-              - "{{ synology_src }}"
-              - "{{ synology_admin }}:{{ remote_tmp.stdout | trim }}/synology_scan_sync.py"
+              - "{{ synology_admin }}"
+              - umask 077; cat > {{ remote_tmp.stdout | trim }}/synology_scan_sync.py
+            stdin: "{{ lookup('ansible.builtin.file', synology_src, rstrip=False) }}"
+            stdin_add_newline: false
+          no_log: true
 
         - name: Hash transferred source on Synology
           ansible.builtin.command:
