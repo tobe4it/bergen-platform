@@ -540,3 +540,49 @@ keine Originale und autorisiert keine Archivierung.
 Die tatsächliche atomare Veröffentlichung ist **nicht**
 mit diesem Playbook verbunden und benötigt ein gesondertes
 Approval mit erneuter frischer Beweiserhebung.
+
+### Gesondert freizugebende Veröffentlichung des DELETED_BY_USER-Journals
+
+Nach erfolgreichem Live-Dry-Run am 14.10.2026
+(`READY_TO_PUBLISH`, `JOURNAL_DIRECTORY_PRIVATE_VERIFIED`,
+`NO_FILES_CHANGED`, Ansible `changed=0`) ist die
+separat gegatete Veröffentlichung vorbereitet.
+**Die Ausführung ist noch nicht freigegeben.**
+
+Das neue `publish-paperless-deleted-by-user-journal.yml`
+verlangt die eigens dafür reservierte Ansible-Variable
+`paperless_user_deletion_journal_apply_approved=true`.
+Ohne sie bricht es vor jedem Schreibzugriff ab.
+Das Verzeichnis-Approval ist nicht ausreichend.
+Es prüft erneut Paperless-Dokument-ID 26, den historischen
+NAS-`SENT`-Receipt unter Lock und die Abwesenheit
+der NAS-Quelle, vergleicht beide frischen Proofs
+mit dem Preflight und validiert die unabhängige
+Deletion-Policy. Erst danach läuft der Publisher im
+LXC **als `paperless-ingest`**, nicht root.
+
+Der Publisher verwendet die geprüfte v2-Schemafunktion
+und den offline crashgetesteten atomaren
+`publish_once`-Store. Erwarteter fixer Event-ID:
+`f4ec236e1eec5af84a73a3fa528c7bd2afa41307c4319a2ac8b26643dbdb0e26`.
+Erwarteter SHA-256 des kanonischen JSON:
+`5e0030686637d7feb85d7a8607ada78d22c224e31d77f053ba14f4dc6ace7d0a`.
+Die Journaldatei erhält Modus `0600`, wird
+atomar ohne Überschreiben veröffentlicht und anschließend
+byteweise überprüft. Bei identischem Bestand
+ist der Vorgang idempotent. Historische Receipts,
+Paperless-Dokumente und NAS-Originale werden nicht verändert.
+Der Eintrag erteilt **keine** Archivierungsfreigabe und
+keine Erlaubnis zum Reimport.
+
+Offline-Tests für das Apply-Gate, **ohne Ausführung**:
+```bash
+python3 -m unittest discover -s tests -p 'test_paperless_deleted_by_user_journal_publication.py' -v
+python3 -m unittest discover -s tests -p 'test_paperless_deleted_by_user_decision_store.py' -v
+```
+
+Zur erneuten **rein lesenden** Live-Prüfung weiterhin:
+`ansible/playbooks/plan-paperless-deleted-by-user-journal.yml`.
+
+Der produktive Apply-Aufruf wird erst nach separater,
+auf Dokument 26 bezogener Freigabe kommuniziert.
