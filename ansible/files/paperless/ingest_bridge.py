@@ -145,7 +145,9 @@ def main():
         raise RuntimeError('RUN_AS_ROOT_REQUIRED')
     ingest_uid = pwd.getpwnam('paperless-ingest').pw_uid
     check_dir(STAGING, 0, 0o750)
+    check_dir(STAGING / 'Privat', 0, 0o750)
     check_dir(CONSUME, 1000, 0o750)
+    check_dir(CONSUME / 'Privat', 1000, 0o750)
     for subdir in ENABLED:
         check_dir(STAGING / subdir, ingest_uid, 0o700)
         check_dir(CONSUME / subdir, 1000, 0o750)
