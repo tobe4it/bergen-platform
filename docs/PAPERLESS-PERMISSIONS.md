@@ -73,3 +73,40 @@ dabei unangetastet.
 4. Produktivfreigabe erst nach negativen Zugriffstests: Kinder dürfen
    Familie nicht ändern/löschen; Eltern/Familie darf niemand außer dem
    Administrator löschen; fremde Privatdokumente bleiben unsichtbar.
+
+## Persönliche UI-Einstellungen für alle regulären Paperless-Konten
+
+Paperless-ngx 3.3.0 schützt die persönlichen UI-Einstellungen über drei
+Modellberechtigungen: `view_uisettings`, `add_uisettings` und
+`change_uisettings`. Diese Einstellungen betreffen immer das **angemeldete
+Konto**. Im Backend wird die Speicherroutine mit
+`serializer.save(user=request.user)` auf das aktuelle Konto gebunden.
+`AppConfig`, Benutzerverwaltung und dokumentbezogene Rechte werden
+dadurch nicht erweitert.
+
+Die Rechte sind Bestandteil der **allgemeinen Benutzerbasis**, unabhängig von
+`Mailserver`, `Eltern`, `Familie`, `Kinder`, Lese- oder Bearbeitungsrechten
+auf Dokumenten.
+
+Implementierung:
+- `ansible/files/paperless/enable_personal_settings.py`:
+  Idempotente Rechtevergabe an alle aktiven Nicht-Superuser, ausgenommen das
+  vorhandene Sonderkonto namens `AnonymousUser`. Das `admin`-Superuserkonto
+  besitzt die Rechte bereits. Auch reine Testkonten erscheinen im Dry-Run;
+  gewünschte Deaktivierungen sind eine **separate** Entscheidung.
+- `ansible/playbooks/prepare-paperless-personal-settings.yml`: zunächst
+  ausschließlich lesende Liste der Berechtigten, anschließend nur auf
+  ausdrückliche Freigabe (`-e paperless_ui_settings_apply=true`)
+  transaktionale Zuteilung und Live-Verifikation.
+- `tests/test_paperless_ui_settings_policy.py`: Offline-Vertragstests.
+
+Wichtig für neue LDAP-Paperless-Konten: Die persönlichen Grundrechte müssen
+bei jeder **neuen Konto-Provisionierung** ebenfalls vergeben werden. Die
+derzeitige einmalige Migration installiert **keinen** automatischen
+Benutzer-Erstellungs-Hook. Der Provisioning-Schritt bleibt für die geplante
+LDAP-Onboarding-Automatik offen.
+
+UI-Test nach Anwendung: Anmeldung als `thomas` oder `nadja`, Anzeige der
+persönlichen Einstellungen, persönliche Änderung speichern, ohne Rechte auf
+globale Anwendungsadministration oder auf Dokumente anderer Benutzer zu
+erlangen.
