@@ -1,116 +1,106 @@
-"""Provision Bergen Paperless inbox tag and per-user review defaults.
+"""Bergen Paperless tag catalogue, with explicit dry-run/commit.
 
-Run through Paperless Django manage.py shell -c. Dry-run unless
-BP_INBOX_APPLY=1. Existing custom remove-on-save choices remain unchanged.
-Does not tag historic documents, alter document ACLs, or delete anything.
+Creates admin-owned tags; grants only view_tag to active regular users.
+Topic tags learn from confirmed classifications; operational tags do not.
+Existing user settings, document ACLs and historic documents are preserved.
 """
 import copy
 import os
 
-from django.contrib.auth.models import Group, Permission, User
+from django.contrib.auth.models import Permission, User
 from django.contrib.contenttypes.models import ContentType
 from django.db import transaction
 from documents.models import MatchingModel, Tag, UiSettings
 from documents.permissions import get_objects_for_user_owner_aware
-from guardian.shortcuts import assign_perm, get_groups_with_perms, get_users_with_perms
+from guardian.shortcuts import assign_perm, get_users_with_perms
 
 FLAG = os.environ.get("BP_INBOX_APPLY", "0")
-NAME = "Posteingang"
-COLOR = "#dfb45f"
-GROUP_NAMES = ("Eltern@bergen.intern", "Familie@bergen.intern", "Kinder@bergen.intern")
+# name, colour, learn from training examples, inbox
+CATALOGUE = (
+    ("Steuer", "#5e81ac", True, False),
+    ("Haus", "#a3be8c", True, False),
+    ("Finanzen", "#b48ead", True, False),
+    ("Versicherung", "#88c0d0", True, False),
+    ("Mobilität", "#d08770", True, False),
+    ("Gesundheit", "#bf616a", True, False),
+    ("Bildung", "#ebcb8b", True, False),
+    ("Beruf", "#81a1c1", True, False),
+    ("Reise", "#8fbcbb", True, False),
+    ("IT", "#5e81ac", True, False),
+    ("Ehrenamt", "#a3be8c", True, False),
+    ("Behörden", "#b48ead", True, False),
+    ("Haustiere", "#d08770", True, False),
+    ("Energie", "#ebcb8b", True, False),
+    ("Gewährleistung", "#88c0d0", True, False),
+    ("Posteingang", "#dfb45f", False, True),
+    ("Aktion offen", "#bf616a", False, False),
+    ("Frist prüfen", "#d08770", False, False),
+)
 SETTING_GROUP = "document_editing"
 SETTING_KEY = "remove_inbox_tags"
 
 
-def abort(reason):
-    raise RuntimeError("BERGEN_INBOX_PREFLIGHT_FAILED: " + reason)
+def abort(message):
+    raise RuntimeError("BERGEN_TAG_PREFLIGHT_FAILED " + message)
 
 
-def inspect_tag(admin):
-    matches = list(Tag.objects.filter(name__iexact=NAME).select_related("owner"))
-    if len(matches) > 1:
-        abort("DUPLICATE_INBOX_TAG_NAME")
-    tag = matches[0] if matches else None
-    if tag is not None:
-        if tag.name != NAME or tag.owner_id != admin.pk:
-            abort("INBOX_NAME_ALREADY_OWNED_BY_OTHER_ACCOUNT")
-        if (
-            not tag.is_inbox_tag or tag.matching_algorithm != MatchingModel.MATCH_NONE
-            or tag.match or tag.get_parent() is not None
-        ):
-            abort("INBOX_TAG_HAS_UNEXPECTED_PROPERTIES")
-        if tag.color != COLOR:
-            print("NOTICE_EXISTING_INBOX_COLOR_RETAINED", tag.color)
-        # Never silently adopt a tag with an unexpected object-policy history.
-        for group, rights in get_groups_with_perms(tag, attach_perms=True).items():
-            if set(rights) != {"view_tag"} or group.name not in GROUP_NAMES:
-                abort("UNEXPECTED_INBOX_GROUP_ACL_" + group.name)
-        for user, rights in get_users_with_perms(tag, attach_perms=True).items():
-            if set(rights) != {"view_tag"} or not user.is_active:
-                abort("UNEXPECTED_INBOX_USER_ACL_" + user.username)
-    others = list(Tag.objects.filter(is_inbox_tag=True).exclude(pk=tag.pk if tag else None)
-                  .values_list("pk", "name"))
-    if others:
-        abort("OTHER_INBOX_TAGS_REQUIRE_REVIEW: " + repr(others))
-    return tag
+def inspect_existing(admin):
+    names = {item[0] for item in CATALOGUE}
+    if len(names) != len(CATALOGUE):
+        abort("DUPLICATE_CATALOGUE_ENTRY")
+    existing = {}
+    for name, color, learn, inbox in CATALOGUE:
+        found = list(Tag.objects.filter(name__iexact=name).select_related("owner"))
+        if len(found) > 1:
+            abort("DUPLICATE_TAG_NAME " + name)
+        if not found:
+            continue
+        tag = found[0]
+        if tag.name != name or tag.owner_id != admin.pk:
+            abort("TAG_NOT_ADMIN_OWNED " + name)
+        if tag.get_parent() is not None or tag.match:
+            abort("EXISTING_TAG_HAS_PARENT_OR_MATCH " + name)
+        # Only upgrade a manually created, nonmatching tag to AUTO. Do not
+        # silently replace regex, literal or learned rules configured by users.
+        allowed = {MatchingModel.MATCH_NONE}
+        if learn:
+            allowed.add(MatchingModel.MATCH_AUTO)
+        if tag.matching_algorithm not in allowed:
+            abort("EXISTING_TAG_HAS_CUSTOM_MATCHING " + name)
+        if tag.is_inbox_tag and not inbox:
+            abort("UNEXPECTED_INBOX_TAG " + name)
+        for user, perms in get_users_with_perms(tag, attach_perms=True).items():
+            if set(perms) != {"view_tag"}:
+                abort("UNEXPECTED_TAG_USER_ACL " + name + " " + user.username)
+        existing[name] = tag
+    unrelated_inboxes = list(
+        Tag.objects.filter(is_inbox_tag=True).exclude(
+            pk__in=[tag.pk for tag in existing.values()]
+        ).values_list("name", flat=True)
+    )
+    if unrelated_inboxes:
+        abort("OTHER_INBOX_TAGS_NEED_REVIEW " + repr(unrelated_inboxes))
+    return existing
 
 
-def inspect_preferences(accounts):
-    planned = []
-    for user in accounts:
+def inspect_preferences(users):
+    result = []
+    for user in users:
         try:
-            current = UiSettings.objects.get(user=user)
-            data = current.settings
+            row = UiSettings.objects.get(user=user)
+            data = row.settings or {}
         except UiSettings.DoesNotExist:
-            data = None
-        if data is None:
             data = {}
         if not isinstance(data, dict):
-            abort("INVALID_UI_SETTINGS_TYPE_" + user.username)
-        subgroup = data.get(SETTING_GROUP, {})
-        if not isinstance(subgroup, dict):
-            abort("INVALID_DOCUMENT_EDITING_SETTINGS_" + user.username)
-        old = subgroup.get(SETTING_KEY)
-        if old is not None and not isinstance(old, (bool, str)):
-            abort("INVALID_REVIEW_SETTING_TYPE_" + user.username)
-        if isinstance(old, str) and old not in ("true", "false"):
-            abort("INVALID_REVIEW_SETTING_VALUE_" + user.username)
-        planned.append((user, data, old))
-    return planned
-
-
-def verify_tag(tag, admin, accounts, groups, eligible_users):
-    tag.refresh_from_db()
-    if not tag.is_inbox_tag or tag.owner_id != admin.pk:
-        abort("INBOX_TAG_IDENTITY_CHANGED")
-    if tag.matching_algorithm != MatchingModel.MATCH_NONE or tag.get_parent() is not None:
-        abort("INBOX_TAG_MATCHING_POLICY_CHANGED")
-    for group in groups:
-        gp = get_groups_with_perms(tag, attach_perms=True)
-        if set(gp.get(group, [])) != {"view_tag"}:
-            abort("MISSING_GROUP_TAG_READ_" + group.name)
-        if not group.permissions.filter(
-            codename="view_tag", content_type__app_label="documents"
-        ).exists():
-            abort("MISSING_GROUP_GLOBAL_TAG_VIEW_" + group.name)
-    for user in eligible_users:
-        if not user.has_perm("documents.view_tag"):
-            abort("MISSING_GLOBAL_VIEW_TAG_" + user.username)
-        if not get_objects_for_user_owner_aware(user, "documents.view_tag", Tag).filter(
-            pk=tag.pk
-        ).exists():
-            abort("MISSING_INBOX_TAG_VISIBILITY_" + user.username)
-    for user in accounts:
-        setting = UiSettings.objects.get(user=user)
-        value = setting.settings[SETTING_GROUP][SETTING_KEY]
-        if value not in (True, False, "true", "false"):
-            abort("INVALID_SAVED_REVIEW_PREFERENCE_" + user.username)
-    for group, rights in get_groups_with_perms(tag, attach_perms=True).items():
-        if set(rights) != {"view_tag"}:
-            abort("INBOX_GROUP_ACL_ESCALATED_" + group.name)
-    for user, rights in get_users_with_perms(tag, attach_perms=True).items():
-        if set(rights) != {"view_tag"}:
-            abort("INBOX_USER_ACL_ESCALATED_" + user.username)
+            abort("INVALID_UI_SETTINGS " + user.username)
+        section = data.get(SETTING_GROUP, {})
+        if not isinstance(section, dict):
+            abort("INVALID_DOCUMENT_EDITING_SETTINGS " + user.username)
+        current = section.get(SETTING_KEY)
+        if current is not None and current not in (True, False, "true", "false"):
+            abort("INVALID_REMOVE_INBOX_SETTING " + user.username)
+        result.append((user, data, current))
+    return result
 
 
 def main():
@@ -118,61 +108,104 @@ def main():
         abort("INVALID_APPLY_FLAG")
     admin = User.objects.get(username="admin")
     if not admin.is_active or not admin.is_superuser:
-        abort("EXPECTED_ADMIN_SUPERUSER_NOT_FOUND")
-    groups = [Group.objects.get(name=name) for name in GROUP_NAMES]
-    accounts = list(User.objects.filter(is_active=True).exclude(
+        abort("EXPECTED_ADMIN_MISSING")
+    users = list(User.objects.filter(is_active=True).exclude(
         username__iexact="AnonymousUser"
     ).order_by("username"))
-    if not accounts:
-        abort("NO_REGULAR_USERS")
-    eligible = [user for user in accounts if user.has_perm("documents.view_document")]
-    tag_perm = Permission.objects.get(content_type=ContentType.objects.get_for_model(Tag),
-                                      codename="view_tag")
-    existing = inspect_tag(admin)
-    preferences = inspect_preferences(accounts)
+    if not users:
+        abort("NO_ACTIVE_USERS")
+    # A real legacy user named AnonymousUser is deliberately excluded.
+    eligible = [user for user in users if not user.is_superuser]
+    view_perm = Permission.objects.get(
+        content_type=ContentType.objects.get_for_model(Tag), codename="view_tag"
+    )
+    existing = inspect_existing(admin)
+    preferences = inspect_preferences(users)
     print("MODE", "APPLY" if FLAG == "1" else "DRY_RUN")
-    print("INBOX_TAG", NAME, "EXISTS" if existing else "CREATE_ADMIN_OWNED")
-    print("TAG_ACCESS_GROUPS", ",".join(GROUP_NAMES))
-    print("DOC_VIEW_USERS", ",".join(user.username for user in eligible))
-    print("USER_PREFERENCES", ",".join(
-        "%s:%s" % (user.username, "DEFAULT_TRUE" if value is None else "KEEP_" + str(value))
-        for user, _data, value in preferences
+    for name, _color, learn, inbox in CATALOGUE:
+        current = existing.get(name)
+        print("TAG_PLAN", name,
+              "EXISTS" if current else "CREATE",
+              "AUTO" if learn else "NONE",
+              "INBOX" if inbox else "NORMAL")
+    print("TAG_READERS", ",".join(u.username for u in eligible))
+    print("REMOVE_INBOX_ON_SAVE", ",".join(
+        u.username + ":" + ("DEFAULT_TRUE" if current is None else "KEEP_" + str(current))
+        for u, _data, current in preferences
     ))
-    print("HISTORIC_DOCUMENTS_UNTOUCHED")
-    print("FUTURE_USER_ONBOARDING_REQUIRES_RERUN")
+    print("DOCUMENTS_AND_ACLS_UNCHANGED")
+    print("FUTURE_USERS_REQUIRE_BASELINE_PROVISIONING")
     if FLAG == "0":
         print("DRY_RUN_NO_CHANGES")
         return
 
     created = 0
-    changed_preferences = 0
+    updated = 0
+    defaulted = 0
     with transaction.atomic():
-        tag = existing
-        if tag is None:
-            tag = Tag.objects.create(
-                name=NAME, owner=admin, color=COLOR, is_inbox_tag=True,
-                match="", matching_algorithm=MatchingModel.MATCH_NONE,
+        for name, color, learn, inbox in CATALOGUE:
+            target_algorithm = (
+                MatchingModel.MATCH_AUTO if learn else MatchingModel.MATCH_NONE
             )
-            created = 1
-        for group in groups:
-            group.permissions.add(tag_perm)
-            assign_perm("view_tag", group, tag)
-        for user in eligible:
-            user.user_permissions.add(tag_perm)
-            assign_perm("view_tag", user, tag)
-        for user, original, old in preferences:
-            if old is not None:
+            tag = existing.get(name)
+            if tag is None:
+                tag = Tag.objects.create(
+                    name=name, owner=admin, color=color, match="",
+                    matching_algorithm=target_algorithm, is_inbox_tag=inbox
+                )
+                created += 1
+            else:
+                fields = []
+                if tag.matching_algorithm != target_algorithm:
+                    tag.matching_algorithm = target_algorithm
+                    fields.append("matching_algorithm")
+                if tag.is_inbox_tag != inbox:
+                    tag.is_inbox_tag = inbox
+                    fields.append("is_inbox_tag")
+                if fields:
+                    tag.save(update_fields=fields)
+                    updated += 1
+            for user in eligible:
+                # Existing global model right is left unchanged. This grants
+                # only the ability to view the catalogue and its entries.
+                if not user.has_perm("documents.view_tag"):
+                    user.user_permissions.add(view_perm)
+                assign_perm("view_tag", user, tag)
+
+        for user, data, current in preferences:
+            if current is not None:
                 continue
-            data = copy.deepcopy(original)
-            data.setdefault(SETTING_GROUP, {})[SETTING_KEY] = True
-            UiSettings.objects.update_or_create(user=user,
-                                                 defaults={"settings": data})
-            changed_preferences += 1
-        # Query fresh User objects, so Django's permission cache cannot hide errors.
-        eligible = list(User.objects.filter(pk__in=[u.pk for u in eligible]).order_by("pk"))
-        verify_tag(tag, admin, accounts, groups, eligible)
-    print("INBOX_TAG_PROVISIONED_AND_VERIFIED", "created=" + str(created),
-          "settings_defaulted=" + str(changed_preferences))
+            new_data = copy.deepcopy(data)
+            new_data.setdefault(SETTING_GROUP, {})[SETTING_KEY] = True
+            UiSettings.objects.update_or_create(
+                user=user, defaults={"settings": new_data}
+            )
+            defaulted += 1
+
+        for name, _color, learn, inbox in CATALOGUE:
+            tag = Tag.objects.get(name=name, owner=admin)
+            if tag.matching_algorithm != (
+                MatchingModel.MATCH_AUTO if learn else MatchingModel.MATCH_NONE
+            ) or tag.is_inbox_tag != inbox or tag.get_parent() is not None:
+                abort("POST_TAG_POLICY " + name)
+            for user in eligible:
+                fresh = User.objects.get(pk=user.pk)
+                if not fresh.has_perm("documents.view_tag"):
+                    abort("MISSING_TAG_MODEL_READ " + user.username)
+                if not get_objects_for_user_owner_aware(
+                    fresh, "documents.view_tag", Tag
+                ).filter(pk=tag.pk).exists():
+                    abort("MISSING_TAG_OBJECT_READ " + name + "/" + user.username)
+        for user, _data, _current in preferences:
+            setting = UiSettings.objects.get(user=user).settings
+            if setting[SETTING_GROUP][SETTING_KEY] not in (
+                True, False, "true", "false"
+            ):
+                abort("POST_USER_SETTING " + user.username)
+    print("BERGEN_TAG_CATALOGUE_COMMITTED_AND_VERIFIED",
+          "created=" + str(created),
+          "updated=" + str(updated),
+          "preferences_defaulted=" + str(defaulted))
 
 
 main()
