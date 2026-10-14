@@ -1,0 +1,38 @@
+---
+# Read-only targeted diagnostic; no lifecycle or deletion decision.
+- name: Diagnose unverified Paperless import receipt 7a92b91deb7b2e8e35f9f710
+  hosts: venombox
+  gather_facts: false
+  become: true
+  tasks:
+    - name: Check expected Paperless guest
+      ansible.builtin.command:
+        argv: [pct, config, '126']
+      register: diagnostic_lxc_config
+      changed_when: false
+
+    - name: Require expected unprivileged confined guest
+      ansible.builtin.assert:
+        that:
+          - inventory_hostname == 'venombox'
+          - "'hostname: bergen-paperless' in diagnostic_lxc_config.stdout_lines"
+          - "'unprivileged: 1' in diagnostic_lxc_config.stdout_lines"
+          - "'lxc.apparmor.profile: unconfined' not in diagnostic_lxc_config.stdout"
+
+    - name: Inspect exact imported receipt and live Paperless document
+      ansible.builtin.command:
+        argv: [pct, exec, '126', --, python3, '-']
+        stdin: "{{ lookup('ansible.builtin.file', playbook_dir + '/../files/paperless/diagnose_paperless_import_7a92.py', rstrip=False) }}"
+      register: paperless_import_7a92_diagnostic
+      changed_when: false
+
+    - name: Show diagnosis without making a deletion decision
+      ansible.builtin.debug:
+        var: paperless_import_7a92_diagnostic.stdout_lines
+
+    - name: Require read-only diagnostic marker
+      ansible.builtin.assert:
+        that:
+          - "'TARGET_RECEIPT 7a92b91deb7b2e8e35f9f710.json' in paperless_import_7a92_diagnostic.stdout_lines"
+          - "'DIAGNOSTIC_ONLY_NO_LIFECYCLE_DECISION' in paperless_import_7a92_diagnostic.stdout_lines"
+          - "'NO_FILES_CHANGED' in paperless_import_7a92_diagnostic.stdout_lines"
