@@ -37,14 +37,22 @@ MAX_FILES_PER_RUN = 100
 
 def secure_state():
     os.umask(0o077)
-    root = HOME / ".local"
-    root.mkdir(mode=0o700, exist_ok=True)
-    for p in (root, root / "state", STATE):
-        if p != root:
-            p.mkdir(mode=0o700, exist_ok=True)
-        s = p.lstat()
-        if not stat.S_ISDIR(s.st_mode) or s.st_uid != os.geteuid() or stat.S_IMODE(s.st_mode) != 0o700:
-            raise RuntimeError("UNSAFE_STATE_DIRECTORY " + str(p))
+    # .local and .local/state are shared per-user application directories:
+    # normal 0755 parents are safe if they are user-owned and not writable
+    # by anyone else. Never chmod these existing directories.
+    # The Paperless-specific journal directory MUST remain private (0700).
+    parents = (HOME / ".local", HOME / ".local" / "state")
+    for path in (*parents, STATE):
+        path.mkdir(mode=0o700, exist_ok=True)
+        info = path.lstat()  # Reject symlinks, including existing ones.
+        mode = stat.S_IMODE(info.st_mode)
+        if not stat.S_ISDIR(info.st_mode) or info.st_uid != os.geteuid():
+            raise RuntimeError("UNSAFE_STATE_DIRECTORY " + str(path))
+        if path == STATE:
+            if mode != 0o700:
+                raise RuntimeError("UNSAFE_PRIVATE_STATE_MODE " + str(path))
+        elif mode & 0o022:
+            raise RuntimeError("WRITABLE_STATE_PARENT " + str(path))
 
 
 def metadata(path):
