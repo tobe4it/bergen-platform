@@ -165,6 +165,58 @@ def send(snap, filename, scope):
         )
 
 
+def acknowledge_verified_import(only, expected_digest, bridge_receipt):
+    """Manual repair after independent receipt + SHA256 verification.
+
+    Never transfers a file. The operator must have separately verified the
+    destination checksum and a bridge receipt with status IMPORTED.
+    """
+    if os.geteuid() == 0:
+        raise RuntimeError("DO_NOT_RUN_AS_ROOT")
+    if not re.fullmatch(r"[a-f0-9]{64}", expected_digest):
+        raise RuntimeError("INVALID_EXPECTED_SHA256")
+    if not re.fullmatch(r"[a-f0-9]{24}", bridge_receipt):
+        raise RuntimeError("INVALID_BRIDGE_RECEIPT")
+    secure_state()
+    sources = [
+        (folder / only[len(scope) + 1:], scope)
+        for folder, scope in SOURCES
+        if only.startswith(scope + "/")
+        and "/" not in only[len(scope) + 1:]
+    ]
+    if len(sources) != 1:
+        raise RuntimeError("INVALID_APPROVED_SOURCE")
+    path, scope = sources[0]
+    if not path.is_file() or path.suffix.lower() != ".pdf":
+        raise RuntimeError("SOURCE_NOT_FOUND")
+    with (STATE / "sync.lock").open("a+") as lock:
+        flock(lock, LOCK_EX | LOCK_NB)
+        receipt = receipt_path(scope, path.name)
+        if receipt.exists() or receipt.is_symlink():
+            raise RuntimeError("MANUAL_REVIEW_EXISTING_RECEIPT " + receipt.name)
+        with tempfile.TemporaryDirectory(dir=STATE, prefix="snapshot-") as tmpdir:
+            checked = snapshot(path, Path(tmpdir) / "snapshot.pdf")
+        if checked is None:
+            raise RuntimeError("SOURCE_NOT_STABLE")
+        actual_digest, source_signature = checked
+        if actual_digest != expected_digest:
+            raise RuntimeError("SOURCE_SHA256_CHANGED")
+        stem = re.sub(r"[^\\w. -]", "_", path.stem, flags=re.UNICODE).strip(" ._-")[:120] or "scan"
+        filename = stem + "--nas-" + actual_digest + ".pdf"
+        write_receipt(receipt, {
+            "status": "SENT",
+            "scope": scope,
+            "source": path.name,
+            "destination": scope + "/" + filename,
+            "sha256": actual_digest,
+            "signature": source_signature,
+            "sent_at": time.time(),
+            "manually_confirmed_imported": True,
+            "bridge_receipt": bridge_receipt + ".json",
+        })
+        print("ACKNOWLEDGED_VERIFIED_IMPORT", only, "bridge=" + bridge_receipt)
+
+
 def scan(commit, only=None):
     if os.geteuid() == 0:
         raise RuntimeError("DO_NOT_RUN_AS_ROOT")
@@ -250,6 +302,12 @@ if __name__ == "__main__":
     parser.add_argument("--commit", action="store_true", help="actually rsync eligible snapshots")
     parser.add_argument("--only", metavar="SCOPE/FILENAME",
                         help="process exactly one approved PDF (fail if not found)")
+    parser.add_argument("--ack-verified-import", action="store_true",
+                        help="operator-only journal repair; never sends any file")
+    parser.add_argument("--expected-sha256",
+                        help="verified remote SHA256, required with --ack-verified-import")
+    parser.add_argument("--bridge-receipt",
+                        help="24-character ID of independently verified IMPORTED bridge receipt")
     args = parser.parse_args()
     if args.only is not None:
         matches = [
@@ -260,4 +318,11 @@ if __name__ == "__main__":
         ]
         if len(matches) != 1 or not matches[0].is_file():
             parser.error("--only must refer to an existing PDF in an enabled directory")
-    scan(args.commit, args.only)
+    if args.ack_verified_import:
+        if args.commit or not args.only or not args.expected_sha256 or not args.bridge_receipt:
+            parser.error("--ack-verified-import requires --only, --expected-sha256 and --bridge-receipt, never --commit")
+        acknowledge_verified_import(args.only, args.expected_sha256, args.bridge_receipt)
+    else:
+        if args.expected_sha256 or args.bridge_receipt:
+            parser.error("verified-import proof arguments require --ack-verified-import")
+        scan(args.commit, args.only)
