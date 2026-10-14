@@ -210,7 +210,7 @@ def acknowledge_verified_import(only, expected_digest, bridge_receipt):
             "destination": scope + "/" + filename,
             "sha256": actual_digest,
             "signature": source_signature,
-            "sent_at": time.time(),
+            "reconciled_at": time.time(),
             "manually_confirmed_imported": True,
             "bridge_receipt": bridge_receipt + ".json",
         })
