@@ -282,6 +282,10 @@ def scan(commit, only=None, scheduled=False):
                             continue
                         if not IDENTITY.is_file():
                             raise RuntimeError("MISSING_SSH_IDENTITY")
+                        # A revoked DSM gate stops a long-running batch
+                        # before preparing the next PDF, not just on startup.
+                        if scheduled:
+                            require_schedule_gate()
                         remote_snapshot = Path(tmpdir) / filename
                         snap.rename(remote_snapshot)
                         # Write-ahead journal: after a crash or uncertain rsync
