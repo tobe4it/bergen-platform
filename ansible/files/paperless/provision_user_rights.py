@@ -63,14 +63,17 @@ def tag_delete_blockers():
 def audit_user(user):
     effective = user.get_all_permissions()
     print("USER", user.username, "STAFF", user.is_staff, "SUPERUSER", user.is_superuser)
-    for content_type in ContentType.objects.filter(
-        permission__isnull=False
-    ).distinct().order_by("app_label", "model"):
-        perms = Permission.objects.filter(content_type=content_type).order_by("codename")
-        rights = [p.codename for p in perms if
-                  content_type.app_label + "." + p.codename in effective]
-        print("RIGHTS", user.username,
-              content_type.app_label + "." + content_type.model,
+    permissions_by_model = {}
+    for permission in Permission.objects.select_related("content_type").order_by(
+        "content_type__app_label", "content_type__model", "codename"
+    ):
+        ct = permission.content_type
+        key = (ct.app_label, ct.model)
+        permissions_by_model.setdefault(key, []).append(permission.codename)
+    for (app_label, model), codenames in permissions_by_model.items():
+        rights = [codename for codename in codenames
+                  if app_label + "." + codename in effective]
+        print("RIGHTS", user.username, app_label + "." + model,
               ",".join(rights) if rights else "-")
     missing = [right for right in REVIEW_ONLY if right not in effective]
     print("REVIEW_ONLY_MISSING", user.username, ",".join(missing) if missing else "-")
