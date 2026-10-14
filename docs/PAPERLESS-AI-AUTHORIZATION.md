@@ -5,7 +5,7 @@ Voraussetzung: [Paperless-Berechtigungsaudit](PAPERLESS-PERMISSIONS-AUDIT.md), 3
 in-process DRF-Checks für vier repräsentative Dokumente am 2026-10-14 bestanden.
 Das ist **keine** Freigabe der AI/RAG-Schnittstelle.
 
-## Ausgangslage (Repository, nicht live verifiziert)
+## Ausgangslage (Repository und read-only Live-Preflight)
 
 - `bergen-ai` (LXC 110) enthält Ollama und Open WebUI.
   Relevante Dateien: `ansible/group_vars/all/bergen-ai.yml`,
@@ -17,12 +17,46 @@ Das ist **keine** Freigabe der AI/RAG-Schnittstelle.
 - `bergen-paperless` (LXC 126) besitzt die Scopes
   `Privat/thomas`, `Privat/nadja`, `Eltern`, `Familie`.
   Paperless setzt bereits geprüfte Dokument-ACLs durch.
-- Die Rolle setzt standardmäßig `open_webui_signup_enabled: true`; ob dies
-  live überschrieben wird, ist offen. Vor produktiver Integration prüfen.
+- Die Rolle setzt standardmäßig `open_webui_signup_enabled: true`; der
+  Betreiber-Preflight bestätigt `ENABLE_SIGNUP=TRUE` in der laufenden
+  Container-Umgebung. Das belegt die Environmentvariable, nicht die
+  tatsächlich gespeicherte Registrierungspolitik.
 - In der eingecheckten AI-Variablendatei stehen LDAP/389 ohne TLS und
-  `ldap_validate_cert: false`. Der produktive Ist-Zustand muss gesondert
-  festgestellt werden. Kein unverschlüsseltes LDAP als Identitätsvertrauensanker
-  für eine Dokumenten-KI freigeben.
+  `ldap_validate_cert: false`. Der Live-Preflight bestätigt für den laufenden
+  Open-WebUI-Prozess `LDAP_USE_TLS=FALSE` und `LDAP_VALIDATE_CERT=FALSE`.
+  Das weist auf ungeschützte LDAP-Verbindungen hin, beweist aber ohne
+  Netzwerk-/Protokollprüfung noch nicht den konkreten Verbindungsweg.
+  Kein unverschlüsseltes LDAP als Identitätsvertrauensanker für eine
+  Dokumenten-KI freigeben.
+
+## Live-Preflight und Konfigurationsabweichung (Betreiber, 2026-10-14)
+
+Lesendes Playbook `ansible/playbooks/audit-paperless-ai-readiness.yml`
+über `venombox → pct exec 110 → podman exec open-webui`;
+`ok=4 changed=0 failed=0`. Kein SSH zum DHCP-Gast benötigt.
+
+| Indikator | Laufende Container-Umgebung |
+| --- | --- |
+| `WEBUI_AUTH` | TRUE |
+| `ENABLE_LDAP` | TRUE |
+| `ENABLE_SIGNUP` | TRUE |
+| `ENABLE_PERSISTENT_CONFIG` | TRUE |
+| `LDAP_USE_TLS` | FALSE |
+| `LDAP_VALIDATE_CERT` | FALSE |
+| Open-WebUI-Version | unbekannt (Paketmetadaten nicht gefunden) |
+
+**Konfigurationsdrift:** Die eingecheckte Quadlet-Vorlage enthält
+`ENABLE_PERSISTENT_CONFIG=false`, die laufende Container-Umgebung meldet
+jedoch `TRUE`. Ursache offen: ältere Containerinstanz, nicht angewendete
+Vorlage, manuelle Überschreibung oder andere Startkonfiguration. Nicht
+durch ein ungeprüftes Redeploy beheben. Zuerst Container-Image,
+Quadlet/Systemd-Quelle und tatsächliche Konfigurationspersistenz **lesend**
+ermitteln. Bei `ENABLE_PERSISTENT_CONFIG=TRUE` können gespeicherte
+Open-WebUI-Einstellungen von den Umgebungswerten abweichen.
+
+**Preflight-PASS heißt nur:** Container und allowlist-basierte
+Environmentabfrage waren erreichbar. Es ist **kein** Security-Gate-PASS
+für Authentisierung, LDAP oder Paperless-RAG.
 
 ## Sicherheitsinvarianten (verbindlich)
 
