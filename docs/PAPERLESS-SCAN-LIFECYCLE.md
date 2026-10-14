@@ -48,14 +48,23 @@ proof that the unattended job continues to work.
    verifies the original source is the *same* file with the *same* digest
    and signature. The archiver has a lock and durable journal. If any
    comparison fails, it must leave the original source in place.
-5. A narrowly privileged administrative NAS operation (not a continuous
-   root watcher) atomically moves the original PDF from the monitored input
-   into a root-protected, non-watched quarantine within
+5. After validated live import proof, the archive step atomically moves
+   the original PDF from the monitored input into a root-protected,
+   non-watched quarantine within
    `state_parent/paperless-archive/<scope>/YYYY-MM/`. Private and shared
-   scopes remain separated; no new read grants are created. The existing
-   `paperless-sync` account currently has only minimal read rights in
-   source folders, so it must **not** be granted broad write/delete rights
-   just to implement archiving.
+   scopes remain separated; no new read grants are created.
+   The restricted `paperless-sync` account is intended to have **read and
+   delete** rights on PDFs inside its permitted scan input directories:
+   traversing/listing, reading, and removing successfully processed originals
+   are necessary; creating/editing PDF content, changing ACLs or ownership,
+   and access to other home content are not. Synology ACL permissions for
+   unlink/rename depend on directory-level delete/delete-child rights.
+   The current broad input ACE permits more than this target and must not
+   be blindly replaced while production ingest is running.
+   As the quarantine is root:root 0700, use a narrowly authorised,
+   proof-validated one-shot administrative move helper to cross that
+   boundary; do not give `paperless-sync` general root access or make the
+   quarantine writable to it.
 6. The NAS receipt remains durable, so the same scan cannot be resent merely
    because it has disappeared from the inbox. A crash after rename and before
    journal update must be recoverable by examining the quarantine target
