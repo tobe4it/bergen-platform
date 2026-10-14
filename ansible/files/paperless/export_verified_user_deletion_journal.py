@@ -49,7 +49,8 @@ def read():
             opened = os.fstat(fd)
             if (opened.st_ino != entry.st_ino or opened.st_dev != entry.st_dev
                     or opened.st_nlink != 1 or opened.st_uid != 997
-                    or opened.st_gid != 988 or opened.st_size != entry.st_size):
+                    or opened.st_gid != 988 or opened.st_size != entry.st_size
+                    or stat.S_IMODE(opened.st_mode) != 0o600):
                 raise RuntimeError("JOURNAL_ENTRY_CHANGED")
             raw = os.read(fd, 8193)
         finally:
