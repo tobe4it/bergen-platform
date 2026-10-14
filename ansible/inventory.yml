@@ -8,14 +8,14 @@ all:
           ansible_connection: local
 
         bp-controller:
-          ansible_host: 192.168.20.250
+          # Resolve via DNS; site-specific addresses belong in inventory.local.yml.
           ansible_user: root
           ansible_python_interpreter: /usr/bin/python3
 
     proxmox_hosts:
       hosts:
         venombox:
-          ansible_host: 192.168.20.133
+          # Resolve via DNS; site-specific addresses belong in inventory.local.yml.
           ansible_user: root
           ansible_python_interpreter: /usr/bin/python3
 
