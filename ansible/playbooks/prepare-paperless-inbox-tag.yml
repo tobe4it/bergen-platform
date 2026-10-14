@@ -1,42 +1,41 @@
 ---
-- name: Provision Bergen Paperless inbox tag and user review defaults
+# Managed tag catalogue for Bergen Paperless-ngx.
+# Dry-run by default; commit only with paperless_inbox_apply=true.
+- name: Prepare controlled Bergen Paperless tag catalogue
   hosts: venombox
   become: true
   gather_facts: false
   vars:
-    paperless_inbox_apply: false
-    paperless_inbox_lxc: 126
+    paperless_tag_script: "{{ playbook_dir }}/../files/paperless/prepare_inbox_tag.py"
+    paperless_tag_commit: "{{ paperless_inbox_apply | default(false) | bool }}"
   tasks:
-    - name: Confirm intended Proxmox target
+    - name: Require expected Proxmox target
       ansible.builtin.assert:
         that:
-          - inventory_hostname == 'venombox'
-          - paperless_inbox_lxc | int == 126
-    - name: Verify guest identity
+          - inventory_hostname == "venombox"
+          - not ansible_check_mode
+
+    - name: Confirm expected Paperless guest
       ansible.builtin.command:
         argv: [pct, config, '126']
-      register: paperless_inbox_guest_config
+      register: paperless_tag_guest
       changed_when: false
-    - name: Require expected guest hostname
+
+    - name: Require confined Paperless guest
       ansible.builtin.assert:
         that:
-          - "'hostname: bergen-paperless' in paperless_inbox_guest_config.stdout"
-    - name: Check running guest
+          - "'hostname: bergen-paperless' in paperless_tag_guest.stdout_lines"
+          - "'unprivileged: 1' in paperless_tag_guest.stdout_lines"
+          - "'lxc.apparmor.profile: unconfined' not in paperless_tag_guest.stdout"
+
+    - name: Confirm guest is running
       ansible.builtin.command:
         argv: [pct, status, '126']
-      register: paperless_inbox_status
+      register: paperless_tag_status
       changed_when: false
-      failed_when: paperless_inbox_status.rc != 0 or 'status: running' not in paperless_inbox_status.stdout
-    - name: Stage migration code on Proxmox
-      ansible.builtin.copy:
-        src: ../files/paperless/prepare_inbox_tag.py
-        dest: /tmp/bergen-paperless-prepare-inbox-tag.py
-        mode: '0600'
-    - name: Transfer migration code into confined guest
-      ansible.builtin.command:
-        argv: [pct, push, '126', /tmp/bergen-paperless-prepare-inbox-tag.py, /tmp/bergen-paperless-prepare-inbox-tag.py]
-      changed_when: false
-    - name: Preview admin tag and user defaults without modifying data
+      failed_when: paperless_tag_status.rc != 0 or 'status: running' not in paperless_tag_status.stdout
+
+    - name: Preview managed tags, matching algorithms and settings
       ansible.builtin.command:
         argv:
           - pct
@@ -45,24 +44,29 @@
           - --
           - podman
           - exec
-          - -i
+          - -e
+          - BP_INBOX_APPLY=0
           - bergen-paperless
           - python
           - /usr/src/paperless/src/manage.py
           - shell
           - -c
-          - "{{ lookup('ansible.builtin.file', '../files/paperless/prepare_inbox_tag.py') }}"
-      register: paperless_inbox_preview
+          - "{{ lookup('ansible.builtin.file', paperless_tag_script, rstrip=False) }}"
+      register: paperless_tag_preview
       changed_when: false
-    - name: Require safe preview
+
+    - name: Require successful preview
       ansible.builtin.assert:
         that:
-          - "'DRY_RUN_NO_CHANGES' in paperless_inbox_preview.stdout"
-          - "'HISTORIC_DOCUMENTS_UNTOUCHED' in paperless_inbox_preview.stdout"
-    - name: Display preview
+          - "'DRY_RUN_NO_CHANGES' in paperless_tag_preview.stdout"
+          - "'DOCUMENTS_AND_ACLS_UNCHANGED' in paperless_tag_preview.stdout"
+          - "paperless_tag_preview.stdout_lines | select('match', '^TAG_PLAN ') | list | length == 18"
+
+    - name: Display catalogue preview
       ansible.builtin.debug:
-        var: paperless_inbox_preview.stdout_lines
-    - name: Apply tag and defaults only with explicit opt-in
+        var: paperless_tag_preview.stdout_lines
+
+    - name: Apply tag catalogue only when explicitly authorised
       ansible.builtin.command:
         argv:
           - pct
@@ -78,20 +82,18 @@
           - /usr/src/paperless/src/manage.py
           - shell
           - -c
-          - "{{ lookup('ansible.builtin.file', '../files/paperless/prepare_inbox_tag.py') }}"
-      when: paperless_inbox_apply | bool
-      register: paperless_inbox_result
-      changed_when: "'created=1' in paperless_inbox_result.stdout or 'settings_defaulted=0' not in paperless_inbox_result.stdout"
-    - name: Verify committed result
+          - "{{ lookup('ansible.builtin.file', paperless_tag_script, rstrip=False) }}"
+      when: paperless_tag_commit
+      register: paperless_tag_applied
+      changed_when: true
+
+    - name: Require verified database transaction
       ansible.builtin.assert:
         that:
-          - "'INBOX_TAG_PROVISIONED_AND_VERIFIED' in paperless_inbox_result.stdout"
-      when: paperless_inbox_apply | bool
-    - name: Display committed result
+          - "'BERGEN_TAG_CATALOGUE_COMMITTED_AND_VERIFIED' in paperless_tag_applied.stdout"
+      when: paperless_tag_commit
+
+    - name: Display committed catalogue
       ansible.builtin.debug:
-        var: paperless_inbox_result.stdout_lines
-      when: paperless_inbox_apply | bool
-    - name: Remove temporary Proxmox script
-      ansible.builtin.file:
-        path: /tmp/bergen-paperless-prepare-inbox-tag.py
-        state: absent
+        var: paperless_tag_applied.stdout_lines
+      when: paperless_tag_commit
