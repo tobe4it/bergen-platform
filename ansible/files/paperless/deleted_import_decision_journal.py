@@ -74,6 +74,7 @@ def validate_record(record):
             or not _valid_basename(record["source"])
             or not isinstance(record["receiver_source"], str)
             or not record["receiver_source"].startswith(record["scope"] + "/")
+            or not _valid_basename(record["receiver_source"][len(record["scope"]) + 1:])
             or not record["receiver_source"].endswith(
                 "--nas-" + record["sha256"] + ".pdf")
             or not isinstance(record["confirmed_by"], str)
