@@ -151,10 +151,10 @@ def send(snap, filename, scope):
         encoding="utf-8", errors="surrogateescape",
     )
     # rsync --ignore-existing can return exit code 0 without writing a file!
-    # Require the itemized 'new file' record for the one intended basename.
+    # On the local rsync SENDER, <f+++++++++ indicates the newly created\n    # regular file sent to the receiver (not >f+++++++++, which is inbound).\n    # Require exactly one record for the intended basename.
     # In the ambiguous crash-after-transfer-before-receipt case this rejects
     # and requires operator reconciliation instead of falsely saying SENT.
-    expected = ">f+++++++++ " + filename
+    expected = "<f+++++++++ " + filename
     if result.stdout.splitlines().count(expected) != 1:
         # Keep diagnostic output for review rather than accepting an ambiguous
         # success. Escape line endings and bound the length.
