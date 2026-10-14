@@ -139,8 +139,20 @@
                     status = response.status_code
                     data = getattr(response, "data", None)
                     response.close()
+                    scoped_cases = [
+                        case for case in cases if case[1] == username
+                    ]
+                    # A user with no view_document permission may be denied
+                    # access to the entire collection. This is a valid
+                    # negative outcome ONLY if all expected cases are denied.
+                    if status in (403, 404) and all(not case[3] for case in scoped_cases):
+                        for label, _, _, _ in scoped_cases:
+                            print("PASS", label, "list", "HTTP", status, "collection denied")
+                        continue
                     if status != 200 or not isinstance(data, dict) or not isinstance(data.get("results"), list):
-                        raise ValueError("unexpected list response")
+                        print("FAIL", username, "list", "HTTP", status, "unexpected response")
+                        failures += 1
+                        continue
                     results = data["results"]
                     if data.get("next") or data.get("count") != len(results):
                         raise ValueError("incomplete list pagination")
