@@ -1,46 +1,265 @@
 ---
-- name: Prepare guarded Paperless staging bridge
-  hosts: bergen-paperless
+# Deploy exclusively through Proxmox: controller vmbr2 cannot SSH to Paperless vmbr3.
+# This playbook installs the bridge and runs its dry-run ONLY. It never calls --commit.
+- name: Prepare Paperless ingest bridge through Proxmox host
+  hosts: venombox
   gather_facts: false
   become: true
 
+  vars:
+    paperless_bridge_vmid: "126"
+    paperless_bridge_guest_script: /usr/local/libexec/bergen-paperless-ingest-bridge.py
+    paperless_bridge_state: /srv/bergen-paperless/ingest-bridge-state
+
   tasks:
-    - name: Create bridge state directories
-      ansible.builtin.file:
-        path: "{{ item }}"
-        state: directory
-        owner: root
-        group: root
-        mode: '0700'
-      loop:
-        - /srv/bergen-paperless/ingest-bridge-state
-        - /srv/bergen-paperless/ingest-bridge-state/tmp
-        - /srv/bergen-paperless/ingest-bridge-state/receipts
+    - name: Require exact Proxmox inventory target
+      ansible.builtin.assert:
+        that:
+          - inventory_hostname == 'venombox'
+          - not ansible_check_mode
+        fail_msg: "STOP: This bridge preparation must run on venombox, not on bergen-paperless, and not in check mode"
 
-    - name: Ensure script directory
-      ansible.builtin.file:
-        path: /usr/local/libexec
-        state: directory
-        owner: root
-        group: root
-        mode: '0755'
-
-    - name: Install bridge script
-      ansible.builtin.copy:
-        src: ../files/paperless/ingest_bridge.py
-        dest: /usr/local/libexec/bergen-paperless-ingest-bridge.py
-        owner: root
-        group: root
-        mode: '0750'
-
-    - name: Run guarded dry run only
+    - name: Check LXC identity and confinement
       ansible.builtin.command:
-        argv:
-          - /usr/bin/python3
-          - /usr/local/libexec/bergen-paperless-ingest-bridge.py
-      register: bridge_check
+        argv: [pct, config, "{{ paperless_bridge_vmid }}"]
+      register: paperless_bridge_lxc_config
       changed_when: false
 
-    - name: Display dry-run output
-      ansible.builtin.debug:
-        var: bridge_check.stdout_lines
+    - name: Require expected Paperless LXC
+      ansible.builtin.assert:
+        that:
+          - "'hostname: bergen-paperless' in paperless_bridge_lxc_config.stdout_lines"
+          - "'unprivileged: 1' in paperless_bridge_lxc_config.stdout_lines"
+          - "'lxc.apparmor.profile: unconfined' not in paperless_bridge_lxc_config.stdout"
+        fail_msg: "STOP: VMID 126 is not the expected confined bergen-paperless LXC"
+
+    - name: Require running guest
+      ansible.builtin.command:
+        argv: [pct, status, "{{ paperless_bridge_vmid }}"]
+      register: paperless_bridge_guest_status
+      changed_when: false
+      failed_when: paperless_bridge_guest_status.rc != 0 or paperless_bridge_guest_status.stdout | trim != 'status: running'
+
+    - name: Verify guest hostname directly through pct
+      ansible.builtin.command:
+        argv: [pct, exec, "{{ paperless_bridge_vmid }}", --, /bin/hostname, -s]
+      register: paperless_bridge_guest_hostname
+      changed_when: false
+      failed_when: paperless_bridge_guest_hostname.rc != 0 or paperless_bridge_guest_hostname.stdout | trim != 'bergen-paperless'
+
+    - name: Verify guest ingestion paths and any pre-existing target (read-only)
+      ansible.builtin.command:
+        argv:
+          - pct
+          - exec
+          - "{{ paperless_bridge_vmid }}"
+          - --
+          - /usr/bin/python3
+          - -c
+          - |
+            from pathlib import Path
+            import os, pwd, stat
+            ingest_uid = pwd.getpwnam('paperless-ingest').pw_uid
+            required = {
+                '/srv/bergen-paperless/ingest-staging': (0, 0o750),
+                '/srv/bergen-paperless/ingest-staging/Privat': (0, 0o750),
+                '/srv/bergen-paperless/consume': (1000, 0o750),
+                '/srv/bergen-paperless/consume/Privat': (1000, 0o750),
+            }
+            for scope in ('Privat/thomas', 'Privat/nadja', 'Eltern', 'Familie'):
+                required['/srv/bergen-paperless/ingest-staging/' + scope] = (ingest_uid, 0o700)
+                required['/srv/bergen-paperless/consume/' + scope] = (1000, 0o750)
+            for name, (uid, mode) in required.items():
+                s = Path(name).lstat()
+                assert stat.S_ISDIR(s.st_mode) and s.st_uid == uid and stat.S_IMODE(s.st_mode) == mode, 'STOP unsafe directory: ' + name
+            for name, expected_mode in (
+                ('/srv/bergen-paperless/ingest-bridge-state', 0o700),
+                ('/srv/bergen-paperless/ingest-bridge-state/tmp', 0o700),
+                ('/srv/bergen-paperless/ingest-bridge-state/receipts', 0o700),
+                ('/usr/local/libexec', 0o755),
+            ):
+                p = Path(name)
+                if p.is_symlink():
+                    raise RuntimeError('STOP symlink: ' + name)
+                if p.exists():
+                    s = p.lstat()
+                    assert stat.S_ISDIR(s.st_mode) and s.st_uid == 0 and stat.S_IMODE(s.st_mode) == expected_mode, 'STOP unsafe existing directory: ' + name
+            script = Path('/usr/local/libexec/bergen-paperless-ingest-bridge.py')
+            if script.is_symlink():
+                raise RuntimeError('STOP symlink at script target')
+            if script.exists():
+                s = script.lstat()
+                assert stat.S_ISREG(s.st_mode) and s.st_uid == 0, 'STOP unsafe existing script'
+            assert os.stat('/srv/bergen-paperless/consume').st_dev == os.stat('/srv/bergen-paperless').st_dev, 'STOP consume is on another filesystem'
+            print('GUEST_PREFLIGHT=OK')
+      register: paperless_bridge_preflight
+      changed_when: false
+
+    - name: Deploy and verify guarded bridge with cleanup
+      block:
+        - name: Allocate Proxmox-side temporary file
+          ansible.builtin.tempfile:
+            state: file
+            prefix: bergen-paperless-bridge-
+            suffix: .py
+            path: /var/tmp
+          register: paperless_bridge_host_tmp
+
+        - name: Copy reviewed script to Proxmox temporary file
+          ansible.builtin.copy:
+            src: ../files/paperless/ingest_bridge.py
+            dest: "{{ paperless_bridge_host_tmp.path }}"
+            owner: root
+            group: root
+            mode: '0600'
+
+        - name: Calculate source checksum on Proxmox
+          ansible.builtin.stat:
+            path: "{{ paperless_bridge_host_tmp.path }}"
+            checksum_algorithm: sha256
+          register: paperless_bridge_host_stat
+
+        - name: Allocate isolated temporary directory inside guest
+          ansible.builtin.command:
+            argv:
+              - pct
+              - exec
+              - "{{ paperless_bridge_vmid }}"
+              - --
+              - /usr/bin/mktemp
+              - -d
+              - /var/tmp/bergen-paperless-bridge.XXXXXXXX
+          register: paperless_bridge_guest_tmp
+          changed_when: true
+
+        - name: Validate guest temporary path before use
+          ansible.builtin.assert:
+            that:
+              - paperless_bridge_guest_tmp.stdout | trim is match('^/var/tmp/bergen-paperless-bridge\\.[A-Za-z0-9]{8}$')
+
+        - name: Push script through Proxmox (no vmbr2-to-vmbr3 SSH)
+          ansible.builtin.command:
+            argv:
+              - pct
+              - push
+              - "{{ paperless_bridge_vmid }}"
+              - "{{ paperless_bridge_host_tmp.path }}"
+              - "{{ paperless_bridge_guest_tmp.stdout | trim }}/ingest_bridge.py"
+
+        - name: Compare the bytes received inside Paperless guest
+          ansible.builtin.command:
+            argv:
+              - pct
+              - exec
+              - "{{ paperless_bridge_vmid }}"
+              - --
+              - /usr/bin/sha256sum
+              - "{{ paperless_bridge_guest_tmp.stdout | trim }}/ingest_bridge.py"
+          register: paperless_bridge_received_hash
+          changed_when: false
+
+        - name: Require unmodified transferred script
+          ansible.builtin.assert:
+            that:
+              - paperless_bridge_received_hash.stdout.split()[0] == paperless_bridge_host_stat.stat.checksum
+
+        - name: Read existing installed script hash if present
+          ansible.builtin.command:
+            argv:
+              - pct
+              - exec
+              - "{{ paperless_bridge_vmid }}"
+              - --
+              - /usr/bin/sha256sum
+              - "{{ paperless_bridge_guest_script }}"
+          register: paperless_bridge_installed_hash
+          changed_when: false
+          failed_when: false
+
+        - name: Create protected bridge state directories inside guest
+          ansible.builtin.command:
+            argv:
+              - pct
+              - exec
+              - "{{ paperless_bridge_vmid }}"
+              - --
+              - /usr/bin/install
+              - -d
+              - -o
+              - root
+              - -g
+              - root
+              - -m
+              - "0700"
+              - "{{ paperless_bridge_state }}"
+              - "{{ paperless_bridge_state }}/tmp"
+              - "{{ paperless_bridge_state }}/receipts"
+          changed_when: false
+
+        - name: Ensure guest executable directory
+          ansible.builtin.command:
+            argv: [pct, exec, "{{ paperless_bridge_vmid }}", --, /usr/bin/install, -d, -o, root, -g, root, -m, "0755", /usr/local/libexec]
+          changed_when: false
+
+        - name: Install script only if digest changed
+          ansible.builtin.command:
+            argv:
+              - pct
+              - exec
+              - "{{ paperless_bridge_vmid }}"
+              - --
+              - /usr/bin/install
+              - -o
+              - root
+              - -g
+              - root
+              - -m
+              - "0750"
+              - "{{ paperless_bridge_guest_tmp.stdout | trim }}/ingest_bridge.py"
+              - "{{ paperless_bridge_guest_script }}"
+          when: paperless_bridge_installed_hash.rc != 0 or paperless_bridge_installed_hash.stdout.split()[0] != paperless_bridge_host_stat.stat.checksum
+          changed_when: true
+
+        - name: Run bridge in dry-run mode (no PDF publication)
+          ansible.builtin.command:
+            argv:
+              - pct
+              - exec
+              - "{{ paperless_bridge_vmid }}"
+              - --
+              - /usr/bin/python3
+              - "{{ paperless_bridge_guest_script }}"
+          register: paperless_bridge_dryrun
+          changed_when: false
+
+        - name: Display dry-run results
+          ansible.builtin.debug:
+            var: paperless_bridge_dryrun.stdout_lines
+
+      always:
+        - name: Remove guest temporary staging directory
+          ansible.builtin.command:
+            argv:
+              - pct
+              - exec
+              - "{{ paperless_bridge_vmid }}"
+              - --
+              - /usr/bin/rm
+              - -r
+              - --
+              - "{{ paperless_bridge_guest_tmp.stdout | trim }}"
+          when:
+            - paperless_bridge_guest_tmp is defined
+            - paperless_bridge_guest_tmp.stdout is defined
+            - paperless_bridge_guest_tmp.stdout | trim is match('^/var/tmp/bergen-paperless-bridge\\.[A-Za-z0-9]{8}$')
+          changed_when: false
+
+        - name: Remove Proxmox temporary script
+          ansible.builtin.file:
+            path: "{{ paperless_bridge_host_tmp.path }}"
+            state: absent
+          when:
+            - paperless_bridge_host_tmp is defined
+            - paperless_bridge_host_tmp.path is defined
+            - paperless_bridge_host_tmp.path is match('^/var/tmp/bergen-paperless-bridge-[^/]+\\.py$')
+          changed_when: false
