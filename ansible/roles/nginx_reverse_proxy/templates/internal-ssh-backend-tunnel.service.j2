@@ -6,7 +6,7 @@ Wants=network-online.target
 
 [Service]
 Type=simple
-ExecStart=/usr/bin/ssh -F {{ ai_proxy_ssh_config_path }} -o BatchMode=yes -o StrictHostKeyChecking=yes -o ExitOnForwardFailure=yes -o ServerAliveInterval=30 -o ServerAliveCountMax=3 -N -T -L 127.0.0.1:{{ ai_proxy_local_port }}:127.0.0.1:{{ ai_proxy_remote_port }} {{ ai_proxy_ssh_alias }}
+ExecStart=/usr/bin/ssh -N -T -4 -b {{ ai_proxy_source_address }} -F {{ ai_proxy_ssh_config_path }} -o BatchMode=yes -o IdentitiesOnly=yes -o PasswordAuthentication=no -o KbdInteractiveAuthentication=no -o PreferredAuthentications=publickey -o StrictHostKeyChecking=yes -o ExitOnForwardFailure=yes -o ServerAliveInterval=30 -o ServerAliveCountMax=3 -o ForwardAgent=no -o ForwardX11=no -o PermitLocalCommand=no -o ControlMaster=no -o GatewayPorts=no -L 127.0.0.1:{{ ai_proxy_local_port }}:127.0.0.1:{{ ai_proxy_remote_port }} {{ ai_proxy_ssh_alias }}
 Restart=on-failure
 RestartSec=10
 TimeoutStartSec=30
