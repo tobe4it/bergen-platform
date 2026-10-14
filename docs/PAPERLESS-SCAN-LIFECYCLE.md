@@ -886,3 +886,11 @@ beider Journale ist noch nicht nachgewiesen. Beim nächsten
 planmäßigen Backup den erfolgreichen Lauf und die Aufnahme
 des privaten Journal-Verzeichnisses prüfen. Kein weiterer
 Schreibvorgang allein aus diesem Protokoll autorisiert.
+
+### Zwei Journale: read-only Lifecycle-Audit
+
+Neues separates Playbook: `ansible/playbooks/audit-paperless-import-lifecycle-15-26.yml`. Es liest die beiden v2-Journale als `paperless-ingest`, prüft beide SHA-256 und Dateiberechtigungen, verifiziert NAS-SENT-Receipts und Original-Abwesenheit unter Lock sowie die beiden Paperless-Löschungen live. Alle anderen Imports werden mit Hash, Owner, Gruppe und ACL erneut geprüft. Dokumente 15 und 26 besitzen denselben Inhaltshash, jedoch getrennte Identitäten. Unbekannte Löschungen führen zum Abbruch.
+
+Tests: `python3 -m unittest discover -s tests -p 'test_paperless_import_lifecycle_15_26.py' -v`.
+
+Der Audit ist bisher **nicht live getestet**. Erwartete Marker: `DELETED_BY_USER 2`, `IMPORT_LIFECYCLE_RECONCILED`, `ARCHIVE_NOT_AUTHORIZED`, `NO_FILES_CHANGED`. Keine Receipt-Änderung, kein Reimport und keine Archivierungsfreigabe. Der alte Ein-Journal-Audit bleibt unverändert und ist nicht für den neuen Zustand geeignet. Die DSM-Archivierungsblocker und der Backup-Nachweis nach Journalpublikation bleiben offen.
