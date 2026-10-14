@@ -18,33 +18,8 @@ from guardian.shortcuts import get_groups_with_perms, get_users_with_perms
 FLAG = os.environ.get("BP_USER_RIGHTS_APPLY", "0")
 TARGET_RIGHT = "documents.delete_tag"
 # App label, model, permissions: audit only; no automatic grants.
-AUDIT = {
-    "documents": {
-        "document": ("add", "view", "change", "delete"),
-        "tag": ("add", "view", "change", "delete"),
-        "correspondent": ("add", "view", "change", "delete"),
-        "documenttype": ("add", "view", "change", "delete"),
-        "storagepath": ("add", "view", "change", "delete"),
-        "customfield": ("add", "view", "change", "delete"),
-        "note": ("add", "view", "change", "delete"),
-        "savedview": ("add", "view", "change", "delete"),
-        "sharelink": ("add", "view", "delete"),
-        "paperlesstask": ("view", "change"),
-        "workflow": ("add", "view", "change", "delete"),
-        "uisettings": ("add", "view", "change", "delete"),
-        "mailaccount": ("add", "view", "change", "delete"),
-        "mailrule": ("add", "view", "change", "delete"),
-        "appconfig": ("view", "change"),
-    },
-    "auth": {
-        "user": ("add", "view", "change", "delete"),
-        "group": ("add", "view", "change", "delete"),
-    },
-    "paperless": {
-        "globalstatistics": ("view",),
-        "systemmonitoring": ("view",),
-    },
-}
+# The audit enumerates the real Permission rows from the live Paperless DB.
+# This avoids assuming app labels for optional plugins or newly added models.
 # Conservative recommendations, not granted by this migration.
 REVIEW_ONLY = (
     "documents.add_savedview", "documents.view_savedview",
@@ -88,14 +63,15 @@ def tag_delete_blockers():
 def audit_user(user):
     effective = user.get_all_permissions()
     print("USER", user.username, "STAFF", user.is_staff, "SUPERUSER", user.is_superuser)
-    for app_label, models in AUDIT.items():
-        for model, verbs in models.items():
-            rights = [
-                verb for verb in verbs
-                if "%s.%s_%s" % (app_label, verb, model) in effective
-            ]
-            print("RIGHTS", user.username, app_label + "." + model,
-                  ",".join(rights) if rights else "-")
+    for content_type in ContentType.objects.filter(
+        permission__isnull=False
+    ).distinct().order_by("app_label", "model"):
+        perms = Permission.objects.filter(content_type=content_type).order_by("codename")
+        rights = [p.codename for p in perms if
+                  content_type.app_label + "." + p.codename in effective]
+        print("RIGHTS", user.username,
+              content_type.app_label + "." + content_type.model,
+              ",".join(rights) if rights else "-")
     missing = [right for right in REVIEW_ONLY if right not in effective]
     print("REVIEW_ONLY_MISSING", user.username, ",".join(missing) if missing else "-")
     print("DELETE_TAG", user.username,
