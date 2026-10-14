@@ -45,9 +45,9 @@ WATCH_MASK = (IN_CLOSE_WRITE | IN_MOVED_TO | IN_DELETE_SELF
 SIGNAL_MASK = IN_CLOSE_WRITE | IN_MOVED_TO
 LOST_MASK = IN_DELETE_SELF | IN_MOVE_SELF | IN_UNMOUNT | IN_IGNORED
 
-QUIET_AFTER_EVENT = 65    # Sender requires 60 seconds since last mtime/ctime.
-FULL_SCAN_SECONDS = 900  # Recovery from missed/overflowed events.
-SYNC_TIMEOUT_SECONDS = 3600
+QUIET_AFTER_EVENT = sync.SETTINGS["event_delay"]
+FULL_SCAN_SECONDS = sync.SETTINGS["full_scan"]
+SYNC_TIMEOUT_SECONDS = sync.SETTINGS["sender_timeout"]
 EVENT_HEADER = struct.Struct("iIII")
 SCRIPT = Path(__file__).resolve().with_name("synology_scan_sync.py")
 
