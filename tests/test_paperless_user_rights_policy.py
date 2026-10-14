@@ -22,6 +22,9 @@ class UserRightsTests(unittest.TestCase):
     def test_only_model_tag_delete_is_added(self):
         self.assertIn('codename="delete_tag"', self.source)
         self.assertIn("user.user_permissions.add(perm)", self.source)
+        self.assertIn('ADULT_TAG_EDITORS = ("nadja", "thomas")', self.source)
+        self.assertIn("for user in editors:", self.source)
+        self.assertIn("MISSING_TAG_EDITOR_BASELINE", self.source)
         self.assertNotIn('assign_perm("delete_tag"', self.source)
         self.assertNotIn('assign_perm("delete_document"', self.source)
         self.assertNotIn('user.is_staff = True', self.source)
