@@ -2,16 +2,17 @@
 # Read-only, allowlisted Open WebUI environment preflight.
 # Does not inspect or print credentials, LDAP bind details, session keys,
 # bearer tokens, user records or document data.
+# Runs via venombox -> pct exec 110 (no guest SSH or guest IP required).
 # Reports configuration hints, NOT a successful end-to-end auth proof.
 - name: Inspect Bergen-AI authentication readiness (read-only)
-  hosts: bergen-ai
+  hosts: venombox
   become: true
   gather_facts: false
 
   tasks:
-    - name: Verify intended AI guest
+    - name: Verify intended AI guest via Proxmox
       ansible.builtin.command:
-        argv: [hostname, -s]
+        argv: [pct, exec, '110', --, hostname, -s]
       register: paperless_ai_hostname
       changed_when: false
       failed_when: paperless_ai_hostname.stdout | trim != 'bergen-ai'
@@ -19,6 +20,10 @@
     - name: Inspect allowlisted Open WebUI authentication flags only
       ansible.builtin.command:
         argv:
+          - pct
+          - exec
+          - '110'
+          - --
           - podman
           - exec
           - open-webui
