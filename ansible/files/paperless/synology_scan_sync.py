@@ -115,7 +115,7 @@ def read_receipt(path):
     if not stat.S_ISREG(st.st_mode) or st.st_uid != os.geteuid() or stat.S_IMODE(st.st_mode) != 0o600:
         raise RuntimeError("UNSAFE_RECEIPT " + str(path))
     data = json.loads(path.read_text(encoding="utf-8"))
-    if data.get("status") != "SENT":
+    if data.get("status") not in ("PREPARED", "SENT"):
         raise RuntimeError("UNKNOWN_RECEIPT_STATE " + str(path))
     return data
 
@@ -156,7 +156,13 @@ def send(snap, filename, scope):
     # and requires operator reconciliation instead of falsely saying SENT.
     expected = ">f+++++++++ " + filename
     if result.stdout.splitlines().count(expected) != 1:
-        raise RuntimeError("RSYNC_NOT_CONFIRMED_NEW_FILE " + scope + "/" + filename)
+        # Keep diagnostic output for review rather than accepting an ambiguous
+        # success. Escape line endings and bound the length.
+        raise RuntimeError(
+            "RSYNC_NOT_CONFIRMED_NEW_FILE " + scope + "/" + filename
+            + " stdout=" + repr(result.stdout[-1200:])
+            + " stderr=" + repr(result.stderr[-400:])
+        )
 
 
 def scan(commit, only=None):
@@ -185,9 +191,15 @@ def scan(commit, only=None):
                         continue
                     receipt_file = receipt_path(scope, path.name)
                     old = read_receipt(receipt_file)
-                    if old is not None and old["signature"] == signature(st):
-                        print("TRACKED", scope + "/" + path.name)
-                        continue
+                    if old is not None:
+                        if old["status"] == "PREPARED":
+                            raise RuntimeError("MANUAL_REVIEW_PREPARED " + scope + "/" + path.name)
+                        if old.get("signature") == signature(st):
+                            print("TRACKED", scope + "/" + path.name)
+                            continue
+                        # Do not silently overwrite proof of a different
+                        # source version with the same path.
+                        raise RuntimeError("MANUAL_REVIEW_SOURCE_CHANGED " + scope + "/" + path.name)
                     if processed >= MAX_FILES_PER_RUN:
                         print("DEFERRED", scope + "/" + path.name,
                               "(new-candidate limit reached)")
@@ -209,16 +221,22 @@ def scan(commit, only=None):
                             raise RuntimeError("MISSING_SSH_IDENTITY")
                         remote_snapshot = Path(tmpdir) / filename
                         snap.rename(remote_snapshot)
-                        send(remote_snapshot, filename, scope)
-                        write_receipt(receipt_file, {
-                            "status": "SENT",
+                        # Write-ahead journal: after a crash or uncertain rsync
+                        # outcome never automatically retry the same filename.
+                        prepared = {
+                            "status": "PREPARED",
                             "scope": scope,
                             "source": path.name,
                             "destination": scope + "/" + filename,
                             "sha256": checksum,
                             "signature": source_signature,
-                            "sent_at": time.time(),
-                        })
+                            "prepared_at": time.time(),
+                        }
+                        write_receipt(receipt_file, prepared)
+                        send(remote_snapshot, filename, scope)
+                        prepared["status"] = "SENT"
+                        prepared["sent_at"] = time.time()
+                        write_receipt(receipt_file, prepared)
                         print("SENT", scope + "/" + path.name, "->", scope + "/" + filename)
                 except Exception as exc:
                     print("REJECTED", scope + "/" + path.name, str(exc), file=sys.stderr)
