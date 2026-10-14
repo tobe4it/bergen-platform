@@ -27,7 +27,9 @@ SOURCES = (
     (Path("/volume1/paperless-scan/Familie"), "Familie"),
 )
 HOME = Path.home()
-STATE = HOME / ".local" / "state" / "bergen-paperless-sync"
+STATE_ROOT = Path("/volume1")
+STATE_PARENT = STATE_ROOT / ".bergen-platform-state"
+STATE = STATE_PARENT / "paperless-sync"
 IDENTITY = HOME / ".ssh" / "id_ed25519_paperless_ingest"
 DESTINATION = "paperless-ingest@bergen-paperless"
 QUIET_SECONDS = 60
@@ -37,22 +39,20 @@ MAX_FILES_PER_RUN = 100
 
 def secure_state():
     os.umask(0o077)
-    # .local and .local/state are shared per-user application directories:
-    # normal 0755 parents are safe if they are user-owned and not writable
-    # by anyone else. Never chmod these existing directories.
-    # The Paperless-specific journal directory MUST remain private (0700).
-    parents = (HOME / ".local", HOME / ".local" / "state")
-    for path in (*parents, STATE):
-        path.mkdir(mode=0o700, exist_ok=True)
-        info = path.lstat()  # Reject symlinks, including existing ones.
-        mode = stat.S_IMODE(info.st_mode)
-        if not stat.S_ISDIR(info.st_mode) or info.st_uid != os.geteuid():
+    # DSM Home directories can appear world-writable (0777) with Synology
+    # ACLs. The sync receipts must not live below such a directory.
+    # Provision STATE_PARENT as root:root 0755 and STATE as
+    # paperless-sync:users 0700 separately, before any sync run.
+    # Nothing is auto-created or chmodded here: fail closed on bad paths.
+    for path, owner, mode in (
+        (STATE_ROOT, 0, 0o755),
+        (STATE_PARENT, 0, 0o755),
+        (STATE, os.geteuid(), 0o700),
+    ):
+        info = path.lstat()  # Also rejects symlink components.
+        if (not stat.S_ISDIR(info.st_mode) or info.st_uid != owner
+                or stat.S_IMODE(info.st_mode) != mode):
             raise RuntimeError("UNSAFE_STATE_DIRECTORY " + str(path))
-        if path == STATE:
-            if mode != 0o700:
-                raise RuntimeError("UNSAFE_PRIVATE_STATE_MODE " + str(path))
-        elif mode & 0o022:
-            raise RuntimeError("WRITABLE_STATE_PARENT " + str(path))
 
 
 def metadata(path):
