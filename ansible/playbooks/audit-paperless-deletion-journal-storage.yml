@@ -1,0 +1,70 @@
+---
+# Read-only inspection only. No directory creation, no journal writing.
+- name: Audit Paperless deletion journal storage and scheduled backup configuration
+  hosts: venombox
+  gather_facts: false
+  become: true
+  tasks:
+    - name: Verify Paperless guest configuration
+      ansible.builtin.command:
+        argv: [pct, config, '126']
+      register: journal_storage_guest
+      changed_when: false
+
+    - name: Require expected unprivileged guest
+      ansible.builtin.assert:
+        that:
+          - "'hostname: bergen-paperless' in journal_storage_guest.stdout_lines"
+          - "'unprivileged: 1' in journal_storage_guest.stdout_lines"
+
+    - name: Inspect mount points, existing candidate parents and account identity
+      ansible.builtin.command:
+        argv:
+          - pct
+          - exec
+          - '126'
+          - --
+          - /bin/sh
+          - -c
+          - |
+            set -eu
+            command -v findmnt >/dev/null
+            command -v stat >/dev/null
+            printf '%s\n' '=== EXISTING ACCOUNTS ==='
+            getent passwd paperless || true
+            getent passwd paperless-ingest || true
+            printf '%s\n' '=== EXISTING PATHS AND MOUNTS ==='
+            for p in / /var /var/lib /srv /srv/bergen-paperless /var/lib/paperless; do
+              if [ -e "$p" ]; then
+                stat -c 'PATH %n MODE %a UID %u GID %g TYPE %F' "$p"
+                findmnt -T "$p" -n -o TARGET,SOURCE,FSTYPE,OPTIONS
+              else
+                printf 'ABSENT %s\n' "$p"
+              fi
+            done
+            printf '%s\n' 'NO_FILES_CHANGED'
+      register: journal_storage_guest_audit
+      changed_when: false
+
+    - name: Inspect Proxmox scheduled backup configuration
+      ansible.builtin.command:
+        argv: [pvesh, get, /cluster/backup, --output-format, json]
+      register: journal_storage_backup_jobs
+      changed_when: false
+
+    - name: Show guest rootfs and mount configuration
+      ansible.builtin.debug:
+        var: journal_storage_guest.stdout_lines
+
+    - name: Show read-only guest filesystem audit
+      ansible.builtin.debug:
+        var: journal_storage_guest_audit.stdout_lines
+
+    - name: Show scheduled backup jobs for manual review
+      ansible.builtin.debug:
+        var: journal_storage_backup_jobs.stdout
+
+    - name: Confirm read-only completion
+      ansible.builtin.assert:
+        that:
+          - "'NO_FILES_CHANGED' in journal_storage_guest_audit.stdout_lines"
