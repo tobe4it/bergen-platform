@@ -121,6 +121,12 @@ class DeletedDecisionJournalTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "DELETION_PROOF_OR_APPROVAL_MISMATCH"):
             journal.build_record(n, DELETED, "thomas", decision()["confirmed_at"], 26, BRIDGE)
 
+    def test_receiver_path_traversal_rejected(self):
+        rec = decision()
+        rec["receiver_source"] = "Privat/thomas/../bad--nas-" + SHA + ".pdf"
+        with self.assertRaisesRegex(ValueError, "INVALID_DECISION_FIELDS"):
+            journal.validate_record(rec)
+
     def test_non_utc_confirmation_rejected(self):
         rec = decision()
         rec["confirmed_at"] = "2026-10-14T21:39:00+02:00"
