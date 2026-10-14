@@ -22,3 +22,9 @@ ansible/vars/mail-tls.local.yml
 ansible/vars/selfhost-acme.local.vault.yml
 ansible/vars/selfhost-acme.local.yml
 ansible/vars/selfhost-acme.vault.yml
+
+# Paperless NAS site config and encrypted local credentials
+ansible/vars/paperless-synology.local.yml
+ansible/vars/paperless-synology.local.yml~
+ansible/vars/paperless-synology.local.yml.*~
+ansible/vars/paperless.vault.yml
