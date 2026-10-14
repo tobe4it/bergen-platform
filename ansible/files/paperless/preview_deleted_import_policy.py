@@ -9,9 +9,9 @@ import json
 import re
 import sys
 
-SHA = re.compile(r"[a-f0-9]{64}\\Z")
-SENDER = re.compile(r"[a-f0-9]{64}\\.json\\Z")
-BRIDGE = re.compile(r"[a-f0-9]{24}\\.json\\Z")
+SHA = re.compile(r"[a-f0-9]{64}\Z")
+SENDER = re.compile(r"[a-f0-9]{64}\.json\Z")
+BRIDGE = re.compile(r"[a-f0-9]{24}\.json\Z")
 
 
 def records(lines):
