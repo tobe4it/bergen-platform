@@ -201,7 +201,7 @@ def acknowledge_verified_import(only, expected_digest, bridge_receipt):
         actual_digest, source_signature = checked
         if actual_digest != expected_digest:
             raise RuntimeError("SOURCE_SHA256_CHANGED")
-        stem = re.sub(r"[^\\w. -]", "_", path.stem, flags=re.UNICODE).strip(" ._-")[:120] or "scan"
+        stem = re.sub(r"[^\w. -]", "_", path.stem, flags=re.UNICODE).strip(" ._-")[:120] or "scan"
         filename = stem + "--nas-" + actual_digest + ".pdf"
         write_receipt(receipt, {
             "status": "SENT",
