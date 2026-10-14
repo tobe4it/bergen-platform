@@ -694,3 +694,40 @@ ansible-playbook \
 
 Die Import-Lifecycle-Reconciliation bleibt bis zur
 Klärung dieses zweiten Receipts fail-closed.
+
+### Zweite explizite Benutzerlöschung: Dokument 15 (read-only Preflight)
+
+Der Benutzer hat am 14.10.2026 bestätigt, dass auch
+Dokument 15 bewusst aus Paperless und die entsprechende
+Quelldatei von der Synology gelöscht wurden. Der Bridge-Receipt
+`7a92b91deb7b2e8e35f9f710.json` bleibt historisch
+`IMPORTED`; die Live-Diagnose zeigte `DOCUMENT_EXISTS False`
+und `EXPECTED_FILENAME_EXISTS False`.
+Diese Erklärung ist **keine Freigabe zum Schreiben eines zweiten Journals**.
+
+Das neue rein lesende Playbook
+`ansible/playbooks/preview-paperless-deleted-import-15.yml`
+prüft die Abwesenheit in Paperless über die bestehende
+Exporter-Logik und sucht unter exklusivem Sender-Lock den
+historischen NAS-Sender-Receipt **anhand von Zielpfad und
+SHA-256**, ohne den möglicherweise normalisierten Scan-Dateinamen
+zu erraten. Es prüft dessen Identität, `SENT`-Status,
+Signatur, Quelle, Pfadschlüssel und Abwesenheit des Originals.
+Ein unabhängiger Matcher bestätigt die Übereinstimmung beider
+Seiten. Alle Schritte sind read-only; weder Journal noch
+Receipts, NAS-Originale oder Dokumente werden geändert.
+Ein Journal-Schema oder produktiver Writer für Dokument 15
+ist noch nicht eingerichtet. Bis zur vollständigen gesonderten
+Journalisierung bleibt die Lifecycle-Reconciliation
+fail-closed.
+
+```bash
+python3 -m unittest discover -s tests -p 'test_paperless_deleted_import_15.py' -v
+ansible-playbook \
+  -i ansible/inventory.yml \
+  -i ansible/inventory.local.yml \
+  ansible/playbooks/preview-paperless-deleted-import-15.yml \
+  --vault-id paperless@prompt \
+  -e @ansible/vars/paperless.vault.yml \
+  -e @ansible/vars/paperless-synology.local.yml
+```
