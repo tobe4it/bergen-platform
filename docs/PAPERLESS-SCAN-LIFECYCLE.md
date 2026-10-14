@@ -24,10 +24,11 @@ A full recovery into isolated test guest 901 was completed on 2026-10-12,
 including PostgreSQL, Redis, Paperless and an OCR test document; the test
 guest was subsequently removed. Additional protected archive created
 2026-10-13. The systemd units `bergen-paperless-vzdump.service` and
-`.timer` were installed and enabled for 03:00 Europe/Berlin with a proposed
-7-daily/4-weekly/12-monthly retention setting. **Verify** the timer's last
-successful run, service exit status, current backup destination, and actual
-retention before allowing expiry. A successful historical restore is not
+`.timer` run at 03:00 Europe/Berlin. The 2026-10-14 run completed successfully
+at 03:02:54, with rootfs and mp0 included and an archive present on the NFS
+target. The executed retention was keep-daily=7, keep-weekly=4,
+keep-monthly=12. Purge still needs a fresh backup-health check at the time
+of each deletion, not just this historical evidence. A successful historical restore is not
 proof that the unattended job continues to work.
 
 ## Fail-closed workflow
@@ -49,8 +50,8 @@ proof that the unattended job continues to work.
    and signature. The archiver has a lock and durable journal. If any
    comparison fails, it must leave the original source in place.
 5. After validated live import proof, the archive step atomically moves
-   the original PDF from the monitored input into a root-protected,
-   non-watched quarantine within
+   the original PDF from the monitored input into a private,
+   non-watched quarantine owned by the restricted sync account within
    `state_parent/paperless-archive/<scope>/YYYY-MM/`. Private and shared
    scopes remain separated; no new read grants are created.
    The restricted `paperless-sync` account is intended to have **read and
@@ -61,10 +62,15 @@ proof that the unattended job continues to work.
    unlink/rename depend on directory-level delete/delete-child rights.
    The current broad input ACE permits more than this target and must not
    be blindly replaced while production ingest is running.
-   As the quarantine is root:root 0700, use a narrowly authorised,
-   proof-validated one-shot administrative move helper to cross that
-   boundary; do not give `paperless-sync` general root access or make the
-   quarantine writable to it.
+   The quarantine directory and its scope/month subdirectories are owned by
+   the configured `paperless-sync` account (group `users`) and use mode `0700`.
+   Its application parent and code/config remain root:root `0755` / root-owned.
+   The same account is authorised to move verified originals into this
+   quarantine and to delete expired archived PDFs. Time-based deletion is
+   enforced by the scheduled application logic, **not by the filesystem ACL**;
+   thus compromise of the sync account can also cause early deletion. Run
+   the expiry worker as `paperless-sync` with no elevation. Minimise its
+   capabilities, keep durable audit receipts and verify periodic backups.
 6. The NAS receipt remains durable, so the same scan cannot be resent merely
    because it has disappeared from the inbox. A crash after rename and before
    journal update must be recoverable by examining the quarantine target
@@ -90,7 +96,7 @@ content and crash recovery.
 
 Also verify the future archiver's month rollover provisioning and privacy
 boundary: existing NAS scanner folders may have Synology-specific ACLs, while
-the technical root-only quarantine must not inherit an unintended shared ACL.
+the private sync-user-owned quarantine must not inherit an unintended shared ACL.
 A new LDAP home requires per-home safe provision and explicit Paperless
 workflow/ACL activation before its scope may be monitored.
 
