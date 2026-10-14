@@ -26,7 +26,7 @@ Paperless-ngx v3.3.0 `src/documents/permissions.py`,
 | Modell | Empfohlene Nutzung | Entscheidung |
 | --- | --- | --- |
 | SavedView | Eigene gespeicherte Ansichten erstellen/bearbeiten/löschen | Audit, danach gesondert freigeben |
-| Note | Notizen an zugänglichen Dokumenten | API-Sonderlogik prüfen, nicht pauschal freigeben |
+| Note | Notizen an zugänglichen Dokumenten | Paperless prüft im Dokument-Endpunkt view_document/change_document; fehlende globale Note-Rechte bedeuten nicht automatisch fehlende Notizfunktion |
 | CustomField | Vorhandene Felder lesen/verwenden | Eigentümerregel und Datenmodell prüfen |
 | StoragePath | Pfade lesen/verwenden | Keine unkontrollierte Pfadverwaltung |
 | PaperlessTask | Eigene Tasks ansehen | Audit |
@@ -49,8 +49,8 @@ und alle Sicherheitsblocker für `delete_tag`.
 
 Nach Prüfung und ausdrücklicher Freigabe aktiviert
 `-e paperless_user_rights_apply=true` **ausschließlich**
-`documents.delete_tag` für aktive reguläre Nicht-Staff-Konten.
-Vor dem Commit werden unbesessene Tags und fremde
+`documents.delete_tag` ausschließlich für die aktiven erwachsenen Tag-Verwalter\n\`nadja\` und \`thomas\` (nicht \`thomas3\`).
+Vor dem Commit werden die Tag-Editor-Basisrechte, unbesessene Tags und fremde
 Löschobjektberechtigungen erneut überprüft. Es werden keine
 Objektberechtigungen hinzugefügt und keine Tags oder Dokumente
 verändert.
