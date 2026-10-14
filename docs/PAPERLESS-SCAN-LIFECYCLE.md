@@ -325,3 +325,50 @@ python3 -m unittest discover \
   -s tests \
   -p 'test_paperless_deleted_import_decision_journal.py' -v
 ```
+
+### Bewusste Löschung auf beiden Seiten: `DELETED_BY_USER` (nur Vorschau)
+
+Bei Dokument 26 (`Privat/thomas/Gebuehren 2.pdf`) hat der Nutzer die
+Löschung in Paperless **und** auf der Synology ausdrücklich bestätigt.
+Die vorherige Vorschau `preview-paperless-deleted-import.yml` verlangt
+noch eine vorhandene NAS-Quelldatei und ist dafür ungeeignet.
+
+`preview-paperless-deleted-by-user.yml` prüft rein lesend:
+
+1. Paperless: historischer Bridge-Receipt `IMPORTED`, zugehörige
+   Dokument-ID und ursprünglicher Importdateiname aktuell nicht vorhanden.
+2. Synology: unter dem Sender-Lock existiert das Original **nicht**;
+   das reguläre `SENT`-Receipt existiert unverändert, ist restriktiv
+   geschützt und enthält die historische Prüfsumme, Quelldatei und
+   Empfängerkennung. Der Receipt-Schlüssel wird nach
+   `SHA256(scope + NUL + filename)` gegengeprüft.
+3. Lokal: beide Nachweise müssen in Scope, Empfängerkennung, SHA-256
+   und den ausdrücklich bestätigten IDs übereinstimmen.
+
+Die Ausgabe `PREVIEW_DELETED_BY_USER` ist **kein persistierter
+Journalstatus**, kein Nachweis, *wer* die Dateien technisch gelöscht
+hat, und keine Archivierungsfreigabe. Abwesenheit wird nur zum
+Prüfzeitpunkt festgestellt. Sender- und Bridge-Receipt werden nicht
+verändert. Wiederimport, Wiederherstellung, Archivkopie und
+Quelllöschung sind nicht Bestandteil dieser Vorschau.
+
+```bash
+python3 -m unittest discover \
+  -s tests \
+  -p 'test_paperless_deleted_by_user_policy.py' -v
+
+ansible-playbook \
+  -i ansible/inventory.yml \
+  -i ansible/inventory.local.yml \
+  ansible/playbooks/preview-paperless-deleted-by-user.yml \
+  --vault-id paperless@prompt \
+  -e @ansible/vars/paperless.vault.yml \
+  -e @ansible/vars/paperless-synology.local.yml
+```
+
+Das bestehende offline-only Journalmodul kennt weiterhin nur
+`DELETED_IN_PAPERLESS`. `DELETED_BY_USER` darf nicht durch bloßes
+Umbenennen des bestehenden Ereignistyps gespeichert werden: Zunächst
+sind ein separates Schema, Nachweisbindung, Tests und die Freigabe
+einer produktiven Integration erforderlich. Der bisherige
+Archivabgleich bleibt fail-closed.
