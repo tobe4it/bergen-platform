@@ -1,0 +1,97 @@
+---
+- name: Provision Bergen Paperless inbox tag and user review defaults
+  hosts: venombox
+  become: true
+  gather_facts: false
+  vars:
+    paperless_inbox_apply: false
+    paperless_inbox_lxc: 126
+  tasks:
+    - name: Confirm intended Proxmox target
+      ansible.builtin.assert:
+        that:
+          - inventory_hostname == 'venombox'
+          - paperless_inbox_lxc | int == 126
+    - name: Verify guest identity
+      ansible.builtin.command:
+        argv: [pct, config, '126']
+      register: paperless_inbox_guest_config
+      changed_when: false
+    - name: Require expected guest hostname
+      ansible.builtin.assert:
+        that:
+          - "'hostname: bergen-paperless' in paperless_inbox_guest_config.stdout"
+    - name: Check running guest
+      ansible.builtin.command:
+        argv: [pct, status, '126']
+      register: paperless_inbox_status
+      changed_when: false
+      failed_when: paperless_inbox_status.rc != 0 or 'status: running' not in paperless_inbox_status.stdout
+    - name: Stage migration code on Proxmox
+      ansible.builtin.copy:
+        src: ../files/paperless/prepare_inbox_tag.py
+        dest: /tmp/bergen-paperless-prepare-inbox-tag.py
+        mode: '0600'
+    - name: Transfer migration code into confined guest
+      ansible.builtin.command:
+        argv: [pct, push, '126', /tmp/bergen-paperless-prepare-inbox-tag.py, /tmp/bergen-paperless-prepare-inbox-tag.py]
+      changed_when: false
+    - name: Preview admin tag and user defaults without modifying data
+      ansible.builtin.command:
+        argv:
+          - pct
+          - exec
+          - '126'
+          - --
+          - podman
+          - exec
+          - -i
+          - bergen-paperless
+          - python
+          - /usr/src/paperless/src/manage.py
+          - shell
+          - -c
+          - "{{ lookup('ansible.builtin.file', '../files/paperless/prepare_inbox_tag.py') }}"
+      register: paperless_inbox_preview
+      changed_when: false
+    - name: Require safe preview
+      ansible.builtin.assert:
+        that:
+          - "'DRY_RUN_NO_CHANGES' in paperless_inbox_preview.stdout"
+          - "'HISTORIC_DOCUMENTS_UNTOUCHED' in paperless_inbox_preview.stdout"
+    - name: Display preview
+      ansible.builtin.debug:
+        var: paperless_inbox_preview.stdout_lines
+    - name: Apply tag and defaults only with explicit opt-in
+      ansible.builtin.command:
+        argv:
+          - pct
+          - exec
+          - '126'
+          - --
+          - podman
+          - exec
+          - -e
+          - BP_INBOX_APPLY=1
+          - bergen-paperless
+          - python
+          - /usr/src/paperless/src/manage.py
+          - shell
+          - -c
+          - "{{ lookup('ansible.builtin.file', '../files/paperless/prepare_inbox_tag.py') }}"
+      when: paperless_inbox_apply | bool
+      register: paperless_inbox_result
+      changed_when: "'created=1' in paperless_inbox_result.stdout or 'settings_defaulted=0' not in paperless_inbox_result.stdout"
+    - name: Verify committed result
+      ansible.builtin.assert:
+        that:
+          - "'INBOX_TAG_PROVISIONED_AND_VERIFIED' in paperless_inbox_result.stdout"
+      when: paperless_inbox_apply | bool
+    - name: Display committed result
+      ansible.builtin.debug:
+        var: paperless_inbox_result.stdout_lines
+      when: paperless_inbox_apply | bool
+    - name: Remove temporary Proxmox script
+      ansible.builtin.file:
+        path: /tmp/bergen-paperless-prepare-inbox-tag.py
+        state: absent
