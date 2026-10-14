@@ -128,6 +128,8 @@ class Document15JournalPublisherTests(unittest.TestCase):
 
     def test_wrong_user_blocks_before_loading_code(self):
         with patch.object(publisher.os, "geteuid", return_value=0), \
+             patch.object(publisher.pwd, "getpwnam",
+                          return_value=types.SimpleNamespace(pw_uid=997, pw_gid=988)), \
              patch.object(publisher, "_load_module",
                           side_effect=AssertionError("module must not load")):
             with self.assertRaisesRegex(RuntimeError, "RESTRICTED_INGEST_IDENTITY_REQUIRED"):
