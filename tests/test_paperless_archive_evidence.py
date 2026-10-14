@@ -16,7 +16,7 @@ spec.loader.exec_module(m)
 D = "a" * 64
 DEST = "Familie/scan--nas-" + D + ".pdf"
 N = {"sender_receipt": "b" * 64 + ".json", "scope": "Familie", "source": "scan.pdf", "receiver_source": DEST, "sha256": D}
-P = {"bridge_receipt": "c" * 24 + ".json", "receiver_source": DEST, "sha256": D, "document_id": 23}
+P = {"schema_version": 1, "bridge_receipt": "c" * 24 + ".json", "receiver_source": DEST, "sha256": D, "document_id": 23}
 
 
 def output(nas, paperless):
@@ -31,6 +31,10 @@ class ArchiveEvidenceTests(unittest.TestCase):
         result = output(json.dumps(N), json.dumps(P))
         self.assertIn("ARCHIVE_MATCH_READY", result)
         self.assertIn("MATCHED 1", result)
+
+    def test_unknown_schema_fails_closed(self):
+        with self.assertRaisesRegex(RuntimeError, "INVALID_OR_DUPLICATE_PAPERLESS_PROOF"):
+            output(json.dumps(N), json.dumps(dict(P, schema_version=2)))
 
     def test_missing_proof_blocks(self):
         self.assertIn("ARCHIVE_MATCH_BLOCKED", output(json.dumps(N), ""))
@@ -61,6 +65,7 @@ class ArchiveEvidenceTests(unittest.TestCase):
     def test_playbook_read_only(self):
         play = PLAY.read_text(encoding="utf-8")
         self.assertIn("changed_when: false", play)
+        self.assertIn('failed_when: "archive_guest_status.rc', play)
         self.assertIn("pct", play)
         self.assertIn("audit_synology_archive_candidates.py", play)
         self.assertNotIn("paperless_archive_apply", play)
