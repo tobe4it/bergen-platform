@@ -39,8 +39,17 @@ git fetch origin
 git merge --ff-only origin/feat/paperless-ingest-bridge-20261014
 
 python3 -m py_compile \
+  ansible/files/paperless/synology_scan_sync.py \
   ansible/files/paperless/synology_inotify_watch.py \
   ansible/files/paperless/synology_watcher_supervisor.py
+
+# The sender must be deployed at the exact reviewed version first.
+ansible-playbook \
+  -i ansible/inventory.yml \
+  -i ansible/inventory.local.yml \
+  ansible/playbooks/prepare-paperless-synology-scan-sync.yml \
+  --vault-id paperless@prompt \
+  -e @ansible/vars/paperless.vault.yml
 
 ansible-playbook \
   -i ansible/inventory.yml \
