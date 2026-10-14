@@ -98,6 +98,19 @@ dadurch **nicht** automatisch. Benutzergebundene API-Delegation,
 Tool-Identitätsbindung und Paperless-ACLs bleiben separate Sicherheitsgates.
 Ein globaler Paperless-Admin-Token ist weiterhin ausgeschlossen.
 
+## Öffentliche Dienstnamen und Wildcard-TLS (Entwurf)
+
+Bergen-AI soll künftig unter `https://ai.thebergens.net` erreichbar
+sein und den bestehenden Wildcard-Zertifikats-Lebenszyklus nutzen.
+Das produktive Paperless bleibt unter `https://paperless.thebergens.net`;
+der Synology SSO Server nutzt **weiterhin**
+`https://sehnde.tbergen.de:5001` mit entsprechendem Zertifikat.
+Der neue OIDC-Client für Open WebUI soll nach Prüfung der laufenden
+Version auf `https://ai.thebergens.net/oauth/oidc/callback` zurückführen.
+TLS-Terminierung und Zertifikats-Consumer sind noch nicht bestimmt.
+Siehe [Bergen-AI TLS/SSO Plan](BERGEN-AI-TLS-SSO.md) und das
+read-only `ansible/playbooks/audit-open-webui-tls-readiness.yml`.
+
 ## Sicherheitsinvarianten (verbindlich)
 
 1. **Identität:** Jede Anfrage an die Dokumentensuche besitzt eine durch den
