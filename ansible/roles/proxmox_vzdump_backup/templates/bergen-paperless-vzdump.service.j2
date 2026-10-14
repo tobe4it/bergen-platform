@@ -1,0 +1,11 @@
+[Unit]
+Description=Bergen Paperless LXC {{ paperless_backup_vmid }} daily consistent Proxmox backup
+Documentation=man:systemd.service(5)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStartPre=/usr/bin/mountpoint -q /mnt/pve/{{ paperless_backup_storage }}
+ExecStart=/usr/bin/vzdump {{ paperless_backup_vmid }} --storage {{ paperless_backup_storage }} --mode stop --compress zstd --tmpdir {{ paperless_backup_tmpdir }} --prune-backups {{ paperless_backup_prune }} --remove 1
+TimeoutStartSec=infinity

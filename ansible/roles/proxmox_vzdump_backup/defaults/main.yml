@@ -1,0 +1,12 @@
+---
+paperless_backup_vmid: 0
+paperless_backup_guest_hostname: ""
+paperless_backup_storage: ""
+paperless_backup_expected_export: ""
+paperless_backup_pve_host: ""
+paperless_backup_schedule_approved: false
+paperless_backup_timer_enabled: false
+paperless_backup_calendar: "*-*-* 03:00:00 Europe/Berlin"
+paperless_backup_tmpdir: /var/tmp
+paperless_backup_prune: "keep-daily=7,keep-weekly=4,keep-monthly=12"
+paperless_backup_unit: bergen-paperless-vzdump
