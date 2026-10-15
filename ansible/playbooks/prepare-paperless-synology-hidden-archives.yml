@@ -1,0 +1,51 @@
+---
+# Audit-only by default. --prepare must be explicitly opted in.
+# No PDF, sender, Paperless API, receipt, activation gate or purge modifications.
+- name: Verify or provision same-subvolume hidden archives for Paperless
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  tasks:
+    - name: Validate explicit Synology context and prepare boolean
+      ansible.builtin.assert:
+        that:
+          - synology_admin is defined
+          - synology_admin is match('^[A-Za-z_][A-Za-z0-9_.-]*@[A-Za-z0-9][A-Za-z0-9.-]+$')
+          - synology_config is defined
+          - synology_config.schema_version == 1
+          - synology_config.state_parent is match('^/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$')
+          - synology_config.sync_user == 'paperless-sync'
+          - (paperless_hidden_archive_prepare | default(false)) is boolean
+        fail_msg: "Ignored site-local NAS settings are required"
+
+    - name: Run pinned-root Synology hidden-archive audit or explicit preparation
+      ansible.builtin.command:
+        argv:
+          - ssh
+          - -T
+          - -o
+          - BatchMode=yes
+          - -o
+          - StrictHostKeyChecking=yes
+          - -o
+          - ConnectTimeout=15
+          - "{{ synology_admin }}"
+          - >-
+            sudo -n /usr/bin/python3 -
+            {{ synology_config.state_parent | quote }}
+            {{ '--prepare' if (paperless_hidden_archive_prepare | default(false) | bool) else '--audit' }}
+        stdin: "{{ lookup('ansible.builtin.file', playbook_dir + '/../files/paperless/prepare_synology_hidden_archives.py', rstrip=False) }}"
+      register: paperless_hidden_archive_result
+      changed_when: "'ARCHIVE_CREATED' in paperless_hidden_archive_result.stdout"
+
+    - name: Confirm archive gate remains absent and input files untouched
+      ansible.builtin.assert:
+        that:
+          - "'ARCHIVE_GATE_ABSENT' in paperless_hidden_archive_result.stdout_lines"
+          - "'NO_SCAN_OR_RECEIPT_FILES_CHANGED' in paperless_hidden_archive_result.stdout_lines"
+          - "'ARCHIVE_COMMIT_NOT_AUTHORIZED' in paperless_hidden_archive_result.stdout_lines"
+        fail_msg: "Archive preparation not safely completed"
+
+    - name: Display scoped directory/ACL warnings
+      ansible.builtin.debug:
+        var: paperless_hidden_archive_result.stdout_lines
