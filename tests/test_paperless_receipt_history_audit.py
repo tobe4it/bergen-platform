@@ -154,7 +154,8 @@ class HistoryAuditTests(unittest.TestCase):
         path, record = v2(self.root, 'SENT', nonce='b' * 32)
         with self.assertRaisesRegex(RuntimeError, 'SENT_WITHOUT_PREPARED'):
             self.result()
-        record['incarnation_nonce'] = 'a' * 32
+        path.unlink()
+        path, record = v2(self.root, 'SENT', nonce='a' * 32)
         record['transfer_evidence']['new_file_confirmed'] = False
         write_record(self.root, path.name, record)
         with self.assertRaisesRegex(RuntimeError, 'INVALID_V2_TRANSFER_EVIDENCE'):
