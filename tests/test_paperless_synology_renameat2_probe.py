@@ -188,6 +188,63 @@ class IsolatedSynologyRenameTests(unittest.TestCase):
             self.assertTrue(fixture.exists())
             self.assertTrue(other.exists())
 
+    def test_actual_dsm_acl_header_with_spaces_before_newlines(self):
+        # Exact live paperless-scan diagnostic (15.10.2026).
+        stdout = (
+            "ACL version: 1 \n"
+            "Archive: is_inherit,is_support_ACL \n"
+            "Owner: [root(user)] \n"
+            "--------------------- \n"
+            "\t [0] group:administrators:allow:rwxpdDaARWc--:fd-- (level:1)\n"
+        )
+        result = subprocess.CompletedProcess(
+            [], 0, stdout=stdout, stderr="")
+        self.assertTrue(probe._has_expected_inherited_dsm_acl(result))
+
+    def test_unpadded_dsm_acl_header_also_accepted(self):
+        result = subprocess.CompletedProcess(
+            [], 0, stdout=(
+                "ACL version: 1\n"
+                "Archive: is_inherit,is_support_ACL\n"),
+            stderr="")
+        self.assertTrue(probe._has_expected_inherited_dsm_acl(result))
+
+    def test_dsm_acl_header_does_not_accept_changed_flags_or_order(self):
+        headers = (
+            "ACL version: 1 \nArchive: has_ACL \n",
+            "Archive: is_inherit,is_support_ACL \nACL version: 1 \n",
+            "ACL version: 2 \nArchive: is_inherit,is_support_ACL \n",
+            "ACL version: 1 \nArchive: is_inherit,is_support_ACL,has_ACL \n",
+            "ACL version: 1 \nOwner: [root(user)]\n"
+            "Archive: is_inherit,is_support_ACL \n",
+        )
+        for output in headers:
+            with self.subTest(stdout=output):
+                result = subprocess.CompletedProcess(
+                    [], 0, stdout=output, stderr="")
+                self.assertFalse(probe._has_expected_inherited_dsm_acl(result))
+
+    def test_dsm_acl_header_rejects_leading_or_embedded_whitespace(self):
+        headers = (
+            " ACL version: 1 \nArchive: is_inherit,is_support_ACL \n",
+            "ACL version: 1 \n Archive: is_inherit,is_support_ACL \n",
+            "ACL version: 1 invalid\nArchive: is_inherit,is_support_ACL \n",
+            "ACL version: 1 \nArchive: is_inherit, is_support_ACL \n",
+        )
+        for output in headers:
+            with self.subTest(stdout=output):
+                result = subprocess.CompletedProcess(
+                    [], 0, stdout=output, stderr="")
+                self.assertFalse(probe._has_expected_inherited_dsm_acl(result))
+
+    def test_dsm_acl_header_rejects_error_status_or_stderr(self):
+        good = "ACL version: 1 \nArchive: is_inherit,is_support_ACL \n"
+        for rc, stderr in ((1, ""), (255, ""), (0, "warning")):
+            with self.subTest(rc=rc, stderr=stderr):
+                result = subprocess.CompletedProcess(
+                    [], rc, stdout=good, stderr=stderr)
+                self.assertFalse(probe._has_expected_inherited_dsm_acl(result))
+
     def test_inherited_dsm_acl_is_removed_only_from_new_fixture(self):
         with tempfile.TemporaryDirectory(prefix="rename-safety-") as tmp:
             root = Path(tmp)
@@ -197,9 +254,9 @@ class IsolatedSynologyRenameTests(unittest.TestCase):
             events = []
             response = [
                 subprocess.CompletedProcess([], 0,
-                    stdout="ACL version: 1\nArchive: is_inherit,is_support_ACL\n", stderr=""),
+                    stdout="ACL version: 1 \nArchive: is_inherit,is_support_ACL \n", stderr=""),
                 subprocess.CompletedProcess([], 0,
-                    stdout="ACL version: 1\nArchive: is_inherit,is_support_ACL\n", stderr=""),
+                    stdout="ACL version: 1 \nArchive: is_inherit,is_support_ACL \n", stderr=""),
                 subprocess.CompletedProcess([], 0, stdout="", stderr=""),
                 subprocess.CompletedProcess([], 255,
                     stdout="(synoacltool.c, 596)It's Linux mode\n", stderr=""),
