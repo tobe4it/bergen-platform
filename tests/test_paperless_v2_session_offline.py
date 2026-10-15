@@ -80,13 +80,17 @@ class OfflineSessionTests(unittest.TestCase):
             "NO_FILES_CHANGED",
         ]) + "\n"
 
-    def run(self, transport=None, receiver=None):
+    def execute_session(self, transport=None, receiver=None):
         return session.run_offline_once(
             self.journal, self.source, SCOPE,
             transport or self.transport, receiver or self.receiver)
 
+    def test_unittest_run_entrypoint_is_not_shadowed(self):
+        # TestCase.run is the unittest framework's own lifecycle hook.
+        self.assertIs(OfflineSessionTests.run, unittest.TestCase.run)
+
     def test_complete_matching_mock_session_never_writes_sent(self):
-        result = self.run()
+        result = self.execute_session()
         self.assertEqual(self.calls, ["transport", "receiver"])
         self.assertEqual(len(self.prepared_events()), 1)
         self.assertFalse(any(p.name.endswith(".sent.json") for p in self.receipts()))
@@ -98,10 +102,10 @@ class OfflineSessionTests(unittest.TestCase):
         self.assertEqual(self.source.read_bytes(), PDF)
 
     def test_repeated_call_rejected_without_even_invoking_mock(self):
-        self.run()
+        self.execute_session()
         calls = list(self.calls)
         with self.assertRaisesRegex(RuntimeError, "EXISTING_RECEIPT_BLOCKS_RETRANSMISSION"):
-            self.run()
+            self.execute_session()
         self.assertEqual(self.calls, calls)
         self.assertEqual(len(self.prepared_events()), 1)
 
@@ -111,11 +115,11 @@ class OfflineSessionTests(unittest.TestCase):
             self.assertTrue(self.prepared_events())
             raise KeyboardInterrupt("injected crash")
         with self.assertRaises(KeyboardInterrupt):
-            self.run(transport=crash)
+            self.execute_session(transport=crash)
         self.assertEqual(self.calls, ["transport"])
         self.assertEqual(len(self.prepared_events()), 1)
         with self.assertRaisesRegex(RuntimeError, "EXISTING_RECEIPT_BLOCKS_RETRANSMISSION"):
-            self.run()
+            self.execute_session()
         self.assertEqual(self.calls, ["transport"])
 
     def test_failed_rsync_returncode_keeps_prepared_without_receiver(self):
@@ -123,7 +127,7 @@ class OfflineSessionTests(unittest.TestCase):
             self.calls.append("transport")
             return (23, "", "")
         with self.assertRaisesRegex(RuntimeError, "OFFLINE_RSYNC_NOT_VERIFIED"):
-            self.run(transport=failure)
+            self.execute_session(transport=failure)
         self.assertEqual(self.calls, ["transport"])
         self.assertEqual(len(self.prepared_events()), 1)
         self.assertFalse(any(p.name.endswith(".sent.json") for p in self.receipts()))
@@ -133,7 +137,7 @@ class OfflineSessionTests(unittest.TestCase):
             self.calls.append("transport")
             return (0, "sending incremental file list\n", "")
         with self.assertRaisesRegex(ValueError, "RSYNC_NEW_FILE_MARKER"):
-            self.run(transport=ambiguous)
+            self.execute_session(transport=ambiguous)
         self.assertEqual(self.calls, ["transport"])
         self.assertEqual(len(self.prepared_events()), 1)
 
@@ -142,7 +146,7 @@ class OfflineSessionTests(unittest.TestCase):
             rc, out, err = self.transport(snapshot, prepared)
             return rc, out.replace("<f+++++++++", ">f+++++++++"), err
         with self.assertRaisesRegex(ValueError, "RSYNC_NEW_FILE_MARKER"):
-            self.run(transport=wrong)
+            self.execute_session(transport=wrong)
         self.assertEqual(self.calls, ["transport"])
 
     def test_receiver_timeout_leaves_unresolved_prepared(self):
@@ -150,18 +154,18 @@ class OfflineSessionTests(unittest.TestCase):
             self.calls.append("receiver")
             raise TimeoutError("offline simulated timeout")
         with self.assertRaises(TimeoutError):
-            self.run(receiver=timeout)
+            self.execute_session(receiver=timeout)
         self.assertEqual(self.calls, ["transport", "receiver"])
         self.assertEqual(len(self.prepared_events()), 1)
         with self.assertRaisesRegex(RuntimeError, "EXISTING_RECEIPT_BLOCKS_RETRANSMISSION"):
-            self.run()
+            self.execute_session()
 
     def test_receiver_wrong_hash_leaves_prepared_unresolved(self):
         def corrupted(prepared):
             rc, out = self.receiver(prepared)
             return rc, out.replace(prepared["sha256"], "f" * 64)
         with self.assertRaisesRegex(ValueError, "RECEIVER_PROOF_IDENTITY"):
-            self.run(receiver=corrupted)
+            self.execute_session(receiver=corrupted)
         self.assertEqual(len(self.prepared_events()), 1)
         self.assertFalse(any(p.name.endswith(".sent.json") for p in self.receipts()))
 
@@ -170,7 +174,7 @@ class OfflineSessionTests(unittest.TestCase):
             rc, out = self.receiver(prepared)
             return rc, out.replace(out.splitlines()[0], "RECEIVER_BINDING " + "1" * 64)
         with self.assertRaisesRegex(ValueError, "RECEIVER_PROOF_IDENTITY"):
-            self.run(receiver=wrong_nonce)
+            self.execute_session(receiver=wrong_nonce)
 
     def test_changed_source_after_rsync_blocks_receiver(self):
         def change(snapshot, prepared):
@@ -178,7 +182,7 @@ class OfflineSessionTests(unittest.TestCase):
             self.source.write_bytes(PDF + b"appended")
             return result
         with self.assertRaisesRegex(RuntimeError, "OFFLINE_SOURCE_CHANGED_AFTER_TRANSFER"):
-            self.run(transport=change)
+            self.execute_session(transport=change)
         self.assertEqual(self.calls, ["transport"])
         self.assertEqual(len(self.prepared_events()), 1)
 
@@ -188,7 +192,7 @@ class OfflineSessionTests(unittest.TestCase):
             snapshot.write_bytes(PDF + b"spoofed")
             return result
         with self.assertRaisesRegex(RuntimeError, "OFFLINE_SNAPSHOT_CHANGED"):
-            self.run(transport=mutate)
+            self.execute_session(transport=mutate)
         self.assertEqual(self.calls, ["transport"])
         self.assertEqual(len(self.prepared_events()), 1)
 
@@ -202,7 +206,7 @@ class OfflineSessionTests(unittest.TestCase):
             retained[0].write_bytes(PDF + b"spoofed")
             return result
         with self.assertRaisesRegex(RuntimeError, "OFFLINE_SNAPSHOT_CHANGED"):
-            self.run(transport=transport, receiver=receiver)
+            self.execute_session(transport=transport, receiver=receiver)
         self.assertEqual(self.calls, ["transport", "receiver"])
         self.assertEqual(len(self.prepared_events()), 1)
 
@@ -212,7 +216,7 @@ class OfflineSessionTests(unittest.TestCase):
             self.source.write_bytes(PDF + b"appended")
             return result
         with self.assertRaisesRegex(RuntimeError, "OFFLINE_SOURCE_CHANGED_AFTER_TRANSFER"):
-            self.run(receiver=change)
+            self.execute_session(receiver=change)
         self.assertEqual(self.calls, ["transport", "receiver"])
         self.assertFalse(any(p.name.endswith(".sent.json") for p in self.receipts()))
 
@@ -223,7 +227,7 @@ class OfflineSessionTests(unittest.TestCase):
             receipt.write_bytes(b"altered")
             return result
         with self.assertRaisesRegex(RuntimeError, "PREPARED_CHANGED_AFTER_RSYNC"):
-            self.run(transport=tamper)
+            self.execute_session(transport=tamper)
         self.assertEqual(self.calls, ["transport"])
 
     def test_prepared_tampering_after_receiver_rejected(self):
@@ -232,14 +236,14 @@ class OfflineSessionTests(unittest.TestCase):
             self.prepared_events()[0].write_bytes(b"altered")
             return result
         with self.assertRaisesRegex(RuntimeError, "PREPARED_CHANGED_AFTER_RECEIVER"):
-            self.run(receiver=tamper)
+            self.execute_session(receiver=tamper)
 
     def test_receiver_failure_returncode_blocks_success(self):
         def failure(prepared):
             rc, stdout = self.receiver(prepared)
             return 1, stdout
         with self.assertRaisesRegex(ValueError, "RECEIVER_PROCESS_UNSUCCESSFUL"):
-            self.run(receiver=failure)
+            self.execute_session(receiver=failure)
         self.assertEqual(len(self.prepared_events()), 1)
 
     def test_v1_receipt_blocks_new_nonce_and_callback(self):
@@ -255,7 +259,7 @@ class OfflineSessionTests(unittest.TestCase):
         path.chmod(0o600)
         original = path.read_bytes()
         with self.assertRaisesRegex(RuntimeError, "EXISTING_RECEIPT_BLOCKS_RETRANSMISSION"):
-            self.run()
+            self.execute_session()
         self.assertEqual(path.read_bytes(), original)
         self.assertEqual(self.calls, [])
         self.assertFalse(self.prepared_events())
@@ -267,7 +271,7 @@ class OfflineSessionTests(unittest.TestCase):
         self.source.unlink()
         self.source.symlink_to(target)
         with self.assertRaisesRegex(RuntimeError, "UNSAFE_OFFLINE_SOURCE"):
-            self.run()
+            self.execute_session()
         self.assertFalse(self.prepared_events())
         self.assertEqual(self.calls, [])
 
@@ -275,19 +279,19 @@ class OfflineSessionTests(unittest.TestCase):
         other = self.root / "other.pdf"
         os.link(self.source, other)
         with self.assertRaisesRegex(RuntimeError, "UNSAFE_OFFLINE_SOURCE"):
-            self.run()
+            self.execute_session()
         self.assertFalse(self.prepared_events())
 
     def test_publicly_readable_source_rejected(self):
         self.source.chmod(0o644)
         with self.assertRaisesRegex(RuntimeError, "UNSAFE_OFFLINE_SOURCE"):
-            self.run()
+            self.execute_session()
         self.assertFalse(self.prepared_events())
 
     def test_not_pdf_rejected_without_journal(self):
         self.source.write_bytes(b"Definitely no PDF")
         with self.assertRaisesRegex(RuntimeError, "INVALID_OFFLINE_PDF"):
-            self.run()
+            self.execute_session()
         self.assertFalse(self.prepared_events())
 
     def test_wrong_scope_rejected_without_journal(self):
@@ -307,7 +311,7 @@ class OfflineSessionTests(unittest.TestCase):
             self.calls.append("transport")
             return (0, "OK")
         with self.assertRaisesRegex(ValueError, "INVALID_TRANSPORT_CALLBACK"):
-            self.run(transport=malformed)
+            self.execute_session(transport=malformed)
         self.assertEqual(self.calls, ["transport"])
         self.assertEqual(len(self.prepared_events()), 1)
 
@@ -316,7 +320,7 @@ class OfflineSessionTests(unittest.TestCase):
             self.calls.append("receiver")
             return "SUCCESS"
         with self.assertRaisesRegex(ValueError, "INVALID_RECEIVER_CALLBACK"):
-            self.run(receiver=malformed)
+            self.execute_session(receiver=malformed)
         self.assertEqual(self.calls, ["transport", "receiver"])
         self.assertEqual(len(self.prepared_events()), 1)
 
@@ -334,7 +338,7 @@ class OfflineSessionTests(unittest.TestCase):
         def r(prepared):
             assert_lock()
             return self.receiver(prepared)
-        result = self.run(transport=t, receiver=r)
+        result = self.execute_session(transport=t, receiver=r)
         self.assertFalse(result["sent_authorized"])
 
     def test_existing_exclusive_lock_blocks_reservation(self):
@@ -342,7 +346,7 @@ class OfflineSessionTests(unittest.TestCase):
         try:
             flock(fd, LOCK_EX | LOCK_NB)
             with self.assertRaises(BlockingIOError):
-                self.run()
+                self.execute_session()
         finally:
             flock(fd, LOCK_UN)
             os.close(fd)
@@ -353,7 +357,7 @@ class OfflineSessionTests(unittest.TestCase):
         orphan = self.journal / ".v2-receipt-old.tmp"
         orphan.write_bytes(b"uncertain crash")
         with self.assertRaisesRegex(RuntimeError, "UNKNOWN_OR_ORPHANED_JOURNAL_ENTRY"):
-            self.run()
+            self.execute_session()
         self.assertEqual(self.calls, [])
         self.assertEqual(orphan.read_bytes(), b"uncertain crash")
         self.assertFalse(self.prepared_events())
