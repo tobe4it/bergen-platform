@@ -1,0 +1,4 @@
+---
+# EXAMPLE ONLY. Store the populated file via ansible-vault, Git-ignored.
+# Each independent DNS-zone instance must have its own API credentials.
+selfhost_acme_api_key: CHANGE_ME_ID.CHANGE_ME_SECRET
