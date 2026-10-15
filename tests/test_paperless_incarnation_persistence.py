@@ -69,6 +69,18 @@ class IncarnationPersistenceTests(unittest.TestCase):
         self.assertEqual(prepared["receipt_id"] + ".prepared.json", path.name)
         self.assertEqual(prepared["status"], "PREPARED")
 
+    def test_classifier_accepts_and_validates_nonce_bound_v2(self):
+        _, prepared = self.reserve()
+        candidate = dict(prepared)
+        self.assertEqual(versions.classify_existing(
+            [candidate], SCOPE, NAME, DIGEST, SIG, "v2"), "BLOCK_PREPARED")
+        candidate["status"] = "SENT"
+        self.assertEqual(versions.classify_existing(
+            [candidate], SCOPE, NAME, DIGEST, SIG, "v2"), "TRACKED")
+        candidate["incarnation_nonce"] = "b" * 32
+        with self.assertRaisesRegex(ValueError, "FORGED_V2_RECEIPT_ID"):
+            versions.classify_existing([candidate], SCOPE, NAME, DIGEST, SIG, "v2")
+
     def test_restart_never_allocates_a_second_id(self):
         path, record = self.reserve()
         with self.assertRaisesRegex(RuntimeError, "HISTORICAL_NAME_REQUIRES_RECONCILIATION"):
