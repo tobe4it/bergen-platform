@@ -597,6 +597,53 @@ zusätzlicher Identitätsprüfung kontrolliert per
 sowie der lesende Vorab-Audit bestanden sind.
 Beide Archiv-Commit-Gates bleiben gesperrt.
 
+## Synology-ACL-Header: tatsächliche Ausgabe (15.10.2026)
+
+Der zweite explizite `paperless-scan`-Kernel-Probe-Lauf
+brach **vor jeder Verschiebung** mit
+`UNEXPECTED_INHERITED_FIXTURE_ACL` ab. Der
+bereinigte `try/finally`-Pfad bestätigte dabei
+`ISOLATED_EMPTY_FIXTURE_CLEANED paperless-scan`.
+Ein danach kontrolliert angelegter, unveränderter
+Diagnoseordner (`st_dev=1048641`, `root:root`,
+POSIX-Modus `0000`) zeigte mit zwei identischen,
+lesenden `synoacltool -get`-Aufrufen:
+
+    ACL_GET_1_RC 0
+    ACL_GET_2_RC 0
+    'ACL version: 1 \\n'
+    'Archive: is_inherit,is_support_ACL \\n'
+
+Die Kopfzeilen enthalten im DSM **zusätzliche
+Leerzeichen vor dem Zeilenende**. Der alte Parser
+forderte dagegen `ACL version: 1\\n` ohne
+Leerzeichen. Der Diagnoseordner wurde unmittelbar
+per `rmdir` entfernt:
+`EMPTY_DIAGNOSTIC_FIXTURE_REMOVED`,
+`NO_SOURCE_OR_ARCHIVE_FILES_CHANGED`.
+
+Korrektur auf diesem Draft-Branch: Der Parser
+akzeptiert ausschließlich **horizontale abschließende
+Leerzeichen/Tabs** in den beiden erwarteten
+Kopfzeilen. Exit-Code muss weiterhin 0 sein,
+`stderr` muss leer bleiben, die Reihenfolge,
+`ACL version: 1` und
+`Archive: is_inherit,is_support_ACL` müssen
+unverändert stimmen. Keine Änderung an
+Owner-/Device-/Inode-/Subvolume-Checks, an
+`synoacltool -del`-Beschränkung auf den eigenen
+neuen *leeren* Testordner oder an den
+Commit-Gates.
+
+Fünf weitere Regressionstests decken genau die
+DSM-Ausgabe mit Zeilenend-Leerzeichen, die
+unformatierte Ausgabe, falsche Flags/Reihenfolge,
+führende oder interne Leerzeichen sowie
+Toolfehler ab (**23** Tests insgesamt,
+**Ausführung des neuen Stands ausstehend**).
+Bis zum bestandenen Test: **kein erneuter
+Live-Kernel-Probe-Lauf**.
+
 ## Noch gesperrte produktive Verschiebung
 
 Vor einer Standort-Commit-Freigabe müssen alle
