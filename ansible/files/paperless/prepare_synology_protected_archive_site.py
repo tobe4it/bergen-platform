@@ -139,6 +139,28 @@ def validate_private_directory(path, uid, dev, tool):
             "PRIVATE_ARCHIVE_NATIVE_ACL_REVIEW_REQUIRED")
 
 
+def verify_empty_site_tree(archive, scopes, owner, device, tool):
+    """Read-only verification of a precisely empty, private staged site.
+
+    Until the worker and import proof gate are released, ANY unexpected entry,
+    including a PDF, hidden file or symlink, is an explicit blocker.
+    """
+    expected = {archive: set()}
+    for scope in scopes:
+        parent = archive
+        for part in scope.split("/"):
+            child = parent / part
+            expected[parent].add(part)
+            expected.setdefault(child, set())
+            parent = child
+    for path, permitted in expected.items():
+        validate_private_directory(path, owner, device, tool)
+        with os.scandir(path) as stream:
+            names = {entry.name for entry in stream}
+        require(names == permitted, "ARCHIVE_TREE_NOT_EMPTY_OR_UNEXPECTED_ENTRY")
+    return len(expected)
+
+
 def sync_dir(path):
     fd = os.open(path, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
     try:
@@ -214,6 +236,12 @@ def inspect(parent, site, prepare=False):
     print("PROTECTED_ARCHIVE_ROOT", str(archive))
     print("PROTECTED_ARCHIVE_CANDIDATE", "EXISTS" if (archive.exists() or archive.is_symlink()) else "ABSENT")
     if not prepare:
+        if archive.exists() or archive.is_symlink():
+            count = verify_empty_site_tree(
+                archive, wanted, user.pw_uid, device, tool)
+            print("PROTECTED_ARCHIVE_EMPTY_TREE_VERIFIED", site, count)
+        else:
+            print("PROTECTED_ARCHIVE_NOT_YET_STAGED", site)
         print("PREPARE_DISABLED")
         print("NO_FILES_CHANGED")
         print("ARCHIVE_COMMIT_NOT_AUTHORIZED")
@@ -226,6 +254,9 @@ def inspect(parent, site, prepare=False):
         for part in scope.split("/"):
             current = current / part
             stage_empty(current, user.pw_uid, user.pw_gid, device, tool)
+    count = verify_empty_site_tree(
+        archive, wanted, user.pw_uid, device, tool)
+    print("PROTECTED_ARCHIVE_EMPTY_TREE_VERIFIED", site, count)
     print("PROTECTED_SITE_PREPARED", site)
     print("NO_SCAN_OR_RECEIPT_FILES_CHANGED")
     print("ARCHIVE_GATE_ABSENT")
