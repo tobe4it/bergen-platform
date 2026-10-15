@@ -27,6 +27,14 @@ ACE = re.compile(
     r"(group|user):([^:]+):(allow|deny):([rwxpdDaARWcCo-]{13,15}):"
     r"([fdin-]{4})\s+\(level:[0-9]+\)"
 )
+# Synology's root-owned volume roots can expose the special owner
+# principal as owner::allow:... . Its rights belong to st_uid, not to
+# a general LDAP user; evaluate_parent requires st_uid == 0.
+OWNER_ACE = re.compile(
+    r"(?:^|\s)(?:\?\s*)?\[[0-9]+\]\s+"
+    r"owner::(allow|deny):([rwxpdDaARWcCo-]{13,15}):"
+    r"([fdin-]{4})\s+\(level:[0-9]+\)"
+)
 LINUX_MODE = re.compile(r"\(synoacltool\.c,\s*[0-9]+\)It's Linux mode\Z")
 
 
@@ -80,9 +88,14 @@ def parse_native_aces(output):
         if "allow:" not in line and "deny:" not in line:
             continue
         match = ACE.search(line)
-        if match is None:
-            raise RuntimeError("UNRECOGNIZED_NATIVE_ACL_ENTRY " + acl_excerpt(line))
-        entries.append(match.groups())
+        if match is not None:
+            entries.append(match.groups())
+        else:
+            owner = OWNER_ACE.search(line)
+            if owner is None:
+                raise RuntimeError("UNRECOGNIZED_NATIVE_ACL_ENTRY " + acl_excerpt(line))
+            effect, permissions, inherit = owner.groups()
+            entries.append(("owner", "", effect, permissions, inherit))
         if len(entries) > 100:
             raise RuntimeError("ACL_ENTRY_LIMIT")
     require(entries, "NATIVE_ACL_EMPTY")
@@ -93,6 +106,10 @@ def parent_delete_grants(aces, sync_user):
     bad = []
     for role, principal, effect, permissions, _inherit in aces:
         if effect != "allow":
+            continue
+        # Called only after evaluate_parent established st_uid == 0:
+        # the special Synology owner:: ACE therefore belongs to root.
+        if role == "owner":
             continue
         if role == "group" and principal in ADMIN_GROUPS:
             continue
