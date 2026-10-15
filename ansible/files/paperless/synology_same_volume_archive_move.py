@@ -387,6 +387,8 @@ def archive_one(source_dir, state_dir, scope, filename, proof, *,
                             "bridge_receipt": proof["bridge_receipt"],
                             "document_id": proof["document_id"],
                             "sha256": receipt["sha256"], "signature": signature,
+                            "archive_site": SITE_BY_SCOPE[scope],
+                            "archive_scope_dir": str(archive_scope_dir),
                             "archive_month": month, "archive_name": final,
                         }
                         if not commit:
