@@ -127,6 +127,26 @@ def _validate_archive_scope_path(archive_scope_dir, source_dir, scope):
             "ARCHIVE_NOT_IN_PROTECTED_SITE")
 
 
+def _require_site_commit_gate(state_parent, site):
+    """Only a per-site root-owned 0600 release authorizes live rename.
+
+    Never accept the former archive-move.enabled global flag. No gate is
+    generated in the repository or deployed by archive worker staging.
+    """
+    require(site in frozenset(SITE_BY_SCOPE.values()), "INVALID_ARCHIVE_SITE")
+    legacy = state_parent / "archive-move.enabled"
+    require(not legacy.exists() and not legacy.is_symlink(),
+            "LEGACY_ARCHIVE_GATE_MUST_BE_ABSENT")
+    gate = state_parent / ("archive-move." + site + ".enabled")
+    try:
+        st = gate.lstat()
+    except FileNotFoundError:
+        raise RuntimeError("ARCHIVE_SITE_GATE_NOT_APPROVED") from None
+    require(stat.S_ISREG(st.st_mode) and st.st_uid == 0 and st.st_nlink == 1
+            and stat.S_IMODE(st.st_mode) == 0o600,
+            "ARCHIVE_SITE_GATE_NOT_APPROVED")
+
+
 def _read_source(dirfd, name, limit, *, expected_signature, expected_sha,
                  after_rename=False):
     before = os.stat(name, dir_fd=dirfd, follow_symlinks=False)
@@ -463,13 +483,7 @@ def main():
     require(not global_gate.exists() and not global_gate.is_symlink(),
             "LEGACY_ARCHIVE_GATE_MUST_BE_ABSENT")
     if args.commit:
-        # Per-site gate is intentionally NOT provisioned by any playbook.
-        # It must be released separately, after the full site acceptance suite.
-        gate = parent / ("archive-move." + site + ".enabled")
-        st = gate.lstat()
-        require(stat.S_ISREG(st.st_mode) and st.st_uid == 0
-                and st.st_nlink == 1 and stat.S_IMODE(st.st_mode) == 0o600,
-                "ARCHIVE_SITE_GATE_NOT_APPROVED")
+        _require_site_commit_gate(parent, site)
     proof = _read_json_stdin()
     result = archive_one(source_dir, SETTINGS["state"], scope, filename, proof,
                          archive_scope_dir=archive_scope_dir,
