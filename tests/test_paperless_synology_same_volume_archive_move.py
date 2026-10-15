@@ -334,6 +334,58 @@ class SameVolumeArchiveTests(unittest.TestCase):
             with self.assertRaisesRegex(RuntimeError, "ARCHIVE_SITE_ROOT_MISMATCH"):
                 move._validated_protected_scope(self.folder, SCOPE, os.geteuid())
 
+    def test_site_commit_gates_absent_by_default(self):
+        for site in ("homes", "paperless-scan"):
+            with self.subTest(site=site):
+                with self.assertRaisesRegex(
+                        RuntimeError, "ARCHIVE_SITE_GATE_NOT_APPROVED"):
+                    move._require_site_commit_gate(self.base, site)
+
+    def test_legacy_global_gate_never_activates_site(self):
+        legacy = self.base / "archive-move.enabled"
+        legacy.write_bytes(b"")
+        legacy.chmod(0o600)
+        with self.assertRaisesRegex(
+                RuntimeError, "LEGACY_ARCHIVE_GATE_MUST_BE_ABSENT"):
+            move._require_site_commit_gate(self.base, "paperless-scan")
+
+    def test_symlink_or_wrong_mode_site_gate_is_rejected(self):
+        gate = self.base / "archive-move.paperless-scan.enabled"
+        gate.symlink_to(self.state / "sync.lock")
+        with self.assertRaisesRegex(RuntimeError, "ARCHIVE_SITE_GATE_NOT_APPROVED"):
+            move._require_site_commit_gate(self.base, "paperless-scan")
+        gate.unlink()
+        gate.write_bytes(b"")
+        gate.chmod(0o644)
+        with self.assertRaisesRegex(RuntimeError, "ARCHIVE_SITE_GATE_NOT_APPROVED"):
+            move._require_site_commit_gate(self.base, "paperless-scan")
+
+    def test_gate_cannot_authorize_other_site(self):
+        gate = self.base / "archive-move.homes.enabled"
+        gate.write_bytes(b"")
+        gate.chmod(0o600)
+        original = Path.lstat
+
+        def simulate_root_gate(path):
+            st = original(path)
+            if path == gate:
+                return SimpleNamespace(st_mode=st.st_mode, st_uid=0,
+                                       st_nlink=st.st_nlink)
+            return st
+
+        with patch.object(Path, "lstat", simulate_root_gate):
+            move._require_site_commit_gate(self.base, "homes")
+            with self.assertRaisesRegex(
+                    RuntimeError, "ARCHIVE_SITE_GATE_NOT_APPROVED"):
+                move._require_site_commit_gate(self.base, "paperless-scan")
+
+    def test_disabled_worker_staging_rejects_both_site_gates(self):
+        stage_yaml = (CODE.parent.parent / "playbooks" /
+                      "stage-paperless-synology-archive-worker.yml").read_text()
+        for gate in ("archive-move.enabled", "archive-move.homes.enabled",
+                     "archive-move.paperless-scan.enabled"):
+            self.assertIn(gate, stage_yaml)
+
     def test_archival_does_not_disable_30_day_retention(self):
         self.execute(commit=True)
         self.assertTrue(self.target.exists())
