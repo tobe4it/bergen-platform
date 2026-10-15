@@ -4,6 +4,7 @@ import hashlib
 import os
 import sys
 import unittest
+import yaml
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -167,6 +168,26 @@ class OfflineTransferEvidenceTests(unittest.TestCase):
         self.assertIn("OFFLINE ONLY", src)
         active = (SRC / "synology_scan_sync.py").read_text()
         self.assertNotIn("compare_v2_transfer_evidence_offline", active)
+
+    def test_receiver_playbook_yaml_is_parseable_and_has_single_proof_gate(self):
+        playbook = ROOT / "ansible/playbooks/audit-paperless-v2-receiver.yml"
+        documents = yaml.safe_load(playbook.read_text(encoding="utf-8"))
+        self.assertIsInstance(documents, list)
+        self.assertEqual(len(documents), 1)
+        self.assertEqual(documents[0]["hosts"], "venombox")
+        tasks = documents[0]["tasks"]
+        gates = [task for task in tasks
+                 if task.get("name") ==
+                 "Require digest match, point-in-time limitation and release block"]
+        self.assertEqual(len(gates), 1)
+        proofs = gates[0]["ansible.builtin.assert"]["that"]
+        self.assertTrue(any("RECEIVER_BINDING" in p for p in proofs))
+        self.assertTrue(any("RECEIVER_POINT_IN_TIME_VERIFIED" in p for p in proofs))
+        self.assertTrue(any("SENT_NOT_AUTHORIZED" in p for p in proofs))
+        self.assertTrue(any("SOURCE_DELETE_NOT_AUTHORIZED" in p for p in proofs))
+        self.assertEqual(sum(
+            t.get("name") == "Display receiver point-in-time SHA and safety markers"
+            for t in tasks), 1)
 
     def test_receiver_binding_producer_and_contract_match(self):
         receiver = (SRC / "verify_receiver_v2_staging.py").read_text()
