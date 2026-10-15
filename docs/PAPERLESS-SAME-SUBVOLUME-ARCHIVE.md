@@ -1,0 +1,139 @@
+# Bergen Paperless – same-subvolume-Archiv im versteckten Quellordner
+
+**Entwicklungsstand 15.10.2026, Draft-PR #81. Keine Produktivfreigabe.**
+
+## Entscheidung und Verzeichnisstruktur
+
+Für jeden der vier konfigurierten Scan-Quellordner wird ein
+Unterverzeichnis **.paperless-archive** vorgesehen:
+
+    Paperless/
+      Scan.pdf
+      .paperless-archive/
+        2026-10/
+          <v1-Sender-Receipt-ID>.pdf
+
+Der Unterordner liegt im selben konfigurierten Scan-Quellordner.
+Er muss tatsächlich dasselbe Dateisystem beziehungsweise Btrfs-
+Subvolume verwenden. Die Implementierung prüft gleiche
+Device-ID und verwendet ausschließlich
+**renameat2 mit RENAME_NOREPLACE**. Falls die Kernel-
+Operation nicht verfügbar oder die Verschiebung über eine
+Subvolume-Grenze notwendig ist, wird abgebrochen. Es gibt
+keinen Copy-Delete-Fallback, keine Zielüberschreibung und
+keinen automatischen 30-Tage-Purge.
+
+Der Inotify-Watcher beobachtet nur die unmittelbaren
+Scan-Ordner, nicht deren Unterverzeichnisse. Der v1-Sender
+ignoriert Verzeichnisse ohne PDF-Endung; seine bestehenden
+Receipts werden nicht verändert.
+
+## Implementierte Komponenten
+
+- ansible/files/paperless/prepare_synology_hidden_archives.py:
+  Root-Audit und optional nur Verzeichniserstellung für alle
+  konfigurierten Scopes, jeweils UID paperless-sync, Modus 0700;
+  zusätzlich das private Archiv-Journal im Sender-State.
+- ansible/playbooks/prepare-paperless-synology-hidden-archives.yml:
+  Audit als Standard, Verzeichniserstellung nur mit explizitem
+  paperless_hidden_archive_prepare=true.
+- ansible/files/paperless/synology_same_volume_archive_move.py:
+  Manueller v1-SENT-Archivierungsworker. Nur ein Scope/Dateiname,
+  SHA-256-, Identitäts- und Importbelegprüfung, exklusives
+  senderseitiges sync.lock; fsync von Dateiinhalten und Journal;
+  ARCHIVE_PREPARED vor dem Rename, ARCHIVED nach synchronisiertem
+  Rename und erneuter Integritätsprüfung. Unklarer Status
+  blockiert weitere Ausführung bis zur manuellen Reconciliation.
+- ansible/playbooks/stage-paperless-synology-archive-worker.yml:
+  Separates Staging des Workers unter dem bereits existierenden
+  root-eigenen Synology-Codeverzeichnis, Hash-Abgleich und
+  fehlender Aktivierungsgate.
+- ansible/files/paperless/select_one_verified_archive_move.py:
+  Strikte Auswahl eines einzelnen NAS-v1-SENT-Receipts mit
+  korrespondierender lebender Paperless-IMPORTED-Dokument-ID
+  und SHA-256.
+- ansible/playbooks/archive-paperless-verified-import.yml:
+  Frischer, getrennter Live-Export von venombox/LXC 126
+  und Synology, Vergleich auf dem Controller, Übertragung des
+  ausgewählten Belegs direkt zum NAS-Worker. Ausschließlich
+  Dry-Run, solange keine separate Freigabe vorliegt.
+
+**Vorerst nur v1-SENT:** Der nachgelagerte v2-Transport-
+und Importpfad ist noch nicht produktiv aktiviert.
+Nach Archivierung darf ein neuer Scan mit gleichem alten
+Dateinamen den v1-Receipt-Schutz nicht umgehen; die
+Versionierung des Senders bleibt deshalb ein separates Thema.
+
+## Controller-Abnahme der neuen Funktionen
+
+Auf einem aktuellen Worktree des PR #81:
+
+    python3 -m unittest discover -s tests -p 'test_paperless_synology_same_volume_archive_move.py' -v
+    python3 -m unittest discover -s tests -p 'test_paperless_select_one_archive_move.py' -v
+
+Ansible-Syntax ohne Ausführung auf den Hosts:
+
+    ansible-playbook -i ansible/inventory.yml -i ansible/inventory.local.yml \
+      ansible/playbooks/prepare-paperless-synology-hidden-archives.yml \
+      -e @ansible/vars/paperless-synology.local.yml --syntax-check
+
+Der erste echte Aufruf des Verzeichnis-Playbooks bleibt
+ein READ-ONLY-AUDIT. Erst nach Prüfung der ACLs darf der
+Operator ausdrücklich die Ordnererstellung aktivieren.
+Das Staging des Workers ist nochmals ein separater Schritt.
+
+Ein einzelner Controller-Dry-Run kann nach erfolgreichem
+Staging mit dem exakten Dateiparameter
+
+    -e paperless_archive_only='Familie/Scan.pdf'
+
+aufgerufen werden. Alle weiteren erforderlichen NAS-
+und Paperless-Variablen stammen aus dem bestehenden
+ignorierten Inventar und Vault. Keine Dateinamen,
+Kennwörter oder Belege in Git oder PR-Kommentaren speichern.
+
+## Noch gesperrte produktive Verschiebung
+
+Der echte Commit benötigt eine von root außerhalb
+dieser Playbooks bereitgestellte Freigabedatei
+(state_parent/archive-move.enabled), UID 0,
+Modus 0600, ohne Hardlink/Symlink. Der Standard des
+Controller-Playbooks ist commit=false; keines der neuen
+Playbooks erzeugt den Gate.
+
+Vor einer Freigabe müssen folgende Punkte erfüllt sein:
+
+1. Neue Offline-Tests und Ansible-Syntax vollständig bestanden.
+2. Verzeichnisse und **native DSM-ACLs** in allen vier Scopes
+   geprüft, insbesondere keine Sichtbarkeit privater Archive
+   für Kinder oder unberechtigte Familienmitglieder.
+   Ein führender Punkt im Ordnernamen schützt keine Daten.
+3. Echte Subvolume-/Device-Prüfung und Linux-
+   RENAME_NOREPLACE-Funktion auf Synology DSM nachgewiesen.
+4. Ein frisches NAS-Backup samt Restore-Test für Archiv und
+   Journal bestätigt (nur LXC-vzdump reicht dafür nicht).
+5. Race mit anderen DSM-Schreibprozessen beim Scanner-Input
+   ausgeschlossen oder kontrolliert. Ein bloßes lstat direkt
+   vor rename verhindert nicht jede konkurrierende Ersetzung.
+6. Eigens erzeugte Test-PDF von Synology bis Paperless
+   kontrolliert importiert, vollständige Owner-/ACL-Prüfung
+   bestanden und Archiv-Dry-Run bestätigt.
+7. Manuell freigegebener Einzel-Rename mit bestätigter
+   Archivkopie und Wiederherstellung, einschließlich Crash-
+   und Wiederanlaufszenarien. Keine automatischen Retries.
+8. Die 19 historischen v1-Receipts bleiben unverändert.
+
+## Retention
+
+Das ARCHIVED-Journal enthält den UTC-Archivzeitpunkt.
+Ein Purge-Worker existiert **nicht**. Archive bleiben
+daher auch nach den ersten 30 Tagen unverändert erhalten,
+bis eine unabhängige Retention-Freigabe implementiert ist.
+Die Herkunftsdatei im Eingang wird beim atomaren Rename
+entfernt – hierfür sind die oben genannten Prüfungen
+unverzichtbar.
+
+**Status:** Entwurf im Repository. Keine produktive
+Installation oder Freigabe. Der frühere gemeinsame Offline-
+Teststand von 181/181 gilt nur für Commit b18ee48;
+die neuen Komponenten müssen gesondert getestet werden.
