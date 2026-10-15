@@ -476,6 +476,71 @@ mit temporären Test-PDFs. Erst nach erfolgreichem
 Test und Re-Review darf der Worker in *deaktiviertem*
 Zustand auf die NAS übertragen werden.
 
+## Btrfs und echter Kernel-Rename-Test (Stand 15.10.2026)
+
+Der Live-Read-only-Nachweis mit
+`btrfs inspect-internal rootid` bestätigt für alle vier
+Archiv-Paare identische Btrfs-Subvolume-IDs:
+
+- `Privat/thomas` und `Privat/nadja`: Quelle und
+  geschütztes Ziel jeweils Subvolume `437`.
+- `Eltern` und `Familie`: Quelle und Ziel jeweils
+  Subvolume `7446`.
+
+`SUBVOLUME_FAILURES 0` und `NO_FILES_CHANGED`.
+Das ist **noch kein** Nachweis der DSM-Kernel-Unterstützung
+für `RENAME_NOREPLACE`.
+
+Dafür gibt es nun den gesonderten, nicht automatisch
+ausgeführten Test
+`ansible/playbooks/audit-paperless-synology-renameat2.yml`.
+Er ist standardmäßig **ausschließlich lesend**:
+
+    -e paperless_renameat2_site=paperless-scan
+
+Erst mit **ausdrücklich gesetztem, booleschem**
+`-e '{"paperless_renameat2_probe": true}'` erzeugt er
+für genau einen Standort einen isolierten
+`0700`-Testordner **direkt unter dem jeweiligen
+Subvolume-Root, neben statt innerhalb der produktiven
+Scan- und geschützten Archivverzeichnisse**.
+
+In diesem temporären Ordner führt `paperless-sync`
+den tatsächlich auf der NAS installierten
+`_noreplace_rename`-Kernel-Aufruf aus. Zuerst muss
+die Kollision mit bestehendem Ziel
+`EEXIST` zurückgeben, ohne Quelle/Ziel zu verändern.
+Dann wird eine *selbst erzeugte* Test-PDF aus einem
+Test-Unterordner in einen anderen umbenannt.
+Dateiinhalt, SHA256, Device und Inode müssen erhalten
+bleiben. Anschließend wird **nur** dieser Testordner
+bereinigt. Der Test überprüft zusätzlich unmittelbar
+zuvor alle drei fehlenden Commit-Gates und die
+aktuellen `btrfs rootid`-Zuordnungen.
+
+Der Test erzeugt **keine** Archiv-PDF unter
+`.bergen-paperless-archive`, verschiebt keine
+eingehenden Scans, berührt keine Receipts/Journals
+und aktiviert keinen Worker. Er kann zunächst
+auf `paperless-scan`, anschließend getrennt auf
+`homes` ausgeführt werden. Auch ein erfolgreicher
+Fixture-Test erlaubt noch **keinen** produktiven Commit.
+
+Neue Regressionstests:
+
+    python3 -m unittest discover -s tests \
+      -p 'test_paperless_synology_renameat2_probe.py' -v
+
+Ansible-Syntaxprüfung vor Remote-Probe:
+
+    ansible-playbook -i ansible/inventory.yml \
+      -i ansible/inventory.local.yml \
+      ansible/playbooks/audit-paperless-synology-renameat2.yml \
+      --syntax-check
+
+**Der Live-Synology-Fixture-Test wurde noch nicht
+ausgeführt** (nur vorbereitet).
+
 ## Noch gesperrte produktive Verschiebung
 
 Vor einer Standort-Commit-Freigabe müssen alle
