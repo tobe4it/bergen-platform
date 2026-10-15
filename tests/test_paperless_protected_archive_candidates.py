@@ -119,7 +119,7 @@ class ProtectedArchiveCandidateTests(unittest.TestCase):
         self.assertEqual(risks, ["user:thomas@bergen.intern"])
 
     def test_unknown_special_principal_still_blocked(self):
-        unknown = "? [2] everyone::allow:rwxpdDaARWcCo:fd-- (level:0)\n"
+        unknown = "? [2] anonymous::allow:rwxpdDaARWcCo:fd-- (level:0)\n"
         with self.assertRaisesRegex(RuntimeError, "UNRECOGNIZED_NATIVE_ACL_ENTRY"):
             audit.parse_native_aces(unknown)
 
@@ -154,7 +154,7 @@ class ProtectedArchiveCandidateTests(unittest.TestCase):
         self.assertEqual(audit.SITE_SCOPES["all"], audit.SCOPES)
 
     def test_unrecognized_acl_diagnostic_contains_bounded_original(self):
-        malformed = "? [4] everyone::allow:rwxpdDaARWc--:fd-- (level:0)"
+        malformed = "? [4] anonymous::allow:rwxpdDaARWc--:fd-- (level:0)"
         with self.assertRaisesRegex(
                 RuntimeError, "UNRECOGNIZED_NATIVE_ACL_ENTRY") as context:
             audit.parse_native_aces(malformed)
