@@ -4,6 +4,10 @@ This implementation uses selfHOST's current ACME-DNS API, not its historical
 DynDNS endpoint. The existing production Certbot lineage is not changed by
 checking out these files.
 
+For repeated use with *independent* DNS zones, see
+[additional per-zone certificate instances](SELFHOST-ACME-MULTI-INSTANCE.md).
+The existing single-zone setup remains the default; adding a zone is opt-in.
+
 
 ## Preferred: manage the entire setup from the Ansible controller
 
