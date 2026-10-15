@@ -1,0 +1,47 @@
+---
+# Read-only DSM archive entry protection audit. Never rename the real archive.
+- name: Inspect scan-parent delete-child rights affecting hidden archives
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  tasks:
+    - name: Require site-local Synology configuration and expected scopes
+      ansible.builtin.assert:
+        that:
+          - synology_admin is defined
+          - synology_admin is match('^[A-Za-z_][A-Za-z0-9_.-]*@[A-Za-z0-9][A-Za-z0-9.-]+$')
+          - synology_config is defined
+          - synology_config.schema_version == 1
+          - synology_config.sync_user == 'paperless-sync'
+          - synology_config.state_parent is match('^/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$')
+
+    - name: Audit native DSM source-directory ACE grants without writes
+      ansible.builtin.command:
+        argv:
+          - ssh
+          - -T
+          - -o
+          - BatchMode=yes
+          - -o
+          - StrictHostKeyChecking=yes
+          - -o
+          - ConnectTimeout=15
+          - "{{ synology_admin }}"
+          - >-
+            sudo -n /usr/bin/python3 - {{ synology_config.state_parent | quote }}
+        stdin: "{{ lookup('ansible.builtin.file', playbook_dir + '/../files/paperless/audit_synology_archive_entry_protection.py', rstrip=False) }}"
+      register: archive_entry_audit
+      changed_when: false
+
+    - name: Show exact per-scope directory entry risk findings
+      ansible.builtin.debug:
+        var: archive_entry_audit.stdout_lines
+
+    - name: Fail closed if any group could potentially delete archive entry
+      ansible.builtin.assert:
+        that:
+          - "'NO_FILES_CHANGED' in archive_entry_audit.stdout_lines"
+          - "'ARCHIVE_ENTRY_PROTECTION_BLOCKED' not in archive_entry_audit.stdout_lines"
+          - "'BLOCKER ' not in archive_entry_audit.stdout"
+          - "'ARCHIVE_ENTRY_PROTECTION_NEEDS_EFFECTIVE_TEST' in archive_entry_audit.stdout_lines"
+        fail_msg: "Archive parent folder has potentially destructive non-admin grants; do not move PDFs. See audit above."
