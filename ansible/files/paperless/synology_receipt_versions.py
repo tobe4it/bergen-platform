@@ -68,6 +68,35 @@ def receiver_destination(scope, basename, sha256, signature):
     return scope + "/" + receiver_filename(scope, basename, sha256, signature)
 
 
+# Published v2 identities MUST use these nonce-bound functions. The earlier
+# signature-only version_id() remains solely for historical OFFLINE test cases
+# and is not sufficient to authorize a real sender incarnation.
+NONCE = re.compile(r"[a-f0-9]{32}\Z")
+
+
+def incarnation_id(scope, basename, sha256, signature, nonce):
+    """Explicit random incarnation ID, bound to content and NAS identity.
+
+    A caller must persist this nonce in PREPARED before attempting rsync.
+    Generating another nonce on restart must NOT create another transfer.
+    """
+    validate(scope, basename, sha256, signature)
+    if not isinstance(nonce, str) or not NONCE.fullmatch(nonce):
+        raise ValueError("INVALID_INCARNATION_NONCE")
+    payload = ["bergen-paperless-receipt-v2-incarnation", scope, basename,
+               sha256, list(signature), nonce]
+    canonical = json.dumps(payload, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+    return "v2-" + nonce + "-" + hashlib.sha256(canonical).hexdigest()
+
+
+def incarnation_receipt_filename(scope, basename, sha256, signature, nonce):
+    return incarnation_id(scope, basename, sha256, signature, nonce) + ".prepared.json"
+
+
+def incarnation_receiver_destination(scope, basename, sha256, signature, nonce):
+    return scope + "/nas-" + incarnation_id(scope, basename, sha256, signature, nonce) + ".pdf"
+
+
 def classify_existing(existing, scope, basename, sha256, signature, version):
     """Fail closed on any older unresolved or unarchived same-name version.
 
@@ -151,4 +180,5 @@ def preview_transfer(scope, basename, sha256, signature, history,
 
 
 __all__ = ["legacy_id", "version_id", "receipt_filename", "receiver_filename",
-           "receiver_destination", "classify_existing", "preview_transfer"]
+           "receiver_destination", "incarnation_id", "incarnation_receipt_filename",
+           "incarnation_receiver_destination", "classify_existing", "preview_transfer"]
