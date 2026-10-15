@@ -127,6 +127,21 @@ class SameVolumeArchiveTests(unittest.TestCase):
         self.assertEqual((month / "moved.pdf").read_bytes(), PDF)
         self.assertEqual((month / "moved.pdf").stat().st_ino, self.signature[1])
 
+    def test_full_archive_journal_flow_uses_kernel_noreplace(self):
+        # Unlike earlier flow tests, exercise the real production rename
+        # callback, not the test's plain os.rename substitute.
+        with patch.object(move.time, "time_ns",
+                          return_value=time.time_ns() + 90_000_000_000):
+            result = move.archive_one(
+                self.folder, self.state, SCOPE, NAME, self.proof,
+                commit=True, archive_month="2026-10")
+        self.assertEqual(result["status"], "ARCHIVE_MOVED")
+        self.assertFalse(self.source.exists())
+        self.assertEqual(self.target.read_bytes(), PDF)
+        self.assertEqual(self.target.stat().st_ino, self.signature[1])
+        self.assertTrue(self.event("prepared").is_file())
+        self.assertTrue(self.event("archived").is_file())
+
     def test_no_automatic_purge_or_live_sender_wiring(self):
         program = (CODE / "synology_same_volume_archive_move.py").read_text()
         self.assertNotIn("os.unlink(", program)
