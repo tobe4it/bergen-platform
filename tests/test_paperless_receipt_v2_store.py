@@ -174,6 +174,14 @@ class AppendOnlyStoreTests(unittest.TestCase):
             store.publish_event(missing, self.prepared)
         self.assertFalse(missing.exists())
 
+    def test_integer_v2_schema_compatibility(self):
+        from synology_receipt_versions import classify_existing
+        args = ("Privat/thomas", "Gescanntes Dokument.pdf", SHA, SIG)
+        self.assertEqual(classify_existing([], *args, version=2), "NEW_VERSION_READY")
+        self.assertEqual(classify_existing([], *args, version="v2"), "NEW_VERSION_READY")
+        with self.assertRaisesRegex(ValueError, "UNSUPPORTED_RECEIPT_VERSION"):
+            classify_existing([], *args, version=True)
+
     def test_no_production_entrypoint_or_live_paths(self):
         s = (SOURCE / "synology_receipt_v2_store.py").read_text(encoding="utf-8")
         self.assertIn("OFFLINE ONLY", s)
