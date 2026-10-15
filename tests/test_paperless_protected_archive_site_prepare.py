@@ -74,7 +74,7 @@ class ProtectedSitePreparationTests(unittest.TestCase):
     def test_readonly_verify_complete_empty_homes_tree(self):
         reply = subprocess.CompletedProcess(
             ["synoacltool"], 255,
-            stdout="(synoacltool.c, 596)It's Linux mode\\n",
+            stdout="(synoacltool.c, 596)It's Linux mode\n",
             stderr="")
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp) / ".bergen-paperless-archive"
@@ -89,7 +89,7 @@ class ProtectedSitePreparationTests(unittest.TestCase):
     def test_readonly_verify_rejects_unexpected_pdf_without_deleting_it(self):
         reply = subprocess.CompletedProcess(
             ["synoacltool"], 255,
-            stdout="(synoacltool.c, 596)It's Linux mode\\n",
+            stdout="(synoacltool.c, 596)It's Linux mode\n",
             stderr="")
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp) / ".bergen-paperless-archive"
@@ -108,7 +108,7 @@ class ProtectedSitePreparationTests(unittest.TestCase):
     def test_readonly_verify_rejects_extra_symlink_even_if_private(self):
         reply = subprocess.CompletedProcess(
             ["synoacltool"], 255,
-            stdout="(synoacltool.c, 596)It's Linux mode\\n",
+            stdout="(synoacltool.c, 596)It's Linux mode\n",
             stderr="")
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp) / ".bergen-paperless-archive"
