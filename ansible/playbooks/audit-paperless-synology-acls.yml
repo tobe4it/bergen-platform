@@ -33,15 +33,18 @@
       register: paperless_dsm_acl_audit
       changed_when: false
 
+    - name: Display all ACL evidence before fail-closed verdict
+      ansible.builtin.debug:
+        var: paperless_dsm_acl_audit.stdout_lines
+
     - name: Require complete read-only report
       ansible.builtin.assert:
         that:
           - "'NO_FILES_CHANGED' in paperless_dsm_acl_audit.stdout_lines"
+          - "'BLOCKER ' not in paperless_dsm_acl_audit.stdout"
           - "'REVIEW_REQUIRED Familie SYNC_USER_DELETE_CHILD_RENAME_AND_ACL_INHERITANCE' in paperless_dsm_acl_audit.stdout_lines"
           - "'REVIEW_REQUIRED Eltern SYNC_USER_DELETE_CHILD_RENAME_AND_ACL_INHERITANCE' in paperless_dsm_acl_audit.stdout_lines"
           - "'REVIEW_REQUIRED Privat/thomas SYNC_USER_DELETE_CHILD_RENAME_AND_ACL_INHERITANCE' in paperless_dsm_acl_audit.stdout_lines"
           - "'REVIEW_REQUIRED Privat/nadja SYNC_USER_DELETE_CHILD_RENAME_AND_ACL_INHERITANCE' in paperless_dsm_acl_audit.stdout_lines"
 
-    - name: Display ACL evidence for manual DSM review
-      ansible.builtin.debug:
-        var: paperless_dsm_acl_audit.stdout_lines
+        fail_msg: "Native DSM hidden-archive ACL blocker: do not move any PDFs; inspect the report printed above"
