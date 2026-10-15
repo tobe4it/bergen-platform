@@ -94,6 +94,40 @@ class ProtectedArchiveCandidateTests(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError, "UNRECOGNIZED_NATIVE_ACL_ENTRY"):
             audit.parse_native_aces("group:everyone:allow:UNKNOWN\n")
 
+    def test_real_homes_owner_ace_is_root_only(self):
+        # Verbatim native Synology ACE from /volume1/homes in live NAS audit.
+        owner = "? [1] owner::allow:rwxpdDaARWcCo:fd-- (level:0)\n"
+        self.assertEqual(
+            audit.parse_native_aces(owner),
+            [("owner", "", "allow", "rwxpdDaARWcCo", "fd--")])
+        self.assertEqual(
+            audit.evaluate_parent(st(uid=0), acl(owner), "paperless-sync"),
+            ("NATIVE_PARENT_NO_OBVIOUS_DELETE_GRANT", []))
+
+    def test_owner_ace_on_nonroot_parent_remains_blocked(self):
+        owner = "? [1] owner::allow:rwxpdDaARWcCo:fd-- (level:0)\n"
+        self.assertEqual(
+            audit.evaluate_parent(st(uid=1234), acl(owner), "paperless-sync"),
+            ("UNSAFE_UNOWNED_PARENT", []))
+
+    def test_owner_ace_does_not_hide_nonadmin_delete_grant(self):
+        owner = "? [1] owner::allow:rwxpdDaARWcCo:fd-- (level:0)\n"
+        user = "? [2] user:thomas@bergen.intern:allow:rwxpdDaARWc--:fd-- (level:0)\n"
+        status, risks = audit.evaluate_parent(
+            st(uid=0), acl(owner + user), "paperless-sync")
+        self.assertEqual(status, "PARENT_HAS_NONADMIN_DELETE_GRANTS")
+        self.assertEqual(risks, ["user:thomas@bergen.intern"])
+
+    def test_unknown_special_principal_still_blocked(self):
+        unknown = "? [2] everyone::allow:rwxpdDaARWcCo:fd-- (level:0)\n"
+        with self.assertRaisesRegex(RuntimeError, "UNRECOGNIZED_NATIVE_ACL_ENTRY"):
+            audit.parse_native_aces(unknown)
+
+    def test_malformed_owner_ace_remains_blocked(self):
+        malformed = "? [1] owner::allow:rwxpdDaARWcCo:zzzz (level:0)\n"
+        with self.assertRaisesRegex(RuntimeError, "UNRECOGNIZED_NATIVE_ACL_ENTRY"):
+            audit.parse_native_aces(malformed)
+
     def test_unrecognized_acl_diagnostic_contains_bounded_original(self):
         malformed = "? [4] everyone::allow:rwxpdDaARWc--:fd-- (level:0)"
         with self.assertRaisesRegex(
