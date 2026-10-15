@@ -13,7 +13,7 @@ import stat
 from fcntl import LOCK_EX, LOCK_NB, flock
 from pathlib import Path
 
-from synology_receipt_versions import incarnation_id, incarnation_receiver_destination
+from synology_receipt_versions import incarnation_id, incarnation_receiver_destination, legacy_id, validate
 
 NONCE = re.compile(r"[0-9a-f]{32}\Z")
 PREPARED_KEYS = frozenset({
@@ -203,4 +203,97 @@ def publish_event(directory, record):
         os.close(dirfd)
 
 
-__all__ = ["prepared_record", "sent_record", "publish_event"]
+def _checked_history(dirfd):
+    """Fail-closed v1/v2 enumeration while holding the sender lock.
+
+    Returns historical (scope, source) pairs without changing any records.
+    """
+    old_pattern = re.compile(r"[a-f0-9]{64}\.json\Z")
+    v2_pattern = re.compile(r"(v2-[a-f0-9]{32}-[a-f0-9]{64})\.(prepared|sent)\.json\Z")
+    names = os.listdir(dirfd)
+    if len(names) > 10000:
+        raise RuntimeError("STATE_ENTRY_LIMIT_EXCEEDED")
+    identities = set()
+    events = {}
+    for name in sorted(names):
+        is_old = bool(old_pattern.fullmatch(name))
+        is_v2 = v2_pattern.fullmatch(name)
+        if not (is_old or is_v2):
+            if (name.endswith(".json") or name.startswith(".receipt-")
+                    or name.startswith(".v2-receipt-")):
+                raise RuntimeError("UNKNOWN_OR_ORPHANED_JOURNAL_ENTRY")
+            continue
+        raw = _read_checked(dirfd, name)
+        try:
+            def no_duplicates(pairs):
+                result = {}
+                for key, value in pairs:
+                    if key in result:
+                        raise ValueError("DUPLICATE_JSON_KEY")
+                    result[key] = value
+                return result
+            value = json.loads(raw, object_pairs_hook=no_duplicates)
+            if not isinstance(value, dict):
+                raise ValueError("INVALID_RECEIPT_OBJECT")
+            scope, source = value["scope"], value["source"]
+            if is_old:
+                if legacy_id(scope, source) + ".json" != name:
+                    raise ValueError("LEGACY_KEY_MISMATCH")
+                if (value.get("status") not in ("PREPARED", "SENT")
+                        or not isinstance(value.get("sha256"), str)
+                        or not re.fullmatch(r"[a-f0-9]{64}", value["sha256"])
+                        or not isinstance(value.get("signature"), list)
+                        or len(value["signature"]) != 5
+                        or any(type(n) is not int or n < 0 for n in value["signature"])):
+                    raise ValueError("INVALID_LEGACY_EVENT")
+            else:
+                if _validate(value) != is_v2.group(2).upper():
+                    raise ValueError("V2_STATUS_MISMATCH")
+                if name != value["receipt_id"] + "." + value["status"].lower() + ".json":
+                    raise ValueError("V2_FILE_NAME_MISMATCH")
+                if _canonical(value) != raw:
+                    raise ValueError("NONCANONICAL_V2_EVENT")
+                events.setdefault(value["receipt_id"], {})[value["status"]] = value
+            identities.add((scope, source))
+        except (KeyError, TypeError, ValueError) as exc:
+            raise RuntimeError("INVALID_HISTORICAL_RECEIPT") from exc
+    for stages in events.values():
+        if "SENT" in stages:
+            if "PREPARED" not in stages:
+                raise RuntimeError("SENT_WITHOUT_PREPARED")
+            expected = dict(stages["SENT"])
+            expected.pop("transfer_evidence")
+            expected["status"] = "PREPARED"
+            if stages["PREPARED"] != expected:
+                raise RuntimeError("PREPARED_SENT_MISMATCH")
+    return identities
+
+
+def reserve_prepared(directory, scope, source, sha256, signature):
+    """Mint + durably persist a random nonce before any possible transfer.
+
+    Repeated names, including an uncertain PREPARED, cannot be retried.
+    The nonce is part of the receipt basename AND remote file basename.
+    This is OFFLINE ONLY, not authorization to send or delete files.
+    """
+    validate(scope, source, sha256, signature)
+    dirfd = _directory_fd(directory)
+    try:
+        lockfd = _lock_existing(dirfd)
+        try:
+            previous = _checked_history(dirfd)
+            if (scope, source) in previous:
+                raise RuntimeError("HISTORICAL_NAME_REQUIRES_RECONCILIATION")
+            record = prepared_record(scope, source, sha256, signature,
+                                     secrets.token_hex(16))
+            filename = record["receipt_id"] + ".prepared.json"
+            if not _publish_no_replace(dirfd, filename, _canonical(record)):
+                raise RuntimeError("NONCE_COLLISION_REQUIRES_RECONCILIATION")
+            return directory / filename, record
+        finally:
+            os.close(lockfd)
+    finally:
+        os.close(dirfd)
+
+
+__all__ = ["prepared_record", "sent_record", "publish_event", "reserve_prepared"]
