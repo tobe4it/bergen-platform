@@ -205,7 +205,10 @@ def publish_event(directory, record):
             if status in ("ATTEMPTED", "SENT"):
                 prepared_name = record["receipt_id"] + ".prepared.json"
                 expected = dict(record)
-                expected.pop("transfer_evidence")
+                # Only SENT carries transfer evidence. ATTEMPTED has exactly
+                # the PREPARED fields with a different status.
+                if status == "SENT":
+                    expected.pop("transfer_evidence")
                 expected["status"] = "PREPARED"
                 if _read_checked(dirfd, prepared_name) != _canonical(expected):
                     raise RuntimeError("MISSING_OR_MISMATCHED_PREPARED_EVENT")
