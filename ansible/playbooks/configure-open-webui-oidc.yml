@@ -1,0 +1,103 @@
+---
+- name: Add OIDC to the existing Open WebUI container
+  hosts: bergen-ai
+  gather_facts: false
+  vars:
+    oidc_env_path: /etc/bergen-platform/open-webui-oidc.env
+    oidc_dropin_dir: /etc/containers/systemd/open-webui.container.d
+  tasks:
+    - name: Require reviewed deployment and existing account recovery
+      ansible.builtin.assert:
+        that:
+          - open_webui_oidc_deployment_approved | default(false) | bool
+          - open_webui_oidc_backup_confirmed | default(false) | bool
+          - open_webui_oidc_local_admin_confirmed | default(false) | bool
+        fail_msg: Confirm a current data backup and working local administrator before activation.
+
+    - name: Validate OIDC values without exposing secrets
+      ansible.builtin.assert:
+        that:
+          - open_webui_oidc_public_url is match('^https://[^/\s]+$')
+          - open_webui_oidc_discovery_url is match('^https://[^\s]+/\.well-known/openid-configuration$')
+          - open_webui_oidc_client_id is match('^[A-Za-z0-9._-]+$')
+          - open_webui_oidc_client_id != 'CHANGE_ME'
+          - vault_open_webui_oidc_client_secret | length > 0
+          - "'\n' not in vault_open_webui_oidc_client_secret"
+          - "'\r' not in vault_open_webui_oidc_client_secret"
+      no_log: true
+
+    - name: Require existing Quadlet
+      ansible.builtin.stat:
+        path: /etc/containers/systemd/open-webui.container
+      register: oidc_quadlet
+
+    - name: Require an existing deployment
+      ansible.builtin.assert:
+        that: oidc_quadlet.stat.isreg | default(false)
+
+    - name: Check discovery from the running application container
+      ansible.builtin.command:
+        argv:
+          - podman
+          - exec
+          - open-webui
+          - python3
+          - -c
+          - "import json,sys,urllib.request; r=urllib.request.urlopen(sys.argv[1], timeout=15); d=json.load(r); assert r.status == 200; assert all(d.get(k,'').startswith('https://') for k in ('issuer','authorization_endpoint','token_endpoint','jwks_uri','userinfo_endpoint')); print(d['issuer'])"
+          - '{{ open_webui_oidc_discovery_url }}'
+      changed_when: false
+      when: not ansible_check_mode
+
+    - name: Create configuration directories
+      ansible.builtin.file:
+        path: '{{ item }}'
+        state: directory
+        owner: root
+        group: root
+        mode: '0755'
+      loop:
+        - /etc/bergen-platform
+        - '{{ oidc_dropin_dir }}'
+
+    - name: Write protected OIDC environment
+      ansible.builtin.template:
+        src: ../templates/open-webui/oidc.env.j2
+        dest: '{{ oidc_env_path }}'
+        owner: root
+        group: root
+        mode: '0600'
+      no_log: true
+      diff: false
+      notify: Restart Open WebUI
+
+    - name: Add OIDC environment to existing Quadlet
+      ansible.builtin.copy:
+        dest: '{{ oidc_dropin_dir }}/90-oidc.conf'
+        content: |
+          # Managed by Ansible. Preserve the existing container and LDAP setup.
+          [Container]
+          EnvironmentFile={{ oidc_env_path }}
+        owner: root
+        group: root
+        mode: '0644'
+      notify: Restart Open WebUI
+
+    - name: Apply OIDC configuration
+      ansible.builtin.meta: flush_handlers
+
+    - name: Wait for Open WebUI after activation
+      ansible.builtin.uri:
+        url: http://127.0.0.1:3000/api/version
+        status_code: 200
+      register: oidc_health
+      until: oidc_health.status | default(0) == 200
+      retries: 30
+      delay: 5
+      when: not ansible_check_mode
+
+  handlers:
+    - name: Restart Open WebUI
+      ansible.builtin.systemd_service:
+        name: open-webui.service
+        daemon_reload: true
+        state: restarted

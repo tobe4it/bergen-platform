@@ -1,0 +1,4 @@
+---
+open_webui_oidc_public_url: https://ai.example.net
+open_webui_oidc_client_id: CHANGE_ME
+open_webui_oidc_discovery_url: https://sso.example.net:5001/webman/sso/.well-known/openid-configuration
