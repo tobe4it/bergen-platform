@@ -264,11 +264,18 @@
       register: acme_existing_lineage
       when: selfhost_acme_issue_production | default(false) | bool
 
-    - name: Require a new production certificate name
+    - name: Detect an existing certificate directory for this name
+      ansible.builtin.stat:
+        path: "/etc/letsencrypt/live/{{ acme_cert_name }}"
+      register: acme_existing_live
+      when: selfhost_acme_issue_production | default(false) | bool
+
+    - name: Require a completely unused production certificate name
       ansible.builtin.assert:
         that:
           - not acme_existing_lineage.stat.exists
-        fail_msg: Existing lineage must be handled separately; refusing replacement
+          - not acme_existing_live.stat.exists
+        fail_msg: Existing lineage or live path must be handled separately; refusing replacement
       when: selfhost_acme_issue_production | default(false) | bool
 
     - name: Explicitly issue a new independent production certificate
