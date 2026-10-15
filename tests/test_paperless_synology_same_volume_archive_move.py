@@ -328,6 +328,9 @@ class SameVolumeArchiveTests(unittest.TestCase):
             if path == self.base:
                 return SimpleNamespace(st_dev=st.st_dev + 101,
                                        st_mode=st.st_mode, st_uid=st.st_uid)
+            if path == self.site:
+                return SimpleNamespace(st_dev=st.st_dev,
+                                       st_mode=st.st_mode, st_uid=12345)
             return st
 
         with patch.object(Path, "lstat", simulated_mount_info):
