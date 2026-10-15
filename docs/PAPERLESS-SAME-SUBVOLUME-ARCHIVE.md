@@ -436,7 +436,10 @@ unter den beschreibbaren Scan-Eingängen werden **niemals**
 als Ziel verwendet; sie bleiben unberührt. Der Rename
 bleibt `renameat2(RENAME_NOREPLACE)`, die
 Sender-`SENT`-, Paperless-`IMPORTED`- und
-SHA256-Beweiskette sowie das Journal sind unverändert.
+SHA256-Beweiskette bleiben unverändert. Das Journal
+enthält zusätzlich `archive_site` und den vollständigen
+`archive_scope_dir` zur eindeutigen späteren
+Wiederherstellung und Crash-Reconciliation.
 
 Die produktive Archivierung wird **pro Standort**
 getrennt abgesichert. Nur eine unabhängige, spätere
@@ -463,7 +466,9 @@ Offline-Tests auf `bp-controller` durchzuführen:
     python3 -m unittest discover -s tests \
       -p 'test_paperless_synology_same_volume_archive_move.py' -v
 
-Die angepasste Serie prüft unter anderem den
+Die angepasste Serie (32 Testmethoden, zuletzt nur im
+Branch aktualisiert; Lauf auf `bp-controller` steht noch aus)
+prüft unter anderem den
 pro Standort geschützten Zielpfad, die getrennten
 Freigabedateien, Symlink-/Mode-Blocker, Crash-
 und Replay-Barrieren sowie echte Kernel-`renameat2`
