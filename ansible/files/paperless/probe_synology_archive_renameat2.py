@@ -145,6 +145,22 @@ def _linux_acl_only(tool, fixture):
         r"\(synoacltool\.c,\s*[0-9]+\)It's Linux mode", output) is not None
 
 
+def _has_expected_inherited_dsm_acl(result):
+    """Require exact version and archive flags, allowing only line-end padding.
+
+    DSM appends spaces before the newline in its printed ACL header.
+    Whitespace at the beginning, changed flags, wrong line order, stderr,
+    and nonzero exit statuses still fail closed.
+    """
+    if result.returncode != 0 or result.stderr:
+        return False
+    lines = result.stdout.splitlines()
+    return (len(lines) >= 2
+            and lines[0].rstrip(" \t") == "ACL version: 1"
+            and lines[1].rstrip(" \t") ==
+            "Archive: is_inherit,is_support_ACL")
+
+
 def secure_new_fixture(fixture, root, original, service, device, btrfs, rootid):
     """Normalize only a newly created, inode-pinned, EMPTY fixture.
 
@@ -171,9 +187,7 @@ def secure_new_fixture(fixture, root, original, service, device, btrfs, rootid):
         result = subprocess.run([tool, "-get", str(fixture)],
                                 capture_output=True, text=True,
                                 check=False, timeout=20)
-        require(result.returncode == 0
-                and result.stdout.startswith("ACL version: 1\n")
-                and "Archive: is_inherit,is_support_ACL" in result.stdout,
+        require(_has_expected_inherited_dsm_acl(result),
                 "UNEXPECTED_INHERITED_FIXTURE_ACL")
         # Only the fixture just allocated by mkdtemp; no descendant entries.
         removed = subprocess.run([tool, "-del", str(fixture)],
