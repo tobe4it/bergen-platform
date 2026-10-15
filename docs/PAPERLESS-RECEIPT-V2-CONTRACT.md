@@ -88,3 +88,57 @@ python3 -m unittest discover -s tests -p 'test_paperless_receipt_v2_transfer_con
 
 Neither command connects to DSM, reads private receipts, sends files, or
 performs a deployment. The active sender and Synology installer are untouched.
+
+
+## Staged immutable event store (offline only, 2026-10-15)
+
+`ansible/files/paperless/synology_receipt_v2_store.py` is a **library**
+without a CLI, deployed NAS path or sender integration. It provides
+`prepared_record`, `sent_record` and `publish_event` for an **offline
+test directory**, not a production workflow.
+
+- The existing `sync.lock` must already be a safe owner-only regular
+  file (0600). A nonblocking exclusive lock excludes a parallel sender.
+  The private existing journal directory must be owned by the caller
+  (0700). Neither directory nor lock is created automatically.
+- A PREPARED record is a separate immutable
+  `v2-<fingerprint>.prepared.json` file. A SENT record is stored as
+  `v2-<fingerprint>.sent.json`. Both are canonical JSON, privately owned
+  (0600), limited to 4096 bytes, stored with fsync of file and directory
+  and published with no-overwrite hard-link semantics.
+- SENT requires a **byte-exact existing PREPARED event**, under the same
+  lock. The caller provides `transfer_evidence` matching the receiver
+  destination and hash. **This library does not independently verify that
+  evidence**; a matching dictionary is not an IMPORTED confirmation.
+- Safe idempotent replay verifies existing immutable bytes; different
+  bytes, symlinks, hardlinks, unsafe modes, invalid IDs/nonces or unknown
+  fields fail closed. A failed post-publication directory fsync may leave
+  a valid event; retry must check identical published bytes.
+- An `incarnation_nonce` is recorded and protected against overwriting,
+  but the current v2 fingerprint and receiver filename are *not derived
+  from the nonce*. An exhausted or reused file signature must continue
+  to block, not silently reuse a previous receiver identity. A final
+  versioned identity migration remains a release prerequisite.
+- Old `<64hex>.json` v1 receipts, existing sender journal code, sender
+  service, watcher and NAS paths remain untouched. No v1/v2 history
+  enumerator, real remote proof or rollout mechanism is implemented yet.
+  Consequently **no source deletion, quarantine, purge or main merge**.
+
+Offline tests from the v2 journal branch checkout:
+
+```bash
+python3 -m unittest discover -s tests -p 'test_paperless_synology_receipt_versions.py' -v
+python3 -m unittest discover -s tests -p 'test_paperless_receipt_v2_transfer_contract.py' -v
+python3 -m unittest discover -s tests -p 'test_paperless_receipt_v2_store.py' -v
+python3 -m unittest discover -s tests -p 'test_paperless_deleted_by_user_decision_store.py' -v
+```
+
+The last test covers an existing offline lifecycle consumer that passes
+integer schema marker `2`; the v2 classifier now deliberately accepts
+both `2` and `"v2"`, but rejects booleans and other versions.
+
+**Next gated implementation**: trusted complete historical receipt
+enumeration under the lock, a robust persistent incarnation identity,
+receiver no-overwrite/remote digest verification, explicit IMPORTED
+acknowledgement, cross-subvolume archive journal, and crash recovery.
+These are required before any `--commit` integration.
