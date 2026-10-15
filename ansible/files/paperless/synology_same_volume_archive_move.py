@@ -100,6 +100,21 @@ def _read_source(dirfd, name, limit, *, expected_signature, expected_sha,
         os.close(fd)
 
 
+def _fsync_existing_pdf(dirfd, name, expected_signature):
+    """Persist existing PDF file data before/after the metadata-only rename."""
+    fd = os.open(name, os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC,
+                 dir_fd=dirfd)
+    try:
+        require(source_signature(os.fstat(fd))[:4] == expected_signature[:4],
+                "PDF_CHANGED_BEFORE_FSYNC")
+        os.fsync(fd)
+        after = os.fstat(fd)
+        require(source_signature(after)[:4] == expected_signature[:4],
+                "PDF_CHANGED_AFTER_FSYNC")
+    finally:
+        os.close(fd)
+
+
 def _read_receipt(path, scope, source, signature, expected_sha):
     before = path.lstat()
     require(stat.S_ISREG(before.st_mode) and before.st_nlink == 1
@@ -307,6 +322,7 @@ def archive_one(source_dir, state_dir, scope, filename, proof, *, commit=False,
                                 raise RuntimeError("ARCHIVE_TARGET_ALREADY_EXISTS")
                             except FileNotFoundError:
                                 pass
+                            _fsync_existing_pdf(sourcefd, filename, signature)
                             _atomic_event(journalfd, sender_id + ".prepared.json",
                                           dict(plan, stage="ARCHIVE_PREPARED"))
                             # All critical preconditions are rechecked AFTER
@@ -328,6 +344,7 @@ def archive_one(source_dir, state_dir, scope, filename, proof, *, commit=False,
                                          expected_signature=signature,
                                          expected_sha=receipt["sha256"],
                                          after_rename=True)
+                            _fsync_existing_pdf(monthfd, final, signature)
                             _atomic_event(journalfd, sender_id + ".archived.json",
                                           dict(plan, stage="ARCHIVED",
                                                archived_at=datetime.datetime.now(
