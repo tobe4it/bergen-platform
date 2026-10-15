@@ -248,6 +248,28 @@ jeweiligen Kandidaten auf `BLOCKER` und analysiert
 die restlichen Scopes weiter. Keine Erweiterung des
 ACL-Parsers ohne anhand realer NAS-Ausgabe überprüfte Syntax.
 
+Der zweite echte NAS-Lauf vom 15.10.2026 bestätigte die
+zwei vorgeschlagenen Standortwurzeln:
+
+| Scopes | Quelle `st_dev` | Kandidat |
+| --- | ---: | --- |
+| `Privat/thomas`, `Privat/nadja` | 47 | `/volume1/homes/.bergen-paperless-archive` |
+| `Eltern`, `Familie` | 1048641 | `/volume1/paperless-scan/.bergen-paperless-archive` |
+
+`paperless-scan` ergab
+`NATIVE_PARENT_NO_OBVIOUS_DELETE_GRANT`; `homes` war
+wegen des speziellen DSM-ACE-Principals
+`owner::allow:rwxpdDaARWcCo:fd--` noch blockiert,
+`ARCHIVE_PARENT_BLOCKERS 2`.
+Der Parser kennt jetzt **nur diese zusätzlich beobachtete
+Sonderform `owner::`** und behandelt sie ausschließlich dann
+als Eigentümerrecht von `root`, wenn das geprüfte
+Elternverzeichnis `st_uid == 0` hat. Jede andere unbekannte
+Sonderform und jeder nichtadministrative Delete-/Rename-Grant
+bleibt gesperrt. Die 19 angepassten Tests und der erneute
+Live-Audit stehen noch aus; kein Standort ist produktiv
+freigegeben.
+
 Dieser Audit steigt von jedem konfigurierten Scan-Verzeichnis
 zu dessen oberstem `st_dev`-gleichen Verzeichnis auf,
 prüft dessen root-Eigentümer und native DSM-ACLs auf
