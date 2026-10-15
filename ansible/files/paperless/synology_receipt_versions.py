@@ -1,14 +1,13 @@
 #!/usr/bin/env python3
 """Pure v2 receipt identity and compatibility decisions for Synology scans.
 
-Not wired into the active sender. No I/O or state changes. The future
+OFFLINE ONLY. Not wired into the active sender. No I/O or state changes. The future
 archiver must establish durable ARCHIVED proof before a reused name is
 allowed to start a new version after an existing legacy receipt.
 """
 import hashlib
 import json
 import re
-from pathlib import Path
 
 SHA256 = re.compile(r"[a-f0-9]{64}\Z")
 VALID_SCOPE = re.compile(r"[A-Za-z0-9_][A-Za-z0-9_./-]*\Z")
@@ -52,6 +51,20 @@ def receipt_filename(scope, basename, sha256, signature):
     return version_id(scope, basename, sha256, signature) + ".json"
 
 
+def receiver_filename(scope, basename, sha256, signature):
+    """Collision-resistant rsync basename bound to NAS file incarnation.
+
+    It is not the former <stem>--nas-<content-hash>.pdf naming scheme.
+    Receiver nonexistence must be checked separately at transfer time.
+    """
+    return "nas-" + version_id(scope, basename, sha256, signature) + ".pdf"
+
+
+def receiver_destination(scope, basename, sha256, signature):
+    """Relative destination only; never a live transfer authorization."""
+    return scope + "/" + receiver_filename(scope, basename, sha256, signature)
+
+
 def classify_existing(existing, scope, basename, sha256, signature, version):
     """Fail closed on any older unresolved or unarchived same-name version.
 
@@ -60,6 +73,8 @@ def classify_existing(existing, scope, basename, sha256, signature, version):
     the private state directory; absence cannot be assumed from one key lookup.
     This routine is a policy helper, not authorization to transfer.
     """
+    if version != "v2":
+        raise ValueError("UNSUPPORTED_RECEIPT_VERSION")
     validate(scope, basename, sha256, signature)
     same = []
     other = []
@@ -70,6 +85,20 @@ def classify_existing(existing, scope, basename, sha256, signature, version):
         status = receipt.get("status")
         if status not in ("PREPARED", "SENT"):
             raise ValueError("UNSAFE_RECEIPT_STATUS")
+        # Validate optional v2 identity before accepting its historical proof.
+        # v1 receipts remain immutable and do not carry these keys.
+        if "receipt_id" in receipt or "schema_version" in receipt:
+            if (type(receipt.get("schema_version")) is not int
+                    or receipt["schema_version"] != 2
+                    or not isinstance(receipt.get("receipt_id"), str)
+                    or not V2_ID.fullmatch(receipt["receipt_id"])):
+                raise ValueError("INVALID_V2_RECEIPT")
+            try:
+                expected_id = version_id(scope, basename, receipt["sha256"], receipt["signature"])
+            except (KeyError, TypeError, ValueError) as exc:
+                raise ValueError("INVALID_V2_RECEIPT") from exc
+            if receipt["receipt_id"] != expected_id:
+                raise ValueError("FORGED_V2_RECEIPT_ID")
         if receipt.get("sha256") == sha256 and receipt.get("signature") == list(signature):
             same.append(receipt)
         else:
@@ -81,6 +110,8 @@ def classify_existing(existing, scope, basename, sha256, signature, version):
             return "BLOCK_PREPARED"
         if other and any(x["status"] != "SENT" for x in other):
             return "BLOCK_PREVIOUS_PREPARED"
+        if other:
+            return "BLOCK_NAME_REUSE_PENDING_ARCHIVE_PROOF"
         return "TRACKED"
     if other:
         # No archived receipt contract is implemented yet; never silently
@@ -89,4 +120,30 @@ def classify_existing(existing, scope, basename, sha256, signature, version):
     return "NEW_VERSION_READY"
 
 
-__all__ = ["legacy_id", "version_id", "receipt_filename", "classify_existing"]
+def preview_transfer(scope, basename, sha256, signature, history,
+                     *, history_complete=False):
+    """Read-only proposal, never a journal or transfer permit.
+
+    The future caller must attest complete historical v1/v2 enumeration
+    while holding the sender lock. No receiver path is checked here.
+    """
+    if history_complete is not True:
+        raise ValueError("COMPLETE_LOCKED_HISTORY_REQUIRED")
+    decision = classify_existing(history, scope, basename, sha256, signature, "v2")
+    return {
+        "preview_only": True,
+        "decision": decision,
+        "receipt_id": version_id(scope, basename, sha256, signature),
+        "sender_receipt": receipt_filename(scope, basename, sha256, signature),
+        "receiver_source": receiver_destination(scope, basename, sha256, signature),
+        "scope": scope,
+        "source": basename,
+        "sha256": sha256,
+        "signature": list(signature),
+        "receiver_path_proof": "NOT_CHECKED",
+        "archive_authorization": False,
+    }
+
+
+__all__ = ["legacy_id", "version_id", "receipt_filename", "receiver_filename",
+           "receiver_destination", "classify_existing", "preview_transfer"]
