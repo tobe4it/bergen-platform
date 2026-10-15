@@ -161,6 +161,23 @@ def _has_expected_inherited_dsm_acl(result):
             "Archive: is_inherit,is_support_ACL")
 
 
+def _allowed_initial_fixture_mode(root, parent_info, mode):
+    """Admit the confirmed 0711 DSM homes inheritance only at that site.
+
+    /volume1/homes has a DSM-native ACL and POSIX mode 0711; newly created
+    children inherit 0711 even if mkdtemp requests 0700. The special case
+    is limited to the exact trusted home subvolume root and its verified
+    root-owned 0711 parent. All other sites retain the previous policy.
+    """
+    if mode in (0o000, 0o700):
+        return True
+    return (root == Path("/volume1/homes")
+            and parent_info.st_uid == 0
+            and stat.S_ISDIR(parent_info.st_mode)
+            and stat.S_IMODE(parent_info.st_mode) == 0o711
+            and mode == 0o711)
+
+
 def secure_new_fixture(fixture, root, original, service, device, btrfs, rootid):
     """Normalize only a newly created, inode-pinned, EMPTY fixture.
 
@@ -173,17 +190,22 @@ def secure_new_fixture(fixture, root, original, service, device, btrfs, rootid):
             fixture.name.startswith(".bergen-rename-probe-"),
             "FIXTURE_NOT_ISOLATED")
     current = fixture.lstat()
+    parent_info = root.lstat()
     require(stat.S_ISDIR(current.st_mode)
             and current.st_uid == 0
             and current.st_dev == device
             and current.st_ino == original.st_ino
-            and stat.S_IMODE(current.st_mode) in (0o000, 0o700),
+            and _allowed_initial_fixture_mode(
+                root, parent_info, stat.S_IMODE(current.st_mode)),
             "UNSAFE_NEW_FIXTURE")
     with os.scandir(fixture) as entries:
         require(next(entries, None) is None, "NONEMPTY_NEW_FIXTURE")
 
     tool = _synology_acl_tool()
-    if not _linux_acl_only(tool, fixture):
+    linux_mode = _linux_acl_only(tool, fixture)
+    if stat.S_IMODE(current.st_mode) == 0o711:
+        require(not linux_mode, "HOMES_INHERITED_ACL_REQUIRED")
+    if not linux_mode:
         result = subprocess.run([tool, "-get", str(fixture)],
                                 capture_output=True, text=True,
                                 check=False, timeout=20)
