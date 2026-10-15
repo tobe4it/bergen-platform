@@ -43,13 +43,13 @@ Für zentral verwaltete menschliche Konten ist der **Synology Directory Server (
 
 1. **Versioniert:** Bridge-/Sender-Reconciliation, zwei separate `DELETED_BY_USER`-v2-Journale, lesender Audit `audit-paperless-import-lifecycle-15-26.yml`, dazu Tests und Dokumentation im Feature-Branch.
 2. **Belegt:** letzter übermittelter Live-Audit `ok=14 changed=0 unreachable=0 failed=0`, 17/17 Importe/SENT-Nachweise und zwei bestätigte Benutzerlöschungen. Die Dokumente 15 und 26 haben denselben Inhalts-SHA, aber verschiedene IDs/Receipts.
-3. **Nicht belegt:** ein erfolgreiches Backup **nach** Veröffentlichung beider Journale, Wiederherstellbarkeit der neuesten Journale, neuer lokaler Unit-Testlauf, vollständiger End-to-End-Test der neun lokalen Playbooks.
+3. **Backup nach Journalpublikation belegt:** LXC 126 wurde am 15.10.2026 im `stop`-Modus (03:00:12–03:03:15 MESZ) erfolgreich gesichert; `rootfs` und `mp0` sind laut Tasklog enthalten, `mp0 backup=1` laut LXC-Konfiguration, das 1.492.825.227-Byte-Archiv laut Proxmox-Storage-Liste vorhanden. **Weiter nicht belegt:** technische Archivinhaltsprüfung, Einschluss und Wiederherstellbarkeit beider Journaldateien, neue lokale Unit-Tests und End-to-End-Tests der neun lokalen Playbooks.
 4. **Nicht freigegeben:** NAS-Archivkopie, Originaldatei-Entfernung, Retention/Purge, Receipt-Migration, Reimport/Restore, Passwortrotation, SSH-Autorisierungsänderung, Consumer-Neustart.
 
 ## Morgen: Archivierung als getrennte Arbeitsphase
 
 **Phase A – ausschließlich lesend:**
-- Nach-21:45-MESZ-Backup für LXC 126 anhand Taskstatus, tatsächlich vorhandenem Backup-Archiv, rootfs/mp0-Einschluss und Journalpfad prüfen. Ein erfolgreicher Task allein belegt keine Wiederherstellbarkeit.
+- **Backup-Baseline bestätigt:** erfolgreicher Task nach Journalveröffentlichung, `rootfs` und `mp0` einschließlich `backup=1`, Archiv im Storage vorhanden. Als Nächstes das konkrete Archiv auf Zstd/TAR-Lesbarkeit und die beiden Journaldateien unter `/var/lib/paperless-ingest/deletion-decisions/` prüfen. Der Audit liest diese über `pct exec 126`, also aus LXC 126. Ein isolierter Restore bleibt danach ein gesonderter Akzeptanznachweis.
 - NAS-Scope-/Archivpfade und DSM-ACLs einschließlich `delete-child`/Rename/Quarantäne isoliert prüfen; `st_dev` je Pfad erfassen. Die bekannten Gerätekennungen unterscheiden sich zwischen Scan-Scopes und Archiv (47, 1048641, 40); ein atomarer `rename` über diese Grenze ist ausgeschlossen (`EXDEV`).
 - Sender v1/v2-Receipt-Inkarnationen, Wiederverwendung gleicher Dateinamen, `rsync --ignore-existing`, Duplikatverhalten und eindeutige Receiver-Zielnamen als Gesamtkette spezifizieren.
 - Entscheidung für crash-sicheren Cross-Subvolume-Transport entwerfen: Kopie in privaten Staging-Bereich, Hashvergleich, `fsync` von Datei und Verzeichnis, atomare Veröffentlichung des Archivnachweises, idempotenter Replay und definierte Quarantäne bei Teilfehlern.
