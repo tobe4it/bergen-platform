@@ -179,16 +179,19 @@ def inspect(state_parent, site, probe):
 
     # Only mutable fixture: unique new private sibling of protected archive.
     fixture = Path(tempfile.mkdtemp(prefix=".bergen-rename-probe-", dir=root))
-    st = fixture.lstat()
-    require(st.st_uid == 0 and stat.S_ISDIR(st.st_mode)
-            and st.st_dev == root_info.st_dev
-            and stat.S_IMODE(st.st_mode) == 0o700,
-            "UNSAFE_NEW_FIXTURE")
+    original = None
+    invoked = False
     try:
+        original = fixture.lstat()
+        require(original.st_uid == 0 and stat.S_ISDIR(original.st_mode)
+                and original.st_dev == root_info.st_dev
+                and stat.S_IMODE(original.st_mode) == 0o700,
+                "UNSAFE_NEW_FIXTURE")
         os.chown(fixture, service.pw_uid, service.pw_gid)
         os.chmod(fixture, 0o700)
         require(subvol_id(btrfs, fixture) == rootid,
                 "FIXTURE_NOT_SAME_SUBVOLUME")
+        invoked = True
         r = subprocess.run([
             "sudo", "-n", "-u", "paperless-sync", "/usr/bin/python3", "-c",
             UNPRIVILEGED_FIXTURE, str(fixture), site, str(bindir)],
@@ -199,15 +202,43 @@ def inspect(state_parent, site, probe):
                 str(r.returncode) + "_" +
                 r.stderr.strip()[:220].replace(" ", "_"))
     finally:
-        # Never delete outside the exact new directory of this invocation.
+        # Cleanup is guaranteed to be attempted even when the immediately
+        # created fixture fails its initial UID/mode/device validation.
+        # Only delete the precise directory created by this invocation.
         require(fixture.parent == root and
-                fixture.name.startswith(".bergen-rename-probe-")
-                and fixture.lstat().st_ino == st.st_ino,
+                fixture.name.startswith(".bergen-rename-probe-") and
+                original is not None,
                 "FIXTURE_CLEANUP_REQUIRES_MANUAL_REVIEW")
-        shutil.rmtree(fixture)
+        current = fixture.lstat()
+        require(stat.S_ISDIR(current.st_mode) and
+                current.st_ino == original.st_ino and
+                current.st_dev == original.st_dev,
+                "FIXTURE_CLEANUP_REQUIRES_MANUAL_REVIEW")
+        if not invoked:
+            # Must be empty: do not recursively delete any unknown files
+            # if the root-level directory was unsafe from the beginning.
+            os.rmdir(fixture)
+            print("ISOLATED_EMPTY_FIXTURE_CLEANED", site)
+        else:
+            # Known fixture structure only; unexpected paths block deletion.
+            expected = {
+                "scan-fixture": {"test.pdf"},
+                "archive-fixture": {"collision.pdf", "renamed.pdf"},
+            }
+            with os.scandir(fixture) as stream:
+                children = list(stream)
+            require(all(c.name in expected and not c.is_symlink()
+                        and c.is_dir(follow_symlinks=False) for c in children),
+                    "FIXTURE_UNEXPECTED_CONTENT_REQUIRES_MANUAL_REVIEW")
+            for child in children:
+                with os.scandir(child.path) as stream:
+                    require(all(f.name in expected[child.name] and
+                                f.is_file(follow_symlinks=False) for f in stream),
+                            "FIXTURE_UNEXPECTED_CONTENT_REQUIRES_MANUAL_REVIEW")
+            shutil.rmtree(fixture)
+            print("ISOLATED_RENAME_FIXTURE_CLEANED", site)
         require(not fixture.exists() and not fixture.is_symlink(),
                 "FIXTURE_CLEANUP_INCOMPLETE")
-        print("ISOLATED_RENAME_FIXTURE_CLEANED", site)
     print("PROTECTED_ARCHIVE_UNCHANGED")
     print("SCAN_AND_RECEIPTS_UNCHANGED")
     print("ARCHIVE_COMMIT_NOT_AUTHORIZED")
