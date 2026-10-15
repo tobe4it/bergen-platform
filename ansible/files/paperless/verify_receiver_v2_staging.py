@@ -143,6 +143,14 @@ def main(argv):
         raise ValueError("INVALID_RECEIVER_SIZE")
     result = verify(STAGING, scope, name, digest, int(size),
                     root_uid=0, ingest_uid=user.pw_uid)
+    # Correlates the verified location, receiver basename, digest and size
+    # with the sender's immutable PREPARED. This is NOT an attestation:
+    # the future orchestrator must authenticate the origin of the output.
+    binding = hashlib.sha256(
+        (scope + "\0" + name + "\0" + result["receiver_sha256"] +
+         "\0" + str(result["receiver_bytes"])).encode("utf-8")
+    ).hexdigest()
+    print("RECEIVER_BINDING", binding)
     print("RECEIVER_SHA256", result["receiver_sha256"])
     print("RECEIVER_BYTES", result["receiver_bytes"])
     print("RECEIVER_POINT_IN_TIME_VERIFIED")
