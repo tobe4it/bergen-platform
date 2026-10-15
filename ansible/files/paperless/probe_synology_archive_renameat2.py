@@ -129,6 +129,72 @@ def subvol_id(binary, path):
     return out
 
 
+def _synology_acl_tool():
+    for path in ("/usr/syno/bin/synoacltool",
+                 "/usr/syno/sbin/synoacltool", shutil.which("synoacltool")):
+        if path and Path(path).is_file() and os.access(path, os.X_OK):
+            return path
+    raise RuntimeError("SYNOACLTOOL_NOT_FOUND")
+
+
+def _linux_acl_only(tool, fixture):
+    result = subprocess.run([tool, "-get", str(fixture)], capture_output=True,
+                            text=True, check=False, timeout=20)
+    output = (result.stdout + "\n" + result.stderr).strip()
+    return result.returncode == 255 and re.fullmatch(
+        r"\(synoacltool\.c,\s*[0-9]+\)It's Linux mode", output) is not None
+
+
+def secure_new_fixture(fixture, root, original, service, device, btrfs, rootid):
+    """Normalize only a newly created, inode-pinned, EMPTY fixture.
+
+    Synology DSM may inherit native ACLs and report mode 0000 for a new
+    directory under /volume1/<site>. Remove ACLs ONLY on our private,
+    uniquely-created fixture, not on the device root or protected archives.
+    Fail closed if DSM does not return strict Linux-mode afterwards.
+    """
+    require(fixture.parent == root and
+            fixture.name.startswith(".bergen-rename-probe-"),
+            "FIXTURE_NOT_ISOLATED")
+    current = fixture.lstat()
+    require(stat.S_ISDIR(current.st_mode)
+            and current.st_uid == 0
+            and current.st_dev == device
+            and current.st_ino == original.st_ino
+            and stat.S_IMODE(current.st_mode) in (0o000, 0o700),
+            "UNSAFE_NEW_FIXTURE")
+    with os.scandir(fixture) as entries:
+        require(next(entries, None) is None, "NONEMPTY_NEW_FIXTURE")
+
+    tool = _synology_acl_tool()
+    if not _linux_acl_only(tool, fixture):
+        result = subprocess.run([tool, "-get", str(fixture)],
+                                capture_output=True, text=True,
+                                check=False, timeout=20)
+        require(result.returncode == 0
+                and result.stdout.startswith("ACL version: 1\n")
+                and "Archive: is_inherit,is_support_ACL" in result.stdout,
+                "UNEXPECTED_INHERITED_FIXTURE_ACL")
+        # Only the fixture just allocated by mkdtemp; no descendant entries.
+        removed = subprocess.run([tool, "-del", str(fixture)],
+                                 capture_output=True, text=True,
+                                 check=False, timeout=20)
+        require(removed.returncode == 0, "FIXTURE_ACL_REMOVAL_FAILED")
+    os.chown(fixture, service.pw_uid, service.pw_gid)
+    os.chmod(fixture, 0o700)
+    updated = fixture.lstat()
+    require(stat.S_ISDIR(updated.st_mode)
+            and updated.st_ino == original.st_ino
+            and updated.st_dev == device
+            and updated.st_uid == service.pw_uid
+            and stat.S_IMODE(updated.st_mode) == 0o700,
+            "FIXTURE_NOT_PRIVATE_AFTER_ACL_NORMALIZATION")
+    require(_linux_acl_only(tool, fixture),
+            "FIXTURE_NATIVE_ACL_STILL_PRESENT")
+    require(subvol_id(btrfs, fixture) == rootid,
+            "FIXTURE_NOT_SAME_SUBVOLUME")
+
+
 def cleanup_fixture(fixture, root, original, invoked, site):
     """Never delete beyond a single verified new synthetic fixture."""
     # Cleanup is guaranteed to be attempted even when the immediately
@@ -224,14 +290,8 @@ def inspect(state_parent, site, probe):
     invoked = False
     try:
         original = fixture.lstat()
-        require(original.st_uid == 0 and stat.S_ISDIR(original.st_mode)
-                and original.st_dev == root_info.st_dev
-                and stat.S_IMODE(original.st_mode) == 0o700,
-                "UNSAFE_NEW_FIXTURE")
-        os.chown(fixture, service.pw_uid, service.pw_gid)
-        os.chmod(fixture, 0o700)
-        require(subvol_id(btrfs, fixture) == rootid,
-                "FIXTURE_NOT_SAME_SUBVOLUME")
+        secure_new_fixture(fixture, root, original, service,
+                           root_info.st_dev, btrfs, rootid)
         invoked = True
         r = subprocess.run([
             "sudo", "-n", "-u", "paperless-sync", "/usr/bin/python3", "-c",
