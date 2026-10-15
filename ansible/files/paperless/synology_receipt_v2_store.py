@@ -39,6 +39,20 @@ def prepared_record(scope, source, sha256, signature, incarnation_nonce):
     return obj
 
 
+def attempted_record(prepared):
+    """Represent one irreversible decision to start a transfer.
+
+    Publish the event durably under sync.lock before launching rsync.
+    This is not a replay token and publishing it a second time must fail.
+    """
+    _validate(prepared)
+    if prepared["status"] != "PREPARED":
+        raise ValueError("PREPARED_EVENT_REQUIRED")
+    value = dict(prepared, status="ATTEMPTED")
+    _validate(value)
+    return value
+
+
 def sent_record(prepared, transfer_evidence):
     """Construct SENT using externally supplied evidence, not remote verification."""
     _validate(prepared)
@@ -53,7 +67,7 @@ def _validate(record):
     if not isinstance(record, dict) or type(record.get("schema_version")) is not int:
         raise ValueError("INVALID_V2_EVENT")
     status = record.get("status")
-    expected_keys = PREPARED_KEYS if status == "PREPARED" else SENT_KEYS if status == "SENT" else None
+    expected_keys = PREPARED_KEYS if status in ("PREPARED", "ATTEMPTED") else SENT_KEYS if status == "SENT" else None
     if expected_keys is None or set(record) != expected_keys or record["schema_version"] != 2:
         raise ValueError("INVALID_V2_EVENT_FIELDS")
     if not isinstance(record.get("incarnation_nonce"), str) or not NONCE.fullmatch(record["incarnation_nonce"]):
@@ -188,14 +202,19 @@ def publish_event(directory, record):
         lockfd = _lock_existing(dirfd)
         try:
             name = record["receipt_id"] + "." + status.lower() + ".json"
-            if status == "SENT":
+            if status in ("ATTEMPTED", "SENT"):
                 prepared_name = record["receipt_id"] + ".prepared.json"
                 expected = dict(record)
-                expected.pop("transfer_evidence")
+                # Only SENT carries transfer evidence. ATTEMPTED has exactly
+                # the PREPARED fields with a different status.
+                if status == "SENT":
+                    expected.pop("transfer_evidence")
                 expected["status"] = "PREPARED"
                 if _read_checked(dirfd, prepared_name) != _canonical(expected):
                     raise RuntimeError("MISSING_OR_MISMATCHED_PREPARED_EVENT")
             created = _publish_no_replace(dirfd, name, raw)
+            if status == "ATTEMPTED" and not created:
+                raise RuntimeError("TRANSFER_ATTEMPT_ALREADY_RECORDED")
             return directory / name, created
         finally:
             os.close(lockfd)
@@ -209,7 +228,7 @@ def _checked_history(dirfd):
     Returns historical (scope, source) pairs without changing any records.
     """
     old_pattern = re.compile(r"[a-f0-9]{64}\.json\Z")
-    v2_pattern = re.compile(r"(v2-[a-f0-9]{32}-[a-f0-9]{64})\.(prepared|sent)\.json\Z")
+    v2_pattern = re.compile(r"(v2-[a-f0-9]{32}-[a-f0-9]{64})\.(prepared|attempted|sent)\.json\Z")
     names = os.listdir(dirfd)
     if len(names) > 10000:
         raise RuntimeError("STATE_ENTRY_LIMIT_EXCEEDED")
@@ -269,6 +288,12 @@ def _checked_history(dirfd):
         except (KeyError, TypeError, ValueError) as exc:
             raise RuntimeError("INVALID_HISTORICAL_RECEIPT") from exc
     for stages in events.values():
+        if "ATTEMPTED" in stages:
+            if "PREPARED" not in stages:
+                raise RuntimeError("ATTEMPTED_WITHOUT_PREPARED")
+            expected = dict(stages["ATTEMPTED"], status="PREPARED")
+            if stages["PREPARED"] != expected:
+                raise RuntimeError("PREPARED_ATTEMPTED_MISMATCH")
         if "SENT" in stages:
             if "PREPARED" not in stages:
                 raise RuntimeError("SENT_WITHOUT_PREPARED")
@@ -307,4 +332,4 @@ def reserve_prepared(directory, scope, source, sha256, signature):
         os.close(dirfd)
 
 
-__all__ = ["prepared_record", "sent_record", "publish_event", "reserve_prepared"]
+__all__ = ["prepared_record", "attempted_record", "sent_record", "publish_event", "reserve_prepared"]

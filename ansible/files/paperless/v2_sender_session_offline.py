@@ -165,6 +165,17 @@ def run_offline_once(journal, source, scope, transport_mock, receiver_mock):
                 if store._read_checked(dirfd, prepared_name) != recorded_bytes:
                     raise RuntimeError("PREPARED_NOT_DURABLE")
 
+                # A durable, immutable ATTEMPTED event is the last barrier
+                # BEFORE the first transport call. Any uncertain interruption
+                # leaves both events and categorically blocks a second call.
+                attempted = store.attempted_record(prepared)
+                attempted_bytes = store._canonical(attempted)
+                attempted_name = prepared["receipt_id"] + ".attempted.json"
+                if not store._publish_no_replace(dirfd, attempted_name, attempted_bytes):
+                    raise RuntimeError("TRANSFER_ATTEMPT_ALREADY_RECORDED")
+                if store._read_checked(dirfd, attempted_name) != attempted_bytes:
+                    raise RuntimeError("ATTEMPTED_NOT_DURABLE")
+
                 transport_result = transport_mock(snapshot, copy.deepcopy(prepared))
                 if (not isinstance(transport_result, tuple)
                         or len(transport_result) != 3):
@@ -179,6 +190,8 @@ def run_offline_once(journal, source, scope, transport_mock, receiver_mock):
 
                 if store._read_checked(dirfd, prepared_name) != recorded_bytes:
                     raise RuntimeError("PREPARED_CHANGED_AFTER_RSYNC")
+                if store._read_checked(dirfd, attempted_name) != attempted_bytes:
+                    raise RuntimeError("ATTEMPTED_CHANGED_AFTER_RSYNC")
                 _recheck_source(source, st, digest)
                 _recheck_snapshot(snapshot, st.st_size, digest)
 
@@ -192,6 +205,8 @@ def run_offline_once(journal, source, scope, transport_mock, receiver_mock):
 
                 if store._read_checked(dirfd, prepared_name) != recorded_bytes:
                     raise RuntimeError("PREPARED_CHANGED_AFTER_RECEIVER")
+                if store._read_checked(dirfd, attempted_name) != attempted_bytes:
+                    raise RuntimeError("ATTEMPTED_CHANGED_AFTER_RECEIVER")
                 _recheck_source(source, st, digest)
                 _recheck_snapshot(snapshot, st.st_size, digest)
 

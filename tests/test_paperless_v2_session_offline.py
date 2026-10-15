@@ -50,6 +50,10 @@ class OfflineSessionTests(unittest.TestCase):
         self.assertTrue(receipt.is_file(), "PREPARED must precede first callback")
         self.assertEqual(receipt.read_bytes(), store._canonical(prepared))
         self.assertEqual(stat.S_IMODE(receipt.stat().st_mode), 0o600)
+        attempt = self.journal / (prepared["receipt_id"] + ".attempted.json")
+        self.assertEqual(attempt.read_bytes(),
+                         store._canonical(store.attempted_record(prepared)))
+        self.assertEqual(stat.S_IMODE(attempt.stat().st_mode), 0o600)
         self.assertEqual(snapshot.read_bytes(), PDF)
         self.assertIn(prepared["incarnation_nonce"], prepared["destination"])
         dest = prepared["destination"].rsplit("/", 1)[1]
@@ -108,6 +112,28 @@ class OfflineSessionTests(unittest.TestCase):
             self.execute_session()
         self.assertEqual(self.calls, calls)
         self.assertEqual(len(self.prepared_events()), 1)
+
+    def test_session_attempt_exists_before_transport_and_never_sent(self):
+        result = self.execute_session()
+        attempted = [p for p in self.receipts() if p.name.endswith(".attempted.json")]
+        self.assertEqual(len(attempted), 1)
+        self.assertEqual(len(self.prepared_events()), 1)
+        self.assertFalse(result["sent_authorized"])
+        with self.assertRaisesRegex(RuntimeError, "EXISTING_RECEIPT_BLOCKS_RETRANSMISSION"):
+            self.execute_session()
+        self.assertEqual(self.calls, ["transport", "receiver"])
+
+    def test_tampered_attempted_after_transport_blocks_receiver(self):
+        def change_attempt(snapshot, prepared):
+            result = self.transport(snapshot, prepared)
+            attempted = next(p for p in self.receipts()
+                             if p.name.endswith(".attempted.json"))
+            attempted.write_bytes(b"tampered")
+            return result
+        with self.assertRaisesRegex(RuntimeError, "ATTEMPTED_CHANGED_AFTER_RSYNC"):
+            self.execute_session(transport=change_attempt)
+        self.assertEqual(self.calls, ["transport"])
+        self.assertFalse(any(p.name.endswith(".sent.json") for p in self.receipts()))
 
     def test_crash_during_transport_keeps_prepared_and_blocks_retry(self):
         def crash(snapshot, prepared):
