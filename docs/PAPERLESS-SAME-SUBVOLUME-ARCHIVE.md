@@ -235,6 +235,19 @@ Neuer rein lesender Standort-Audit:
       -e @ansible/vars/paperless.vault.yml \
       -e @ansible/vars/paperless-synology.local.yml
 
+Der erste Live-Aufruf des Standort-Audits vom 15.10.2026
+brach **lesend, ohne Dateiveränderung** bei
+`UNRECOGNIZED_NATIVE_ACL_ENTRY` ab. Das bedeutet:
+mindestens eine DSM-ACE-Darstellung am ermittelten
+Dateisystem-Wurzelverzeichnis ist noch nicht vom Parser abgedeckt.
+**Es gibt noch keinen freigegebenen Standort.** Das
+Diagnose-Update gibt bei unbekannten ACEs die betreffende
+Scope-Kennung und den auf 240 Zeichen begrenzten
+`UNRECOGNIZED_PARENT_ACE`-Eintrag aus, setzt den
+jeweiligen Kandidaten auf `BLOCKER` und analysiert
+die restlichen Scopes weiter. Keine Erweiterung des
+ACL-Parsers ohne anhand realer NAS-Ausgabe überprüfte Syntax.
+
 Dieser Audit steigt von jedem konfigurierten Scan-Verzeichnis
 zu dessen oberstem `st_dev`-gleichen Verzeichnis auf,
 prüft dessen root-Eigentümer und native DSM-ACLs auf
