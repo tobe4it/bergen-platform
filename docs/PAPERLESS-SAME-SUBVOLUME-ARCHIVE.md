@@ -198,6 +198,55 @@ Die bis dahin angelegten vier versteckten Ordner bleiben
 leer, der Move-Worker gesperrt. Keine ACL-Autoänderung
 oder automatische Bereinigung.
 
+## Standortentscheidung nach bestätigtem Vierfach-Blocker
+
+Der reale, **lesende** DSM-Parent-ACE-Audit vom 15.10.2026 ergab:
+
+- `Privat/thomas`: Delete/Rename-Grant für `thomas@bergen.intern`
+- `Privat/nadja`: Delete/Rename-Grant für `nadja@bergen.intern`
+- `Eltern`: Delete/Rename-Grant für `Eltern@bergen.intern`
+- `Familie`: Delete/Rename-Grant für `Familie@bergen.intern`
+
+Ergebnis `RISKY_SOURCE_ACL_GRANTS 4`,
+`ARCHIVE_ENTRY_PROTECTION_BLOCKED`, `NO_FILES_CHANGED`.
+
+**Folge:** Die angelegten vier `.paperless-archive`-Ordner
+bleiben leer. Der aktuelle Worker `synology_same_volume_archive_move.py`
+verwendet noch genau diese geblockten Quell-Unterordner und darf
+ausdrücklich **nicht** für produktive Archivierungs-Renames
+freigegeben werden, selbst wenn seine 30+ Offline-Tests bestehen.
+Es gibt keine neue Commit-Freigabe und keine automatische
+30-Tage-Bereinigung.
+
+**Geplante Alternative:** ein geschützter Archivstamm außerhalb
+der beschreibbaren Eingangsordner, aber **auf dem jeweiligen
+Subvolume**. Da die Synology `homes` und `paperless-scan`
+als getrennte Btrfs-Subvolumes verwendet, sind mindestens zwei
+Archivstämme erforderlich. Exakte Pfade erst nach Audit festlegen.
+
+Neuer rein lesender Standort-Audit:
+
+    python3 -m unittest discover -s tests \
+      -p 'test_paperless_protected_archive_candidates.py' -v
+
+    ansible-playbook -i ansible/inventory.yml -i ansible/inventory.local.yml \
+      ansible/playbooks/audit-paperless-synology-protected-archive-candidates.yml \
+      --vault-id paperless@prompt \
+      -e @ansible/vars/paperless.vault.yml \
+      -e @ansible/vars/paperless-synology.local.yml
+
+Dieser Audit steigt von jedem konfigurierten Scan-Verzeichnis
+zu dessen oberstem `st_dev`-gleichen Verzeichnis auf,
+prüft dessen root-Eigentümer und native DSM-ACLs auf
+mögliche nichtadministrative Delete-/Rename-Grants und
+schlägt einen separaten `.bergen-paperless-archive`-Unterordner
+vor. Keine Verzeichniserstellung, ACL-Änderung oder
+Test-Umbenennung. Ein scheinbar sicherer Kandidat bleibt
+`ARCHIVE_PARENT_CANDIDATES_NEED_EFFECTIVE_TEST`
+bis zu **echtem Subvolume-ID-Nachweis**, effektiven
+LDAP-/SMB-Rechtetests, Backup/Restore und zur Anpassung
+des Workers an den neuen, zentral geschützten Zielpfad.
+
 ## Noch gesperrte produktive Verschiebung
 
 Der echte Commit benötigt eine von root außerhalb
