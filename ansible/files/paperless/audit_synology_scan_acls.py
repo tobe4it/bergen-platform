@@ -25,7 +25,7 @@ def acl_tool():
     return None
 
 
-def inspect(parent):
+def inspect(parent, require_hidden=False):
     if (not parent.is_absolute() or ".." in parent.parts or parent == Path("/")
             or str(parent) != os.path.normpath(str(parent))):
         raise RuntimeError("INVALID_PARENT")
@@ -49,6 +49,18 @@ def inspect(parent):
         print("NO_FILES_CHANGED")
         return
     print("SYNC_IDENTITY", SETTINGS["sync_user"], "uid", user.pw_uid)
+    if require_hidden:
+        journal = SETTINGS["state"] / "archive-move-journal"
+        try:
+            journal_st = journal.lstat()
+            if (not stat.S_ISDIR(journal_st.st_mode)
+                    or journal_st.st_uid != user.pw_uid
+                    or stat.S_IMODE(journal_st.st_mode) != 0o700):
+                print("BLOCKER GLOBAL ARCHIVE_JOURNAL_UNSAFE")
+            else:
+                print("ARCHIVE_JOURNAL_PRESENT")
+        except FileNotFoundError:
+            print("BLOCKER GLOBAL ARCHIVE_JOURNAL_MISSING")
     for folder, scope in SETTINGS["sources"]:
         source = folder.lstat()
         if not stat.S_ISDIR(source.st_mode):
@@ -58,7 +70,18 @@ def inspect(parent):
         print("SOURCE_DEVICE", source.st_dev)
         print("SOURCE_MODE", oct(stat.S_IMODE(source.st_mode)))
         print("SOURCE_OWNER", source.st_uid, source.st_gid)
-        print("ARCHIVE_CANDIDATE", "ABSENT" if not candidate.exists() and not candidate.is_symlink() else "EXISTS_REVIEW")
+        missing = not candidate.exists() and not candidate.is_symlink()
+        print("ARCHIVE_CANDIDATE", "ABSENT" if missing else "EXISTS_REVIEW")
+        if require_hidden:
+            if missing:
+                print("BLOCKER", scope, "HIDDEN_ARCHIVE_MISSING")
+            else:
+                hidden = candidate.lstat()
+                if (not stat.S_ISDIR(hidden.st_mode)
+                        or hidden.st_uid != user.pw_uid
+                        or stat.S_IMODE(hidden.st_mode) != 0o700
+                        or hidden.st_dev != source.st_dev):
+                    print("BLOCKER", scope, "HIDDEN_ARCHIVE_OWNER_MODE_OR_DEVICE")
         # The source ACL is what matters for creating/removing entries. The
         # parent ACL helps identify inherited grants and DSM Home behavior.
         targets = [("SOURCE", folder), ("PARENT", folder.parent)]
@@ -109,6 +132,6 @@ def inspect(parent):
 
 
 if __name__ == "__main__":
-    if len(sys.argv) != 2:
-        raise SystemExit("usage: audit_synology_scan_acls.py STATE_PARENT")
-    inspect(Path(sys.argv[1]))
+    if len(sys.argv) not in (2, 3) or (len(sys.argv) == 3 and sys.argv[2] != "--require-hidden"):
+        raise SystemExit("usage: audit_synology_scan_acls.py STATE_PARENT [--require-hidden]")
+    inspect(Path(sys.argv[1]), require_hidden=(len(sys.argv) == 3))
