@@ -1,0 +1,183 @@
+---
+# Stage root-owned archive code on NAS, NEVER create activation gate or move PDFs.
+# Explicit operator action only. Use ignored site-local settings.
+- name: Stage disabled Synology same-subvolume Paperless archive worker
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  vars:
+    archive_worker_source: "{{ playbook_dir }}/../files/paperless/synology_same_volume_archive_move.py"
+    archive_worker_name: synology_same_volume_archive_move.py
+  tasks:
+    - name: Validate existing site-local Synology configuration
+      ansible.builtin.assert:
+        that:
+          - synology_admin is defined
+          - synology_admin is match('^[A-Za-z_][A-Za-z0-9_.-]*@[A-Za-z0-9][A-Za-z0-9.-]+$')
+          - synology_config is defined
+          - synology_config.schema_version == 1
+          - synology_config.sync_user == 'paperless-sync'
+          - synology_config.state_parent is match('^/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$')
+
+    - name: Hash local reviewed worker bytes
+      ansible.builtin.stat:
+        path: "{{ archive_worker_source }}"
+        checksum_algorithm: sha256
+      register: archive_worker_local
+      failed_when: >-
+        not archive_worker_local.stat.exists or
+        not archive_worker_local.stat.isreg or
+        archive_worker_local.stat.islnk
+
+    - name: Validate root-owned code parent and disabled commit gate
+      ansible.builtin.command:
+        argv:
+          - ssh
+          - -T
+          - -o
+          - BatchMode=yes
+          - -o
+          - StrictHostKeyChecking=yes
+          - -o
+          - ConnectTimeout=15
+          - "{{ synology_admin }}"
+          - sudo -n /bin/sh -s
+        stdin: |
+          set -eu
+          PARENT={{ synology_config.state_parent | quote }}
+          BIN="$PARENT/bin"
+          TARGET="$BIN/synology_same_volume_archive_move.py"
+          test "$(stat -c '%u:%a' "$PARENT")" = "0:755"
+          test "$(stat -c '%u:%a' "$BIN")" = "0:755"
+          test ! -L "$PARENT" && test ! -L "$BIN"
+          test ! -e "$PARENT/archive-move.enabled"
+          test ! -L "$PARENT/archive-move.enabled"
+          if test -e "$TARGET" || test -L "$TARGET"; then
+            test ! -L "$TARGET"
+            test -f "$TARGET"
+            test "$(stat -c '%u:%a' "$TARGET")" = "0:644"
+          fi
+          echo ARCHIVE_WORKER_STAGE_ALLOWED
+      register: archive_stage_guard
+      changed_when: false
+
+    - name: Require inactive archive gate before any code transfer
+      ansible.builtin.assert:
+        that:
+          - "'ARCHIVE_WORKER_STAGE_ALLOWED' in archive_stage_guard.stdout_lines"
+
+    - name: Stage verified file with cleanup
+      block:
+        - name: Allocate private temporary NAS source path
+          ansible.builtin.command:
+            argv:
+              - ssh
+              - -T
+              - -o
+              - BatchMode=yes
+              - -o
+              - StrictHostKeyChecking=yes
+              - "{{ synology_admin }}"
+              - umask 077; mktemp /tmp/bergen-paperless-archive.XXXXXXXX
+          register: archive_temp_path
+          changed_when: true
+
+        - name: Validate temporary file location
+          ansible.builtin.assert:
+            that:
+              - archive_temp_path.stdout | trim is match('^/tmp/bergen-paperless-archive\.[A-Za-z0-9]{8}$')
+
+        - name: Upload worker source only to isolated staging
+          ansible.builtin.command:
+            argv:
+              - ssh
+              - -T
+              - -o
+              - BatchMode=yes
+              - -o
+              - StrictHostKeyChecking=yes
+              - "{{ synology_admin }}"
+              - "umask 077; cat > {{ archive_temp_path.stdout | trim | quote }}"
+            stdin: "{{ lookup('ansible.builtin.file', archive_worker_source, rstrip=False) }}"
+            stdin_add_newline: false
+          changed_when: true
+
+        - name: Hash remote temporary worker
+          ansible.builtin.command:
+            argv:
+              - ssh
+              - -T
+              - -o
+              - BatchMode=yes
+              - -o
+              - StrictHostKeyChecking=yes
+              - "{{ synology_admin }}"
+              - "sha256sum {{ archive_temp_path.stdout | trim | quote }}"
+          register: remote_archive_hash
+          changed_when: false
+
+        - name: Reject mismatched worker bytes
+          ansible.builtin.assert:
+            that:
+              - remote_archive_hash.stdout.split()[0] == archive_worker_local.stat.checksum
+
+        - name: Install reviewed root-owned code while commit gate remains absent
+          ansible.builtin.command:
+            argv:
+              - ssh
+              - -T
+              - -o
+              - BatchMode=yes
+              - -o
+              - StrictHostKeyChecking=yes
+              - "{{ synology_admin }}"
+              - sudo -n /bin/sh -s
+            stdin: |
+              set -eu
+              PARENT={{ synology_config.state_parent | quote }}
+              BIN="$PARENT/bin"
+              SOURCE={{ archive_temp_path.stdout | trim | quote }}
+              TARGET="$BIN/synology_same_volume_archive_move.py"
+              test ! -e "$PARENT/archive-move.enabled"
+              test ! -L "$PARENT/archive-move.enabled"
+              test "$(sha256sum "$SOURCE" | cut -d ' ' -f 1)" = {{ archive_worker_local.stat.checksum | quote }}
+              if test -e "$TARGET" || test -L "$TARGET"; then
+                test ! -L "$TARGET"
+                test "$(stat -c '%u:%a' "$TARGET")" = "0:644"
+              fi
+              TMP=$(mktemp "$BIN/.archive-code.XXXXXXXX")
+              trap 'rm -f "$TMP"' EXIT
+              install -o root -g root -m 0644 "$SOURCE" "$TMP"
+              test "$(sha256sum "$TMP" | cut -d ' ' -f 1)" = {{ archive_worker_local.stat.checksum | quote }}
+              mv -f "$TMP" "$TARGET"
+              trap - EXIT
+              test ! -e "$PARENT/archive-move.enabled"
+              echo ARCHIVE_WORKER_STAGED_DISABLED
+          register: archive_worker_install
+          changed_when: true
+
+        - name: Require disabled status after installation
+          ansible.builtin.assert:
+            that:
+              - "'ARCHIVE_WORKER_STAGED_DISABLED' in archive_worker_install.stdout_lines"
+      always:
+        - name: Clean up this playbook's isolated staging file
+          ansible.builtin.command:
+            argv:
+              - ssh
+              - -T
+              - -o
+              - BatchMode=yes
+              - -o
+              - StrictHostKeyChecking=yes
+              - "{{ synology_admin }}"
+              - "rm -f -- {{ archive_temp_path.stdout | trim | quote }}"
+          when:
+            - archive_temp_path is defined
+            - archive_temp_path.stdout is defined
+            - archive_temp_path.stdout | trim is match('^/tmp/bergen-paperless-archive\.[A-Za-z0-9]{8}$')
+          changed_when: false
+
+    - name: Display disabled install status
+      ansible.builtin.debug:
+        msg: "Staged root-owned archive worker; no document moved and commit gate still absent"
