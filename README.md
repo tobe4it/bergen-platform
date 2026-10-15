@@ -20,6 +20,7 @@ Current capabilities include:
 - Generic LXC bootstrap
 - Ansible role-based architecture
 - Open WebUI deployment
+- Internal Nginx HTTPS proxy with isolated SSH backend tunnels
 - Ollama deployment
 - OpenLDAP authentication
 - Mosquitto MQTT deployment and per-client access management
@@ -94,6 +95,8 @@ Project documentation can be found in the **docs/** directory.
 - MQTT.md
 - PIHOLE.md
 - EVCC.md
+- REVERSE-PROXY.md
+- BERGEN-AI-PROXY.md
 - ROADMAP.md
 - UPDATE.md
 
@@ -217,7 +220,7 @@ The Bergen Platform follows Semantic Versioning.
 
 Current release:
 
-v0.9.2 — Mail gateway TLS, Certbot and MTA-STS maintenance (2026-10-11)
+v0.10.0 — Internal reverse proxy and isolated Bergen-AI HTTPS access (2026-10-15)
 
 See **docs/CHANGELOG.md** for release history.
 
