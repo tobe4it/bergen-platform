@@ -108,7 +108,7 @@
       delegate_to: localhost
       become: false
       register: archive_execution
-      changed_when: "'ARCHIVE_MOVED' in archive_execution.stdout_lines"
+      changed_when: "archive_execution.stdout is search('(?m)^ARCHIVE_MOVED ')"
       no_log: false
 
     - name: Require explicit archive marker and no purge
