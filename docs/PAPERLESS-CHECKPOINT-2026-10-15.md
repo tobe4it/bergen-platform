@@ -38,7 +38,48 @@ Abschlussmarker: `DELETED_BY_USER 2`, `IMPORT_LIFECYCLE_RECONCILED`, `ARCHIVE_NO
 - Historischer Nachweis: erfolgreicher `vzdump`-Task für LXC 126 vom 14.10.2026, ca. 03:02:54 MESZ, vor der zweiten Journalveröffentlichung.
 - **Neuer Nachweis aus dem Proxmox-Tasklog:** LXC 126 (`bergen-paperless`) wurde am **15.10.2026 um 03:00:12 MESZ** im Modus `stop` auf Storage `bergen-synology-backup` gesichert. `rootfs` (`/`) **und** `mp0` (`/srv/bergen-paperless`) wurden laut Log eingeschlossen.
 - Gemeldeter Archivpfad: `/mnt/pve/bergen-synology-backup/dump/vzdump-lxc-126-2026_10_15-03_00_12.tar.zst`. Log: 4.597.626.880 Byte geschrieben (4,3 GiB), Archivgröße 1,39 GB; Wiederanlauf des Containers nach 183 Sekunden; Backupende **03:03:15 MESZ**, `Backup job finished successfully`, `TASK OK`.
-- Der erfolgreiche Task liegt **nach** der Veröffentlichung beider `DELETED_BY_USER`-Journale am 14.10.2026 gegen 21:45 MESZ. Die frühere Lücke „kein zeitlich nachfolgender Backup-Task“ ist damit geschlossen. **Ob beide Journaldateien im Archiv enthalten, lesbar und wiederherstellbar sind, wurde noch nicht anhand des Archivinhalts oder eines Restore-Tests nachgewiesen.** Die Existenz des Archivs wurde anschließend über die Proxmox-Storage-Liste bestätigt.
+- Der erfolgreiche Task liegt **nach** der Veröffentlichung beider `DELETED_BY_USER`-Journale am 14.10.2026 gegen 21:45 MESZ. Die frühere Lücke „kein zeitlich nachfolgender Backup-Task“ ist damit geschlossen. **Inhaltsprüfung am 15.10.2026:** Der Nutzer hat das konkrete Archiv auf `venombox` mit `set -o pipefail` sowie `tar --zstd -tf "$archive" | grep -E '(^|/)var/lib/paperless-ingest/deletion-decisions/[^/]+\.json
+- Backup-Pruning laut Log: `keep-daily=7,keep-monthly=12,keep-weekly=4`; bei diesem Lauf `pruned 0 backup(s)`.
+- **Konfigurations-/Existenzprüfung vom 15.10.2026:** `pct config 126` meldet `rootfs: local-zfs:subvol-126-disk-0,size=32G` und `mp0: local-zfs:subvol-126-disk-1,mp=/srv/bergen-paperless,backup=1,size=100G`. `pvesm list bergen-synology-backup --content backup` bestätigt den zugehörigen Eintrag mit **1.492.825.227 Bytes** (Storage-ID `bergen-synology-backup:backup/vzdump-lxc-126-2026_10_15-03_00_12.tar.zst`).
+- **Journal-Quellsystem verifiziert (Code):** `audit-paperless-import-lifecycle-15-26.yml` liest beide Löschjournale mittels `pct exec 126 -- runuser -u paperless-ingest ...` **innerhalb von LXC 126**. Damit liegt die durch den Audit geprüfte Journalquelle im Container-Kontext; ob ihre konkreten Dateien im Backup tatsächlich enthalten sind, ist dennoch erst durch Archiv-Inhaltsprüfung belegt.
+
+- Vor jeder zukünftigen Original-Löschung/Retention-Freigabe: tatsächliche Datenlesbarkeit und SHA-256-Gleichheit der gesicherten Journalinhalte, Ausschlüsse/Binds, Paperless-Datenkonsistenz und isolierte Wiederherstellbarkeit kontrollieren. Der nun nachgewiesene TAR-Mitglieder-Einschluss und ein früherer isolierter Paperless-Restore ersetzen den Test mit dem aktuellen Backup nicht.
+
+## Offene Punkte – bewusst zurückgestellt
+
+1. **Archivierung/Purge (blockiert):** Synology-ACLs und sichere Quarantäne, Cross-Btrfs-Subvolume-Copy statt `rename` (`EXDEV`), Hash/fsync, atomare Journale, Replay-/Crash-Recovery, getrennt autorisierte Originaldatei-Entfernung und zeitgesteuerte Löschung.
+2. **Sender-Versionierung (blockiert):** v1-Receipt-Schlüssel basieren auf Scope und Dateiname; Wiederverwendung eines Scannamens und `rsync --ignore-existing` erfordern eine vollständige v2-Inkarnations-/Zielnamenstrategie. Keine stillschweigende Receipt-Migration.
+3. **Backup nach Journalpublikation:** erfolgreicher LXC-126-Backup-Task am 15.10.2026, 03:00–03:03 MESZ, **belegt**; Archiv-Existenz und `mp0 backup=1` separat bestätigt. Der TAR-Index des konkreten Archivs wurde erfolgreich gelesen und führt **beide** `deletion-decisions/*.json` auf. Vollständige JSON-Extraktion, Inhalts-/Hash-Abgleich und isolierter Restore weiterhin offen.
+4. **Audit-Konsolidierung:** älteren Ein-Journal-Audit nicht als aktuellen Gesundheitscheck ausgeben; Migration/Deprecation erst mit Tests und expliziter Freigabe.
+5. **Lokale, noch nicht versionierte Dateien:** Nach der allgemeinen `.gitignore`-Regel `*.local.yml` sind auf `bp-controller` zehn untracked Dateien übrig: neun Paperless-Python-/Ansible-Dateien und `ansible/group_vars/all/bergen-proxy.yml`. Die neun Paperless-Dateien wurden am 14./15.10.2026 als TAR.GZ aus einer E-Mail **statisch** geprüft, aber **nicht ausgeführt oder versioniert**. Das Proxy-YAML wurde nicht eingesehen und ist vor jeder Git-Aufnahme separat auf Geheimnisse und Standortdaten zu prüfen. Kritische Befunde und der Arbeitsplan stehen im [lokalen Code-Review](PAPERLESS-CODE-REVIEW-2026-10-15.md).
+6. **KI/SSO/Berechtigungen:** keine bestätigte produktive, identitätsgebundene Paperless-KI-Suche; getrennten Designzweig `feat/paperless-ai-identity-bound-design-20261015` nicht ungeprüft in diesen Branch integrieren. Mandantentrennung, Benutzerkontext und Zugriffskontrolle vor Aktivierung testen.
+7. **Ollama-Status:** die bislang gezeigte Terminalausgabe enthielt keine eindeutig auswertbare `ollama list`-/API-Antwort. Modelle, Version, Systemd-Konfiguration und Netzwerkgrenzen separat lesend prüfen.
+8. **Dokumentation für Nachlass und Einsteiger:** Betriebs-, Wiederanlauf- und Geheimnis-Notfallblatt weiter vervollständigen; keine Kennwörter, Tokens oder privaten Schlüssel in Git/Wiki.
+
+## Reproduzierbare read-only Kontrolle
+
+Auf `bp-controller` nach Aktualisierung des Branches:
+
+```bash
+cd ~/bergen-platform
+python3 -m unittest discover -s tests -p 'test_paperless_import_lifecycle_15_26.py' -v
+ansible-playbook \
+  -i ansible/inventory.yml \
+  -i ansible/inventory.local.yml \
+  ansible/playbooks/audit-paperless-import-lifecycle-15-26.yml \
+  --vault-id paperless@prompt \
+  -e @ansible/vars/paperless.vault.yml \
+  -e @ansible/vars/paperless-synology.local.yml
+```
+
+Der Ansible-Lauf muss `changed=0` ergeben; jeder unbekannte oder nicht belegte Löschfall muss **fail-closed** bleiben. Die Unit-Test-Ergebnisse sind erst nach tatsächlicher Ausführung als bestätigt zu dokumentieren.
+
+## Versions- und Freigabepolitik
+
+Aktuelle stabile Plattform-Version laut README/Changelog: **v0.9.2**. Dieser Paperless-Stand wird als **unreleased development checkpoint** geführt. Ein mögliches späteres Pre-Release-Tag (z. B. `v0.10.0-paperless.1`) ist **nicht erstellt**. Ein Release-Tag darf erst nach Review und Härtung der noch unversionierten Dateien, Prüfung auf Secrets, Testnachweisen, vollständigem Commit-Stand und bewusster Festlegung des Release-Scopes gesetzt werden. Der Dokumentations-Checkpoint ist über die jeweilige Git-Commit-SHA referenzierbar, nicht über ein Release-Tag.
+
+Weitere Details und historische Freigaben: [Paperless Scan Lifecycle](PAPERLESS-SCAN-LIFECYCLE.md).
+` lesend geprüft. Beide Journalmitglieder wurden gefunden: `./var/lib/paperless-ingest/deletion-decisions/f4ec236e1eec5af84a73a3fa528c7bd2afa41307c4319a2ac8b26643dbdb0e26.json` und `./var/lib/paperless-ingest/deletion-decisions/2a6d73664436c1a3e0432d7a07911feab86ba2a617a185b81bc30580fdd67e90.json`. **Archiv-Einschluss beider Pfade ist damit nachgewiesen; JSON-Datenextraktion, Byte-/Hash-Abgleich mit dem LXC und ein isolierter Restore sind weiterhin nicht nachgewiesen.**
 - Backup-Pruning laut Log: `keep-daily=7,keep-monthly=12,keep-weekly=4`; bei diesem Lauf `pruned 0 backup(s)`.
 - **Konfigurations-/Existenzprüfung vom 15.10.2026:** `pct config 126` meldet `rootfs: local-zfs:subvol-126-disk-0,size=32G` und `mp0: local-zfs:subvol-126-disk-1,mp=/srv/bergen-paperless,backup=1,size=100G`. `pvesm list bergen-synology-backup --content backup` bestätigt den zugehörigen Eintrag mit **1.492.825.227 Bytes** (Storage-ID `bergen-synology-backup:backup/vzdump-lxc-126-2026_10_15-03_00_12.tar.zst`).
 - **Journal-Quellsystem verifiziert (Code):** `audit-paperless-import-lifecycle-15-26.yml` liest beide Löschjournale mittels `pct exec 126 -- runuser -u paperless-ingest ...` **innerhalb von LXC 126**. Damit liegt die durch den Audit geprüfte Journalquelle im Container-Kontext; ob ihre konkreten Dateien im Backup tatsächlich enthalten sind, ist dennoch erst durch Archiv-Inhaltsprüfung belegt.
