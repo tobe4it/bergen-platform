@@ -35,16 +35,18 @@ Abschlussmarker: `DELETED_BY_USER 2`, `IMPORT_LIFECYCLE_RECONCILED`, `ARCHIVE_NO
 
 ## Backup- und Recovery-Stand
 
-- Für LXC 126 wurde ein erfolgreicher `vzdump`-Task vom 14.10.2026, ca. 03:02:54 MESZ, gemeldet. Das NFS-Ziel `bergen-synology-backup` war aktiv.
-- Die Veröffentlichung des zweiten Löschjournals erfolgte erst am 14.10. gegen 21:45 MESZ. **Ein nachfolgend erfolgreiches Backup einschließlich beider Journale ist mit dem bisher vorliegenden Protokoll nicht belegt.**
-- Ein früherer isolierter Restore von Paperless wurde dokumentiert; er ersetzt nicht den erneuten Nachweis nach der Journalveröffentlichung.
-- Vor jeder zukünftigen Lösch- oder Retention-Freigabe: aktuelle Backup-Konfiguration von rootfs und mp0, tatsächlich vorhandene Archive, erfolgreichen jüngeren Lauf und isolierte Wiederherstellbarkeit einschließlich der Journale prüfen.
+- Historischer Nachweis: erfolgreicher `vzdump`-Task für LXC 126 vom 14.10.2026, ca. 03:02:54 MESZ, vor der zweiten Journalveröffentlichung.
+- **Neuer Nachweis aus dem Proxmox-Tasklog:** LXC 126 (`bergen-paperless`) wurde am **15.10.2026 um 03:00:12 MESZ** im Modus `stop` auf Storage `bergen-synology-backup` gesichert. `rootfs` (`/`) **und** `mp0` (`/srv/bergen-paperless`) wurden laut Log eingeschlossen.
+- Gemeldeter Archivpfad: `/mnt/pve/bergen-synology-backup/dump/vzdump-lxc-126-2026_10_15-03_00_12.tar.zst`. Log: 4.597.626.880 Byte geschrieben (4,3 GiB), Archivgröße 1,39 GB; Wiederanlauf des Containers nach 183 Sekunden; Backupende **03:03:15 MESZ**, `Backup job finished successfully`, `TASK OK`.
+- Der erfolgreiche Task liegt **nach** der Veröffentlichung beider `DELETED_BY_USER`-Journale am 14.10.2026 gegen 21:45 MESZ. Die frühere Lücke „kein zeitlich nachfolgender Backup-Task“ ist damit geschlossen. **Ob beide Journaldateien im Archiv enthalten, lesbar und wiederherstellbar sind, wurde noch nicht anhand des Archivinhalts oder eines Restore-Tests nachgewiesen.** Ein Tasklog allein bestätigt auch nicht die heutige Existenz der Archivdatei.
+- Backup-Pruning laut Log: `keep-daily=7,keep-monthly=12,keep-weekly=4`; bei diesem Lauf `pruned 0 backup(s)`.
+- Vor jeder zukünftigen Original-Löschung/Retention-Freigabe: Existenz und technische Lesbarkeit der konkreten Archivdatei, tatsächlichen Einschluss der Journale, ggf. Ausschlüsse/Binds und isolierte Wiederherstellbarkeit kontrollieren. Ein früherer isolierter Paperless-Restore ersetzt den Test mit dem aktuellen Backup nicht.
 
 ## Offene Punkte – bewusst zurückgestellt
 
 1. **Archivierung/Purge (blockiert):** Synology-ACLs und sichere Quarantäne, Cross-Btrfs-Subvolume-Copy statt `rename` (`EXDEV`), Hash/fsync, atomare Journale, Replay-/Crash-Recovery, getrennt autorisierte Originaldatei-Entfernung und zeitgesteuerte Löschung.
 2. **Sender-Versionierung (blockiert):** v1-Receipt-Schlüssel basieren auf Scope und Dateiname; Wiederverwendung eines Scannamens und `rsync --ignore-existing` erfordern eine vollständige v2-Inkarnations-/Zielnamenstrategie. Keine stillschweigende Receipt-Migration.
-3. **Backup nach Journalpublikation:** jüngsten erfolgreichen LXC-126-Backup-Lauf, Archivinhalt und Restore-Evidenz nachweisen.
+3. **Backup nach Journalpublikation:** erfolgreicher LXC-126-Backup-Task am 15.10.2026, 03:00–03:03 MESZ, **belegt**. Existenz/Lesbarkeit des konkreten Archivs, Journal-Einschluss und isolierte Restore-Evidenz weiterhin offen.
 4. **Audit-Konsolidierung:** älteren Ein-Journal-Audit nicht als aktuellen Gesundheitscheck ausgeben; Migration/Deprecation erst mit Tests und expliziter Freigabe.
 5. **Lokale, noch nicht versionierte Dateien:** Nach der allgemeinen `.gitignore`-Regel `*.local.yml` sind auf `bp-controller` zehn untracked Dateien übrig: neun Paperless-Python-/Ansible-Dateien und `ansible/group_vars/all/bergen-proxy.yml`. Die neun Paperless-Dateien wurden am 14./15.10.2026 als TAR.GZ aus einer E-Mail **statisch** geprüft, aber **nicht ausgeführt oder versioniert**. Das Proxy-YAML wurde nicht eingesehen und ist vor jeder Git-Aufnahme separat auf Geheimnisse und Standortdaten zu prüfen. Kritische Befunde und der Arbeitsplan stehen im [lokalen Code-Review](PAPERLESS-CODE-REVIEW-2026-10-15.md).
 6. **KI/SSO/Berechtigungen:** keine bestätigte produktive, identitätsgebundene Paperless-KI-Suche; getrennten Designzweig `feat/paperless-ai-identity-bound-design-20261015` nicht ungeprüft in diesen Branch integrieren. Mandantentrennung, Benutzerkontext und Zugriffskontrolle vor Aktivierung testen.
