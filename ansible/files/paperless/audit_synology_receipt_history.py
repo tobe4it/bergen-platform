@@ -22,7 +22,8 @@ MAX_ENTRIES = 10000
 MAX_BYTES = 8192
 LEGACY_REQUIRED = {'scope', 'source', 'status', 'sha256', 'signature', 'destination'}
 LEGACY_OPTIONAL = {'prepared_at', 'sent_at', 'reconciled_at',
-                   'manually_confirmed_imported', 'bridge_receipt'}
+                   'manually_confirmed_imported', 'bridge_receipt',
+                   'document_id', 'recovery_reason'}
 V2_REQUIRED = {'schema_version', 'receipt_id', 'status', 'scope', 'source',
                'sha256', 'signature', 'destination', 'incarnation_nonce'}
 
@@ -143,6 +144,20 @@ def audit_directory(directory, scopes, *, expected_owner=None):
                             or not set(item) <= LEGACY_REQUIRED | LEGACY_OPTIONAL
                             or item['status'] not in ('PREPARED', 'SENT')):
                         reject('INVALID_LEGACY_RECEIPT_SCHEMA')
+                    # Historical recovery script publishes additional metadata
+                    # only after independently verified Paperless IMPORTED proof.
+                    # Accept that known shape, but reject partial/forged repairs.
+                    if 'document_id' in item or 'recovery_reason' in item:
+                        if (item['status'] != 'SENT'
+                                or item.get('manually_confirmed_imported') is not True
+                                or type(item.get('document_id')) is not int
+                                or item['document_id'] <= 0
+                                or item.get('recovery_reason') != 'verified_paperless_import'
+                                or not isinstance(item.get('bridge_receipt'), str)
+                                or not re.fullmatch(r'[a-f0-9]{24}\\.json', item['bridge_receipt'])
+                                or type(item.get('sent_at')) not in (int, float)
+                                or type(item.get('reconciled_at')) not in (int, float)):
+                            reject('INVALID_LEGACY_REPAIR_METADATA')
                     legacy_key = hashlib.sha256((scope + '\0' + source).encode('utf-8')).hexdigest()
                     if v1.group(1) != legacy_key:
                         reject('LEGACY_FILENAME_MISMATCH')
