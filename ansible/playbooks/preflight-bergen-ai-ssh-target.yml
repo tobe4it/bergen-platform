@@ -1,0 +1,70 @@
+---
+# Read-only backend readiness. Does not read secrets or modify SSH services.
+- name: Inspect Bergen-AI backend for existing-proxy SSH tunnel
+  hosts: venombox
+  become: true
+  gather_facts: false
+  tasks:
+    - name: Require exact AI LXC identity
+      ansible.builtin.command:
+        argv: [pct, exec, '110', --, hostname, -s]
+      register: ai_guest_name
+      changed_when: false
+      failed_when: ai_guest_name.stdout | trim != 'bergen-ai'
+
+    - name: Collect sanitized IPv4 SSH and Open WebUI listeners
+      ansible.builtin.command:
+        argv:
+          - pct
+          - exec
+          - '110'
+          - --
+          - python3
+          - -c
+          - |
+            import socket
+            import subprocess
+
+            def run(args):
+                try:
+                    return subprocess.run(args, capture_output=True, text=True,
+                                          timeout=8, check=False)
+                except (OSError, subprocess.TimeoutExpired):
+                    return None
+
+            ip = run(['ip', '-4', '-o', 'addr', 'show', 'scope', 'global'])
+            if ip and ip.returncode == 0:
+                for line in ip.stdout.splitlines():
+                    fields = line.split()
+                    if len(fields) >= 4:
+                        print('AI_INTERFACE_IPV4', fields[1], fields[3])
+            else:
+                print('AI_INTERFACE_IPV4 UNAVAILABLE')
+            ss = run(['ss', '-ltnH'])
+            for port in (22, 3000):
+                bound = []
+                if ss and ss.returncode == 0:
+                    for line in ss.stdout.splitlines():
+                        fields = line.split()
+                        if len(fields) >= 4 and fields[3].rsplit(':', 1)[-1] == str(port):
+                            bound.append(fields[3])
+                print('AI_LISTEN_' + str(port), ','.join(bound) or 'NOT_LISTENING')
+            for service in ('ssh', 'sshd'):
+                status = run(['systemctl', 'is-active', service])
+                print('AI_SSH_SERVICE_' + service.upper(),
+                      'ACTIVE' if status and status.stdout.strip() == 'active'
+                      else 'NOT_ACTIVE')
+            print('NOTICE read-only; no SSH identities, hostkeys or credentials printed')
+      register: ai_guest_readiness
+      changed_when: false
+
+    - name: Display backend readiness
+      ansible.builtin.debug:
+        var: ai_guest_readiness.stdout_lines
+
+    - name: Require complete backend inspection
+      ansible.builtin.assert:
+        that:
+          - ai_guest_readiness.rc == 0
+          - "'NOTICE read-only' in ai_guest_readiness.stdout"
+        fail_msg: 'Cannot establish backend SSH tunnel readiness.'
