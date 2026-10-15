@@ -20,7 +20,7 @@ from match_v2_import_proof_offline import match_offline
 
 ROOT_PREFIX = "bergen-paperless-archive-fixture-"
 SCOPES = frozenset({"Privat/thomas", "Privat/nadja", "Eltern", "Familie"})
-STAGES = ("QUARANTINE_PREPARED", "ARCHIVED", "SOURCE_REMOVE_INTENT", "SOURCE_REMOVED")
+STAGES = ("QUARANTINE_PREPARED", "ARCHIVED", "SOURCE_REMOVE_INTENT", "SOURCE_REMOVED", "RESTORED")
 MAX_SIZE = 512 * 1024 * 1024
 RECEIPT_ID = re.compile(r"v2-[0-9a-f]{32}-[0-9a-f]{64}\Z")
 
@@ -28,6 +28,13 @@ RECEIPT_ID = re.compile(r"v2-[0-9a-f]{32}-[0-9a-f]{64}\Z")
 def _id(st):
     return (st.st_dev, st.st_ino, st.st_mode, st.st_uid,
             st.st_nlink, st.st_size, st.st_mtime_ns, st.st_ctime_ns)
+
+
+def _require_source_signature(stat_result, sent):
+    actual = [stat_result.st_dev, stat_result.st_ino, stat_result.st_size,
+              stat_result.st_mtime_ns, stat_result.st_ctime_ns]
+    if actual != sent["signature"]:
+        raise RuntimeError("ORIGINAL_INCARNATION_CHANGED")
 
 
 def _dir(path):
@@ -234,12 +241,15 @@ def archive_fixture(root, sent, imported):
     fd = _lock(root)
     try:
         _no_existing_events(root, sent)
-        _regular_digest(source, sent["sha256"], sent["signature"][2])
+        original = _regular_digest(source, sent["sha256"], sent["signature"][2])
+        _require_source_signature(original, sent)
         if dest.exists() or dest.is_symlink():
             raise RuntimeError("ARCHIVE_DESTINATION_ALREADY_EXISTS")
         _publish(root, sent, "QUARANTINE_PREPARED", imported)
         _copy_private(source, dest, sent["signature"][2], sent["sha256"])
         _regular_digest(dest, sent["sha256"], sent["signature"][2])
+        _require_source_signature(
+            _regular_digest(source, sent["sha256"], sent["signature"][2]), sent)
         _publish(root, sent, "ARCHIVED", imported)
         return {"quarantine_copy_verified": True, "source_present": True,
                 "source_delete_authorized": False, "production_approved": False}
@@ -265,6 +275,7 @@ def delete_fixture_original(root, sent, imported, *, offline_restore_test_confir
         expected = sent["signature"][2]
         _regular_digest(dest, sent["sha256"], expected)
         old = _regular_digest(source, sent["sha256"], expected)
+        _require_source_signature(old, sent)
         _publish(root, sent, "SOURCE_REMOVE_INTENT", imported)
         # Checked destination remains preserved even on a crash during unlink.
         _regular_digest(dest, sent["sha256"], expected)
@@ -284,8 +295,10 @@ def restore_fixture_original(root, sent, imported):
     source, dest, _ = _context(root, sent, imported)
     fd = _lock(root)
     try:
-        for stage in STAGES:
+        for stage in STAGES[:4]:
             _require_event(root, sent, stage, imported)
+        if _event_path(root, sent, "RESTORED").exists():
+            raise RuntimeError("FIXTURE_RESTORE_ALREADY_RECORDED")
         if source.exists() or source.is_symlink():
             raise RuntimeError("SOURCE_ALREADY_EXISTS")
         _regular_digest(dest, sent["sha256"], sent["signature"][2])
@@ -302,6 +315,7 @@ def restore_fixture_original(root, sent, imported):
             os.close(dfd)
         _fsync_dir(source.parent)
         _regular_digest(source, sent["sha256"], sent["signature"][2])
+        _publish(root, sent, "RESTORED", imported)
         return {"fixture_restored": True, "production_approved": False}
     finally:
         os.close(fd)
