@@ -77,6 +77,26 @@ Ansible-Syntax ohne Ausführung auf den Hosts:
       ansible/playbooks/prepare-paperless-synology-hidden-archives.yml \
       -e @ansible/vars/paperless-synology.local.yml --syntax-check
 
+Nach dem bereits bestandenen lesenden NAS-Audit mit fünf fehlenden
+Verzeichnissen kann ein Administrator ausdrücklich nur die
+**fünf leeren Verzeichnisse** anlegen:
+
+    ansible-playbook -i ansible/inventory.yml -i ansible/inventory.local.yml \
+      ansible/playbooks/prepare-paperless-synology-hidden-archives.yml \
+      --vault-id paperless@prompt \
+      -e @ansible/vars/paperless.vault.yml \
+      -e @ansible/vars/paperless-synology.local.yml \
+      -e paperless_hidden_archive_prepare=true
+
+Direkt danach das Leseaudit für die **tatsächlichen** DSM-ACLs der
+neu angelegten Ordner wiederholen. Der ACL-Audit zeigt zuerst alle
+Befunde und schlägt anschließend bei erkannten geerbten Benutzer-/
+Familiengruppenrechten oder technischen BLOCKERn fehl. Solche
+Rechte sind vor jeder PDF-Archivierung separat zu entfernen/
+einzuschränken; die reine POSIX-0700-Prüfung reicht nicht aus.
+Ein leerer Archivordner darf bereits bestehen, **aber kein
+Commit-Gate und keine Verschiebung**.
+
 Der erste echte Aufruf des Verzeichnis-Playbooks bleibt
 ein READ-ONLY-AUDIT. Erst nach Prüfung der ACLs darf der
 Operator ausdrücklich die Ordnererstellung aktivieren.
