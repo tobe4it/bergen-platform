@@ -7,6 +7,7 @@ import tempfile
 import time
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import patch
 
 CODE = Path(__file__).resolve().parents[1] / "ansible/files/paperless"
@@ -283,6 +284,55 @@ class SameVolumeArchiveTests(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError, "ARCHIVE_NOT_IN_PROTECTED_SITE"):
             move._validate_archive_scope_path(wanted.parent, self.folder,
                                               "Privat/thomas")
+
+    def test_main_resolves_site_root_by_device_boundary(self):
+        original = Path.lstat
+
+        def simulated_mount_info(path):
+            st = original(path)
+            if path == self.base:
+                return SimpleNamespace(st_dev=st.st_dev + 101,
+                                       st_mode=st.st_mode, st_uid=st.st_uid)
+            if path == self.site:
+                return SimpleNamespace(st_dev=st.st_dev,
+                                       st_mode=st.st_mode, st_uid=0)
+            return st
+
+        with patch.object(Path, "lstat", simulated_mount_info):
+            self.assertEqual(move._validated_protected_scope(
+                self.folder, SCOPE, os.geteuid()), self.archive)
+
+    def test_main_refuses_device_root_with_unexpected_name(self):
+        original = Path.lstat
+
+        def simulated_mount_info(path):
+            st = original(path)
+            if path == self.base:
+                return SimpleNamespace(st_dev=st.st_dev + 101,
+                                       st_mode=st.st_mode, st_uid=st.st_uid)
+            if path == self.site:
+                return SimpleNamespace(st_dev=st.st_dev,
+                                       st_mode=st.st_mode, st_uid=0)
+            return st
+
+        with patch.object(Path, "lstat", simulated_mount_info):
+            with self.assertRaisesRegex(RuntimeError, "ARCHIVE_SITE_ROOT_MISMATCH"):
+                move._validated_protected_scope(
+                    self.folder, "Privat/thomas", os.geteuid())
+
+    def test_main_refuses_non_root_owned_site_boundary(self):
+        original = Path.lstat
+
+        def simulated_mount_info(path):
+            st = original(path)
+            if path == self.base:
+                return SimpleNamespace(st_dev=st.st_dev + 101,
+                                       st_mode=st.st_mode, st_uid=st.st_uid)
+            return st
+
+        with patch.object(Path, "lstat", simulated_mount_info):
+            with self.assertRaisesRegex(RuntimeError, "ARCHIVE_SITE_ROOT_MISMATCH"):
+                move._validated_protected_scope(self.folder, SCOPE, os.geteuid())
 
     def test_archival_does_not_disable_30_day_retention(self):
         self.execute(commit=True)
