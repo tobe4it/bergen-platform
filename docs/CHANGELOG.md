@@ -60,6 +60,8 @@ Internal reverse-proxy and Bergen-AI HTTPS access release.
 
 ### Verified
 
+- Five Bergen-AI proxy contract tests passed and the activation playbook passed
+  its Ansible syntax check on the controller.
 - Read-only live preflight completed with `changed=0` and `failed=0`.
 - Activation completed with `ok=24`, `changed=5`, `failed=0` and preserved
   the Paperless vhost checksum.
