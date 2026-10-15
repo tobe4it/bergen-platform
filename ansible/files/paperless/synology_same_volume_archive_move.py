@@ -64,16 +64,22 @@ def _fsync_dir(fd):
     os.fsync(fd)
 
 
-def _read_source(dirfd, name, limit, *, expected_signature, expected_sha):
+def _read_source(dirfd, name, limit, *, expected_signature, expected_sha,
+                 after_rename=False):
     before = os.stat(name, dir_fd=dirfd, follow_symlinks=False)
+    def identity_ok(st):
+        signature = source_signature(st)
+        return (signature[:4] == expected_signature[:4]
+                and (not after_rename and signature[4] == expected_signature[4]
+                     or after_rename and signature[4] >= expected_signature[4]))
     require(stat.S_ISREG(before.st_mode) and before.st_nlink == 1
             and 0 < before.st_size <= min(limit, MAX_BYTES)
-            and source_signature(before) == expected_signature,
+            and identity_ok(before),
             "SOURCE_IDENTITY_MISMATCH")
     fd = os.open(name, os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC,
                  dir_fd=dirfd)
     try:
-        require(source_signature(os.fstat(fd)) == expected_signature,
+        require(source_signature(os.fstat(fd)) == source_signature(before),
                 "SOURCE_CHANGED_DURING_OPEN")
         sha = hashlib.sha256()
         head, tail = b"", b""
@@ -83,9 +89,9 @@ def _read_source(dirfd, name, limit, *, expected_signature, expected_sha):
                     head = block[:8]
                 tail = (tail + block)[-2048:]
                 sha.update(block)
-        require(source_signature(os.fstat(fd)) == expected_signature and
+        require(source_signature(os.fstat(fd)) == source_signature(before) and
                 source_signature(os.stat(name, dir_fd=dirfd,
-                                         follow_symlinks=False)) == expected_signature,
+                                         follow_symlinks=False)) == source_signature(before),
                 "SOURCE_CHANGED_DURING_READ")
         require(head.startswith(b"%PDF-") and b"%%EOF" in tail,
                 "SOURCE_NOT_PDF")
@@ -210,6 +216,7 @@ def archive_one(source_dir, state_dir, scope, filename, proof, *, commit=False,
     require(type(max_size) is int and 0 < max_size <= MAX_BYTES
             and type(quiet_seconds) is int and 30 <= quiet_seconds <= 3600,
             "INVALID_ARCHIVE_LIMITS")
+    require(isinstance(proof, dict), "IMPORT_PROOF_SCHEMA")
     sync_uid = os.geteuid()
     require(sync_uid != 0, "ROOT_NOT_ALLOWED")
     # Caller selects the approved source directory from immutable site settings.
@@ -299,9 +306,13 @@ def archive_one(source_dir, state_dir, scope, filename, proof, *, commit=False,
                             # This checks identity *after* move. In case of
                             # any mismatch, archive file is retained and the
                             # journal remains unresolved, requiring recovery.
+                            # Linux rename updates inode ctime. Device,
+                            # inode, size, mtime and SHA must stay the same,
+                            # while ctime may advance after the rename.
                             _read_source(monthfd, final, max_size,
                                          expected_signature=signature,
-                                         expected_sha=receipt["sha256"])
+                                         expected_sha=receipt["sha256"],
+                                         after_rename=True)
                             _atomic_event(journalfd, sender_id + ".archived.json",
                                           dict(plan, stage="ARCHIVED",
                                                archived_at=datetime.datetime.now(
