@@ -124,11 +124,16 @@ def classify_existing(existing, scope, basename, sha256, signature, version):
         if "receipt_id" in receipt or "schema_version" in receipt:
             if (type(receipt.get("schema_version")) is not int
                     or receipt["schema_version"] != 2
-                    or not isinstance(receipt.get("receipt_id"), str)
-                    or not V2_ID.fullmatch(receipt["receipt_id"])):
+                    or not isinstance(receipt.get("receipt_id"), str)):
                 raise ValueError("INVALID_V2_RECEIPT")
             try:
-                expected_id = version_id(scope, basename, receipt["sha256"], receipt["signature"])
+                if "incarnation_nonce" in receipt:
+                    # Published v2 events MUST bind this persisted random nonce.
+                    expected_id = incarnation_id(scope, basename, receipt["sha256"],
+                                                 receipt["signature"], receipt["incarnation_nonce"])
+                else:
+                    # Historical staged examples only; never authorize a send.
+                    expected_id = version_id(scope, basename, receipt["sha256"], receipt["signature"])
             except (KeyError, TypeError, ValueError) as exc:
                 raise ValueError("INVALID_V2_RECEIPT") from exc
             if receipt["receipt_id"] != expected_id:
