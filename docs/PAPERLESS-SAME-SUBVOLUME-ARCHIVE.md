@@ -371,19 +371,26 @@ Beide Playbooks meldeten `ok=4 changed=1 failed=0`,
 Die zuvor korrigierten Regressionstests für zwei
 Standorte und ACL-Sonderfälle liefen mit **22/22 + 12/12**.
 
-Nach der Einrichtung wurde die noch fehlende
-**vollständige Read-only-Nachprüfung** des geschützten
-Archivbaums ergänzt: `--audit` überprüft auf jedem
-ausgewählten Standort alle erwarteten Unterverzeichnisse,
-UID `paperless-sync`, Modus `0700`, gleiches Device,
-Abwesenheit nativer DSM-ACLs und die exakte *leere*
-Struktur. Unerwartete PDFs/Dateien/Symlinks blockieren,
-ohne sie zu verändern. Erwartetes Ergebnis
-`PROTECTED_ARCHIVE_EMPTY_TREE_VERIFIED <site> <count>`;
-bei `homes` `4`, bei `paperless-scan` `3`.
-Diese nachträglich ergänzte Prüfung und ihre 15 Tests
-müssen erst noch auf `bp-controller` bzw. der NAS
-ausgeführt werden.
+Die vollständige Read-only-Nachprüfung der beiden
+eingerichteten Archivbäume **ist auf der Live-NAS erfolgreich**:
+auf `paperless-scan` `PROTECTED_ARCHIVE_EMPTY_TREE_VERIFIED
+paperless-scan 3`, auf `homes`
+`PROTECTED_ARCHIVE_EMPTY_TREE_VERIFIED homes 4`.
+Beide Ansible-Läufe: `ok=4 changed=0 failed=0`,
+`PREPARE_DISABLED`, `NO_FILES_CHANGED`,
+`ARCHIVE_COMMIT_NOT_AUTHORIZED`. Damit wurden alle sieben
+erwarteten Verzeichnisobjekte inklusive tatsächlichem
+`paperless-sync`-Eigentümer, Modus `0700`, Device,
+fehlenden DSM-nativen Unterordner-ACLs und
+dem erwarteten leeren Inhaltsbaum geprüft.
+Die zusätzlichen Offline-Regressionstests liefen nach
+Korrektur der Linux-mode-Fixture mit **15/15**.
+
+Die vorher angelegten `.paperless-archive`-Ordner
+innerhalb der vier beschreibbaren Quell-Scan-Verzeichnisse
+sind **nicht** zur Archivierung freigegeben. Der
+vorbereitete geschützte Archivbaum enthält weiterhin
+keine PDF-Dokumente.
 
 **Die Archivierungsfreigabe ist weiterhin gesperrt**:
 Die vorhandene Worker-Implementierung verwendet
