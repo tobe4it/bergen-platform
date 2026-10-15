@@ -148,7 +148,7 @@ def run_readonly_receiver(prepared, venombox_target, identity, known_hosts):
     """
     item = _expected(prepared)
     ssh = _ssh_parts(venombox_target, identity, known_hosts)
-    base = ["sudo", "-n", "pct"]
+    base = ["sudo", "-n", "/usr/sbin/pct"]
     cfg = _run_ssh(ssh, [*base, "config", "126"])
     if ("hostname: bergen-paperless" not in cfg.splitlines()
             or "unprivileged: 1" not in cfg.splitlines()
