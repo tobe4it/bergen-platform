@@ -24,14 +24,17 @@ class SameVolumeArchiveTests(unittest.TestCase):
         tmp = tempfile.TemporaryDirectory(prefix="paperless-samevolume-")
         self.addCleanup(tmp.cleanup)
         self.base = Path(tmp.name)
-        self.folder = self.base / "Paperless"
+        self.site = self.base / "paperless-scan"
+        self.site.mkdir(mode=0o700)
+        self.folder = self.site / "Paperless"
         self.folder.mkdir(mode=0o700)
-        self.archive = self.folder / ".paperless-archive"
+        self.archive_root = self.site / move.PROTECTED_ARCHIVE_DIR
+        self.archive_root.mkdir(mode=0o700)
+        self.archive = self.archive_root / SCOPE
+        self.archive.mkdir(mode=0o700)
         self.state = self.base / "state"
         self.state.mkdir(mode=0o700)
-        for path in (self.folder / ".paperless-archive",
-                     self.state / "archive-move-journal"):
-            path.mkdir(mode=0o700)
+        (self.state / "archive-move-journal").mkdir(mode=0o700)
         lock = self.state / "sync.lock"
         lock.write_bytes(b"")
         lock.chmod(0o600)
@@ -55,8 +58,7 @@ class SameVolumeArchiveTests(unittest.TestCase):
             receiver_source=self.record["destination"], sha256=SHA,
             document_id=75,
         )
-        self.target = (self.folder / ".paperless-archive" / "2026-10" /
-                       (self.rid + ".pdf"))
+        self.target = self.archive / "2026-10" / (self.rid + ".pdf")
 
     def execute(self, commit=False, proof=None, rename_callback=None):
         # Mock only the wall clock to simulate the 60s input-quiescence gate.
@@ -66,6 +68,7 @@ class SameVolumeArchiveTests(unittest.TestCase):
             return move.archive_one(
                 self.folder, self.state, SCOPE, NAME,
                 proof if proof is not None else self.proof,
+                archive_scope_dir=self.archive,
                 commit=commit, archive_month="2026-10",
                 rename_callback=rename_callback or self.rename_fixture)
 
@@ -134,6 +137,7 @@ class SameVolumeArchiveTests(unittest.TestCase):
                           return_value=time.time_ns() + 90_000_000_000):
             result = move.archive_one(
                 self.folder, self.state, SCOPE, NAME, self.proof,
+                archive_scope_dir=self.archive,
                 commit=True, archive_month="2026-10")
         self.assertEqual(result["status"], "ARCHIVE_MOVED")
         self.assertFalse(self.source.exists())
@@ -213,14 +217,14 @@ class SameVolumeArchiveTests(unittest.TestCase):
             self.execute(commit=True)
 
     def test_archive_symlink_refused(self):
-        valid = self.folder / "valid-dir"
-        self.target.parent.parent.rename(valid)
-        (self.folder / ".paperless-archive").symlink_to(valid)
+        valid = self.archive_root / "valid-dir"
+        self.archive.rename(valid)
+        self.archive.symlink_to(valid)
         with self.assertRaisesRegex(RuntimeError, "UNSAFE_ARCHIVE_DIRECTORY"):
             self.execute(commit=True)
 
     def test_archive_bad_permission_refused(self):
-        (self.folder / ".paperless-archive").chmod(0o755)
+        self.archive.chmod(0o755)
         with self.assertRaisesRegex(RuntimeError, "UNSAFE_ARCHIVE_DIRECTORY"):
             self.execute(commit=True)
 
@@ -228,6 +232,7 @@ class SameVolumeArchiveTests(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError, "INVALID_ARCHIVE_MONTH"):
             with patch.object(move.time, "time_ns", return_value=time.time_ns() + 90_000_000_000):
                 move.archive_one(self.folder, self.state, SCOPE, NAME, self.proof,
+                                 archive_scope_dir=self.archive,
                                  archive_month="../BAD")
 
     def test_unapproved_filename_refused_before_reading(self):
@@ -235,7 +240,49 @@ class SameVolumeArchiveTests(unittest.TestCase):
             with self.subTest(filename=filename), self.assertRaisesRegex(
                     RuntimeError, "INVALID_ARCHIVE_SOURCE"):
                 move.archive_one(self.folder, self.state, SCOPE,
-                                 filename, self.proof)
+                                 filename, self.proof,
+                                 archive_scope_dir=self.archive)
+
+    def test_archiving_never_uses_obsolete_per_source_archive(self):
+        old = self.folder / ".paperless-archive"
+        old.mkdir(mode=0o700)
+        with self.assertRaisesRegex(RuntimeError, "ARCHIVE_NOT_IN_PROTECTED_SITE"):
+            move.archive_one(
+                self.folder, self.state, SCOPE, NAME, self.proof,
+                archive_scope_dir=old)
+        self.assertTrue(self.source.exists())
+        self.assertFalse(self.event("prepared").exists())
+
+    def test_wrong_site_scope_cannot_share_another_scope_archive(self):
+        wrong = self.archive_root / "Eltern"
+        wrong.mkdir(mode=0o700)
+        with self.assertRaisesRegex(RuntimeError, "ARCHIVE_NOT_IN_PROTECTED_SITE"):
+            move.archive_one(self.folder, self.state, SCOPE, NAME, self.proof,
+                             archive_scope_dir=wrong)
+        self.assertTrue(self.source.exists())
+
+    def test_protected_archive_root_must_not_be_within_scan_source(self):
+        nested = self.folder / move.PROTECTED_ARCHIVE_DIR / SCOPE
+        nested.parent.mkdir(mode=0o700)
+        nested.mkdir(mode=0o700)
+        with self.assertRaisesRegex(RuntimeError, "ARCHIVE_NOT_IN_PROTECTED_SITE"):
+            move.archive_one(self.folder, self.state, SCOPE, NAME, self.proof,
+                             archive_scope_dir=nested)
+
+    def test_scope_to_site_contract(self):
+        self.assertEqual(move.SITE_BY_SCOPE["Eltern"], "paperless-scan")
+        self.assertEqual(move.SITE_BY_SCOPE["Familie"], "paperless-scan")
+        self.assertEqual(move.SITE_BY_SCOPE["Privat/thomas"], "homes")
+        self.assertEqual(move.SITE_BY_SCOPE["Privat/nadja"], "homes")
+        self.assertNotIn('source_dir / ARCHIVE_DIR',
+                         (CODE / "synology_same_volume_archive_move.py").read_text())
+
+    def test_private_scope_path_requires_extra_protected_privat_layer(self):
+        wanted = self.base / "homes" / move.PROTECTED_ARCHIVE_DIR / "Privat" / "thomas"
+        move._validate_archive_scope_path(wanted, self.folder, "Privat/thomas")
+        with self.assertRaisesRegex(RuntimeError, "ARCHIVE_NOT_IN_PROTECTED_SITE"):
+            move._validate_archive_scope_path(wanted.parent, self.folder,
+                                              "Privat/thomas")
 
     def test_archival_does_not_disable_30_day_retention(self):
         self.execute(commit=True)
