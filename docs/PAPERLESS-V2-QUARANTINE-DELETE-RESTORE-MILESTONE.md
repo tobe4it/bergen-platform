@@ -121,3 +121,26 @@ Das Modul wird niemals in den NAS-Deploypfad aufgenommen.
 
 **Merge nach `main` bleibt blockiert**, bis die produktive
 Implementierung und die genannten Tests tatsächlich bestanden sind.
+
+## Controller-Regression 15.10.2026
+
+Erster gemeinsamer Testlauf: `FAILED_SUITES=2`. Im übermittelten
+Ausschnitt scheiterte die neue Prozess-Preflight-Suite an
+`UNSAFE_TRUSTED_FILE`, während beide früheren Suiten für
+Transfernachweis (19/19) und Empfängerprüfung (18/18) bestanden.
+
+Die Preflight-Tests sind nun von den Dateimodi des per `git worktree`
+ausgecheckten Source-Skripts unabhängig: Sie verwenden eine
+lokale `0600`-Kopie des unveränderten Empfängerprüfers. Die echte
+Sicherheitsprüfung bleibt streng und läuft jetzt **vor dem ersten
+SSH-Aufruf**. Zwei weitere Tests verlangen fail-closed-Verhalten bei
+`0664` und Symlinks. Das Repo-Skript darf für reale Ausführung
+weiterhin nicht gruppenbeschreibbar sein; die Testkorrektur hebt
+keine Berechtigung auf.
+
+Ferner korrigiert ein ATTEMPTED-Test die erwartete öffentliche
+Fehlerklasse `INVALID_HISTORICAL_RECEIPT`: Die Speicherung kapselt
+den intern erkannten Statuswiderspruch absichtlich in diese
+fail-closed-Meldung. Die zweite fehlgeschlagene Suite aus dem
+Controller-Ausschnitt ist damit noch **nicht nachgewiesen**; alle
+betroffenen und anschließend alle acht Suiten sind erneut zu prüfen.
