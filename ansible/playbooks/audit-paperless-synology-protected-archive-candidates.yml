@@ -14,6 +14,7 @@
           - synology_config is defined
           - synology_config.schema_version == 1
           - synology_config.sync_user == 'paperless-sync'
+          - (paperless_archive_site | default('all')) in ['all', 'homes', 'paperless-scan']
           - synology_config.state_parent is match('^/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$')
 
     - name: Run only read-only Synology device-root and parent ACL audit
@@ -28,7 +29,9 @@
           - -o
           - ConnectTimeout=15
           - "{{ synology_admin }}"
-          - "sudo -n /usr/bin/python3 - {{ synology_config.state_parent | quote }}"
+          - >-
+            sudo -n /usr/bin/python3 - {{ synology_config.state_parent | quote }}
+            --site {{ paperless_archive_site | default('all') | quote }}
         stdin: "{{ lookup('ansible.builtin.file', playbook_dir + '/../files/paperless/audit_synology_protected_archive_candidates.py', rstrip=False) }}"
       register: candidate_audit
       changed_when: false
@@ -43,6 +46,12 @@
           - "'NO_FILES_CHANGED' in candidate_audit.stdout_lines"
           - "'ARCHIVE_PARENT_CANDIDATES_NEED_EFFECTIVE_TEST' in candidate_audit.stdout_lines"
           - "'BLOCKER ' not in candidate_audit.stdout"
-          - "'CANDIDATE_DEVICE_COUNT 2' in candidate_audit.stdout_lines"
+          - >-
+            ('CANDIDATE_DEVICE_COUNT 2' in candidate_audit.stdout_lines)
+            if (paperless_archive_site | default('all')) == 'all' else
+            ('CANDIDATE_DEVICE_COUNT 1' in candidate_audit.stdout_lines)
+          - >-
+            'SELECTED_SITE ' ~ (paperless_archive_site | default('all'))
+            in candidate_audit.stdout_lines
           - "'ARCHIVE_PARENT_BLOCKERS 0' in candidate_audit.stdout_lines"
         fail_msg: "No root-controlled same-device archive candidate approved yet. Inspect findings above; do not move any PDFs."
