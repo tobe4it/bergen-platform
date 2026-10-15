@@ -56,6 +56,16 @@ class BergenAiProxyContracts(unittest.TestCase):
         argv = task["ansible.builtin.command"]["argv"]
         self.assertEqual(argv[:4], ["/usr/sbin/runuser", "-u", "{{ ai_proxy_tunnel_user }}", "--"])
         self.assertEqual(argv[4], "ssh")
+        self.assertEqual(task["register"], "ai_proxy_ssh_effective")
+        guard = next(
+            task for task in play["tasks"]
+            if task["name"] == "Require the resolved dedicated SSH identity and trust files"
+        )
+        conditions = guard["ansible.builtin.assert"]["that"]
+        self.assertTrue(any("identityfile" in condition for condition in conditions))
+        self.assertTrue(any("userknownhostsfile" in condition for condition in conditions))
+        self.assertTrue(any("stricthostkeychecking true" in condition for condition in conditions))
+        self.assertTrue(guard["no_log"])
 
     def test_ssh_tunnel_is_loopback_only_with_hostkey_enforcement(self):
         text = TUNNEL.read_text()
