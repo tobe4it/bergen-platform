@@ -4,6 +4,7 @@ import importlib.util
 import io
 import os
 import pwd
+import stat
 import subprocess
 import sys
 import tempfile
@@ -164,6 +165,128 @@ class IsolatedSynologyRenameTests(unittest.TestCase):
                 probe.cleanup_fixture(other, root, other.lstat(), False, "homes")
             self.assertTrue(fixture.exists())
             self.assertTrue(other.exists())
+
+    def test_inherited_dsm_acl_is_removed_only_from_new_fixture(self):
+        with tempfile.TemporaryDirectory(prefix="rename-safety-") as tmp:
+            root = Path(tmp)
+            fixture = root / ".bergen-rename-probe-owned"
+            fixture.mkdir(mode=0o700)
+            st = fixture.lstat()
+            events = []
+            response = [
+                subprocess.CompletedProcess([], 0,
+                    stdout="ACL version: 1\nArchive: is_inherit,is_support_ACL\n", stderr=""),
+                subprocess.CompletedProcess([], 0,
+                    stdout="ACL version: 1\nArchive: is_inherit,is_support_ACL\n", stderr=""),
+                subprocess.CompletedProcess([], 0, stdout="", stderr=""),
+                subprocess.CompletedProcess([], 255,
+                    stdout="(synoacltool.c, 596)It's Linux mode\n", stderr=""),
+            ]
+
+            def run(argv, **_):
+                events.append(argv)
+                return response.pop(0)
+
+            service = SimpleNamespace(pw_uid=os.geteuid(),
+                                      pw_gid=os.getegid())
+            with patch.object(probe, "_synology_acl_tool",
+                              return_value="/fake/synoacltool"), \
+                 patch.object(probe.subprocess, "run", side_effect=run), \
+                 patch.object(probe.os, "chown", return_value=None), \
+                 patch.object(probe, "subvol_id", return_value="7446"):
+                probe.secure_new_fixture(fixture, root, st, service,
+                                         st.st_dev, "/fake/btrfs", "7446")
+            self.assertEqual(
+                events[2], ["/fake/synoacltool", "-del", str(fixture)])
+            self.assertEqual(stat.S_IMODE(fixture.stat().st_mode), 0o700)
+            self.assertEqual(response, [])
+
+    def test_unexpected_dsm_acl_never_removed(self):
+        with tempfile.TemporaryDirectory(prefix="rename-safety-") as tmp:
+            root = Path(tmp)
+            fixture = root / ".bergen-rename-probe-owned"
+            fixture.mkdir(mode=0o700)
+            st = fixture.lstat()
+            commands = []
+
+            def run(argv, **_):
+                commands.append(argv)
+                return subprocess.CompletedProcess(
+                    [], 0, stdout="ACL version: 1\nArchive: has_ACL\n",
+                    stderr="")
+
+            with patch.object(probe, "_synology_acl_tool",
+                              return_value="/fake/synoacltool"), \
+                 patch.object(probe.subprocess, "run", side_effect=run):
+                with self.assertRaisesRegex(
+                        RuntimeError, "UNEXPECTED_INHERITED_FIXTURE_ACL"):
+                    probe.secure_new_fixture(
+                        fixture, root, st,
+                        SimpleNamespace(pw_uid=os.geteuid(),
+                                        pw_gid=os.getegid()),
+                        st.st_dev, "/fake/btrfs", "7446")
+            self.assertFalse(any("-del" in args for args in commands))
+            self.assertTrue(fixture.exists())
+
+    def test_acl_removal_failure_fails_closed(self):
+        with tempfile.TemporaryDirectory(prefix="rename-safety-") as tmp:
+            root = Path(tmp)
+            fixture = root / ".bergen-rename-probe-owned"
+            fixture.mkdir(mode=0o700)
+            st = fixture.lstat()
+            responses = [
+                subprocess.CompletedProcess([], 0,
+                    stdout="ACL version: 1\nArchive: is_inherit,is_support_ACL\n", stderr=""),
+                subprocess.CompletedProcess([], 0,
+                    stdout="ACL version: 1\nArchive: is_inherit,is_support_ACL\n", stderr=""),
+                subprocess.CompletedProcess([], 1,
+                    stdout="", stderr="denied"),
+            ]
+            with patch.object(probe, "_synology_acl_tool",
+                              return_value="/fake/synoacltool"), \
+                 patch.object(probe.subprocess, "run",
+                              side_effect=responses):
+                with self.assertRaisesRegex(
+                        RuntimeError, "FIXTURE_ACL_REMOVAL_FAILED"):
+                    probe.secure_new_fixture(
+                        fixture, root, st,
+                        SimpleNamespace(pw_uid=os.geteuid(),
+                                        pw_gid=os.getegid()),
+                        st.st_dev, "/fake/btrfs", "7446")
+
+    def test_fixture_with_bad_inode_never_gets_acl_mutation(self):
+        with tempfile.TemporaryDirectory(prefix="rename-safety-") as tmp:
+            root = Path(tmp)
+            fixture = root / ".bergen-rename-probe-owned"
+            fixture.mkdir(mode=0o700)
+            st = fixture.lstat()
+            fake = SimpleNamespace(st_ino=st.st_ino + 1)
+            with patch.object(probe, "_synology_acl_tool") as acl:
+                with self.assertRaisesRegex(RuntimeError, "UNSAFE_NEW_FIXTURE"):
+                    probe.secure_new_fixture(
+                        fixture, root, fake,
+                        SimpleNamespace(pw_uid=os.geteuid(),
+                                        pw_gid=os.getegid()),
+                        st.st_dev, "/fake/btrfs", "7446")
+                acl.assert_not_called()
+
+    def test_nonempty_initial_fixture_never_gets_acl_mutation(self):
+        with tempfile.TemporaryDirectory(prefix="rename-safety-") as tmp:
+            root = Path(tmp)
+            fixture = root / ".bergen-rename-probe-owned"
+            fixture.mkdir(mode=0o700)
+            st = fixture.lstat()
+            (fixture / "unexpected.pdf").write_bytes(b"preserve")
+            with patch.object(probe, "_synology_acl_tool") as acl:
+                with self.assertRaisesRegex(RuntimeError, "NONEMPTY_NEW_FIXTURE"):
+                    probe.secure_new_fixture(
+                        fixture, root, st,
+                        SimpleNamespace(pw_uid=os.geteuid(),
+                                        pw_gid=os.getegid()),
+                        st.st_dev, "/fake/btrfs", "7446")
+                acl.assert_not_called()
+            self.assertEqual(
+                (fixture / "unexpected.pdf").read_bytes(), b"preserve")
 
     def test_no_live_archive_path_is_used_as_fixture_target(self):
         text = MODULE.read_text()
