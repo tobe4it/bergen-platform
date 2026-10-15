@@ -16,7 +16,7 @@ from pathlib import Path
 
 SHA = re.compile(r'[a-f0-9]{64}\Z')
 V1 = re.compile(r'([a-f0-9]{64})\.json\Z')
-V2 = re.compile(r'(v2-[a-f0-9]{64})\.(prepared|sent)\.json\Z')
+V2 = re.compile(r'(v2-[a-f0-9]{32}-[a-f0-9]{64})\.(prepared|sent)\.json\Z')
 NAME = re.compile(r'[^\w. -]', flags=re.UNICODE)
 MAX_ENTRIES = 10000
 MAX_BYTES = 8192
@@ -57,10 +57,14 @@ def common(record, scopes):
     return scope, source, digest, signature
 
 
-def v2_id(scope, source, digest, signature):
-    payload = ['bergen-paperless-receipt-v2', scope, source, digest, signature]
+def v2_id(scope, source, digest, signature, nonce):
+    """Mirror the staged nonce-bound contract without any NAS-side import."""
+    if not isinstance(nonce, str) or not re.fullmatch(r'[0-9a-f]{32}', nonce):
+        reject('INVALID_INCARNATION_NONCE')
+    payload = ['bergen-paperless-receipt-v2-incarnation', scope, source, digest,
+               signature, nonce]
     canonical = json.dumps(payload, ensure_ascii=False, separators=(',', ':')).encode('utf-8')
-    return 'v2-' + hashlib.sha256(canonical).hexdigest()
+    return 'v2-' + nonce + '-' + hashlib.sha256(canonical).hexdigest()
 
 
 def strict_pairs(pairs):
@@ -170,7 +174,7 @@ def audit_directory(directory, scopes, *, expected_owner=None):
                     keys = V2_REQUIRED | ({'transfer_evidence'} if stage == 'SENT' else set())
                     if set(item) != keys or type(item['schema_version']) is not int or item['schema_version'] != 2:
                         reject('INVALID_V2_RECEIPT_SCHEMA')
-                    event_id = v2_id(scope, source, digest, signature)
+                    event_id = v2_id(scope, source, digest, signature, item['incarnation_nonce'])
                     if (v2.group(1) != event_id or item['receipt_id'] != event_id
                             or item['status'] != stage
                             or item['destination'] != scope + '/nas-' + event_id + '.pdf'
