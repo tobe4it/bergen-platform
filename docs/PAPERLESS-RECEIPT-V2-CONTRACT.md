@@ -198,3 +198,25 @@ still not bound to the receiver identity, and an independently verified
 ARCHIVED transition remains unimplemented. No change is made to
 `synology_scan_sync.py`, any running service, source PDFs, or existing
 v1 receipts. `main` merge remains blocked.
+
+
+### Follow-up: repaired legacy receipts (2026-10-15)
+
+The first live read-only history run stopped at
+`HISTORY_AUDIT_FAILED INVALID_LEGACY_RECEIPT_SCHEMA`
+(`changed=0`). The previously published
+`repair_synology_prepared_receipt.py` creates a valid v1 SENT
+receipt with extra `document_id` and
+`recovery_reason=verified_paperless_import` fields after independent
+live IMPORTED proof. These two fields were omitted from the audit's
+allowlist. The reader now accepts exactly that known repair form,
+requiring SENT status, positive integer document ID, matching recovery
+reason, `manually_confirmed_imported=true`, valid bridge ID and
+numeric sent/reconciled timestamps. Partial or unrecognized variants
+still fail closed.
+
+A regression test recreates the repair-writer payload and checks
+negative cases. **The patched branch still requires a fresh offline
+test, Ansible syntax check and repeat of the read-only live audit.**
+Do not treat the original failure as damaged evidence or authorization
+to change NAS receipts.
