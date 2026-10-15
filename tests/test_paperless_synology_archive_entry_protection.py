@@ -45,7 +45,7 @@ class EntryProtectionTests(unittest.TestCase):
 
     def test_unknown_nonadmin_user_with_write_execute_blocks(self):
         listing = sample(
-            "[4] user:random:allow:rwx------c--:---- (level:0)")
+            "[4] user:random:allow:rwx---a-R-c--:---- (level:0)")
         self.assertEqual(
             m.unsafe_parent_grants(m.parse_aces(listing), "paperless-sync"),
             [("user", "random")])
