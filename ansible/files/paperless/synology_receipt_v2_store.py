@@ -239,13 +239,24 @@ def _checked_history(dirfd):
             if is_old:
                 if legacy_id(scope, source) + ".json" != name:
                     raise ValueError("LEGACY_KEY_MISMATCH")
-                if (value.get("status") not in ("PREPARED", "SENT")
+                legacy_required = {"scope", "source", "status", "sha256",
+                                   "signature", "destination"}
+                legacy_optional = {"prepared_at", "sent_at", "reconciled_at",
+                                   "manually_confirmed_imported", "bridge_receipt",
+                                   "document_id", "recovery_reason"}
+                if (not legacy_required <= set(value)
+                        or not set(value) <= legacy_required | legacy_optional
+                        or value.get("status") not in ("PREPARED", "SENT")
                         or not isinstance(value.get("sha256"), str)
                         or not re.fullmatch(r"[a-f0-9]{64}", value["sha256"])
                         or not isinstance(value.get("signature"), list)
                         or len(value["signature"]) != 5
                         or any(type(n) is not int or n < 0 for n in value["signature"])):
                     raise ValueError("INVALID_LEGACY_EVENT")
+                stem = re.sub(r"[^\\w. -]", "_", Path(source).stem,
+                              flags=re.UNICODE).strip(" ._-")[:120] or "scan"
+                if value["destination"] != scope + "/" + stem + "--nas-" + value["sha256"] + ".pdf":
+                    raise ValueError("INVALID_LEGACY_DESTINATION")
             else:
                 if _validate(value) != is_v2.group(2).upper():
                     raise ValueError("V2_STATUS_MISMATCH")
