@@ -1,0 +1,48 @@
+---
+# Read-only candidate discovery at true per-source filesystem-device boundary.
+# No creation of archive directories, ACL changes, or real rename attempts.
+- name: Inspect candidate root-controlled same-device Paperless archive parents
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  tasks:
+    - name: Require existing NAS site-local settings
+      ansible.builtin.assert:
+        that:
+          - synology_admin is defined
+          - synology_admin is match('^[A-Za-z_][A-Za-z0-9_.-]*@[A-Za-z0-9][A-Za-z0-9.-]+$')
+          - synology_config is defined
+          - synology_config.schema_version == 1
+          - synology_config.sync_user == 'paperless-sync'
+          - synology_config.state_parent is match('^/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$')
+
+    - name: Run only read-only Synology device-root and parent ACL audit
+      ansible.builtin.command:
+        argv:
+          - ssh
+          - -T
+          - -o
+          - BatchMode=yes
+          - -o
+          - StrictHostKeyChecking=yes
+          - -o
+          - ConnectTimeout=15
+          - "{{ synology_admin }}"
+          - "sudo -n /usr/bin/python3 - {{ synology_config.state_parent | quote }}"
+        stdin: "{{ lookup('ansible.builtin.file', playbook_dir + '/../files/paperless/audit_synology_protected_archive_candidates.py', rstrip=False) }}"
+      register: candidate_audit
+      changed_when: false
+
+    - name: Report proposed archive parent and any risk findings
+      ansible.builtin.debug:
+        var: candidate_audit.stdout_lines
+
+    - name: Require unmodified NAS and fail closed on candidate parent risks
+      ansible.builtin.assert:
+        that:
+          - "'NO_FILES_CHANGED' in candidate_audit.stdout_lines"
+          - "'ARCHIVE_PARENT_CANDIDATES_NEED_EFFECTIVE_TEST' in candidate_audit.stdout_lines"
+          - "'BLOCKER ' not in candidate_audit.stdout"
+          - "'CANDIDATE_DEVICE_COUNT 2' in candidate_audit.stdout_lines"
+          - "'ARCHIVE_PARENT_BLOCKERS 0' in candidate_audit.stdout_lines"
+        fail_msg: "No root-controlled same-device archive candidate approved yet. Inspect findings above; do not move any PDFs."
