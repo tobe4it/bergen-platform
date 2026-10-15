@@ -13,6 +13,9 @@ SHA256 = re.compile(r"[a-f0-9]{64}\Z")
 VALID_SCOPE = re.compile(r"[A-Za-z0-9_][A-Za-z0-9_./-]*\Z")
 
 
+V2_ID = re.compile(r"v2-[a-f0-9]{64}\Z")
+
+
 def validate(scope, basename, sha256, signature):
     if (not isinstance(scope, str) or not VALID_SCOPE.fullmatch(scope)
             or any(p in ("", ".", "..") for p in scope.split("/"))):
