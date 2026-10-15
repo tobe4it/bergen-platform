@@ -1,216 +1,183 @@
-# Bergen-AI über den bestehenden Bergen-Proxy
+# Bergen-AI through the existing Bergen Proxy
 
-Status: **am 15.10.2026 aktiviert und technisch verifiziert**. Auf der
-bestehenden `nginx_reverse_proxy`-Rolle aufgebaut (PR #46). Kein neuer Reverse
-Proxy, keine Änderung des produktiven Paperless-VHosts, keine zweite
-Wildcard-Key-Kopie und kein neues Zertifikat.
+Status: **activated and technically verified on 2026-10-15**. This deployment
+uses the existing `nginx_reverse_proxy` role and the existing dedicated proxy
+LXC. It does not introduce another reverse proxy, modify the productive
+Paperless vhost, copy the wildcard private key to Bergen-AI, or request a new
+certificate.
 
-## Feststehender Ist-Zustand (read-only geprüft)
+## Verified baseline
 
-- `bergen-proxy` LXC 125: Nginx auf TCP 443, nicht auf TCP 80.
-- `paperless.thebergens.net`: bestehender VHost
-  `50-internal-paperless.thebergens.net.conf`, Upstream
-  `http://127.0.0.1:18000`; ein SSH-Prozess lauscht auf Loopback:18000.
-- Zertifikatspfad im vorhandenen VHost:
-  `/etc/nginx/tls/fullchain.pem`. Kein lokales Certbot-Verzeichnis
-  und kein lokaler Certbot/TLS-Timer im Audit nachgewiesen.
-- `bergen-ai` LXC 110: Open WebUI auf TCP 3000 (bereits separat geprüft).
+- The existing `bergen-proxy` LXC runs Nginx on TCP 443 and has no TCP 80
+  listener.
+- `paperless.thebergens.net` uses the existing
+  `50-internal-paperless.thebergens.net.conf` vhost and the loopback upstream
+  `http://127.0.0.1:18000`.
+- Paperless reaches its backend through a dedicated, non-root SSH local
+  forward. Its identity is not reused for Bergen-AI.
+- The proxy uses the existing certificate files
+  `/etc/nginx/tls/fullchain.pem` and `/etc/nginx/tls/privkey.pem`.
+- Open WebUI listens on loopback TCP 3000 in the Bergen-AI guest.
+- Internal DNS resolves `ai.thebergens.net` and
+  `paperless.thebergens.net` to the same proxy address.
+- The existing certificate covers `ai.thebergens.net`, and `nginx -t`
+  succeeds.
 
-- Nachträglich per `ps -ww -C ssh` nachgewiesen: Paperless verwendet einen
-  **direkten SSH-Forward** aus LXC 125, mit an die interne Proxy-IPv4
-  gebundenem SSH-Client, dedizierter Tunnelidentität, gepinntem Ed25519-
-  Hostschlüssel, ausschließlich Public-Key-Authentifizierung und
-  `-L 127.0.0.1:18000:127.0.0.1:8000`. Der AI-Tunnel übernimmt dieses
-  Transportmuster, aber **nicht** die Paperless-Identität.
-- Read-only AI-Preflight: `ai.thebergens.net` und
-  `paperless.thebergens.net` lösen im Proxy beide auf dessen interne
-  Adresse auf; der lokale Port 13000 ist frei; das vorhandene Zertifikat
-  deckt `ai.thebergens.net` ab; `nginx -t` besteht.
+The automatic wildcard-certificate distribution and the corresponding Nginx
+reload after a real renewal remain to be proven separately.
 
-**Am 15.10.2026 zusätzlich belegt:** die separate nicht privilegierte
-AI-Tunnelidentität, der auf den benötigten Loopback-Forward beschränkte
-öffentliche Schlüssel, der unabhängig geprüfte Ed25519-Hostkey, die
-gitignorierte lokale Proxy-Konfiguration und die End-to-End-Erreichbarkeit von
-Open WebUI über `127.0.0.1:13000` mit HTTP 200. Offen bleibt der automatische
-Wildcard-Renewal-Distributionsweg zum Proxy.
-
-## Ziel und Grenzen
+## Architecture and scope
 
 ```text
 https://ai.thebergens.net
-   -> bestehender Nginx in LXC 125 (TLS *.thebergens.net)
-   -> http://127.0.0.1:13000 auf LXC 125
-   -> dedizierter SSH-Forward (LXC 125 -> LXC 110)
-   -> 127.0.0.1:3000 in LXC 110 (Open WebUI)
+  -> existing Nginx in the dedicated proxy LXC
+  -> http://127.0.0.1:13000 on the proxy
+  -> dedicated SSH local forward
+  -> 127.0.0.1:3000 in the Bergen-AI guest
 ```
 
-Der zusätzliche lokale Port 13000 ist produktiv aktiviert und bindet
-ausschließlich an Loopback. Kein direkter Netzwerkzugriff auf die Loopback-Adresse
-eines anderen LXC. Kein WAN-Ingress, keine DNS-API-Änderung und keine
-Firewall-Öffnung durch diese Änderung.
+The additional backend listener binds only to proxy loopback. The playbook does
+not add WAN ingress, DNS records, routing changes, firewall rules, certificates,
+SSH accounts, keys, or SSO configuration.
 
-### Voraussetzung: bereits geprüfter SSH-Transport
+### Dedicated SSH transport
 
-Das Deployment legt **keine** SSH-Schlüssel an, verteilt keine Keys und
-ändert weder `authorized_keys` noch `known_hosts`. Vor Aktivierung muss
-im Proxy-LXC eine root-eigene SSH-Konfigurationsdatei existieren, die den
-Alias `ai_proxy_ssh_alias` über den geprüften Pfad zum KI-LXC auflöst.
-Der produktive Paperless-Tunnel verwendet ausdrücklich keinen PCT-ProxyCommand
-(`ProxyCommand=none`), sondern eine direkte SSH-Verbindung. Für AI ist
-dieses bewährte Muster vorgesehen; die tatsächliche AI-LXC-Adresse und
-der SSH-Server müssen separat bestätigt werden. Die Host-Key-
-Prüfung bleibt zwingend aktiv; ein eigener minimal berechtigter Tunnel-Key
-ist zu bevorzugen. Die genaue Konfiguration ist **standortspezifisch** und
-wird nicht im öffentlichen Repository erfunden.
+Before activation, the following site-local prerequisites must already exist:
 
-Der Tunnel-Unit-Entwurf verwendet **wie Paperless einen dedizierten
-nicht privilegierten technischen Benutzer** (`User`/`Group`, kein root),
-ein getrenntes Arbeitsverzeichnis unter `/var/lib` und die
-systemd-Härtungen `ProtectSystem=strict`, `ProtectHome=true`,
-`PrivateDevices=true`, eingeschränkte Adressfamilien und leeres
-`CapabilityBoundingSet`. Die SSH-Client-Konfiguration gehört dem
-AI-Tunnel-Benutzer und hat Modus 0600; ein eigener Schlüssel und eine
-eigene gepinnte `known_hosts`-Datei sind Voraussetzung.
+- a dedicated non-root tunnel account on the proxy;
+- a separate Ed25519 client key owned by that account;
+- a restricted target account and `authorized_keys` rule permitting only the
+  required loopback forward to TCP 3000;
+- an independently verified and pinned Ed25519 server host key;
+- a mode 0400 or 0600 SSH client configuration and a dedicated
+  `known_hosts` file;
+- a reviewed SSH alias resolving to the intended target account and address.
 
-Der Tunnel-Unit-Entwurf verwendet `ssh -4 -b <lokale Proxy-IPv4> -F ...`
-mit `-N -T -L 127.0.0.1:13000:127.0.0.1:3000`,
-`BatchMode=yes`, `IdentitiesOnly=yes`, deaktivierter Passwortanmeldung,
-`StrictHostKeyChecking=yes` und `ExitOnForwardFailure=yes`.
-Damit bleibt Open WebUI nur über den authentisierten SSH-Transport
-erreichbar. Der Dienst wird bei Fehlern neu gestartet.
+The activation playbook creates none of these prerequisites. It executes
+`ssh -G` through `runuser` and validates the effective user, identity file,
+dedicated known-hosts file, `IdentitiesOnly`, `BatchMode`, and strict
+host-key checking.
+
+The generated systemd service runs as the dedicated tunnel user and uses:
+
+- `ssh -4 -b <proxy-source-address>`;
+- `-N -T`;
+- `-L 127.0.0.1:13000:127.0.0.1:3000`;
+- public-key-only authentication;
+- `StrictHostKeyChecking=yes`;
+- `ExitOnForwardFailure=yes`;
+- server-alive monitoring and restart on failure.
+
+The unit also applies `NoNewPrivileges`, `ProtectSystem=strict`,
+`ProtectHome=true`, `PrivateDevices=true`, restricted address families,
+and an empty `CapabilityBoundingSet`.
 
 ### Nginx
 
-Der AI-VHost wird mit **derselben** Vorlage
+The AI vhost uses the same
 `ansible/roles/nginx_reverse_proxy/templates/internal-proxy-site.conf.j2`
-wie die anderen verwalteten HTTPS-Sites erstellt. Sie enthält den
-WebSocket-Upgrade, Forwarded-Header und die bestehende Client-CIDR-
-Allowlist. Die globale WebSocket-Map muss bereits existieren.
-Der bestehende Paperless-VHost wird nicht gerendert, verändert oder gelöscht;
-sein SHA-256 wird vor und nach der Aktivierung verglichen.
+template as other managed internal HTTPS sites. It includes WebSocket upgrade
+support, forwarded headers, the existing private client CIDR allowlist, and the
+existing TLS files.
 
-### Zertifikat und DNS
+The activation does not render, replace, or remove the Paperless vhost. Its
+SHA-256 checksum is recorded before the change and compared afterwards.
 
-Der AI-VHost nutzt die **bereits vorhandenen** Dateien
-`/etc/nginx/tls/fullchain.pem` und `/etc/nginx/tls/privkey.pem`.
-Der Playbook-Preflight prüft die Zertifikatsabdeckung für
-`ai.thebergens.net` und mindestens 14 Tage Restlaufzeit.
-Es kopiert/erneuert keine Schlüssel. Vor einer produktiven Freigabe muss
-die existierende Verteilung und Aktivierung nach Renewal nachgewiesen werden.
+Clients outside the configured CIDRs receive HTTP 403 only after reaching
+Nginx. The allowlist is not a firewall substitute; VLAN policy and WAN
+isolation remain separate controls.
 
-Die interne DNS-Zone **löst im Proxy bereits** `ai.thebergens.net` auf
-dieselbe interne Proxy-Adresse wie `paperless.thebergens.net` auf. Dieser PR ändert
-keine DNS-Einträge. Die interne Auflösung und unerwünschte externe
-Erreichbarkeit müssen separat kontrolliert werden. Die vorhandene
-Produktionskonfiguration lauscht nicht auf Port 80: **HTTP→HTTPS-Redirect
-ist hier nicht vorhanden**; kein neuer HTTP-Listener wird stillschweigend
-aktiviert.
+### Certificate and DNS
 
-## Ablauf auf bp-controller
+The activation preflight verifies:
 
-Zuerst read-only (auf Basis dieses Branches, mit beiden Inventories):
+- exact certificate coverage for `ai.thebergens.net`;
+- at least 14 days of remaining certificate validity;
+- identical internal IPv4 resolution for AI and Paperless;
+- a valid existing Nginx configuration;
+- an unused proxy loopback port 13000.
+
+No certificate is copied or renewed, and no DNS entry is created. The proxy has
+no HTTP listener, so this deployment does not provide an HTTP-to-HTTPS
+redirect.
+
+## Controller workflow
+
+Run the read-only preflight first, using both inventories and the site-local
+variable files:
 
 ```bash
-cd ~/bergen-platform
-source .venv/bin/activate
-git fetch origin
-git show origin/feat/bergen-ai-existing-proxy-tunnel-20261015:ansible/playbooks/preflight-bergen-ai-proxy.yml > /tmp/preflight-bergen-ai-proxy.yml
-ansible-playbook -i ansible/inventory.yml -i ansible/inventory.local.yml \
-  /tmp/preflight-bergen-ai-proxy.yml \
+ansible-playbook \
+  -i ansible/inventory.yml \
+  -i ansible/inventory.local.yml \
+  ansible/playbooks/preflight-bergen-ai-proxy.yml \
   --vault-id paperless@prompt \
   -e @ansible/vars/paperless.vault.yml \
-  -e @ansible/vars/paperless-synology.local.yml
+  -e @ansible/vars/paperless-synology.local.yml \
+  -e @ansible/group_vars/all/bergen-proxy.yml
 ```
 
-Die Ausgabe enthält TLS-SAN, DNS, Nginx und die belegten lokalen Ports.
-Die Aktivierung ist erst zulässig, wenn die **separate AI-Tunnelidentität
-auf Proxy und AI-Gast** angelegt, der SSH-Zugriff auf den
-benötigten Forward eingeschränkt, der SSH-Hostkey verifiziert und die
-Anmeldung ohne Passwort als dieser Benutzer erfolgreich geprüft ist.
-Die vorliegende Aktivierung legt **weder Benutzer noch Schlüssel oder
-SSH-Autorisierungsregeln** an; ohne diese Vorbereitung verweigert sie
-die Ausführung. Danach müssen der SSH-Alias und die private
-CIDR-Allowlist in `ansible/group_vars/all/bergen-proxy.yml` geprüft
-sind, die interne DNS-Zuordnung besteht und der Zertifikats-Renewal-Weg
-bestätigt wurde.
-
-Für einen späteren **separat freigegebenen** First Install: Feature-Branch
-zuerst in einem eigenen Worktree auschecken, damit keine anderen lokalen
-Änderungen auf `bp-controller` überschrieben werden. Danach Syntaxcheck:
+For an authorized first installation, perform the syntax check and then run the
+activation playbook with the explicit approval variable:
 
 ```bash
-ansible-playbook -i ansible/inventory.yml -i ansible/inventory.local.yml \
+ansible-playbook \
+  -i ansible/inventory.yml \
+  -i ansible/inventory.local.yml \
   ansible/playbooks/activate-bergen-ai-proxy.yml \
   --vault-id paperless@prompt \
   -e @ansible/vars/paperless.vault.yml \
   -e @ansible/vars/paperless-synology.local.yml \
-  -e @ansible/group_vars/all/bergen-proxy.yml --syntax-check
+  -e @ansible/group_vars/all/bergen-proxy.yml \
+  -e ai_proxy_deployment_approved=true
 ```
 
-**Nicht ohne Live-Freigabe ausführen.** Das Aktivierungsplaybook benötigt
-zusätzlich `-e ai_proxy_deployment_approved=true`. Es verweigert
-bestehende AI-Konfigurationsdateien, validiert Nginx vor dem Reload und
-entfernt die neu angelegten AI-Dateien und den Tunnel bei Fehlern.
-Es erstellt keinen DNS-Eintrag, keine SSH-Identität und keine TLS-
-Erneuerungsautomatik. Kein `--check` als Ersatz für den lesenden Preflight:
-Systemd-/Tunnel-Start ist in Check-Mode nicht sinnvoll simulierbar.
+This is intentionally a first-install playbook. It refuses existing AI vhost or
+unit files rather than reconciling them. Do not rerun it against the activated
+installation as a routine maintenance action.
 
-## Aktivierung und Abnahme am 15.10.2026
+## Activation and acceptance evidence
 
-Der freigegebene First-Install-Lauf endete mit `ok=24`, `changed=5`,
-`failed=0` und `unreachable=0`. Dabei wurden ausschließlich der
-AI-Tunnel-Dienst, der AI-VHost, dessen Symlink und der erforderliche
-Nginx-Reload geändert. Der SHA-256 des bestehenden Paperless-VHosts blieb
-unverändert.
+The authorized first-install run on 2026-10-15 completed with:
 
-Nachgewiesen wurden:
+```text
+ok=24  changed=5  unreachable=0  failed=0
+```
 
-- `bergen-ai-backend-tunnel.service` läuft als `bergen-ai-tunnel`, bindet
-  `127.0.0.1:13000` und verwendet eine eigene Ed25519-Identität sowie eine
-  eigene gepinnte `known_hosts`-Datei.
-- Open WebUI antwortet auf dem AI-Gast lokal an `127.0.0.1:3000` mit HTTP 200.
-- Der Proxy erreicht Open WebUI über den SSH-Tunnel an
-  `127.0.0.1:13000` mit HTTP 200.
-- Zertifikatsabdeckung, DNS-Gleichlauf mit Paperless, `nginx -t` vor und nach
-  der Änderung sowie der Nginx-Reload waren erfolgreich.
-- Der neue VHost nutzt die bestehende private CIDR-Allowlist; es wurde keine
-  WAN-, DNS- oder Firewall-Regel angelegt.
+The five changes were limited to staging and starting the AI tunnel, rendering
+and enabling the AI vhost, and reloading Nginx. The Paperless vhost checksum
+remained unchanged.
 
-Der Zugriff über einen vorhandenen Synology-Proxy wurde bestätigt. Der direkte
-Zugriff eines iPads aus dem internen VLAN ist noch ein separates
-Client-/Netzwerkproblem: Wenn dabei kein Nginx-Logeintrag entsteht, liegt der
-Fehler vor Nginx (DNS, WLAN-Isolation oder Netzregel). Dieser offene Clientpfad
-stellt die geprüfte Proxy-zu-Backend-Verbindung nicht infrage.
+The following was verified:
 
-## Nachkontrolle
+- the dedicated `bergen-ai-backend-tunnel.service` runs as
+  `bergen-ai-tunnel`;
+- proxy loopback TCP 13000 is owned by the SSH tunnel;
+- Open WebUI returns HTTP 200 on target loopback TCP 3000;
+- Open WebUI returns HTTP 200 through proxy loopback TCP 13000;
+- certificate name coverage and remaining lifetime checks pass;
+- internal AI and Paperless DNS results agree;
+- Nginx validation succeeds before and after the change;
+- Nginx reload succeeds;
+- access through the existing Synology proxy succeeds;
+- five static Bergen-AI proxy contract tests pass;
+- the activation playbook passes its Ansible syntax check.
 
-- `https://paperless.thebergens.net` funktioniert unverändert.
-- `https://ai.thebergens.net` liefert gültiges Zertifikat und Open WebUI,
-  einschließlich WebSocket-Upgrade und korrekt gesetzter Proxy-Header.
-- Nur `127.0.0.1:13000` lauscht auf dem zusätzlichen Backend-Port;
-  der SSH-Dienst ist aktiv und startet nach Reboot neu.
-- Interne DNS-Zuordnung stimmt, keine unerwünschte WAN-Exposition.
-- Zertifikatswechsel nach zentralem Renewal löst auf dem Proxy
-  tatsächlich den erforderlichen Nginx-Reload aus.
-- SSO/OIDC ist ein separater Schritt und wird hier nicht verändert.
+The direct path from one iPad in the internal VLAN remains a separate
+client/network diagnostic. If an attempted request creates no Nginx access-log
+entry, investigate client DNS, encrypted DNS or Private Relay, WLAN client
+isolation, and VLAN/firewall policy before changing the vhost. This does not
+invalidate the verified proxy-to-backend path.
 
+## Operational follow-up
 
-## Produktive Paperless-Tunnel-Referenz (15.10.2026)
-
-`systemctl cat bergen-paperless-tunnel.service` bestätigt, dass die
-Produktivimplementierung **nicht als root** läuft. Sie verwendet
-`User=paperless-tunnel-client`, `Group=paperless-tunnel-client`,
-`WorkingDirectory=/var/lib/bergen-paperless-tunnel`, `UMask=0077`,
-`ProtectHome=true`, `ProtectSystem=strict`, `PrivateDevices=true`,
-`RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6` und
-`CapabilityBoundingSet=` sowie explizite SSH-Optionen zur
-Hostkey-/Public-Key-Prüfung. Der SSH-Forward bindet ausschließlich
-`127.0.0.1:18000` und erreicht das Paperless-Backend auf Loopback:8000.
-
-Das AI-Unit-Template wurde entsprechend gehärtet. Es wird **nicht**
-der Paperless-SSH-Schlüssel kopiert oder wiederverwendet.
-
-Die SSH-Server-Konfiguration des AI-Gasts, der Ed25519-Hostkey und die auf den
-Loopback-Forward zu TCP 3000 eingeschränkte `authorized_keys`-Regel wurden vor
-der Aktivierung geprüft. Schlüsselmaterial und standortspezifische Adressen
-bleiben außerhalb des Repositorys.
+- Verify an actual Open WebUI login and WebSocket operation.
+- Verify access from every intended client network and denial from a network
+  outside the allowlist.
+- Confirm both SSH tunnel services and their loopback listeners after a reboot.
+- Prove automatic wildcard-certificate delivery and Nginx reload after a real
+  renewal.
+- Keep the SSH keys, effective addresses, inventory, and certificate private key
+  outside the repository.
+- Never introduce an allow-all CIDR, disable SSH host-key checking, or reuse the
+  Paperless private key for Bergen-AI.
