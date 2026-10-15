@@ -76,6 +76,25 @@ Ausführung:
 python3 -m unittest discover -s tests -p 'test_paperless_v2_quarantine_fixture.py' -v
 ```
 
+## Erste Zielstufe: geprüfte Archivverschiebung ohne automatische Bereinigung
+
+Die erste gewünschte Funktion ist **nicht** ein 30-Tage-Purge:
+nach unabhängig und frisch verifiziertem Paperless-Import wird
+das Original in das private NAS-Archiv kopiert. Erst nach
+dauerhafter SHA-256- und Journalbestätigung wird es aus
+dem Scan-Eingangsordner entfernt; im Archiv bleibt es für
+mindestens 30 Tage und ohne freigegebenen Purge sogar länger.
+Dies ist wegen der getrennten Btrfs-Subvolumes keine atomare
+`rename`-Operation. Ein Source-`unlink` ist bereits eine
+Löschung am Ursprungsort und bleibt voll testpflichtig.
+
+Ein automatischer Retention-/Expiry-Dienst gehört **nicht** zur
+ersten Freigabe, und kein Ablaufdatum allein darf jemals ein
+Unlink im Archiv auslösen. Die 19 historischen v1-Receipts
+bleiben erhalten. Alle produktiven Archiv- und Inbox-
+Schreiboperationen sind bis zum kontrollierten Live-Nachweis
+weiterhin gesperrt.
+
 ## Was für die produktive Archivierung zwingend noch fehlt
 
 Diese Tests reichen **nicht** für eine Löschfreigabe! Die folgenden
@@ -101,10 +120,12 @@ abzunehmen:
 - **Wirklich wiederherstellbares Backup** von Papierlos-Daten,
   NAS-Journal und Quarantänebestand, kein alleiniger Tasklog-
   oder `tar -tf`-Nachweis.
-- **Mindestens 30 volle Tage Quarantäne** ab einem
-  unveränderlichen, dauerhaft aufgezeichneten ARCHIVED-
-  Zeitstempel. Ein getrennt autorisierter Expiry-Worker
-  mit erneutem Backup-Gate fehlt weiterhin.
+- **Mindestens 30 volle Tage Archivaufbewahrung** ab einem
+  unveränderlichen, dauerhaft aufgezeichneten ARCHIVED-Zeitstempel.
+  Für die erste Betriebsfreigabe bleibt eine automatische
+  Bereinigung explizit deaktiviert: die Dateien verbleiben
+  auch nach Ablauf der 30 Tage, bis ein eigener, separat geprüfter
+  und freigegebener Expiry-Worker implementiert ist.
 - **Crash-Reconciliation**, insbesondere nach create-only-
   Archivpublikation vor `ARCHIVED`, nach `SOURCE_REMOVE_INTENT`
   vor `unlink` sowie nach `unlink` vor `SOURCE_REMOVED`.
