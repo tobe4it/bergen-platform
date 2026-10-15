@@ -123,7 +123,9 @@ class AttemptBarrierTests(unittest.TestCase):
         self.afile.chmod(0o600)
         self.pfile.write_bytes(store._canonical(self.attempted))
         self.pfile.chmod(0o600)
-        with self.assertRaisesRegex(RuntimeError, "V2_STATUS_MISMATCH"):
+        # The history reader intentionally wraps validation failures,
+        # so callers receive a stable fail-closed INVALID_HISTORICAL_RECEIPT.
+        with self.assertRaisesRegex(RuntimeError, "INVALID_HISTORICAL_RECEIPT"):
             store.reserve_prepared(self.state, SCOPE, "Two.pdf", SHA, SIG)
 
     def test_existing_legacy_receipt_bytes_remain_unchanged(self):
