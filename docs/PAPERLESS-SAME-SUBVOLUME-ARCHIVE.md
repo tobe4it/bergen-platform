@@ -160,6 +160,44 @@ Verzeichniseintrag im beschreibbaren Elternverzeichnis.
 Solche Prüfungen dürfen die realen Archive nicht als
 Testobjekte umbenennen oder löschen.
 
+## Schutz des Archiv-Verzeichniseintrags
+
+**Wichtig:** `0700` schützt bei klassischen POSIX-Rechten den
+Inhalt des versteckten Archivs; die Lösch-/Rename-Berechtigung am
+*übergeordneten Scan-Eingangsordner* ist eine andere Frage.
+
+Bei den bisher beobachteten Synology-ACLs erhalten
+`Familie@bergen.intern` und `Eltern@bergen.intern` an ihren
+jeweiligen Scan-Eingangsordnern `rwxpdDaARWc--`. Darin
+steht `D` für **Delete child** und `d` für Delete.
+Damit besteht ein konkreter möglicher Schutzbruch:
+Berechtigte Gruppenmitglieder könnten unter Umständen den
+Eintrag `.paperless-archive` umbenennen oder entfernen,
+selbst wenn sie den Inhalt nicht öffnen können.
+
+Die neue, ausschließlich lesende Prüfung
+`audit-paperless-synology-archive-entry-protection.yml`
+liest die nativen DSM-ACLs aller vier Scan-Eingangsordner.
+Sie blockiert bei nichtadministrativen Delete-/Write-Grants.
+**Sie versucht niemals**, den echten Archivordner umzubenennen
+oder zu löschen. Sie leitet auch aus einem fehlenden
+auffälligen Allow-Eintrag **keine endgültige Freigabe**
+ab: wirksame LDAP-/SMB-Rechte müssen unabhängig mit
+unprivilegierten Testidentitäten geprüft werden.
+
+Erwartete Gegenmaßnahme bei bestätigter Gefährdung:
+Archivwurzel in ein **root-kontrolliertes, nicht von
+Scanner-/Familiengruppen umbenennbares Verzeichnis**
+auf demselben Btrfs-Subvolume verlagern, statt
+blind Berechtigungen auf bestehenden Scan-Eingängen
+zu ändern. Die Zielorte müssen über Mountinfo und native
+DSM-ACLs je Scope nachgewiesen werden; ein Pfad im anderen
+Subvolume ist **keine** rename-basierte Archivlösung.
+
+Die bis dahin angelegten vier versteckten Ordner bleiben
+leer, der Move-Worker gesperrt. Keine ACL-Autoänderung
+oder automatische Bereinigung.
+
 ## Noch gesperrte produktive Verschiebung
 
 Der echte Commit benötigt eine von root außerhalb
