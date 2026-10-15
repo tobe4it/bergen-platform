@@ -24,7 +24,7 @@ class InventoryContracts(unittest.TestCase):
 
     def reconcile(self, current):
         context = dict(inventory_current_data=copy.deepcopy(current),
-                       lxc_inventory_group="mq_lab_nodes", lxc_hostname="bergen-mq-lab",
+                       lxc_inventory_group="example_nodes", lxc_hostname="example-lxc",
                        discovered_inventory_ipv4="192.0.2.212")
         start = False
         for task in self.tasks:
@@ -49,7 +49,7 @@ class InventoryContracts(unittest.TestCase):
         seed = {"all": {"children": {"evcc_nodes": {"hosts": {"evcc": {"ansible_host": "192.0.2.124"}}}}}}
         result = self.reconcile(seed)
         self.assertEqual(result["all"]["children"]["evcc_nodes"], seed["all"]["children"]["evcc_nodes"])
-        self.assertEqual(result["all"]["children"]["mq_lab_nodes"]["hosts"]["bergen-mq-lab"]["ansible_host"], "192.0.2.212")
+        self.assertEqual(result["all"]["children"]["example_nodes"]["hosts"]["example-lxc"]["ansible_host"], "192.0.2.212")
         self.assertNotIn("{{", yaml.safe_dump(result))
         self.assertEqual(self.reconcile(result), result)
 
@@ -61,7 +61,7 @@ class InventoryContracts(unittest.TestCase):
         self.assertNotIn(LEGACY_GROUP, result["all"]["children"])
         self.assertEqual(result["all"]["children"]["mail"], seed["all"]["children"]["mail"])
         self.assertEqual(result["all"]["vars"], seed["all"]["vars"])
-        self.assertEqual(result["all"]["children"]["mq_lab_nodes"]["hosts"]["bergen-mq-lab"]["custom"], "retain")
+        self.assertEqual(result["all"]["children"]["example_nodes"]["hosts"]["example-lxc"]["custom"], "retain")
         self.assertEqual(self.reconcile(result), result)
 
     def test_legacy_different_address_or_extra_host_is_refused(self):

@@ -8,28 +8,12 @@ The project follows **Semantic Versioning (SemVer)** and the changelog format is
 
 ## [Unreleased]
 
-### Added
-
-- Guarded two-QMgr/client audit harness with Java MQI probes for TLS/password
-  negatives, local PUT/GET, message integrity, transactions, queue limits and
-  bidirectional remote-queue transport; produces hashed JSON/Markdown evidence
-  and optional mail submission.
-- Explicit audit inventory of deferred disruptive/infrastructure-dependent cases;
-  clean implemented coverage reports `PARTIAL`, never a misleading full PASS.
-- Separate second-QMgr and client-LXC site examples and deployment instructions
-  in `docs/MQ-TOPOLOGY.md`; VMIDs/network settings remain explicit site inputs.
-- Rocky Java client role with non-login test account, SSH collection of the MQ
-  library, source image check, SHA-256 transfer verification and provenance.
-
 ### Changed
 
-- Two-QMgr/client messaging probes now require TLS 1.3 with a TLS 1.3 cipher;
-  TLS 1.2 configuration is rejected before any live test mutation.
-- MQ server deployment accepts isolated named lab instances and requires separate
-  controller CA/connection paths and Vault reference for additional instances.
-- Client deployment starts a stopped LXC without restarting an already running one.
-- Messaging/security/two-QMgr tests remain NOT_TESTED pending their implementation
-  and live execution; this change is infrastructure preparation only.
+- Moved the IBM MQ evaluation lab, REST-administration prototype, topology,
+  audit tooling, tests and operational documentation to the standalone
+  [`tobe4it/bergen-mq-lab`](https://github.com/tobe4it/bergen-mq-lab)
+  repository. Existing MQ guests and local secrets are not changed.
 
 ---
 
