@@ -1,18 +1,18 @@
 ---
-# Copy relevant values into the already existing, Git-ignored
-# ansible/group_vars/all/bergen-proxy.yml. Do not commit the local file.
-# These are illustrative parameters, NOT verified runtime settings.
-
-# Must refer to an existing, independently reviewed SSH client configuration
-# INSIDE bergen-proxy (LXC 125). It must use a pinned host key, a restricted
-# tunnel identity and the existing Proxmox/PCT transport if required.
-ai_proxy_source_address: 192.0.2.10  # EXAMPLE; use actual proxy source IPv4
-ai_proxy_ssh_config_path: /etc/ssh/bergen-ai-tunnel.conf
+# Site-local additions to the existing Git-ignored
+# ansible/group_vars/all/bergen-proxy.yml.
+# These values are examples, not verified live configuration.
+# Provision a SEPARATE restricted SSH identity and host-key pinning first.
+ai_proxy_tunnel_user: bergen-ai-tunnel-client
+ai_proxy_tunnel_home: /var/lib/bergen-ai-tunnel
+ai_proxy_ssh_config_path: /var/lib/bergen-ai-tunnel/.ssh/config
 ai_proxy_ssh_alias: bergen-ai-tunnel
+# Must match the existing proxy's selected source IPv4 address.
+ai_proxy_source_address: 192.0.2.10
 
-# Reuse the existing reverse_proxy_allow_cidrs in the local proxy YAML.
-# The first-install playbook refuses an empty/public allowlist.
+# Reuse the existing site-local reverse_proxy_allow_cidrs.
+# Do not change Paperless CIDRs or create a public allow-all rule.
 # reverse_proxy_allow_cidrs: [192.0.2.0/24]
 
-# Never set this true in the repository or an example.
+# This file must never authorize activation by default.
 ai_proxy_deployment_approved: false
