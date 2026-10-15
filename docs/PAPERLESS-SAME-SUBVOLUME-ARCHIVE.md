@@ -547,11 +547,28 @@ lief zunächst mit 8/8 grün und der reine
 Der nachfolgende Live-`--probe`-Versuch
 **brach noch vor dem Kernel-Rename** mit
 `SYNODB_RENAME_PROBE_BLOCKED UNSAFE_NEW_FIXTURE`
-ab. Die genaue Abweichung (UID, POSIX-Modus,
-Device oder Verzeichnisart des gerade angelegten
-`mkdtemp`-Ordners unter
-`/volume1/paperless-scan/`) ist noch nicht
-geklärt.
+ab. Die darauffolgende lesende Diagnose
+belegte die Ursache: Das neu erstellte Verzeichnis
+`/volume1/paperless-scan/.bergen-rename-probe-nvv2h7kc`
+hatte UID/GID `0:0`, Modus `0000`, Device
+`1048641`, Inode `317` und native, von
+`/volume1/paperless-scan` **geerbte DSM-ACLs**
+(inklusive Lese-ACE für `Familie@bergen.intern`).
+Es war **leer**. Der Btrfs-Root selbst meldet
+ebenfalls POSIX-Modus `0000` und wird über
+die DSM-ACL verwaltet.
+
+Die korrigierte Probe entfernt deshalb
+`synoacltool -del` **ausschließlich an einem
+neu erzeugten, inode-, device-, uid- und
+leerheitsgeprüften eigenen Testordner**, nicht
+am Subvolume-Root oder an den geschützten
+Archiven. Anschließend werden `paperless-sync`
+und POSIX `0700` gesetzt und `It's Linux mode`
+mit strengem Format sowie die unveränderte
+Subvolume-ID geprüft. Jede unerwartete ACL,
+fehlgeschlagene ACL-Entfernung, unbekannte
+Datei oder geänderte Inode blockiert.
 
 **Wichtige Sicherheitskorrektur:** Die erste Version
 prüfte `UNSAFE_NEW_FIXTURE` außerhalb des
@@ -568,13 +585,16 @@ Vor Beginn des eigentlichen Fixtures wird nur
 nur eine exakt bekannte Teststruktur gelöscht,
 bei fremden Dateien oder Inodewechsel weiterhin
 fail-closed. Zusätzliche fünf Offline-Tests
-wurden ergänzt (jetzt 13, **erneute Ausführung
-noch ausstehend**).
+wurden ergänzt. Fünf weitere Offline-Tests
+überprüfen die strikt isolierte ACL-Normalisierung
+(aktuell **18** Tests, erneute Ausführung
+**noch ausstehend**).
 
 **Keinen erneuten Live-Probe versuchen**, bevor
-der verbliebene Testordner geprüft, die Ursache
-der geänderten Verzeichnismetadaten ermittelt
-und die korrigierte 13-Test-Suite bestanden ist.
+der oben benannte alte, leere Testordner nach
+zusätzlicher Identitätsprüfung kontrolliert per
+`rmdir` entfernt und die korrigierte 18-Test-Serie
+sowie der lesende Vorab-Audit bestanden sind.
 Beide Archiv-Commit-Gates bleiben gesperrt.
 
 ## Noch gesperrte produktive Verschiebung
