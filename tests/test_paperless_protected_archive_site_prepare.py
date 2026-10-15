@@ -1,5 +1,7 @@
 """Fail-closed tests for independent Synology protected archive site setup."""
 import importlib.util
+import os
+import tempfile
 import stat
 import subprocess
 import unittest
@@ -68,6 +70,57 @@ class ProtectedSitePreparationTests(unittest.TestCase):
     def test_missing_ace_is_blocked(self):
         with self.assertRaisesRegex(RuntimeError, "MISSING_PARENT_ACL"):
             stage.parse_parent_access("ACL version: 1\n")
+
+    def test_readonly_verify_complete_empty_homes_tree(self):
+        reply = subprocess.CompletedProcess(
+            ["synoacltool"], 255,
+            stdout="(synoacltool.c, 596)It's Linux mode\\n".replace("\\\\n", "\\n"),
+            stderr="")
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / ".bergen-paperless-archive"
+            for path in (root, root / "Privat", root / "Privat/thomas",
+                         root / "Privat/nadja"):
+                path.mkdir(mode=0o700)
+            with patch.object(stage.subprocess, "run", return_value=reply):
+                self.assertEqual(stage.verify_empty_site_tree(
+                    root, stage.SITE_SCOPES["homes"],
+                    os.geteuid(), root.stat().st_dev, "acl"), 4)
+
+    def test_readonly_verify_rejects_unexpected_pdf_without_deleting_it(self):
+        reply = subprocess.CompletedProcess(
+            ["synoacltool"], 255,
+            stdout="(synoacltool.c, 596)It's Linux mode\\n".replace("\\\\n", "\\n"),
+            stderr="")
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / ".bergen-paperless-archive"
+            for path in (root, root / "Eltern", root / "Familie"):
+                path.mkdir(mode=0o700)
+            unexpected = root / "Eltern/test.pdf"
+            unexpected.write_bytes(b"fixture")
+            with patch.object(stage.subprocess, "run", return_value=reply):
+                with self.assertRaisesRegex(
+                        RuntimeError, "ARCHIVE_TREE_NOT_EMPTY_OR_UNEXPECTED_ENTRY"):
+                    stage.verify_empty_site_tree(
+                        root, stage.SITE_SCOPES["paperless-scan"],
+                        os.geteuid(), root.stat().st_dev, "acl")
+            self.assertEqual(unexpected.read_bytes(), b"fixture")
+
+    def test_readonly_verify_rejects_extra_symlink_even_if_private(self):
+        reply = subprocess.CompletedProcess(
+            ["synoacltool"], 255,
+            stdout="(synoacltool.c, 596)It's Linux mode\\n".replace("\\\\n", "\\n"),
+            stderr="")
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / ".bergen-paperless-archive"
+            for path in (root, root / "Eltern", root / "Familie"):
+                path.mkdir(mode=0o700)
+            (root / "unexpected").symlink_to("/tmp")
+            with patch.object(stage.subprocess, "run", return_value=reply):
+                with self.assertRaisesRegex(
+                        RuntimeError, "ARCHIVE_TREE_NOT_EMPTY_OR_UNEXPECTED_ENTRY"):
+                    stage.verify_empty_site_tree(
+                        root, stage.SITE_SCOPES["paperless-scan"],
+                        os.geteuid(), root.stat().st_dev, "acl")
 
     def test_device_root_requires_device_boundary(self):
         source = Path("/volume1/homes/thomas/Paperless")
