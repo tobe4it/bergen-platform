@@ -71,6 +71,17 @@
         that:
           - "('RECEIVER_SHA256 ' ~ paperless_receiver_sha256) in paperless_receiver_audit.stdout_lines"
           - "('RECEIVER_BYTES ' ~ (paperless_receiver_size | string)) in paperless_receiver_audit.stdout_lines"
+          - paperless_receiver_audit.stdout is search('(?m)^RECEIVER_BINDING [a-f0-9]{64}
+          - "'NEW_FILE_NOT_ATTESTED' in paperless_receiver_audit.stdout_lines"
+          - "'PAPERLESS_IMPORT_NOT_ATTESTED' in paperless_receiver_audit.stdout_lines"
+          - "'SENT_NOT_AUTHORIZED' in paperless_receiver_audit.stdout_lines"
+          - "'SOURCE_DELETE_NOT_AUTHORIZED' in paperless_receiver_audit.stdout_lines"
+          - "'NO_FILES_CHANGED' in paperless_receiver_audit.stdout_lines"
+
+    - name: Display receiver point-in-time SHA and safety markers
+      ansible.builtin.debug:
+        var: paperless_receiver_audit.stdout_lines
+)
           - "'RECEIVER_POINT_IN_TIME_VERIFIED' in paperless_receiver_audit.stdout_lines"
           - "'NEW_FILE_NOT_ATTESTED' in paperless_receiver_audit.stdout_lines"
           - "'PAPERLESS_IMPORT_NOT_ATTESTED' in paperless_receiver_audit.stdout_lines"
