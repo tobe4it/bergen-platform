@@ -68,7 +68,7 @@ python3 -m unittest discover -s tests -p 'test_paperless_v2_transfer_evidence_of
 python3 -m unittest discover -s tests -p 'test_paperless_v2_receiver_readonly.py' -v
 ```
 
-Die neue Suite umfasst 29 Tests (noch auf dem Controller auszuführen):
+Die neue Suite umfasst 30 Tests (noch auf dem Controller auszuführen):
 dauerhaftes PREPARED, Namenswiederholung, simulierte Abstürze,
 falscher oder fehlender rsync-Marker, Quell- und Snapshot-Manipulation
 zwischen den Prüfschritten, falsche Empfängerbestätigung,
@@ -97,3 +97,15 @@ eingeschränkte Scope-Auswahl.
 
 **Weder Quelllöschung noch 30-Tage-Bereinigung noch Merge nach
 `main` ist derzeit autorisiert.**
+
+## Test-Runner-Korrektur (2026-10-15)
+
+Die erste Controller-Ausführung erreichte die Tests nicht, weil die
+Testklasse versehentlich `unittest.TestCase.run()` durch eine eigene
+Hilfsmethode `run(transport=..., receiver=...)` überschrieben hatte.
+Bei der Initialisierung vor `setUp()` entstand dadurch ein
+`AttributeError` für `journal`. Das war ein Fehler des Testharness,
+nicht des Senders. Die Hilfsmethode wurde in `execute_session()`
+umbenannt und ein eigener Regressionstest für den Framework-Einstieg
+ergänzt. Die **30 Tests des korrigierten Branches** müssen erneut
+vollständig durch den Controller ausgeführt werden.
