@@ -67,6 +67,11 @@ def device_boundary(source):
     raise RuntimeError("DEVICE_ANCESTRY_TOO_DEEP")
 
 
+def acl_excerpt(line):
+    """Bounded, single-line diagnostics; no escaping to a second log record."""
+    return "".join(c if c.isprintable() else "?" for c in line)[:240]
+
+
 def parse_native_aces(output):
     if not isinstance(output, str) or len(output) > 64000:
         raise RuntimeError("UNSAFE_ACL_OUTPUT")
@@ -76,7 +81,7 @@ def parse_native_aces(output):
             continue
         match = ACE.search(line)
         if match is None:
-            raise RuntimeError("UNRECOGNIZED_NATIVE_ACL_ENTRY")
+            raise RuntimeError("UNRECOGNIZED_NATIVE_ACL_ENTRY " + acl_excerpt(line))
         entries.append(match.groups())
         if len(entries) > 100:
             raise RuntimeError("ACL_ENTRY_LIMIT")
@@ -158,13 +163,25 @@ def inspect(parent):
         result = subprocess.run(
             [tool, "-get", str(root)], capture_output=True, text=True,
             encoding="utf-8", errors="replace", check=False, timeout=20)
-        classification, grants = evaluate_parent(root_info, result,
-                                                  SETTINGS["sync_user"])
+        unknown_line = None
+        try:
+            classification, grants = evaluate_parent(
+                root_info, result, SETTINGS["sync_user"])
+        except RuntimeError as exc:
+            if not str(exc).startswith("UNRECOGNIZED_NATIVE_ACL_ENTRY "):
+                raise
+            # Reject the candidate but continue inspecting the other
+            # independent scopes; return all forensic evidence in one run.
+            classification = "UNRECOGNIZED_NATIVE_ACL_ENTRY"
+            grants = []
+            unknown_line = str(exc).split(" ", 1)[1]
         print("SCOPE", scope)
         print("SOURCE_DEVICE", source_info.st_dev)
         print("PROPOSED_DEVICE_ROOT", str(root))
         print("PROPOSED_ARCHIVE", str(proposed))
         print("PARENT_ACL_STATUS", classification)
+        if unknown_line is not None:
+            print("UNRECOGNIZED_PARENT_ACE", scope, unknown_line)
         print("ARCHIVE_CANDIDATE", "EXISTS_REVIEW_REQUIRED" if present else "ABSENT")
         if present:
             print("BLOCKER", scope, "EXISTING_CANDIDATE_REQUIRES_MANUAL_REVIEW")
