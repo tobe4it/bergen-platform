@@ -21,6 +21,28 @@ probe = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(probe)
 
 
+def simulate_initial_root_owned_fixture(fixture):
+    """Simulate DSM's root-owned mkdtemp without root test privileges.
+
+    Patch only the FIRST lstat of the selected temporary fixture. Any
+    subsequent lstat, including the post-chown verification, reads real
+    filesystem metadata; production UID checks are never patched.
+    """
+    original_lstat = Path.lstat
+    first = True
+
+    def lstat(path):
+        nonlocal first
+        info = original_lstat(path)
+        if path == fixture and first:
+            first = False
+            return SimpleNamespace(st_mode=info.st_mode, st_uid=0,
+                                   st_dev=info.st_dev, st_ino=info.st_ino)
+        return info
+
+    return patch.object(Path, "lstat", lstat)
+
+
 class IsolatedSynologyRenameTests(unittest.TestCase):
     def test_exact_scope_to_site_mapping(self):
         self.assertEqual(probe.SITES["homes"],
@@ -189,7 +211,8 @@ class IsolatedSynologyRenameTests(unittest.TestCase):
 
             service = SimpleNamespace(pw_uid=os.geteuid(),
                                       pw_gid=os.getegid())
-            with patch.object(probe, "_synology_acl_tool",
+            with simulate_initial_root_owned_fixture(fixture), \
+                 patch.object(probe, "_synology_acl_tool",
                               return_value="/fake/synoacltool"), \
                  patch.object(probe.subprocess, "run", side_effect=run), \
                  patch.object(probe.os, "chown", return_value=None), \
@@ -215,7 +238,8 @@ class IsolatedSynologyRenameTests(unittest.TestCase):
                     [], 0, stdout="ACL version: 1\nArchive: has_ACL\n",
                     stderr="")
 
-            with patch.object(probe, "_synology_acl_tool",
+            with simulate_initial_root_owned_fixture(fixture), \
+                 patch.object(probe, "_synology_acl_tool",
                               return_value="/fake/synoacltool"), \
                  patch.object(probe.subprocess, "run", side_effect=run):
                 with self.assertRaisesRegex(
@@ -242,7 +266,8 @@ class IsolatedSynologyRenameTests(unittest.TestCase):
                 subprocess.CompletedProcess([], 1,
                     stdout="", stderr="denied"),
             ]
-            with patch.object(probe, "_synology_acl_tool",
+            with simulate_initial_root_owned_fixture(fixture), \
+                 patch.object(probe, "_synology_acl_tool",
                               return_value="/fake/synoacltool"), \
                  patch.object(probe.subprocess, "run",
                               side_effect=responses):
@@ -261,7 +286,8 @@ class IsolatedSynologyRenameTests(unittest.TestCase):
             fixture.mkdir(mode=0o700)
             st = fixture.lstat()
             fake = SimpleNamespace(st_ino=st.st_ino + 1)
-            with patch.object(probe, "_synology_acl_tool") as acl:
+            with simulate_initial_root_owned_fixture(fixture), \
+                 patch.object(probe, "_synology_acl_tool") as acl:
                 with self.assertRaisesRegex(RuntimeError, "UNSAFE_NEW_FIXTURE"):
                     probe.secure_new_fixture(
                         fixture, root, fake,
@@ -277,7 +303,8 @@ class IsolatedSynologyRenameTests(unittest.TestCase):
             fixture.mkdir(mode=0o700)
             st = fixture.lstat()
             (fixture / "unexpected.pdf").write_bytes(b"preserve")
-            with patch.object(probe, "_synology_acl_tool") as acl:
+            with simulate_initial_root_owned_fixture(fixture), \
+                 patch.object(probe, "_synology_acl_tool") as acl:
                 with self.assertRaisesRegex(RuntimeError, "NONEMPTY_NEW_FIXTURE"):
                     probe.secure_new_fixture(
                         fixture, root, st,
