@@ -59,8 +59,8 @@ def _ssh_parts(target, identity, known_hosts):
         raise ValueError("INVALID_PINNED_SSH_TARGET")
     if not isinstance(identity, Path) or not isinstance(known_hosts, Path):
         raise ValueError("SSH_PATHS_MUST_BE_PATHS")
-    _file(identity, (0o400, 0o600))
-    _file(known_hosts, (0o400, 0o600, 0o644))
+    _file(identity, (0o400, 0o600), 16384)
+    _file(known_hosts, (0o400, 0o600, 0o644), 131072)
     return [
         "ssh", "-T", "-i", str(identity),
         "-o", "BatchMode=yes",
@@ -90,10 +90,12 @@ def build_rsync_plan(prepared, snapshot, destination, identity, known_hosts):
             or ".." in snapshot.parts
             or snapshot.name != item["destination"].rsplit("/", 1)[1]):
         raise ValueError("SNAPSHOT_NAME_NOT_BOUND_TO_RECEIPT")
-    _file(snapshot, (0o600,), MAX_PDF)
+    _file(snapshot, (0o600,))
     source_fd = os.open(snapshot, os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC)
     try:
         before = os.fstat(source_fd)
+        if not 0 < before.st_size <= MAX_PDF:
+            raise RuntimeError("INVALID_SNAPSHOT_SIZE")
         sha = hashlib.sha256()
         with os.fdopen(source_fd, "rb", closefd=False) as stream:
             for block in iter(lambda: stream.read(1024 * 1024), b""):
