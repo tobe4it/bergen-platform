@@ -253,7 +253,7 @@ def _checked_history(dirfd):
                         or len(value["signature"]) != 5
                         or any(type(n) is not int or n < 0 for n in value["signature"])):
                     raise ValueError("INVALID_LEGACY_EVENT")
-                stem = re.sub(r"[^\\w. -]", "_", Path(source).stem,
+                stem = re.sub(r"[^\w. -]", "_", Path(source).stem,
                               flags=re.UNICODE).strip(" ._-")[:120] or "scan"
                 if value["destination"] != scope + "/" + stem + "--nas-" + value["sha256"] + ".pdf":
                     raise ValueError("INVALID_LEGACY_DESTINATION")
