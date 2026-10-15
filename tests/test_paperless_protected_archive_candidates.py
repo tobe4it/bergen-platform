@@ -94,6 +94,20 @@ class ProtectedArchiveCandidateTests(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError, "UNRECOGNIZED_NATIVE_ACL_ENTRY"):
             audit.parse_native_aces("group:everyone:allow:UNKNOWN\n")
 
+    def test_unrecognized_acl_diagnostic_contains_bounded_original(self):
+        malformed = "? [4] everyone::allow:rwxpdDaARWc--:fd-- (level:0)"
+        with self.assertRaisesRegex(
+                RuntimeError, "UNRECOGNIZED_NATIVE_ACL_ENTRY") as context:
+            audit.parse_native_aces(malformed)
+        self.assertIn(malformed, str(context.exception))
+
+    def test_unrecognized_acl_diagnostic_scrubs_control_chars_and_truncates(self):
+        message = "a" * 300 + "\x1b[31m\n"
+        clean = audit.acl_excerpt(message)
+        self.assertEqual(len(clean), 240)
+        self.assertNotIn("\x1b", clean)
+        self.assertNotIn("\n", clean)
+
     def test_device_boundary_finds_root_above_source(self):
         source = Path("/volume1/homes/thomas/Paperless")
         statuses = {
