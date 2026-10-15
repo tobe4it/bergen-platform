@@ -282,6 +282,77 @@ bis zu **echtem Subvolume-ID-Nachweis**, effektiven
 LDAP-/SMB-Rechtetests, Backup/Restore und zur Anpassung
 des Workers an den neuen, zentral geschützten Zielpfad.
 
+## Unabhängige Freigabe und Vorbereitung je NAS-Standort
+
+**Entscheidung 15.10.2026:** Ein Standort-Blocker darf den
+anderen Standort nicht aufhalten. `homes` und
+`paperless-scan` werden vollständig **getrennt** auditiert
+und die *leeren* geschützten Verzeichnisse werden nur für
+den ausdrücklich gewählten Standort erstellt.
+
+Der überarbeitete Read-only-Standort-Audit unterstützt:
+
+    -e paperless_archive_site=paperless-scan
+    -e paperless_archive_site=homes
+
+Ohne Standortfilter (`all`) bleiben die Gesamtübersicht
+und das strenge globale Ergebnis erhalten. Mit Filter
+werden ausschließlich die **zwei erwarteten Quell-Scopes**
+des jeweiligen Standorts geprüft. Die Anzahl der erwarteten
+Devices wird dann `1` statt `2`.
+
+Neue getrennte Standortvorbereitung:
+
+    ansible-playbook -i ansible/inventory.yml -i ansible/inventory.local.yml \
+      ansible/playbooks/prepare-paperless-synology-protected-archive-site.yml \
+      --vault-id paperless@prompt \
+      -e @ansible/vars/paperless.vault.yml \
+      -e @ansible/vars/paperless-synology.local.yml \
+      -e paperless_archive_site=paperless-scan
+
+**Dieser Befehl ist ausschließlich lesend.** Erst nach
+bestandenen Regressionstests und dem gesonderten
+Live-Preflight wird für **denselben** Standort explizit
+hinzugefügt:
+
+    -e '{"paperless_protected_archive_prepare": true}'
+
+Dieser Befehl legt nur folgende **leere** Verzeichnisse an:
+
+    /volume1/paperless-scan/.bergen-paperless-archive/
+      Eltern/
+      Familie/
+
+Die nachgelagerte Variante `paperless_archive_site=homes`
+kann unabhängig geprüft und vorbereitet werden:
+
+    /volume1/homes/.bergen-paperless-archive/
+      Privat/
+        thomas/
+        nadja/
+
+Die Python-Standortvorbereitung ermittelt die Wurzelpfade
+aus der laufenden, root-eigenen Synology-Konfiguration.
+Sie vertraut keinen hart kodierten Device-Zahlen und
+prüft Eigentümer, tatsächliche Device-Grenzen,
+native DSM-ACLs des Elternverzeichnisses, leere
+bisherige Quell-Archive, private Eigentümer/Modi
+und **Abwesenheit des Move-Gates** erneut direkt
+auf der NAS. Unbekannte ACEs, nichtadministrative
+Löschrechte sowie geerbte native DSM-ACLs auf den
+neuen geschützten Ordnern blockieren.
+
+**Nicht** Teil der Vorbereitung sind: PDF-Import,
+Archivierungsworker-Umbau, Quell-PDF-Rename,
+ACL-Änderung an bestehenden Scans, Gate-Erstellung
+oder automatischer Purge. Eine erfolgreiche
+`PROTECTED_SITE_PREPARED`-Meldung ist nur
+ein Staging-Nachweis, keine produktive
+Freigabe der Löschkette. Der neue Worker muss
+die beiden standortbezogenen Archivwurzeln
+noch ausdrücklich statt der bisherigen
+`.paperless-archive`-Unterordner verwenden.
+
 ## Noch gesperrte produktive Verschiebung
 
 Der echte Commit benötigt eine von root außerhalb
