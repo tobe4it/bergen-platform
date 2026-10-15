@@ -2,7 +2,9 @@
 
 Status, 2026-10-15: READ-ONLY ONLY. No archive worker, inbox deletion or
 quarantine purge is enabled by this change. Paperless stays outside main
-until the full import, archival and deletion lifecycle is proven.
+until authenticated import, safe archive copy, verified inbox-source
+removal and independent restore are proven. Automatic archive expiration
+after 30 days is explicitly deferred.
 
 ## Verified topology and evidence
 
@@ -46,7 +48,7 @@ A successful preflight execution is NEVER a release approval. The NAS
 archive preflight deliberately reports blockers for unimplemented
 sender versioning and source/quarantine handling.
 
-## Mandatory criteria for merging Paperless into main
+## Mandatory criteria for first archive-move release and main promotion
 
 1. Every imported scan is reconciled with a live Paperless document ID,
    SHA-256, effective owner/group and visibility. Deliberately deleted
@@ -59,12 +61,18 @@ sender versioning and source/quarantine handling.
    verified-import acknowledgement. No cross-device atomic rename
    is assumed.
 4. Only then may the still-identical scan original be removed from the
-   inbox. Crash injection at every copy, publish, fsync, receipt and
-   remove boundary must recover safely; mismatches must fail closed.
-5. Quarantine is recoverable for at least 30 full days. A separate,
-   explicitly approved expiry worker verifies fresh successful backup
-   health at purge time, limits deletion to exact eligible archived
-   files and fails closed on any ambiguity or outage.
+   inbox (this is already a destructive filesystem operation, even though
+   the archived copy survives for at least 30 days). Crash injection at
+   every copy, publish, fsync, receipt and removal boundary must
+   recover safely; mismatches must fail closed.
+5. Initial release scope (2026-10-15): the archived NAS original
+   is retained for **at least 30 full days**, and indefinitely until a
+   separately reviewed expiry worker is explicitly enabled. No automatic
+   quarantine purge is required for the first archive-move release.
+   Retention starts only at the durable ARCHIVED timestamp, not the
+   scan time, file mtime or Paperless import date. A later expiry worker
+   must independently verify backup/restore health and exact eligible
+   journal states at purge time; this is a separate release gate.
 6. Four configured privacy scopes pass negative effective DSM and
    Paperless ACL tests; operational backup/restore is independently
    checked. Live positive and negative end-to-end tests are approved.
