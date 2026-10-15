@@ -26,6 +26,7 @@ class SameVolumeArchiveTests(unittest.TestCase):
         self.base = Path(tmp.name)
         self.folder = self.base / "Paperless"
         self.folder.mkdir(mode=0o700)
+        self.archive = self.folder / ".paperless-archive"
         self.state = self.base / "state"
         self.state.mkdir(mode=0o700)
         for path in (self.folder / ".paperless-archive",
