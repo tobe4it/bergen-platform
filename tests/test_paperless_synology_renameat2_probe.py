@@ -22,7 +22,7 @@ spec.loader.exec_module(probe)
 
 
 def simulate_initial_root_owned_fixture(fixture):
-    """Simulate DSM's root-owned mkdtemp without root test privileges.
+    """Simulate DSM's root-owned, mode-0000 mkdtemp without root privileges.
 
     Patch only the FIRST lstat of the selected temporary fixture. Any
     subsequent lstat, including the post-chown verification, reads real
@@ -36,7 +36,7 @@ def simulate_initial_root_owned_fixture(fixture):
         info = original_lstat(path)
         if path == fixture and first:
             first = False
-            return SimpleNamespace(st_mode=info.st_mode, st_uid=0,
+            return SimpleNamespace(st_mode=info.st_mode & ~0o7777, st_uid=0,
                                    st_dev=info.st_dev, st_ino=info.st_ino)
         return info
 
