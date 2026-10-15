@@ -29,7 +29,15 @@ from pathlib import Path
 SCOPES = frozenset(("Familie", "Eltern", "Privat/thomas", "Privat/nadja"))
 DIGEST = re.compile(r"[a-f0-9]{64}\Z")
 BRIDGE = re.compile(r"[a-f0-9]{24}\.json\Z")
-ARCHIVE_DIR = ".paperless-archive"
+# Never use old per-source .paperless-archive directories: scanner users can
+# delete or rename their entries via parent DSM ACL delete-child privileges.
+PROTECTED_ARCHIVE_DIR = ".bergen-paperless-archive"
+SITE_BY_SCOPE = {
+    "Familie": "paperless-scan",
+    "Eltern": "paperless-scan",
+    "Privat/thomas": "homes",
+    "Privat/nadja": "homes",
+}
 JOURNAL_DIR = "archive-move-journal"
 MAX_BYTES = 512 * 1024 * 1024
 RENAME_NOREPLACE = 1
@@ -62,6 +70,61 @@ def _check_dir(path, owner, mode=0o700):
 
 def _fsync_dir(fd):
     os.fsync(fd)
+
+
+def _validated_protected_scope(source_dir, scope, sync_uid):
+    """Resolve archive path from configured source mount, not user input.
+
+    The topmost same-device ancestor must be the expected Synology site
+    ("homes" or "paperless-scan"), owned by root. Reject symlink ancestors,
+    wrong devices, and any missing / improperly secured protected scope.
+    A separate live native DSM ACL audit remains mandatory before commits.
+    """
+    require(scope in SITE_BY_SCOPE and isinstance(source_dir, Path)
+            and source_dir.is_absolute() and ".." not in source_dir.parts,
+            "INVALID_ARCHIVE_SCOPE_OR_SOURCE")
+    expected_site = SITE_BY_SCOPE[scope]
+    info = source_dir.lstat()
+    require(stat.S_ISDIR(info.st_mode), "UNSAFE_SOURCE_DIR")
+    current = source_dir
+    for _ in range(32):
+        require(current.parent != current, "ARCHIVE_DEVICE_BOUNDARY_NOT_FOUND")
+        parent = current.parent
+        pinfo = parent.lstat()
+        require(stat.S_ISDIR(pinfo.st_mode), "UNSAFE_ARCHIVE_PATH_ANCESTOR")
+        if pinfo.st_dev != info.st_dev:
+            break
+        current = parent
+    else:
+        raise RuntimeError("ARCHIVE_DEVICE_BOUNDARY_TOO_DEEP")
+    root_info = current.lstat()
+    require(current.name == expected_site and stat.S_ISDIR(root_info.st_mode)
+            and root_info.st_uid == 0 and root_info.st_dev == info.st_dev,
+            "ARCHIVE_SITE_ROOT_MISMATCH")
+    archive_root = current / PROTECTED_ARCHIVE_DIR
+    paths = [archive_root]
+    for part in scope.split("/"):
+        paths.append(paths[-1] / part)
+    for path in paths:
+        fd = _check_dir(path, sync_uid)
+        try:
+            require(os.fstat(fd).st_dev == info.st_dev,
+                    "PROTECTED_ARCHIVE_DEVICE_MISMATCH")
+        finally:
+            os.close(fd)
+    return paths[-1]
+
+
+def _validate_archive_scope_path(archive_scope_dir, source_dir, scope):
+    """Reject the obsolete scanner-writable archive path even in dry-run."""
+    require(isinstance(archive_scope_dir, Path) and archive_scope_dir.is_absolute()
+            and ".." not in archive_scope_dir.parts,
+            "INVALID_PROTECTED_ARCHIVE_PATH")
+    parts = (PROTECTED_ARCHIVE_DIR, *scope.split("/"))
+    require(tuple(archive_scope_dir.parts[-len(parts):]) == parts
+            and source_dir not in archive_scope_dir.parents
+            and archive_scope_dir != source_dir,
+            "ARCHIVE_NOT_IN_PROTECTED_SITE")
 
 
 def _read_source(dirfd, name, limit, *, expected_signature, expected_sha,
@@ -212,7 +275,8 @@ def _noreplace_rename(srcfd, original, dstfd, archived):
         raise OSError(code, os.strerror(code))
 
 
-def archive_one(source_dir, state_dir, scope, filename, proof, *, commit=False,
+def archive_one(source_dir, state_dir, scope, filename, proof, *,
+                archive_scope_dir, commit=False,
                 max_size=MAX_BYTES, quiet_seconds=60,
                 archive_month=None, rename_callback=None):
     """Reviewable one-shot routine; only source directory child is selectable.
@@ -236,6 +300,7 @@ def archive_one(source_dir, state_dir, scope, filename, proof, *, commit=False,
             and type(quiet_seconds) is int and 30 <= quiet_seconds <= 3600,
             "INVALID_ARCHIVE_LIMITS")
     require(isinstance(proof, dict), "IMPORT_PROOF_SCHEMA")
+    _validate_archive_scope_path(archive_scope_dir, source_dir, scope)
     sync_uid = os.geteuid()
     require(sync_uid != 0, "ROOT_NOT_ALLOWED")
     # Caller selects the approved source directory from immutable site settings.
@@ -285,7 +350,7 @@ def archive_one(source_dir, state_dir, scope, filename, proof, *, commit=False,
                     datetime.timezone.utc).strftime("%Y-%m")
                 require(re.fullmatch(r"20[0-9]{2}-(0[1-9]|1[0-2])", month)
                         is not None, "INVALID_ARCHIVE_MONTH")
-                archfd = _check_dir(source_dir / ARCHIVE_DIR, sync_uid)
+                archfd = _check_dir(archive_scope_dir, sync_uid)
                 try:
                     require(os.fstat(archfd).st_dev == os.fstat(sourcefd).st_dev,
                             "ARCHIVE_NOT_SAME_FILESYSTEM")
@@ -313,7 +378,7 @@ def archive_one(source_dir, state_dir, scope, filename, proof, *, commit=False,
                             _fsync_dir(archfd)
                         except FileExistsError:
                             pass
-                        monthfd = _check_dir(source_dir / ARCHIVE_DIR / month, sync_uid)
+                        monthfd = _check_dir(archive_scope_dir / month, sync_uid)
                         try:
                             require(os.fstat(monthfd).st_dev == os.fstat(sourcefd).st_dev,
                                     "ARCHIVE_MONTH_NOT_SAME_FILESYSTEM")
@@ -390,15 +455,24 @@ def main():
                and "/" not in args.only[len(scope) + 1:]]
     require(len(matches) == 1, "SOURCE_NOT_IN_SITE_CONFIG")
     source_dir, scope, filename = matches[0]
+    site = SITE_BY_SCOPE[scope]
+    archive_scope_dir = _validated_protected_scope(
+        source_dir, scope, os.geteuid())
+    # The historic all-site gate has no authority over protected archives.
+    global_gate = parent / "archive-move.enabled"
+    require(not global_gate.exists() and not global_gate.is_symlink(),
+            "LEGACY_ARCHIVE_GATE_MUST_BE_ABSENT")
     if args.commit:
-        # Gate must be provisioned by a distinct, root-authorized release.
-        gate = parent / "archive-move.enabled"
+        # Per-site gate is intentionally NOT provisioned by any playbook.
+        # It must be released separately, after the full site acceptance suite.
+        gate = parent / ("archive-move." + site + ".enabled")
         st = gate.lstat()
         require(stat.S_ISREG(st.st_mode) and st.st_uid == 0
                 and st.st_nlink == 1 and stat.S_IMODE(st.st_mode) == 0o600,
-                "ARCHIVE_MOVE_GATE_NOT_APPROVED")
+                "ARCHIVE_SITE_GATE_NOT_APPROVED")
     proof = _read_json_stdin()
     result = archive_one(source_dir, SETTINGS["state"], scope, filename, proof,
+                         archive_scope_dir=archive_scope_dir,
                          commit=args.commit,
                          max_size=SETTINGS["max_size"],
                          quiet_seconds=SETTINGS["quiet"])
