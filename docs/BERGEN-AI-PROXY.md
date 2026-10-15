@@ -61,7 +61,7 @@ Prüfung bleibt zwingend aktiv; ein eigener minimal berechtigter Tunnel-Key
 ist zu bevorzugen. Die genaue Konfiguration ist **standortspezifisch** und
 wird nicht im öffentlichen Repository erfunden.
 
-Der Tunnel-Unit-Entwurf verwendet `ssh -4 -b <lokale Proxy-IPv4> -F ...`
+Der Tunnel-Unit-Entwurf verwendet **wie Paperless einen dedizierten\nnicht privilegierten technischen Benutzer** (`User`/`Group`, kein root),\nein getrenntes Arbeitsverzeichnis unter `/var/lib` und die\nsystemd-Härtungen `ProtectSystem=strict`, `ProtectHome=true`,\n`PrivateDevices=true`, eingeschränkte Adressfamilien und leeres\n`CapabilityBoundingSet`. Die SSH-Client-Konfiguration gehört dem\nAI-Tunnel-Benutzer und hat Modus 0600; ein eigener Schlüssel und eine\neigene gepinnte `known_hosts`-Datei sind Voraussetzung.\n\nDer Tunnel-Unit-Entwurf verwendet `ssh -4 -b <lokale Proxy-IPv4> -F ...`
 mit `-N -T -L 127.0.0.1:13000:127.0.0.1:3000`,
 `BatchMode=yes`, `IdentitiesOnly=yes`, deaktivierter Passwortanmeldung,
 `StrictHostKeyChecking=yes` und `ExitOnForwardFailure=yes`.
@@ -112,7 +112,7 @@ ansible-playbook -i ansible/inventory.yml -i ansible/inventory.local.yml \
 ```
 
 Die Ausgabe enthält TLS-SAN, DNS, Nginx und die belegten lokalen Ports.
-Die Aktivierung ist erst zulässig, wenn der SSH-Alias und die private
+Die Aktivierung ist erst zulässig, wenn die **separate AI-Tunnelidentität\nauf Proxy und AI-Gast** angelegt, der SSH-Zugriff auf den\nbenötigten Forward eingeschränkt, der SSH-Hostkey verifiziert und die\nAnmeldung ohne Passwort als dieser Benutzer erfolgreich geprüft ist.\nDie vorliegende Aktivierung legt **weder Benutzer noch Schlüssel oder\nSSH-Autorisierungsregeln** an; ohne diese Vorbereitung verweigert sie\ndie Ausführung. Danach müssen der SSH-Alias und die private
 CIDR-Allowlist in `ansible/group_vars/all/bergen-proxy.yml` geprüft
 sind, die interne DNS-Zuordnung besteht und der Zertifikats-Renewal-Weg
 bestätigt wurde.
@@ -149,3 +149,24 @@ Systemd-/Tunnel-Start ist in Check-Mode nicht sinnvoll simulierbar.
 - Zertifikatswechsel nach zentralem Renewal löst auf dem Proxy
   tatsächlich den erforderlichen Nginx-Reload aus.
 - SSO/OIDC ist ein separater Schritt und wird hier nicht verändert.
+
+
+## Produktive Paperless-Tunnel-Referenz (15.10.2026)
+
+`systemctl cat bergen-paperless-tunnel.service` bestätigt, dass die
+Produktivimplementierung **nicht als root** läuft. Sie verwendet
+`User=paperless-tunnel-client`, `Group=paperless-tunnel-client`,
+`WorkingDirectory=/var/lib/bergen-paperless-tunnel`, `UMask=0077`,
+`ProtectHome=true`, `ProtectSystem=strict`, `PrivateDevices=true`,
+`RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6` und
+`CapabilityBoundingSet=` sowie explizite SSH-Optionen zur
+Hostkey-/Public-Key-Prüfung. Der SSH-Forward bindet ausschließlich
+`127.0.0.1:18000` und erreicht das Paperless-Backend auf Loopback:8000.
+
+Das AI-Unit-Template wurde entsprechend gehärtet. Es wird **nicht**
+der Paperless-SSH-Schlüssel kopiert oder wiederverwendet.
+
+Die AI-LXC-Adresse, die SSH-Server-Konfiguration auf LXC 110,
+dessen Hostkey und die auf diesen einen Forward eingeschränkte
+`authorized_keys`-Regel sind noch nicht nachgewiesen. Diese müssen
+vor einer produktiven Aktivierung gesondert geprüft werden.
