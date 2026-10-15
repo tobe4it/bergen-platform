@@ -21,8 +21,8 @@ probe = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(probe)
 
 
-def simulate_initial_root_owned_fixture(fixture):
-    """Simulate DSM's root-owned, mode-0000 mkdtemp without root privileges.
+def simulate_initial_root_owned_fixture(fixture, mode=0o000):
+    """Simulate DSM root-owned mkdtemp modes without root privileges.
 
     Patch only the FIRST lstat of the selected temporary fixture. Any
     subsequent lstat, including the post-chown verification, reads real
@@ -36,8 +36,9 @@ def simulate_initial_root_owned_fixture(fixture):
         info = original_lstat(path)
         if path == fixture and first:
             first = False
-            return SimpleNamespace(st_mode=info.st_mode & ~0o7777, st_uid=0,
-                                   st_dev=info.st_dev, st_ino=info.st_ino)
+            return SimpleNamespace(st_mode=(info.st_mode & ~0o7777) | mode,
+                                   st_uid=0, st_dev=info.st_dev,
+                                   st_ino=info.st_ino)
         return info
 
     return patch.object(Path, "lstat", lstat)
@@ -244,6 +245,68 @@ class IsolatedSynologyRenameTests(unittest.TestCase):
                 result = subprocess.CompletedProcess(
                     [], rc, stdout=good, stderr=stderr)
                 self.assertFalse(probe._has_expected_inherited_dsm_acl(result))
+
+    def test_homes_0711_is_allowed_only_at_verified_exact_dsm_root(self):
+        parent = SimpleNamespace(st_uid=0, st_mode=stat.S_IFDIR | 0o711)
+        self.assertTrue(probe._allowed_initial_fixture_mode(
+            Path("/volume1/homes"), parent, 0o711))
+        for name in ("/volume1/paperless-scan",
+                     "/volume1/homes/subfolder",
+                     "/volume1/homes-fake"):
+            with self.subTest(path=name):
+                self.assertFalse(probe._allowed_initial_fixture_mode(
+                    Path(name), parent, 0o711))
+
+    def test_homes_0711_is_refused_if_root_identity_mode_or_type_differs(self):
+        for parent in (
+            SimpleNamespace(st_uid=1000, st_mode=stat.S_IFDIR | 0o711),
+            SimpleNamespace(st_uid=0, st_mode=stat.S_IFDIR | 0o700),
+            SimpleNamespace(st_uid=0, st_mode=stat.S_IFLNK | 0o711),
+        ):
+            with self.subTest(parent=parent):
+                self.assertFalse(probe._allowed_initial_fixture_mode(
+                    Path("/volume1/homes"), parent, 0o711))
+
+    def test_unexpected_modes_always_fail_even_under_homes(self):
+        parent = SimpleNamespace(st_uid=0, st_mode=stat.S_IFDIR | 0o711)
+        for mode in (0o001, 0o071, 0o644, 0o755, 0o777, 0o7111):
+            with self.subTest(mode=oct(mode)):
+                self.assertFalse(probe._allowed_initial_fixture_mode(
+                    Path("/volume1/homes"), parent, mode))
+        self.assertTrue(probe._allowed_initial_fixture_mode(
+            Path("/volume1/paperless-scan"), parent, 0o000))
+        self.assertTrue(probe._allowed_initial_fixture_mode(
+            Path("/volume1/paperless-scan"), parent, 0o700))
+
+    def test_homes_0711_requires_inherited_native_acl_before_chown(self):
+        with tempfile.TemporaryDirectory(prefix="rename-safety-") as tmp:
+            root = Path(tmp)
+            fixture = root / ".bergen-rename-probe-owned"
+            fixture.mkdir(mode=0o700)
+            st = fixture.lstat()
+
+            def expected_homes_mode(site, parent, mode):
+                self.assertEqual(site, root)
+                self.assertEqual(mode, 0o711)
+                return True
+
+            with simulate_initial_root_owned_fixture(
+                    fixture, mode=0o711), \
+                 patch.object(probe, "_allowed_initial_fixture_mode",
+                              side_effect=expected_homes_mode), \
+                 patch.object(probe, "_synology_acl_tool",
+                              return_value="/fake/synoacltool"), \
+                 patch.object(probe, "_linux_acl_only", return_value=True), \
+                 patch.object(probe.subprocess, "run") as calls:
+                with self.assertRaisesRegex(
+                        RuntimeError, "HOMES_INHERITED_ACL_REQUIRED"):
+                    probe.secure_new_fixture(
+                        fixture, root, st,
+                        SimpleNamespace(pw_uid=os.geteuid(),
+                                        pw_gid=os.getegid()),
+                        st.st_dev, "/fake/btrfs", "437")
+                calls.assert_not_called()
+            self.assertTrue(fixture.exists())
 
     def test_inherited_dsm_acl_is_removed_only_from_new_fixture(self):
         with tempfile.TemporaryDirectory(prefix="rename-safety-") as tmp:
