@@ -1,11 +1,13 @@
 ---
-# Read-only native DSM ACL inspection. No chmod, setfacl, mkdir or rename.
-- name: Inspect Synology ACLs before per-scope Paperless quarantine provisioning
+# Read-only native DSM ACL inspection; default is pre-provision audit.
+# Opt-in strict mode requires every hidden archive and the private journal.
+# Never mkdir, chmod, setfacl, rename, move or delete user files.
+- name: Inspect Synology ACLs for Paperless scan inputs and hidden archives
   hosts: localhost
   connection: local
   gather_facts: false
   tasks:
-    - name: Validate site-local Synology settings
+    - name: Validate site-local Synology configuration
       ansible.builtin.assert:
         that:
           - synology_admin is defined
@@ -13,9 +15,10 @@
           - synology_config is defined
           - synology_config.schema_version == 1
           - synology_config.state_parent is match('^/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$')
-          - synology_config.sync_user is match('^[a-z_][a-z0-9_-]{0,31}
+          - synology_config.sync_user == 'paperless-sync'
+          - (paperless_require_hidden_archives | default(false)) is boolean
 
-    - name: Query native DSM ACLs on NAS using root read-only introspection
+    - name: Query native DSM ACLs using root for read-only inspection
       ansible.builtin.command:
         argv:
           - ssh
@@ -34,11 +37,11 @@
       register: paperless_dsm_acl_audit
       changed_when: false
 
-    - name: Display all ACL evidence before fail-closed verdict
+    - name: Show native DSM ACL findings before strict verdict
       ansible.builtin.debug:
         var: paperless_dsm_acl_audit.stdout_lines
 
-    - name: Require complete read-only report
+    - name: Require read-only report without ACL blockers
       ansible.builtin.assert:
         that:
           - "'NO_FILES_CHANGED' in paperless_dsm_acl_audit.stdout_lines"
@@ -47,41 +50,19 @@
           - "'REVIEW_REQUIRED Eltern SYNC_USER_DELETE_CHILD_RENAME_AND_ACL_INHERITANCE' in paperless_dsm_acl_audit.stdout_lines"
           - "'REVIEW_REQUIRED Privat/thomas SYNC_USER_DELETE_CHILD_RENAME_AND_ACL_INHERITANCE' in paperless_dsm_acl_audit.stdout_lines"
           - "'REVIEW_REQUIRED Privat/nadja SYNC_USER_DELETE_CHILD_RENAME_AND_ACL_INHERITANCE' in paperless_dsm_acl_audit.stdout_lines"
-
-        fail_msg: "Native DSM hidden-archive ACL blocker: do not move any PDFs; inspect the report printed above"
-)
-          - (paperless_require_hidden_archives | default(false)) is boolean
-
-    - name: Query native DSM ACLs on NAS using root read-only introspection
-      ansible.builtin.command:
-        argv:
-          - ssh
-          - -T
-          - -o
-          - BatchMode=yes
-          - -o
-          - StrictHostKeyChecking=yes
-          - -o
-          - ConnectTimeout=15
-          - "{{ synology_admin }}"
           - >-
-            sudo -n /usr/bin/python3 - {{ synology_config.state_parent | quote }}
-        stdin: "{{ lookup('ansible.builtin.file', playbook_dir + '/../files/paperless/audit_synology_scan_acls.py', rstrip=False) }}"
-      register: paperless_dsm_acl_audit
-      changed_when: false
-
-    - name: Display all ACL evidence before fail-closed verdict
-      ansible.builtin.debug:
-        var: paperless_dsm_acl_audit.stdout_lines
-
-    - name: Require complete read-only report
-      ansible.builtin.assert:
-        that:
-          - "'NO_FILES_CHANGED' in paperless_dsm_acl_audit.stdout_lines"
-          - "'BLOCKER ' not in paperless_dsm_acl_audit.stdout"
-          - "'REVIEW_REQUIRED Familie SYNC_USER_DELETE_CHILD_RENAME_AND_ACL_INHERITANCE' in paperless_dsm_acl_audit.stdout_lines"
-          - "'REVIEW_REQUIRED Eltern SYNC_USER_DELETE_CHILD_RENAME_AND_ACL_INHERITANCE' in paperless_dsm_acl_audit.stdout_lines"
-          - "'REVIEW_REQUIRED Privat/thomas SYNC_USER_DELETE_CHILD_RENAME_AND_ACL_INHERITANCE' in paperless_dsm_acl_audit.stdout_lines"
-          - "'REVIEW_REQUIRED Privat/nadja SYNC_USER_DELETE_CHILD_RENAME_AND_ACL_INHERITANCE' in paperless_dsm_acl_audit.stdout_lines"
-
-        fail_msg: "Native DSM hidden-archive ACL blocker: do not move any PDFs; inspect the report printed above"
+            not (paperless_require_hidden_archives | default(false) | bool) or
+            'ARCHIVE_JOURNAL_PRESENT' in paperless_dsm_acl_audit.stdout_lines
+          - >-
+            not (paperless_require_hidden_archives | default(false) | bool) or
+            'ACL_RESULT Privat/thomas HIDDEN_ARCHIVE rc=0' in paperless_dsm_acl_audit.stdout_lines
+          - >-
+            not (paperless_require_hidden_archives | default(false) | bool) or
+            'ACL_RESULT Privat/nadja HIDDEN_ARCHIVE rc=0' in paperless_dsm_acl_audit.stdout_lines
+          - >-
+            not (paperless_require_hidden_archives | default(false) | bool) or
+            'ACL_RESULT Eltern HIDDEN_ARCHIVE rc=0' in paperless_dsm_acl_audit.stdout_lines
+          - >-
+            not (paperless_require_hidden_archives | default(false) | bool) or
+            'ACL_RESULT Familie HIDDEN_ARCHIVE rc=0' in paperless_dsm_acl_audit.stdout_lines
+        fail_msg: "DSM archive ACLs blocked or missing: do not move any PDFs; review the printed report"
