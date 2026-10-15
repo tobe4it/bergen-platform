@@ -128,6 +128,31 @@ class ProtectedArchiveCandidateTests(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError, "UNRECOGNIZED_NATIVE_ACL_ENTRY"):
             audit.parse_native_aces(malformed)
 
+    def test_real_homes_everyone_ace_is_traverse_only(self):
+        actual = "? [2] everyone::allow:--x----------:fd-- (level:0)\n"
+        self.assertEqual(
+            audit.parse_native_aces(actual),
+            [("everyone", "", "allow", "--x----------", "fd--")])
+        self.assertEqual(
+            audit.evaluate_parent(st(uid=0), acl(actual), "paperless-sync"),
+            ("NATIVE_PARENT_NO_OBVIOUS_DELETE_GRANT", []))
+
+    def test_everyone_delete_child_and_parent_write_remain_blocked(self):
+        for perms in ("rwxpdDaARWcCo", "rwx---a-R-c--"):
+            actual = "? [2] everyone::allow:" + perms + ":fd-- (level:0)\n"
+            with self.subTest(perms=perms):
+                status, risks = audit.evaluate_parent(
+                    st(uid=0), acl(actual), "paperless-sync")
+                self.assertEqual(status, "PARENT_HAS_NONADMIN_DELETE_GRANTS")
+                self.assertEqual(risks, ["everyone:"])
+
+    def test_site_specific_scope_contract(self):
+        self.assertEqual(audit.SITE_SCOPES["paperless-scan"],
+                         frozenset(("Eltern", "Familie")))
+        self.assertEqual(audit.SITE_SCOPES["homes"],
+                         frozenset(("Privat/thomas", "Privat/nadja")))
+        self.assertEqual(audit.SITE_SCOPES["all"], audit.SCOPES)
+
     def test_unrecognized_acl_diagnostic_contains_bounded_original(self):
         malformed = "? [4] everyone::allow:rwxpdDaARWc--:fd-- (level:0)"
         with self.assertRaisesRegex(
