@@ -36,6 +36,7 @@ def context(zone, validation="A" * 43, output=None):
 def test_legacy_default_state_is_unchanged(monkeypatch):
     calls = []
     monkeypatch.setattr(hook.os, "geteuid", lambda: 0)
+    monkeypatch.setattr(hook.os, "umask", lambda mode: 0o022)
     monkeypatch.setattr(hook, "load_config", lambda path: config())
     monkeypatch.setattr(hook, "present", lambda cfg, env, state_dir: calls.append(state_dir))
     hook.main(["auth"], {"SELFHOST_ACME_CONFIG": "/private/config"})
@@ -47,6 +48,7 @@ def test_hook_dispatches_independent_state_directory(monkeypatch):
     cfg = config()
     cfg["state_dir"] = "/var/lib/selfhost-acme/instances/secondary-zone"
     monkeypatch.setattr(hook.os, "geteuid", lambda: 0)
+    monkeypatch.setattr(hook.os, "umask", lambda mode: 0o022)
     monkeypatch.setattr(hook, "load_config", lambda path: cfg)
     monkeypatch.setattr(hook, "present", lambda cfg, env, state_dir: calls.append(("auth", state_dir)))
     monkeypatch.setattr(hook, "cleanup", lambda cfg, env, state_dir: calls.append(("cleanup", state_dir)))
