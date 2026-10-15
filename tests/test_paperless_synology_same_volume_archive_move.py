@@ -96,6 +96,36 @@ class SameVolumeArchiveTests(unittest.TestCase):
         self.assertEqual(journal["sha256"], SHA)
         self.assertTrue(journal["archived_at"].endswith("+00:00"))
 
+    def test_kernel_rename_noreplace_refuses_existing_target(self):
+        month = self.archive / "2026-10"
+        month.mkdir(mode=0o700)
+        target = month / "existing.pdf"
+        target.write_bytes(b"existing target")
+        sfd = os.open(self.folder, os.O_RDONLY | os.O_DIRECTORY)
+        dfd = os.open(month, os.O_RDONLY | os.O_DIRECTORY)
+        try:
+            with self.assertRaises(OSError):
+                move._noreplace_rename(sfd, NAME, dfd, "existing.pdf")
+        finally:
+            os.close(sfd)
+            os.close(dfd)
+        self.assertEqual(target.read_bytes(), b"existing target")
+        self.assertEqual(self.source.read_bytes(), PDF)
+
+    def test_kernel_rename_noreplace_moves_source_without_copy(self):
+        month = self.archive / "2026-10"
+        month.mkdir(mode=0o700)
+        sfd = os.open(self.folder, os.O_RDONLY | os.O_DIRECTORY)
+        dfd = os.open(month, os.O_RDONLY | os.O_DIRECTORY)
+        try:
+            move._noreplace_rename(sfd, NAME, dfd, "moved.pdf")
+        finally:
+            os.close(sfd)
+            os.close(dfd)
+        self.assertFalse(self.source.exists())
+        self.assertEqual((month / "moved.pdf").read_bytes(), PDF)
+        self.assertEqual((month / "moved.pdf").stat().st_ino, self.signature[1])
+
     def test_no_automatic_purge_or_live_sender_wiring(self):
         program = (CODE / "synology_same_volume_archive_move.py").read_text()
         self.assertNotIn("os.unlink(", program)
