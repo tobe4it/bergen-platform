@@ -114,7 +114,7 @@ class ReceiverAuditTests(unittest.TestCase):
             self.verify()
 
     def test_wrong_user_rejected(self):
-        with self.assertRaisesRegex(RuntimeError, "UNSAFE_RECEIVER_FILE"):
+        with self.assertRaisesRegex(RuntimeError, "UNSAFE_RECEIVER_DIRECTORY"):
             v.verify(self.root, "Familie", NAME, DIGEST, len(DATA),
                      root_uid=self.owner, ingest_uid=self.owner + 1000)
 
