@@ -13,7 +13,7 @@ import stat
 from fcntl import LOCK_EX, LOCK_NB, flock
 from pathlib import Path
 
-from synology_receipt_versions import receiver_destination, version_id
+from synology_receipt_versions import incarnation_id, incarnation_receiver_destination
 
 NONCE = re.compile(r"[0-9a-f]{32}\Z")
 PREPARED_KEYS = frozenset({
@@ -28,11 +28,11 @@ def prepared_record(scope, source, sha256, signature, incarnation_nonce):
     """Construct a prospective PREPARED event; does not allocate an incarnation."""
     obj = {
         "schema_version": 2,
-        "receipt_id": version_id(scope, source, sha256, signature),
+        "receipt_id": incarnation_id(scope, source, sha256, signature, incarnation_nonce),
         "status": "PREPARED",
         "scope": scope, "source": source, "sha256": sha256,
         "signature": list(signature),
-        "destination": receiver_destination(scope, source, sha256, signature),
+        "destination": incarnation_receiver_destination(scope, source, sha256, signature, incarnation_nonce),
         "incarnation_nonce": incarnation_nonce,
     }
     _validate(obj)
@@ -59,10 +59,12 @@ def _validate(record):
     if not isinstance(record.get("incarnation_nonce"), str) or not NONCE.fullmatch(record["incarnation_nonce"]):
         raise ValueError("INVALID_INCARNATION_NONCE")
     try:
-        receipt_id = version_id(record["scope"], record["source"],
-                                record["sha256"], record["signature"])
-        dest = receiver_destination(record["scope"], record["source"],
-                                    record["sha256"], record["signature"])
+        receipt_id = incarnation_id(record["scope"], record["source"],
+                                record["sha256"], record["signature"],
+                                record["incarnation_nonce"])
+        dest = incarnation_receiver_destination(record["scope"], record["source"],
+                                    record["sha256"], record["signature"],
+                                    record["incarnation_nonce"])
     except (KeyError, ValueError, TypeError) as exc:
         raise ValueError("INVALID_INCARNATION_FIELDS") from exc
     if record["receipt_id"] != receipt_id or record["destination"] != dest:
