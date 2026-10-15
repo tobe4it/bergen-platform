@@ -114,6 +114,18 @@ class AppendOnlyStoreTests(unittest.TestCase):
             self.publish_prepared()
         self.assertFalse(self.prepared_path.exists())
 
+    def test_existing_sender_lock_blocks_concurrent_publication(self):
+        from fcntl import LOCK_EX, LOCK_NB, LOCK_UN, flock
+        fd = os.open(self.lock, os.O_RDONLY)
+        try:
+            flock(fd, LOCK_EX | LOCK_NB)
+            with self.assertRaises(BlockingIOError):
+                self.publish_prepared()
+            self.assertFalse(self.prepared_path.exists())
+        finally:
+            flock(fd, LOCK_UN)
+            os.close(fd)
+
     def test_preexisting_v1_receipt_is_not_modified(self):
         legacy = self.directory / ("f" * 64 + ".json")
         legacy.write_bytes(b'{"status": "SENT"}')
