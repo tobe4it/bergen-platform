@@ -24,8 +24,6 @@ Current capabilities include:
 - Ollama deployment
 - OpenLDAP authentication
 - Mosquitto MQTT deployment and per-client access management
-- IBM MQ declarative REST administration prototype ([scope and validation](docs/MQ.md), evaluation only)
-- Rocky LXC / Podman MQ [evaluation example](docs/MQ-LAB.md); clarify productive licensing with IBM
 - Postfix/Dovecot mail backend with LDAP identities and explicit aliases
 - Scoped public-gateway Certbot renewal, MTA-STS IPv4/IPv6 and TLS operations runbook
 - Pi-hole DNS filtering in a dedicated LXC

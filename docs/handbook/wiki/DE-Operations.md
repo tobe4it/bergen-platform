@@ -36,19 +36,12 @@ Ein eingerichteter Syslog-Sender allein beweist keine Ankunft. Die Betreuung erz
 ### Monitoring ist eine zusätzliche Aufgabe
 **Monitoring** prüft Zustände wie freien Speicher, Diensterreichbarkeit oder Zertifikatsablauf und meldet Abweichungen. Observium und weitere Auswertung sind im Projekt als Ausbau vorgesehen. Bis eine wirksame Alarmierung nachgewiesen ist, müssen regelmäßige Kontrollen bewusst organisiert werden.
 
-## KI, MQ-Labor und Zusatzdienste
+## KI und Zusatzdienste
 
 Diese Systeme haben für die schnelle Familienübernahme zunächst geringere Priorität. Ihre Daten und Abhängigkeiten müssen dennoch verstanden werden, bevor sie stillgelegt werden.
 
 ### Ollama und Open WebUI
 Ollama betreibt lokale Sprachmodelle; Open WebUI ist die Browseroberfläche. Modell-Dateien, Einstellungen, Konten und Chatverläufe haben unterschiedliche Sicherungsbedarfe. Anmeldung und eine kurze Modellanfrage getrennt testen. KI-Ausgaben ersetzen keine technische Bestätigung einer Diagnose.
-
-### IBM MQ und MQTT
-IBM MQ verwaltet Warteschlangen über Queue Manager. Channels verbinden Endpunkte, Clients greifen auf einen Manager zu. MQTT verteilt Themen-Nachrichten im Smart Home. Beide Systeme haben unterschiedliche Betriebs- und Sicherheitsmodelle.
-
-Das Projekt kennzeichnet den MQ-LXC-/Podman-Aufbau als Evaluation. Das ist keine produktive Freigabe. Lizenz, unterstützte Plattform und Betriebsanforderungen vor Produktivnutzung gesondert klären. IDs, Queue-Managernamen und Teststände gehören ins private Inventar.
-
-Persistente MQ-Daten, PKI und lokale Konfiguration erhalten. Keine Queue-Dateien manuell im laufenden Manager bearbeiten. Ein hinzugefügtes LDAP-CA-Zertifikat beweist weder die erfolgreiche MQ-LDAP-Anmeldung noch alle gewünschten Rechte. Positive und negative Tests sowie Wiederherstellung separat dokumentieren.
 
 ### Weitere Komponenten
 Der dokumentierte Daytrading-Collector sammelt Daten und erzeugt Signale, er platziert keine Orders. Providerzugänge, Timer, Abonnements und tatsächliche Nutzung erfassen. Proxy-Regeln und optionale Monitoring-, Kafka- oder Analysekomponenten nach dem realen Deployment dokumentieren; Projektideen sind keine laufenden Dienste.

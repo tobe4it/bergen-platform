@@ -128,7 +128,7 @@ Ein erfolgreicher Timerlauf kann melden, dass noch kein Zertifikat erneuert werd
 
 ## Podman und Quadlet: Programme in Paketen
 
-Ein LXC ist die äußere Linux-Umgebung. Podman kann darin weitere Anwendungscontainer aus Images starten, etwa Pi-hole oder das MQ-Labor.
+Ein LXC ist die äußere Linux-Umgebung. Podman kann darin weitere Anwendungscontainer aus Images starten, etwa Pi-hole oder einen anderen lokalen Dienst.
 
 ### Drei Teile eines Anwendungscontainers
 Ein **Image** ist das ausgelieferte Programmpaket. Ein **Container** ist eine gestartete Instanz dieses Pakets. **Persistente Daten** liegen in eigens eingebundenen Verzeichnissen oder Volumes, damit sie einen Austausch des Containers überstehen.

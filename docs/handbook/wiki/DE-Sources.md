@@ -16,8 +16,6 @@ Repository main baseline: `7b465fad95be476e853f0b74e9e86e1d125fd4f5`; handbook e
 - [EVCC](https://github.com/tobe4it/bergen-platform/blob/7b465fad95be476e853f0b74e9e86e1d125fd4f5/docs/EVCC.md)
 - [MQTT](https://github.com/tobe4it/bergen-platform/blob/7b465fad95be476e853f0b74e9e86e1d125fd4f5/docs/MQTT.md)
 - [Syslog](https://github.com/tobe4it/bergen-platform/blob/7b465fad95be476e853f0b74e9e86e1d125fd4f5/ansible/roles/syslog/README.md)
-- [MQ evaluation](https://github.com/tobe4it/bergen-platform/blob/7b465fad95be476e853f0b74e9e86e1d125fd4f5/docs/MQ-LAB.md)
-- [MQ LDAP preparation](https://github.com/tobe4it/bergen-platform/blob/7b465fad95be476e853f0b74e9e86e1d125fd4f5/docs/MQ-LDAP.md)
 - [Daytrading collector](https://github.com/tobe4it/bergen-platform/blob/7b465fad95be476e853f0b74e9e86e1d125fd4f5/docs/DAYTRADING.md)
 - [Updates](https://github.com/tobe4it/bergen-platform/blob/7b465fad95be476e853f0b74e9e86e1d125fd4f5/docs/UPDATE.md)
 - [Roadmap / recovery boundary](https://github.com/tobe4it/bergen-platform/blob/7b465fad95be476e853f0b74e9e86e1d125fd4f5/docs/ROADMAP.md)

@@ -21,11 +21,9 @@ Identify the proper unit for other applications. Broad log dumps are hard to rev
 
 Monitoring additionally checks disk space, availability and certificate expiry and sends actionable alerts. A planned Observium, Loki/Grafana or AI integration is not an active alerting system. Until tested alerts exist, arrange explicit recurring checks.
 
-## Optional AI, MQ and market-data services
+## Optional AI and market-data services
 
 Ollama runs local models; Open WebUI supplies the interface. Test login and inference separately. Preserve settings/accounts/chat data intentionally; large downloadable model files may have a different recovery priority. AI output is not proof of a diagnosis.
-
-IBM MQ queue managers, channels and client access differ from MQTT topic distribution. The repository's Rocky LXC/Podman example is evaluation-only, not a productive license or support approval. Record real IDs, manager names and accepted tests privately. Preserve persistent state, PKI and local variables; do not manually alter live queue files. Directory trust, authentication and authorization need distinct tests.
 
 The daytrading collector reads data and produces signals; it does not place orders according to the project. Record provider sessions, timers, data rights and subscriptions. Optional proxies, analytics and Kafka plans must be distinguished from real deployed dependencies.
 
