@@ -53,7 +53,20 @@ performed by this playbook.
 
 After activation, verify local administrator login, the SSO button, callback,
 pending-user approval, a model request and preservation of existing chats.
-These live checks are still outstanding. No live activation is implied by a commit.
+Live validation on 2026-10-15 confirmed a checked offline data backup, local
+administrator access, successful deployment and HTTP 200 from the application.
+After correcting the client secret in Vault, browser SSO completed and created a
+separate account with the pending role. The existing administrator remained present.
+Pending-user approval, a model request and preservation of existing chats have
+not yet been reported as verified.
+
+The operator is rotating the diagnostic-exposed client secret separately from the
+code release. Update the Synology OIDC application secret, edit
+`ansible/vars/ai-oidc.vault.yml` with `ansible-vault edit --vault-id ai@prompt`,
+then rerun the deployment playbook with the existing local settings and approval
+flags. A configuration change restarts Open WebUI. Complete a fresh browser SSO
+login after rotation; an existing session does not verify the new secret.
+Never commit secrets or diagnostic output containing them.
 
 To disable this integration, remove only
 `/etc/containers/systemd/open-webui.container.d/90-oidc.conf`, run

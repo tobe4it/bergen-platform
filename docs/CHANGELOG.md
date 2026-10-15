@@ -17,6 +17,35 @@ The project follows **Semantic Versioning (SemVer)** and the changelog format is
 
 ---
 
+## [0.11.0] - 2026-10-15
+
+Open WebUI OIDC integration with Synology SSO.
+
+### Added
+
+- Guarded OIDC deployment for the existing Podman Quadlet, using a protected
+  environment file and additive drop-in with a restart and health check.
+- Synology scopes and PKCE S256, local administrator recovery, pending accounts
+  by default, and disabled automatic account merging and role/group mapping.
+- English deployment, acceptance, secret-rotation and rollback documentation;
+  configuration tests and Git ignore rules for local settings and Vault files.
+
+### Verified
+
+- Two configuration tests and Ansible syntax validation passed.
+- Live deployment completed without failures; application health returned HTTP 200.
+- Browser SSO created a separate pending account; the existing administrator
+  remained present.
+
+### Operational follow-up
+
+- Client-secret rotation and a fresh login afterward remain operator tasks.
+- User approval, a model request and existing-chat checks remain unconfirmed.
+- One of the identity provider's two DNS addresses timed out from the AI guest;
+  network/DNS remediation remains separate from this release.
+
+---
+
 ## [0.10.0] - 2026-10-15
 
 Internal reverse-proxy and Bergen-AI HTTPS access release.
