@@ -116,9 +116,17 @@
       changed_when: false
 
     - name: Verify reviewed SSH client configuration parses as the dedicated identity
-      become_user: '{{ ai_proxy_tunnel_user }}'
       ansible.builtin.command:
-        argv: [ssh, -F, '{{ ai_proxy_ssh_config_path }}', -G, '{{ ai_proxy_ssh_alias }}']
+        argv:
+          - /usr/sbin/runuser
+          - -u
+          - "{{ ai_proxy_tunnel_user }}"
+          - --
+          - ssh
+          - -F
+          - "{{ ai_proxy_ssh_config_path }}"
+          - -G
+          - "{{ ai_proxy_ssh_alias }}"
       changed_when: false
       no_log: true
 
