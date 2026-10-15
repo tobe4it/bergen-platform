@@ -48,6 +48,79 @@
       changed_when: false
       when: not ansible_check_mode
 
+    - name: Prepare explicitly selected OIDC groups
+      when:
+        - open_webui_oidc_group_management | default(false) | bool
+        - not ansible_check_mode
+      no_log: true
+      block:
+        - name: Require group names and a protected administrator token
+          ansible.builtin.assert:
+            that:
+              - open_webui_oidc_groups | default([]) | type_debug == 'list'
+              - open_webui_oidc_groups | default([]) | length > 0
+              - open_webui_oidc_groups | unique | length == open_webui_oidc_groups | length
+              - vault_open_webui_admin_token | default('') | length > 0
+
+        - name: Validate exact group names
+          ansible.builtin.assert:
+            that:
+              - item is string
+              - item | trim | length > 0
+              - item == item | trim
+          loop: '{{ open_webui_oidc_groups }}'
+
+        - name: Verify API identity is an administrator
+          ansible.builtin.uri:
+            url: http://127.0.0.1:3000/api/v1/auths/
+            headers:
+              Authorization: 'Bearer {{ vault_open_webui_admin_token }}'
+            use_proxy: false
+            follow_redirects: none
+            status_code: 200
+          register: oidc_api_identity
+
+        - name: Require administrator API identity
+          ansible.builtin.assert:
+            that: oidc_api_identity.json.role == 'admin'
+
+        - name: Read existing groups
+          ansible.builtin.uri:
+            url: http://127.0.0.1:3000/api/v1/groups/
+            headers:
+              Authorization: 'Bearer {{ vault_open_webui_admin_token }}'
+            use_proxy: false
+            follow_redirects: none
+            status_code: 200
+          register: oidc_existing_groups
+
+        - name: Reject ambiguous existing group names
+          ansible.builtin.assert:
+            that: oidc_existing_groups.json | selectattr('name', 'equalto', item) | list | length <= 1
+          loop: '{{ open_webui_oidc_groups }}'
+
+        - name: Create missing groups without additional feature grants
+          ansible.builtin.uri:
+            url: http://127.0.0.1:3000/api/v1/groups/create
+            method: POST
+            headers:
+              Authorization: 'Bearer {{ vault_open_webui_admin_token }}'
+            body_format: json
+            body:
+              name: '{{ item }}'
+              description: LDAP membership synchronized through Synology OIDC.
+              permissions:
+                workspace: {}
+              data:
+                config:
+                  share: false
+            use_proxy: false
+            follow_redirects: none
+            status_code: 200
+          loop: '{{ open_webui_oidc_groups }}'
+          when: item not in (oidc_existing_groups.json | map(attribute='name') | list)
+          changed_when: true
+
     - name: Create configuration directories
       ansible.builtin.file:
         path: '{{ item }}'
