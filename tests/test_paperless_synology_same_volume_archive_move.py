@@ -99,6 +99,8 @@ class SameVolumeArchiveTests(unittest.TestCase):
         journal = json.loads(self.event("archived").read_text())
         self.assertEqual(journal["document_id"], 75)
         self.assertEqual(journal["sha256"], SHA)
+        self.assertEqual(journal["archive_site"], "paperless-scan")
+        self.assertEqual(journal["archive_scope_dir"], str(self.archive))
         self.assertTrue(journal["archived_at"].endswith("+00:00"))
 
     def test_kernel_rename_noreplace_refuses_existing_target(self):
@@ -336,6 +338,18 @@ class SameVolumeArchiveTests(unittest.TestCase):
         with patch.object(Path, "lstat", simulated_mount_info):
             with self.assertRaisesRegex(RuntimeError, "ARCHIVE_SITE_ROOT_MISMATCH"):
                 move._validated_protected_scope(self.folder, SCOPE, os.geteuid())
+
+    def test_every_scope_has_individual_protected_sibling_target(self):
+        for scope, site in move.SITE_BY_SCOPE.items():
+            with self.subTest(scope=scope):
+                target = (self.base / site / move.PROTECTED_ARCHIVE_DIR)
+                for part in scope.split("/"):
+                    target = target / part
+                move._validate_archive_scope_path(
+                    target, self.base / site / "scan-inbox", scope)
+                self.assertEqual(
+                    target.parts[-len(scope.split("/")):],
+                    tuple(scope.split("/")))
 
     def test_site_commit_gates_absent_by_default(self):
         for site in ("homes", "paperless-scan"):
