@@ -1,9 +1,9 @@
 # Bergen-AI über den bestehenden Bergen-Proxy
 
-Status: **Draft / nicht produktiv aktiviert**. Auf der bestehenden
-`nginx_reverse_proxy`-Rolle aufgebaut (PR #46). Kein neuer Reverse Proxy,
-keine Änderung des produktiven Paperless-VHosts, keine zweite Wildcard-Key-Kopie
-und kein neues Zertifikat.
+Status: **am 15.10.2026 aktiviert und technisch verifiziert**. Auf der
+bestehenden `nginx_reverse_proxy`-Rolle aufgebaut (PR #46). Kein neuer Reverse
+Proxy, keine Änderung des produktiven Paperless-VHosts, keine zweite
+Wildcard-Key-Kopie und kein neues Zertifikat.
 
 ## Feststehender Ist-Zustand (read-only geprüft)
 
@@ -27,10 +27,12 @@ und kein neues Zertifikat.
   Adresse auf; der lokale Port 13000 ist frei; das vorhandene Zertifikat
   deckt `ai.thebergens.net` ab; `nginx -t` besteht.
 
-**Noch nicht belegt:** der automatische Wildcard-Renewal-Distributionsweg
-zum Proxy, die lokale gitignorierte Proxy-Konfiguration, die tatsächliche
-AI-LXC-SSH-Identität/Hostkey-Prüfung und die End-to-End-Tunnel-Erreichbarkeit.
-Diese Fakten dürfen nicht aus generischen Beispielen abgeleitet werden.
+**Am 15.10.2026 zusätzlich belegt:** die separate nicht privilegierte
+AI-Tunnelidentität, der auf den benötigten Loopback-Forward beschränkte
+öffentliche Schlüssel, der unabhängig geprüfte Ed25519-Hostkey, die
+gitignorierte lokale Proxy-Konfiguration und die End-to-End-Erreichbarkeit von
+Open WebUI über `127.0.0.1:13000` mit HTTP 200. Offen bleibt der automatische
+Wildcard-Renewal-Distributionsweg zum Proxy.
 
 ## Ziel und Grenzen
 
@@ -42,8 +44,8 @@ https://ai.thebergens.net
    -> 127.0.0.1:3000 in LXC 110 (Open WebUI)
 ```
 
-Der zusätzliche lokale Port 13000 ist eine neue, noch nicht produktiv
-bestätigte Wahl. Kein direkter Netzwerkzugriff auf die Loopback-Adresse
+Der zusätzliche lokale Port 13000 ist produktiv aktiviert und bindet
+ausschließlich an Loopback. Kein direkter Netzwerkzugriff auf die Loopback-Adresse
 eines anderen LXC. Kein WAN-Ingress, keine DNS-API-Änderung und keine
 Firewall-Öffnung durch diese Änderung.
 
@@ -61,7 +63,16 @@ Prüfung bleibt zwingend aktiv; ein eigener minimal berechtigter Tunnel-Key
 ist zu bevorzugen. Die genaue Konfiguration ist **standortspezifisch** und
 wird nicht im öffentlichen Repository erfunden.
 
-Der Tunnel-Unit-Entwurf verwendet **wie Paperless einen dedizierten\nnicht privilegierten technischen Benutzer** (`User`/`Group`, kein root),\nein getrenntes Arbeitsverzeichnis unter `/var/lib` und die\nsystemd-Härtungen `ProtectSystem=strict`, `ProtectHome=true`,\n`PrivateDevices=true`, eingeschränkte Adressfamilien und leeres\n`CapabilityBoundingSet`. Die SSH-Client-Konfiguration gehört dem\nAI-Tunnel-Benutzer und hat Modus 0600; ein eigener Schlüssel und eine\neigene gepinnte `known_hosts`-Datei sind Voraussetzung.\n\nDer Tunnel-Unit-Entwurf verwendet `ssh -4 -b <lokale Proxy-IPv4> -F ...`
+Der Tunnel-Unit-Entwurf verwendet **wie Paperless einen dedizierten
+nicht privilegierten technischen Benutzer** (`User`/`Group`, kein root),
+ein getrenntes Arbeitsverzeichnis unter `/var/lib` und die
+systemd-Härtungen `ProtectSystem=strict`, `ProtectHome=true`,
+`PrivateDevices=true`, eingeschränkte Adressfamilien und leeres
+`CapabilityBoundingSet`. Die SSH-Client-Konfiguration gehört dem
+AI-Tunnel-Benutzer und hat Modus 0600; ein eigener Schlüssel und eine
+eigene gepinnte `known_hosts`-Datei sind Voraussetzung.
+
+Der Tunnel-Unit-Entwurf verwendet `ssh -4 -b <lokale Proxy-IPv4> -F ...`
 mit `-N -T -L 127.0.0.1:13000:127.0.0.1:3000`,
 `BatchMode=yes`, `IdentitiesOnly=yes`, deaktivierter Passwortanmeldung,
 `StrictHostKeyChecking=yes` und `ExitOnForwardFailure=yes`.
@@ -112,7 +123,13 @@ ansible-playbook -i ansible/inventory.yml -i ansible/inventory.local.yml \
 ```
 
 Die Ausgabe enthält TLS-SAN, DNS, Nginx und die belegten lokalen Ports.
-Die Aktivierung ist erst zulässig, wenn die **separate AI-Tunnelidentität\nauf Proxy und AI-Gast** angelegt, der SSH-Zugriff auf den\nbenötigten Forward eingeschränkt, der SSH-Hostkey verifiziert und die\nAnmeldung ohne Passwort als dieser Benutzer erfolgreich geprüft ist.\nDie vorliegende Aktivierung legt **weder Benutzer noch Schlüssel oder\nSSH-Autorisierungsregeln** an; ohne diese Vorbereitung verweigert sie\ndie Ausführung. Danach müssen der SSH-Alias und die private
+Die Aktivierung ist erst zulässig, wenn die **separate AI-Tunnelidentität
+auf Proxy und AI-Gast** angelegt, der SSH-Zugriff auf den
+benötigten Forward eingeschränkt, der SSH-Hostkey verifiziert und die
+Anmeldung ohne Passwort als dieser Benutzer erfolgreich geprüft ist.
+Die vorliegende Aktivierung legt **weder Benutzer noch Schlüssel oder
+SSH-Autorisierungsregeln** an; ohne diese Vorbereitung verweigert sie
+die Ausführung. Danach müssen der SSH-Alias und die private
 CIDR-Allowlist in `ansible/group_vars/all/bergen-proxy.yml` geprüft
 sind, die interne DNS-Zuordnung besteht und der Zertifikats-Renewal-Weg
 bestätigt wurde.
@@ -137,6 +154,33 @@ entfernt die neu angelegten AI-Dateien und den Tunnel bei Fehlern.
 Es erstellt keinen DNS-Eintrag, keine SSH-Identität und keine TLS-
 Erneuerungsautomatik. Kein `--check` als Ersatz für den lesenden Preflight:
 Systemd-/Tunnel-Start ist in Check-Mode nicht sinnvoll simulierbar.
+
+## Aktivierung und Abnahme am 15.10.2026
+
+Der freigegebene First-Install-Lauf endete mit `ok=24`, `changed=5`,
+`failed=0` und `unreachable=0`. Dabei wurden ausschließlich der
+AI-Tunnel-Dienst, der AI-VHost, dessen Symlink und der erforderliche
+Nginx-Reload geändert. Der SHA-256 des bestehenden Paperless-VHosts blieb
+unverändert.
+
+Nachgewiesen wurden:
+
+- `bergen-ai-backend-tunnel.service` läuft als `bergen-ai-tunnel`, bindet
+  `127.0.0.1:13000` und verwendet eine eigene Ed25519-Identität sowie eine
+  eigene gepinnte `known_hosts`-Datei.
+- Open WebUI antwortet auf dem AI-Gast lokal an `127.0.0.1:3000` mit HTTP 200.
+- Der Proxy erreicht Open WebUI über den SSH-Tunnel an
+  `127.0.0.1:13000` mit HTTP 200.
+- Zertifikatsabdeckung, DNS-Gleichlauf mit Paperless, `nginx -t` vor und nach
+  der Änderung sowie der Nginx-Reload waren erfolgreich.
+- Der neue VHost nutzt die bestehende private CIDR-Allowlist; es wurde keine
+  WAN-, DNS- oder Firewall-Regel angelegt.
+
+Der Zugriff über einen vorhandenen Synology-Proxy wurde bestätigt. Der direkte
+Zugriff eines iPads aus dem internen VLAN ist noch ein separates
+Client-/Netzwerkproblem: Wenn dabei kein Nginx-Logeintrag entsteht, liegt der
+Fehler vor Nginx (DNS, WLAN-Isolation oder Netzregel). Dieser offene Clientpfad
+stellt die geprüfte Proxy-zu-Backend-Verbindung nicht infrage.
 
 ## Nachkontrolle
 
@@ -166,7 +210,7 @@ Hostkey-/Public-Key-Prüfung. Der SSH-Forward bindet ausschließlich
 Das AI-Unit-Template wurde entsprechend gehärtet. Es wird **nicht**
 der Paperless-SSH-Schlüssel kopiert oder wiederverwendet.
 
-Die AI-LXC-Adresse, die SSH-Server-Konfiguration auf LXC 110,
-dessen Hostkey und die auf diesen einen Forward eingeschränkte
-`authorized_keys`-Regel sind noch nicht nachgewiesen. Diese müssen
-vor einer produktiven Aktivierung gesondert geprüft werden.
+Die SSH-Server-Konfiguration des AI-Gasts, der Ed25519-Hostkey und die auf den
+Loopback-Forward zu TCP 3000 eingeschränkte `authorized_keys`-Regel wurden vor
+der Aktivierung geprüft. Schlüsselmaterial und standortspezifische Adressen
+bleiben außerhalb des Repositorys.
