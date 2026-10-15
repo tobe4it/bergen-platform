@@ -86,10 +86,17 @@ Verzeichnissen kann ein Administrator ausdrücklich nur die
       --vault-id paperless@prompt \
       -e @ansible/vars/paperless.vault.yml \
       -e @ansible/vars/paperless-synology.local.yml \
-      -e paperless_hidden_archive_prepare=true
+      -e '{"paperless_hidden_archive_prepare": true}'
 
 Direkt danach das Leseaudit für die **tatsächlichen** DSM-ACLs der
-neu angelegten Ordner wiederholen. Der ACL-Audit zeigt zuerst alle
+neu angelegten Ordner mit
+`-e '{"paperless_require_hidden_archives": true}'` wiederholen.
+Ohne diesen expliziten Post-Provision-Modus ist
+`ARCHIVE_CANDIDATE ABSENT` ein reiner Hinweis und verhindert den
+frühen, lesenden ACL-Audit nicht. Mit dem neuen Schalter werden
+fehlende Archive bzw. das private Journal als BLOCKER gewertet.
+**Boolesche Zusatzvariablen als JSON übergeben**, nicht als einfache
+`-e name=true`-Strings. Der ACL-Audit zeigt zuerst alle
 Befunde und schlägt anschließend bei erkannten geerbten Benutzer-/
 Familiengruppenrechten oder technischen BLOCKERn fehl. Solche
 Rechte sind vor jeder PDF-Archivierung separat zu entfernen/
