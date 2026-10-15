@@ -107,7 +107,6 @@ class ReceiverAuditTests(unittest.TestCase):
 
     def test_symlinked_scope_directory_rejected(self):
         folder = self.root / "Familie"
-        folder.rmdir() if not any(folder.iterdir()) else None
         self.file.unlink()
         folder.rmdir()
         folder.symlink_to(self.root / "Eltern")
@@ -154,6 +153,18 @@ class ReceiverAuditTests(unittest.TestCase):
         with patch.object(v.os, "fstat", side_effect=changing):
             with self.assertRaisesRegex(RuntimeError, "RECEIVER_FILE_CHANGED_DURING_READ"):
                 self.verify()
+
+    def test_proxmox_playbook_requires_expected_guest_and_restricted_user(self):
+        play = (ROOT / "ansible/playbooks/audit-paperless-v2-receiver.yml").read_text()
+        self.assertIn("hosts: venombox", play)
+        self.assertIn("'unprivileged: 1'", play)
+        self.assertIn("paperless-ingest", play)
+        self.assertIn("verify_receiver_v2_staging.py", play)
+        self.assertIn("SENT_NOT_AUTHORIZED", play)
+        self.assertIn("changed_when: false", play)
+        self.assertNotIn("prepare-paperless-ingest-bridge.yml", play)
+        self.assertNotIn("ansible.builtin.copy:", play)
+        self.assertNotIn("ansible.builtin.file:", play)
 
     def test_no_mutations_or_sender_calls_in_script(self):
         src = MODULE.read_text(encoding="utf-8")
