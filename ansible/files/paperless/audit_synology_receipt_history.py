@@ -16,7 +16,7 @@ from pathlib import Path
 
 SHA = re.compile(r'[a-f0-9]{64}\Z')
 V1 = re.compile(r'([a-f0-9]{64})\.json\Z')
-V2 = re.compile(r'(v2-[a-f0-9]{32}-[a-f0-9]{64})\.(prepared|sent)\.json\Z')
+V2 = re.compile(r'(v2-[a-f0-9]{32}-[a-f0-9]{64})\.(prepared|attempted|sent)\.json\Z')
 NAME = re.compile(r'[^\w. -]', flags=re.UNICODE)
 MAX_ENTRIES = 10000
 MAX_BYTES = 8192
@@ -132,7 +132,7 @@ def audit_directory(directory, scopes, *, expected_owner=None):
             if len(names) > MAX_ENTRIES:
                 reject('STATE_ENTRY_LIMIT_EXCEEDED')
             counts = {scope: {'v1_sent': 0, 'v1_prepared': 0,
-                              'v2_sent': 0, 'v2_prepared': 0} for scope in scopes}
+                              'v2_sent': 0, 'v2_prepared': 0, 'v2_attempted': 0} for scope in scopes}
             v2_events = {}
             for name in sorted(names):
                 v1, v2 = V1.fullmatch(name), V2.fullmatch(name)
@@ -196,6 +196,12 @@ def audit_directory(directory, scopes, *, expected_owner=None):
                     v2_events.setdefault(event_id, {})[stage] = item
                     counts[scope]['v2_' + stage.lower()] += 1
             for event in v2_events.values():
+                if 'ATTEMPTED' in event:
+                    if 'PREPARED' not in event:
+                        reject('ATTEMPTED_WITHOUT_PREPARED')
+                    attempted = dict(event['ATTEMPTED'], status='PREPARED')
+                    if attempted != event['PREPARED']:
+                        reject('PREPARED_ATTEMPTED_MISMATCH')
                 if 'SENT' in event and 'PREPARED' not in event:
                     reject('SENT_WITHOUT_PREPARED')
                 if 'SENT' in event:
@@ -231,7 +237,8 @@ def main(parent):
     report = audit_directory(SETTINGS['state'], tuple(scope for _path, scope in SETTINGS['sources']))
     for scope, stats in report['counts'].items():
         print('SCOPE', scope, 'V1_SENT', stats['v1_sent'], 'V1_PREPARED', stats['v1_prepared'],
-              'V2_PREPARED', stats['v2_prepared'], 'V2_SENT', stats['v2_sent'])
+              'V2_PREPARED', stats['v2_prepared'], 'V2_ATTEMPTED', stats['v2_attempted'],
+              'V2_SENT', stats['v2_sent'])
     print('TOTAL_JOURNAL_EVENTS', report['total_receipts'])
     print('TOTAL_V1_SENT', report['total_v1_sent'])
     print('UNRESOLVED_JOURNAL_EVENTS', report['unresolved'])
