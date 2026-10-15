@@ -76,7 +76,9 @@ def classify_existing(existing, scope, basename, sha256, signature, version):
     the private state directory; absence cannot be assumed from one key lookup.
     This routine is a policy helper, not authorization to transfer.
     """
-    if version != "v2":
+    # Existing offline lifecycle tests use the integer schema marker 2,
+    # while newer callers use the explicit string "v2". Reject bool True.
+    if not (version == "v2" or (type(version) is int and version == 2)):
         raise ValueError("UNSUPPORTED_RECEIPT_VERSION")
     validate(scope, basename, sha256, signature)
     same = []
