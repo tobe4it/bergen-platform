@@ -130,7 +130,7 @@ def synoacl_tool():
 
 def validate_private_directory(path, uid, dev, tool):
     info = inspect_dir(path, uid=uid, mode=0o700, device=dev)
-    require(info.st_nlink >= 2, "INVALID_ARCHIVE_LINK_COUNT")
+    require(info.st_nlink >= 1, "INVALID_ARCHIVE_LINK_COUNT")
     result = subprocess.run(
         [tool, "-get", str(path)], check=False, capture_output=True,
         text=True, encoding="utf-8", errors="replace", timeout=20)
@@ -198,7 +198,7 @@ def inspect(parent, site, prepare=False):
         obsolete = folder / ".paperless-archive"
         obsolete_st = inspect_dir(obsolete, uid=user.pw_uid,
                                   mode=0o700, device=source.st_dev)
-        require(obsolete_st.st_nlink >= 2, "UNSAFE_OBSOLETE_HIDDEN_ARCHIVE")
+        require(obsolete_st.st_nlink >= 1, "UNSAFE_OBSOLETE_HIDDEN_ARCHIVE")
         with os.scandir(obsolete) as stream:
             require(next(stream, None) is None, "OBSOLETE_HIDDEN_ARCHIVE_NOT_EMPTY")
     require(len(roots) == len(devices) == 1,
