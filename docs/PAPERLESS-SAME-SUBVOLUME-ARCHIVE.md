@@ -648,7 +648,7 @@ Live-Kernel-Probe-Lauf**.
 
 Nach 23/23 erfolgreichen Offline-Tests und erfolgreich
 bestandenem Lesepreflight hat die **echte** künstliche
-\`paperless-scan\`-Probe auf MountainCloud **bestanden**:
+`paperless-scan`-Probe auf MountainCloud **bestanden**:
 
     SELECTED_SITE paperless-scan
     PROTECTED_SUBVOLUME_ID 7446
@@ -660,54 +660,54 @@ bestandenem Lesepreflight hat die **echte** künstliche
     SCAN_AND_RECEIPTS_UNCHANGED
     ARCHIVE_COMMIT_NOT_AUTHORIZED
 
-Die Kernel-Funktion \`RENAME_NOREPLACE\` wurde dabei
-tatsächlich als \`paperless-sync\` auf dem NAS getestet;
+Die Kernel-Funktion `RENAME_NOREPLACE` wurde dabei
+tatsächlich als `paperless-sync` auf dem NAS getestet;
 Zieldateien wurden nicht überschrieben, Inode, Device
 und SHA256 der verschobenen **synthetischen** Datei
 blieben unverändert. Keine Quelle oder Archiv-PDF berührt.
 
-Für das eigene Btrfs-Subvolume \`homes\` (Root-ID \`437\`)
+Für das eigene Btrfs-Subvolume `homes` (Root-ID `437`)
 bestand der **lesende** Preflight für
-\`Privat/thomas\` und \`Privat/nadja\`, aber der erste
-künstliche Live-\`--probe\`-Lauf brach **vor dem
-Rename** mit \`UNSAFE_NEW_FIXTURE\` ab. Die leere
-Testfixture wurde korrekt per \`rmdir\` entfernt
-(\`ISOLATED_EMPTY_FIXTURE_CLEANED homes\`).
+`Privat/thomas` und `Privat/nadja`, aber der erste
+künstliche Live-`--probe`-Lauf brach **vor dem
+Rename** mit `UNSAFE_NEW_FIXTURE` ab. Die leere
+Testfixture wurde korrekt per `rmdir` entfernt
+(`ISOLATED_EMPTY_FIXTURE_CLEANED homes`).
 
 Eine anschließende isolierte, vollständig aufgeräumte
-Diagnose unter \`/volume1/homes\` bestätigte:
-Elternverzeichnis UID/GID \`0:0\`, POSIX-Modus
-\`0711\`, st_dev \`47\`; frisch mit \`mkdtemp\`
+Diagnose unter `/volume1/homes` bestätigte:
+Elternverzeichnis UID/GID `0:0`, POSIX-Modus
+`0711`, st_dev `47`; frisch mit `mkdtemp`
 erstellte Testfixture **ebenfalls** UID/GID
-\`0:0\`, Modus \`0711\`, st_dev \`47\`, Inode
-\`9737969\`; native Synology-ACL \`version: 1\`,
-\`Archive: is_inherit,is_support_ACL\` und die
-ererbten Einträge \`owner::\`, \`user:root\`,
-\`everyone::allow:--x\` sowie
-\`group:administrators\`. Die Diagnose endete mit
-\`EMPTY_DIAGNOSTIC_FIXTURE_REMOVED\` und
-\`NO_SOURCE_OR_ARCHIVE_FILES_CHANGED\`.
+`0:0`, Modus `0711`, st_dev `47`, Inode
+`9737969`; native Synology-ACL `version: 1`,
+`Archive: is_inherit,is_support_ACL` und die
+ererbten Einträge `owner::`, `user:root`,
+`everyone::allow:--x` sowie
+`group:administrators`. Die Diagnose endete mit
+`EMPTY_DIAGNOSTIC_FIXTURE_REMOVED` und
+`NO_SOURCE_OR_ARCHIVE_FILES_CHANGED`.
 
 Das war **kein Fehler des Kernels**: Der Test hatte
-bisher nur die Startmodi \`0000\` (paperless-scan)
-und \`0700\` (normales Linux) akzeptiert. Die neue,
+bisher nur die Startmodi `0000` (paperless-scan)
+und `0700` (normales Linux) akzeptiert. Die neue,
 **noch nicht auf dem Controller getestete**
-Entwicklungsfassung lässt initial \`0711\` nur zu,
+Entwicklungsfassung lässt initial `0711` nur zu,
 wenn die Fixture direkt unter dem **exakten**
-Pfad \`/volume1/homes\` liegt und dessen Elternobjekt
-root-eigenes Verzeichnis im Modus \`0711\` ist.
+Pfad `/volume1/homes` liegt und dessen Elternobjekt
+root-eigenes Verzeichnis im Modus `0711` ist.
 Anschließend ist eine wirklich **geerbte native
 DSM-ACL zwingend** und wird nur an der frisch
 angelegten, leeren, inode-/device-validierten
 Testfixture entfernt. Danach müssen Linux-Modus
-\`0700\`, Eigentümer \`paperless-sync\` und
+`0700`, Eigentümer `paperless-sync` und
 identische Subvolume-ID bestätigt sein.
 
 Vier neue Regressionstests decken die exakt begrenzte
-\`homes\`-Ausnahme ab (**27 Offline-Tests gesamt;
+`homes`-Ausnahme ab (**27 Offline-Tests gesamt;
 erneute Ausführung ausstehend**). Bis diese bestanden
-sind, ist jeder erneute Live-\`homes --probe\`
-gesperrt. Das für \`paperless-scan\` bereits
+sind, ist jeder erneute Live-`homes --probe`
+gesperrt. Das für `paperless-scan` bereits
 erfolgreiche Verfahren bleibt unverändert.
 
 ## Noch gesperrte produktive Verschiebung
