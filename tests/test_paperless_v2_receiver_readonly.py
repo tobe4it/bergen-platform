@@ -147,11 +147,29 @@ class ReceiverAuditTests(unittest.TestCase):
             if stat.S_ISREG(value.st_mode):
                 count[0] += 1
                 if count[0] == 2:
-                    # Simulates bytes changing while receiver is being read.
+                    # Change the file BEFORE returning the second fstat
+                    # result. The descriptor check must see the new size.
                     self.file.write_bytes(DATA + b"changed")
+                    value = original(fd)
             return value
         with patch.object(v.os, "fstat", side_effect=changing):
             with self.assertRaisesRegex(RuntimeError, "RECEIVER_FILE_CHANGED_DURING_READ"):
+                self.verify()
+
+    def test_path_change_after_last_descriptor_stat_rejected(self):
+        original = v.os.fstat
+        count = [0]
+        def changing_after_stat(fd):
+            value = original(fd)
+            if stat.S_ISREG(value.st_mode):
+                count[0] += 1
+                if count[0] == 2:
+                    # The file changes AFTER fstat captured the old metadata;
+                    # the independent final path check must catch the race.
+                    self.file.write_bytes(DATA + b"changed")
+            return value
+        with patch.object(v.os, "fstat", side_effect=changing_after_stat):
+            with self.assertRaisesRegex(RuntimeError, "RECEIVER_PATH_CHANGED_DURING_READ"):
                 self.verify()
 
     def test_proxmox_playbook_requires_expected_guest_and_restricted_user(self):
