@@ -393,22 +393,90 @@ vorbereitete geschützte Archivbaum enthält weiterhin
 keine PDF-Dokumente.
 
 **Die Archivierungsfreigabe ist weiterhin gesperrt**:
-Die vorhandene Worker-Implementierung verwendet
-noch die zuvor gesperrten Quell-Verzeichnisse.
-Ein Umstellen auf die geschützten Wurzeln,
-effektive LDAP-/SMB-Rechtetests, Backup- und
-Restore-Probe sowie echte Importbeweiskette sind
-noch nötig. Vor diesem Schritt darf keine Archiv-PDF
-entstehen.
+Im Entwicklungsbranch wurde der Worker auf die geschützten
+Wurzeln umgestellt. Vor einem ersten Live-Dry-Run müssen
+die neuen Offline-Tests vollständig erfolgreich laufen
+und ausschließlich der deaktivierte Worker mit
+`stage-paperless-synology-archive-worker.yml` ausgerollt
+werden. Der tatsächliche kontrollierte Rename bleibt bis
+zum vollständigen Standort-Acceptance-Test gesperrt.
+Insbesondere sind effektive LDAP-/SMB-Rechtetests,
+Backup- und Restore-Probe, Scanner-Race-Prüfung,
+Btrfs-Subvolume-ID / Linux-`renameat2` und echte
+Importbeweiskette noch nötig. Bis dahin darf keine
+Archiv-PDF entstehen.
+
+## Worker-Umstellung auf beide geschützten Archive
+
+Der Entwurfs-Worker
+`ansible/files/paperless/synology_same_volume_archive_move.py`
+erhält jetzt das Zielverzeichnis **explizit** als
+`archive_scope_dir`. Der produktive CLI-Einstieg
+wählt den Pfad ausschließlich aus den root-kontrollierten
+`synology_config.SETTINGS["sources"]`, der erwarteten
+Scope-zu-Standort-Zuordnung und der ermittelten
+`st_dev`-Grenze. Die Device-Wurzel muss `root`
+gehören und exakt `homes` bzw. `paperless-scan`
+heißen. Alle geschützten Verzeichnis-Komponenten
+müssen dem technischen `paperless-sync`-Benutzer
+gehören, Modus `0700` haben und auf demselben
+Device liegen. Für `Privat/thomas` und
+`Privat/nadja` wird auch die zusätzliche
+`Privat/`-Zwischenebene geprüft.
+
+| Scope | Neues Archivziel (vor Monatsunterordner) |
+| --- | --- |
+| `Privat/thomas` | `/volume1/homes/.bergen-paperless-archive/Privat/thomas/` |
+| `Privat/nadja` | `/volume1/homes/.bergen-paperless-archive/Privat/nadja/` |
+| `Eltern` | `/volume1/paperless-scan/.bergen-paperless-archive/Eltern/` |
+| `Familie` | `/volume1/paperless-scan/.bergen-paperless-archive/Familie/` |
+
+Die alten versteckten `.paperless-archive`-Ordner
+unter den beschreibbaren Scan-Eingängen werden **niemals**
+als Ziel verwendet; sie bleiben unberührt. Der Rename
+bleibt `renameat2(RENAME_NOREPLACE)`, die
+Sender-`SENT`-, Paperless-`IMPORTED`- und
+SHA256-Beweiskette sowie das Journal sind unverändert.
+
+Die produktive Archivierung wird **pro Standort**
+getrennt abgesichert. Nur eine unabhängige, spätere
+root-autorisierte Freigabe mit `0600`, ohne
+Symlink/Hardlink und unter folgendem Namen könnte
+einen Commit erlauben:
+
+- `state_parent/archive-move.homes.enabled`
+- `state_parent/archive-move.paperless-scan.enabled`
+
+Die **alte globale** Datei
+`state_parent/archive-move.enabled` ist ausdrücklich
+keine Freigabe, sondern ein Blocker, sobald sie
+existiert. Der Code-Stage-Prozess verweigert die
+Installation bei jeder dieser drei Freigabedateien,
+auch wenn nur ein Standort betroffen ist.
+**Keines der Playbooks erzeugt eine Freigabedatei.**
+Der Standard des Controller-Playbooks bleibt
+`paperless_archive_commit=false` (Dry-Run).
+
+Für den neuen Stand sind mindestens diese
+Offline-Tests auf `bp-controller` durchzuführen:
+
+    python3 -m unittest discover -s tests \
+      -p 'test_paperless_synology_same_volume_archive_move.py' -v
+
+Die angepasste Serie prüft unter anderem den
+pro Standort geschützten Zielpfad, die getrennten
+Freigabedateien, Symlink-/Mode-Blocker, Crash-
+und Replay-Barrieren sowie echte Kernel-`renameat2`
+mit temporären Test-PDFs. Erst nach erfolgreichem
+Test und Re-Review darf der Worker in *deaktiviertem*
+Zustand auf die NAS übertragen werden.
 
 ## Noch gesperrte produktive Verschiebung
 
-Der echte Commit benötigt eine von root außerhalb
-dieser Playbooks bereitgestellte Freigabedatei
-(state_parent/archive-move.enabled), UID 0,
-Modus 0600, ohne Hardlink/Symlink. Der Standard des
-Controller-Playbooks ist commit=false; keines der neuen
-Playbooks erzeugt den Gate.
+Vor einer Standort-Commit-Freigabe müssen alle
+offenen Sicherheits- und Wiederherstellungsnachweise
+erfüllt werden; eine nur strukturell eingerichtete
+Archivwurzel ist noch **keine** Rename-Freigabe.
 
 Vor einer Freigabe müssen folgende Punkte erfüllt sein:
 
