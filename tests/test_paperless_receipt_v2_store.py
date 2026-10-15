@@ -76,7 +76,7 @@ class AppendOnlyStoreTests(unittest.TestCase):
         self.publish_prepared()
         conflict = copy.deepcopy(self.prepared)
         conflict["incarnation_nonce"] = "b" * 32
-        with self.assertRaisesRegex(RuntimeError, "CONFLICTING_JOURNAL_EVENT"):
+        with self.assertRaisesRegex(ValueError, "EVENT_ID_OR_DESTINATION_MISMATCH"):
             store.publish_event(self.directory, conflict)
         self.assertEqual(self.prepared_path.read_bytes(), store._canonical(self.prepared))
 

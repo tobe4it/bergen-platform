@@ -42,7 +42,7 @@ def legacy(directory, name='Scan.pdf', scope=SCOPE, status='SENT', number=0):
 
 def v2(directory, stage='PREPARED', nonce='a' * 32):
     name = 'Repeated.pdf'
-    event = a.v2_id(SCOPE, name, SHA, SIG)
+    event = a.v2_id(SCOPE, name, SHA, SIG, nonce)
     record = dict(schema_version=2, receipt_id=event, status=stage, scope=SCOPE,
                   source=name, sha256=SHA, signature=SIG,
                   destination=SCOPE + '/nas-' + event + '.pdf', incarnation_nonce=nonce)
@@ -152,9 +152,10 @@ class HistoryAuditTests(unittest.TestCase):
     def test_tampered_sent_and_nonce_rejected(self):
         v2(self.root, 'PREPARED')
         path, record = v2(self.root, 'SENT', nonce='b' * 32)
-        with self.assertRaisesRegex(RuntimeError, 'PREPARED_SENT_MISMATCH'):
+        with self.assertRaisesRegex(RuntimeError, 'SENT_WITHOUT_PREPARED'):
             self.result()
-        record['incarnation_nonce'] = 'a' * 32
+        path.unlink()
+        path, record = v2(self.root, 'SENT', nonce='a' * 32)
         record['transfer_evidence']['new_file_confirmed'] = False
         write_record(self.root, path.name, record)
         with self.assertRaisesRegex(RuntimeError, 'INVALID_V2_TRANSFER_EVIDENCE'):
