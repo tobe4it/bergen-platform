@@ -6,6 +6,7 @@ from POSIX mode bits or os.access(). No filesystem or ACL mutation.
 """
 import os
 import pwd
+import re
 import shutil
 import stat
 import subprocess
@@ -23,6 +24,32 @@ def acl_tool():
         if candidate and Path(candidate).is_file() and os.access(candidate, os.X_OK):
             return candidate
     return None
+
+
+def classify_hidden_acl(result, info, expected_uid, source_device):
+    """Allow only an exact, ACL-free POSIX-private archive; fail closed.
+
+    Synology synoacltool returns 255 and '(synoacltool.c, N)It's Linux
+    mode' when the target has no native DSM ACL. That is acceptable only
+    for an actual nonsymlink directory owned by paperless-sync, mode 0700,
+    on the same device as its scan parent. Native DSM ACLs require a
+    separately reviewed policy: do not infer privacy from their presence.
+    """
+    if (not stat.S_ISDIR(info.st_mode)
+            or info.st_uid != expected_uid
+            or stat.S_IMODE(info.st_mode) != 0o700
+            or info.st_dev != source_device):
+        return "UNSAFE_OWNER_MODE_TYPE_OR_DEVICE"
+    combined = "\n".join(
+        part.strip() for part in (result.stdout, result.stderr) if part.strip()
+    ).strip()
+    if (result.returncode == 255 and
+            re.fullmatch(r"\(synoacltool\.c,\s*[0-9]+\)It's Linux mode",
+                         combined)):
+        return "POSIX_PRIVATE"
+    if result.returncode == 0:
+        return "NATIVE_DSM_ACL_NEEDS_EXPLICIT_REVIEW"
+    return "ACL_QUERY_FAILED"
 
 
 def inspect(parent, require_hidden=False):
@@ -109,24 +136,17 @@ def inspect(parent, require_hidden=False):
                 print("ACL", scope, label, cleaned[:600])
             if len(lines) > 100:
                 print("BLOCKER", scope, label, "ACL_OUTPUT_TRUNCATED")
-            if result.returncode != 0:
-                print("BLOCKER", scope, label, "ACL_QUERY_FAILED")
-            if label == "HIDDEN_ARCHIVE" and result.returncode == 0:
-                for line in lines:
-                    if (":allow:" in line
-                            and any(marker in line for marker in (
-                                "group:Familie@bergen.intern:",
-                                "group:Eltern@bergen.intern:",
-                                "group:Kinder@bergen.intern:",
-                                "group:users:",
-                                "group:everyone:",
-                                "user:guest:",
-                            ))):
-                        print("BLOCKER", scope,
-                              "HIDDEN_ARCHIVE_INHERITED_USER_GROUP_ACCESS")
-                        break
+            if label == "HIDDEN_ARCHIVE":
+                status = classify_hidden_acl(result, st, user.pw_uid, source.st_dev)
+                if status == "POSIX_PRIVATE":
+                    print("HIDDEN_ARCHIVE_POSIX_PRIVATE", scope)
+                    # Mode 0700 and no DSM ACL are strong local evidence,
+                    # NOT a live effective user/SMB permissions acceptance.
+                    print("EFFECTIVE_USER_ACCESS_TEST_REQUIRED", scope)
                 else:
-                    print("HIDDEN_ARCHIVE_ACL_MANUAL_EFFECTIVE_CHECK_REQUIRED", scope)
+                    print("BLOCKER", scope, "HIDDEN_ARCHIVE_" + status)
+            elif result.returncode != 0:
+                print("BLOCKER", scope, label, "ACL_QUERY_FAILED")
         print("REVIEW_REQUIRED", scope, "SYNC_USER_DELETE_CHILD_RENAME_AND_ACL_INHERITANCE")
     print("NO_FILES_CHANGED")
 
