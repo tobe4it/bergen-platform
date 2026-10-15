@@ -64,6 +64,25 @@ class AttemptBarrierTests(unittest.TestCase):
         self.assertEqual(self.afile.stat().st_nlink, 1)
         self.assertEqual(self.afile.stat().st_mode & 0o777, 0o600)
 
+    def test_attempt_without_sent_only_transfer_evidence_publishes(self):
+        self.assertNotIn("transfer_evidence", self.attempted)
+        self.assertEqual(set(self.attempted), set(self.prepared))
+        result = self.publish_both()
+        self.assertEqual(result, (self.afile, True))
+        expected = dict(self.attempted, status="PREPARED")
+        self.assertEqual(expected, self.prepared)
+        self.assertEqual(self.afile.read_bytes(), store._canonical(self.attempted))
+
+    def test_attempt_rejects_sent_only_evidence_field(self):
+        forged = dict(self.attempted, transfer_evidence={
+            "receiver_source": self.prepared["destination"],
+            "receiver_sha256": SHA,
+            "new_file_confirmed": True,
+        })
+        with self.assertRaisesRegex(ValueError, "INVALID_V2_EVENT_FIELDS"):
+            store.publish_event(self.state, forged)
+        self.assertFalse(self.afile.exists())
+
     def test_attempt_must_never_be_published_twice(self):
         self.publish_both()
         original = self.afile.read_bytes()
