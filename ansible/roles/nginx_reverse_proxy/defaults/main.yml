@@ -1,0 +1,12 @@
+---
+# Site-neutral defaults. Sensitive values belong in a separate ignored vars file.
+reverse_proxy_deployment_approved: false
+reverse_proxy_internal_only: true
+reverse_proxy_sites: []
+reverse_proxy_allow_cidrs: []
+reverse_proxy_tls_cert_path: /etc/nginx/tls/fullchain.pem
+reverse_proxy_tls_key_path: /etc/nginx/tls/privkey.pem
+reverse_proxy_tls_minimum_remaining_seconds: 1209600
+reverse_proxy_client_max_body_size: 100m
+reverse_proxy_read_timeout: 120s
+reverse_proxy_hsts_enabled: false

@@ -1,0 +1,34 @@
+---
+# Example only. Copy to bergen-proxy.yml (git-ignored) and customize locally.
+# No actual site details, certificate keys or credentials belong in Git.
+# Requires an inventory target for the selected Proxmox node.
+pve_node: CHANGE_ME
+pve_inventory_host: CHANGE_ME
+
+lxc_vmid: 999
+lxc_hostname: internal-reverse-proxy
+lxc_template: local:vztmpl/CHANGE_ME.tar.zst
+lxc_storage: CHANGE_ME
+lxc_rootfs_size: 8
+lxc_cores: 1
+lxc_memory: 512
+lxc_swap: 256
+lxc_bridge: CHANGE_ME
+lxc_ip: dhcp
+lxc_ip6: dhcp
+lxc_unprivileged: true
+lxc_firewall: 1
+lxc_onboot: true
+
+# These paths refer to files to be provisioned on the future reverse-proxy LXC;
+# preflight does not read or transfer private key material.
+reverse_proxy_internal_only: true
+reverse_proxy_tls_cert_path: /etc/nginx/tls/fullchain.pem
+reverse_proxy_tls_key_path: /etc/nginx/tls/privkey.pem
+
+# Example destinations use RFC 5737 documentation IPs: replace locally.
+reverse_proxy_sites:
+  - hostname: paperless.example.net
+    backend_url: http://192.0.2.10:8000
+  - hostname: nextcloud.example.net
+    backend_url: http://192.0.2.11:80

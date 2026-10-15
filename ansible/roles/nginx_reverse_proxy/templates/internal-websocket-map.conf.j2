@@ -1,0 +1,5 @@
+# Managed by Ansible: internal reverse proxy
+map $http_upgrade $reverse_proxy_connection_upgrade {
+    default upgrade;
+    '' close;
+}

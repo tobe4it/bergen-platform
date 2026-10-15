@@ -1,0 +1,179 @@
+---
+# Read-only, cluster-aware preflight for a dedicated internal reverse-proxy LXC.
+# No VM creation, DNS, firewall, ACME, TLS, inventory or service writes.
+# Site-specific inputs must come from a git-ignored local vars file.
+- name: Validate planned internal reverse proxy inputs
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  tasks:
+    - name: Require explicit deployment topology
+      ansible.builtin.assert:
+        that:
+          - pve_node is defined
+          - pve_inventory_host is defined
+          - lxc_vmid is defined
+          - lxc_hostname is defined
+          - lxc_template is defined
+          - lxc_storage is defined
+          - lxc_bridge is defined
+          - lxc_cores is defined
+          - lxc_memory is defined
+          - lxc_rootfs_size is defined
+          - lxc_unprivileged is defined
+          - lxc_firewall is defined
+          - reverse_proxy_sites is defined
+          - reverse_proxy_tls_cert_path is defined
+          - reverse_proxy_tls_key_path is defined
+        fail_msg: >-
+          Missing reverse-proxy deployment variables. Start with the checked-in
+          example and supply site-specific values in a git-ignored vars file.
+
+    - name: Reject unsafe or malformed deployment parameters
+      ansible.builtin.assert:
+        that:
+          - lxc_vmid | int > 0
+          - lxc_hostname is match('^[a-z][a-z0-9-]{1,62}$')
+          - pve_node | length > 0
+          - pve_inventory_host | length > 0
+          - lxc_template is match('^[A-Za-z0-9_.-]+:vztmpl/[A-Za-z0-9_.-]+[.]tar[.](zst|gz|xz)$')
+          - lxc_storage is match('^[A-Za-z0-9_.-]+$')
+          - lxc_bridge is match('^[A-Za-z0-9_.-]+$')
+          - lxc_cores | int >= 1
+          - lxc_memory | int >= 256
+          - lxc_rootfs_size | int >= 4
+          - lxc_unprivileged | bool
+          - lxc_firewall | int == 1
+          - reverse_proxy_internal_only | default(true) | bool
+          - reverse_proxy_sites is sequence
+          - reverse_proxy_sites is not string
+          - reverse_proxy_sites | length > 0
+          - reverse_proxy_tls_cert_path is match('^/\S+$')
+          - reverse_proxy_tls_key_path is match('^/\S+$')
+          - reverse_proxy_tls_cert_path != reverse_proxy_tls_key_path
+        fail_msg: >-
+          The planned proxy must use an unprivileged, firewalled LXC with
+          valid resources and explicit internal-only TLS configuration.
+
+    - name: Validate each planned HTTPS virtual host
+      ansible.builtin.assert:
+        that:
+          - item.hostname is defined
+          - item.backend_url is defined
+          - item.hostname is match('^[a-zA-Z0-9-]+([.][a-zA-Z0-9-]+)+$')
+          - item.backend_url is match('^https?://[a-zA-Z0-9.-]+(:[0-9]{1,5})?/?$')
+        fail_msg: 'A proxy site needs a DNS hostname and HTTP(S) backend URL.'
+      loop: '{{ reverse_proxy_sites }}'
+      loop_control:
+        label: '{{ item.hostname | default("unnamed") }}'
+
+    - name: Refuse duplicate HTTPS virtual hosts
+      ansible.builtin.assert:
+        that:
+          - reverse_proxy_sites | map(attribute='hostname') | list | unique | length == reverse_proxy_sites | length
+        fail_msg: 'Each planned reverse-proxy hostname must be unique.'
+
+- name: Inspect planned Proxmox reverse proxy target without changes
+  hosts: '{{ pve_inventory_host | default(pve_node) }}'
+  gather_facts: false
+  become: true
+  tasks:
+    - name: Read cluster-wide VM and LXC inventory
+      ansible.builtin.command:
+        argv: [pvesh, get, /cluster/resources, --type, vm, --output-format, json]
+      register: reverse_proxy_cluster_inventory
+      changed_when: false
+      check_mode: false
+
+    - name: Identify all guests already using the proposed VMID
+      ansible.builtin.set_fact:
+        reverse_proxy_matching_guests: >-
+          {{ reverse_proxy_cluster_inventory.stdout | from_json
+             | selectattr('vmid', 'equalto', lxc_vmid | int) | list }}
+
+    - name: Reject collisions anywhere in the Proxmox cluster
+      ansible.builtin.assert:
+        that:
+          - >-
+            reverse_proxy_matching_guests | length == 0 or
+            (reverse_proxy_matching_guests | length == 1 and
+             reverse_proxy_matching_guests[0].type == 'lxc' and
+             reverse_proxy_matching_guests[0].node == pve_node and
+             reverse_proxy_matching_guests[0].name == lxc_hostname)
+        fail_msg: >-
+          Proposed VMID is already occupied by a different guest or node.
+          No existing workload may be repurposed.
+
+    - name: Read existing LXC configuration when the identity already exists
+      ansible.builtin.command:
+        argv: [pct, config, '{{ lxc_vmid | string }}']
+      register: reverse_proxy_existing_config
+      changed_when: false
+      check_mode: false
+      when: reverse_proxy_matching_guests | length == 1
+
+    - name: Verify existing LXC hostname before any future deployment
+      ansible.builtin.assert:
+        that:
+          - reverse_proxy_existing_config.rc == 0
+          - >-
+            reverse_proxy_existing_config.stdout | regex_findall('(?m)^hostname: ([^\r\n]+)$')
+            == [lxc_hostname]
+        fail_msg: 'Existing LXC configuration does not match the planned proxy identity.'
+      when: reverse_proxy_matching_guests | length == 1
+
+    - name: Read Proxmox storage status
+      ansible.builtin.command:
+        argv: [pvesm, status]
+      register: reverse_proxy_storage_status
+      changed_when: false
+      check_mode: false
+
+    - name: Verify that the target root filesystem storage is active
+      ansible.builtin.assert:
+        that:
+          - >-
+            reverse_proxy_storage_status.stdout_lines
+            | select('match', '^' ~ (lxc_storage | regex_escape) ~ '\s+\S+\s+active\s+')
+            | list | length == 1
+        fail_msg: 'The configured rootfs storage is missing or not active.'
+
+    - name: List LXC templates in configured template storage
+      ansible.builtin.command:
+        argv: [pvesm, list, '{{ lxc_template.split(":")[0] }}', --content, vztmpl]
+      register: reverse_proxy_template_inventory
+      changed_when: false
+      check_mode: false
+
+    - name: Verify the configured LXC template exists
+      ansible.builtin.assert:
+        that:
+          - >-
+            reverse_proxy_template_inventory.stdout_lines
+            | select('match', '^' ~ (lxc_template | regex_escape) ~ '\s+')
+            | list | length == 1
+        fail_msg: 'The configured LXC template is not present on its storage.'
+
+    - name: Check that the configured network interface or bridge exists
+      ansible.builtin.command:
+        argv: [ip, link, show, dev, '{{ lxc_bridge }}']
+      register: reverse_proxy_bridge_status
+      changed_when: false
+      check_mode: false
+
+    - name: Summarize read-only internal reverse-proxy preflight
+      ansible.builtin.debug:
+        msg:
+          status: PASS
+          changed_system_state: false
+          target_node: '{{ pve_node }}'
+          vmid: '{{ lxc_vmid }}'
+          lxc_name: '{{ lxc_hostname }}'
+          vmid_state: '{{ "existing matching LXC" if reverse_proxy_matching_guests | length == 1 else "free" }}'
+          rootfs_storage: '{{ lxc_storage }}'
+          template: '{{ lxc_template }}'
+          bridge: '{{ lxc_bridge }}'
+          virtual_hosts: '{{ reverse_proxy_sites | map(attribute="hostname") | list }}'
+          note: >-
+            This is not proof of DNS, WAN isolation, TLS key availability or
+            backend reachability. Verify these separately before deployment.

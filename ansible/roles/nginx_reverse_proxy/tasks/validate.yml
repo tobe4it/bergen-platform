@@ -1,0 +1,32 @@
+---
+- name: Validate complete Nginx configuration
+  ansible.builtin.command:
+    argv: [nginx, -t]
+  changed_when: false
+
+- name: Enable and start Nginx
+  ansible.builtin.service:
+    name: nginx
+    enabled: true
+    state: started
+
+- name: Apply validated Nginx changes
+  ansible.builtin.meta: flush_handlers
+
+- name: Confirm Nginx is active
+  ansible.builtin.command:
+    argv: [systemctl, is-active, nginx]
+  register: reverse_proxy_nginx_active
+  changed_when: false
+  failed_when: reverse_proxy_nginx_active.stdout | trim != 'active'
+
+- name: Summarize internal reverse proxy deployment
+  ansible.builtin.debug:
+    msg:
+      status: RUNNING
+      https_sites: '{{ reverse_proxy_sites | map(attribute="hostname") | list }}'
+      tls_material: external_existing
+      source_ingress_policy: '{{ reverse_proxy_allow_cidrs }}'
+      note: >-
+        HTTP backend isolation and UniFi/Proxmox firewall and WAN rules must be
+        independently validated. This role never configures firewall or DNS.

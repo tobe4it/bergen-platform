@@ -1,0 +1,290 @@
+---
+# FIRST INSTALL ONLY. A separate explicit approval is mandatory.
+# Uses the existing nginx_reverse_proxy site template without reconciling
+# unrelated hosts, firewall rules, Paperless or certificate distribution.
+- name: Add Bergen-AI to the existing internal HTTPS proxy
+  hosts: reverse_proxy_nodes
+  become: true
+  gather_facts: false
+  vars:
+    ai_proxy_hostname: ai.thebergens.net
+    ai_proxy_local_port: 13000
+    ai_proxy_remote_port: 3000
+    reverse_proxy_tls_cert_path: /etc/nginx/tls/fullchain.pem
+    reverse_proxy_tls_key_path: /etc/nginx/tls/privkey.pem
+    reverse_proxy_client_max_body_size: 100m
+    reverse_proxy_read_timeout: 120s
+    reverse_proxy_hsts_enabled: false
+    ai_proxy_unit: bergen-ai-backend-tunnel.service
+    ai_proxy_vhost: /etc/nginx/sites-available/50-internal-ai.thebergens.net.conf
+    ai_proxy_link: /etc/nginx/sites-enabled/50-internal-ai.thebergens.net.conf
+    ai_proxy_paperless_link: /etc/nginx/sites-enabled/50-internal-paperless.thebergens.net.conf
+
+  tasks:
+    - name: Require explicit authorization and reviewed local settings
+      ansible.builtin.assert:
+        that:
+          - ai_proxy_deployment_approved | default(false) | bool
+          - inventory_hostname == 'bergen-proxy'
+          - inventory_hostname in groups.get('reverse_proxy_nodes', [])
+          - ai_proxy_tunnel_user is defined
+          - ai_proxy_tunnel_user is match('^[a-z_][a-z0-9_-]{0,30}$')
+          - ai_proxy_tunnel_home is defined
+          - ai_proxy_tunnel_home is match('^/var/lib/[a-zA-Z0-9_-]+$')
+          - ai_proxy_ssh_config_path is defined
+          - ai_proxy_ssh_config_path is match('^/[a-zA-Z0-9_./-]+$')
+          - ai_proxy_source_address is defined
+          - ai_proxy_source_address is match('^[0-9]{1,3}(\\.[0-9]{1,3}){3}$')
+          - ai_proxy_ssh_alias is defined
+          - ai_proxy_ssh_alias is match('^[a-zA-Z0-9._-]+$')
+          - reverse_proxy_allow_cidrs is defined
+          - reverse_proxy_allow_cidrs is sequence
+          - reverse_proxy_allow_cidrs is not string
+          - reverse_proxy_allow_cidrs | length > 0
+          - "'0.0.0.0/0' not in reverse_proxy_allow_cidrs"
+          - "'::/0' not in reverse_proxy_allow_cidrs"
+        fail_msg: >-
+          Refusing activation without reviewed LXC inventory, existing proxy
+          source address, site-local SSH tunnel config, private client allowlist
+          and explicit approval.
+
+    - name: Verify the pre-provisioned dedicated AI tunnel identity
+      ansible.builtin.getent:
+        database: passwd
+        key: '{{ ai_proxy_tunnel_user }}'
+
+    - name: Verify existing Paperless HTTPS vhost without changing it
+      ansible.builtin.stat:
+        path: '{{ ai_proxy_paperless_link }}'
+        follow: true
+        checksum_algorithm: sha256
+      register: ai_proxy_paperless_before
+
+    - name: Inspect proposed AI files and required existing infrastructure
+      ansible.builtin.stat:
+        path: '{{ item }}'
+        follow: false
+      loop:
+        - '{{ ai_proxy_link }}'
+        - '{{ ai_proxy_vhost }}'
+        - '/etc/systemd/system/{{ ai_proxy_unit }}'
+        - '{{ ai_proxy_ssh_config_path }}'
+        - '{{ ai_proxy_tunnel_home }}'
+        - '/etc/nginx/conf.d/10-internal-websocket-map.conf'
+        - '{{ reverse_proxy_tls_cert_path }}'
+      register: ai_proxy_files
+
+    - name: Inspect existing TLS key without displaying its metadata
+      ansible.builtin.stat:
+        path: '{{ reverse_proxy_tls_key_path }}'
+      register: ai_proxy_key
+      no_log: true
+
+    - name: Require a non-destructive first installation
+      ansible.builtin.assert:
+        that:
+          - ai_proxy_paperless_before.stat.isreg | default(false)
+          - not (ai_proxy_files.results[0].stat.exists | default(false))
+          - not (ai_proxy_files.results[1].stat.exists | default(false))
+          - not (ai_proxy_files.results[2].stat.exists | default(false))
+          - ai_proxy_files.results[3].stat.isreg | default(false)
+          - ai_proxy_files.results[3].stat.pw_name | default('') == ai_proxy_tunnel_user
+          - ai_proxy_files.results[3].stat.mode | default('') in ['0600', '0400']
+          - ai_proxy_files.results[4].stat.isdir | default(false)
+          - ai_proxy_files.results[4].stat.pw_name | default('') == ai_proxy_tunnel_user
+          - ai_proxy_files.results[5].stat.isreg | default(false)
+          - ai_proxy_files.results[6].stat.isreg | default(false)
+          - ai_proxy_key.stat.isreg | default(false)
+        fail_msg: >-
+          Existing AI configuration, missing SSH configuration, WebSocket map,
+          TLS files or Paperless baseline. Refusing to overwrite anything.
+
+    - name: Validate existing wildcard certificate coverage
+      ansible.builtin.command:
+        argv: [openssl, x509, -in, '{{ reverse_proxy_tls_cert_path }}', -noout, -checkhost, '{{ ai_proxy_hostname }}']
+      register: ai_proxy_certificate
+      changed_when: false
+
+    - name: Require exact AI hostname coverage
+      ansible.builtin.assert:
+        that:
+          - "'does match certificate' in ai_proxy_certificate.stdout"
+
+    - name: Require at least 14 days remaining on existing certificate
+      ansible.builtin.command:
+        argv: [openssl, x509, -in, '{{ reverse_proxy_tls_cert_path }}', -noout, -checkend, '1209600']
+      changed_when: false
+
+    - name: Verify reviewed SSH client configuration parses as the dedicated identity
+      ansible.builtin.command:
+        argv:
+          - /usr/sbin/runuser
+          - -u
+          - "{{ ai_proxy_tunnel_user }}"
+          - --
+          - ssh
+          - -F
+          - "{{ ai_proxy_ssh_config_path }}"
+          - -G
+          - "{{ ai_proxy_ssh_alias }}"
+      register: ai_proxy_ssh_effective
+      changed_when: false
+      no_log: true
+
+    - name: Require the resolved dedicated SSH identity and trust files
+      ansible.builtin.assert:
+        that:
+          - "('user ' ~ ai_proxy_tunnel_user) in ai_proxy_ssh_effective.stdout_lines"
+          - "('identityfile ' ~ ai_proxy_tunnel_home ~ '/.ssh/id_ed25519') in ai_proxy_ssh_effective.stdout_lines"
+          - "('userknownhostsfile ' ~ ai_proxy_tunnel_home ~ '/.ssh/known_hosts') in ai_proxy_ssh_effective.stdout_lines"
+          - "'identitiesonly yes' in ai_proxy_ssh_effective.stdout_lines"
+          - "'batchmode yes' in ai_proxy_ssh_effective.stdout_lines"
+          - "'stricthostkeychecking true' in ai_proxy_ssh_effective.stdout_lines"
+        fail_msg: 'The resolved SSH alias does not use the reviewed dedicated identity and host-key policy.'
+      no_log: true
+
+    - name: Resolve existing Paperless and proposed AI names internally
+      ansible.builtin.command:
+        argv:
+          - python3
+          - -c
+          - "import socket,sys; print(','.join(sorted({x[4][0] for x in socket.getaddrinfo(sys.argv[1], None, family=socket.AF_INET)})))"
+          - '{{ item }}'
+      loop:
+        - paperless.thebergens.net
+        - '{{ ai_proxy_hostname }}'
+      register: ai_proxy_dns
+      changed_when: false
+
+    - name: Require AI and Paperless to resolve to the same internal proxy
+      ansible.builtin.assert:
+        that:
+          - ai_proxy_dns.results[0].stdout | trim | length > 0
+          - ai_proxy_dns.results[0].stdout == ai_proxy_dns.results[1].stdout
+        fail_msg: 'Internal DNS is not ready; no DNS change is attempted.'
+
+    - name: Require working Nginx before any changes
+      ansible.builtin.command:
+        argv: [nginx, -t]
+      changed_when: false
+
+    - name: Require unoccupied local AI tunnel port
+      ansible.builtin.wait_for:
+        host: 127.0.0.1
+        port: '{{ ai_proxy_local_port }}'
+        state: stopped
+        timeout: 1
+
+    - name: Install AI tunnel and HTTPS vhost with rollback on failure
+      block:
+        - name: Install isolated SSH tunnel unit
+          ansible.builtin.template:
+            src: ../roles/nginx_reverse_proxy/templates/internal-ssh-backend-tunnel.service.j2
+            dest: '/etc/systemd/system/{{ ai_proxy_unit }}'
+            owner: root
+            group: root
+            mode: '0644'
+
+        - name: Start the isolated AI tunnel
+          ansible.builtin.systemd_service:
+            name: '{{ ai_proxy_unit }}'
+            daemon_reload: true
+            enabled: true
+            state: started
+
+        - name: Require SSH tunnel listener
+          ansible.builtin.wait_for:
+            host: 127.0.0.1
+            port: '{{ ai_proxy_local_port }}'
+            state: started
+            timeout: 20
+
+        - name: Require reachable Open WebUI through SSH tunnel
+          ansible.builtin.uri:
+            url: 'http://127.0.0.1:{{ ai_proxy_local_port }}/'
+            follow_redirects: none
+            status_code: [200, 301, 302, 303, 307, 308, 401, 403]
+            return_content: false
+            timeout: 10
+
+        - name: Render AI vhost using the existing Nginx role template
+          ansible.builtin.template:
+            src: ../roles/nginx_reverse_proxy/templates/internal-proxy-site.conf.j2
+            dest: '{{ ai_proxy_vhost }}'
+            owner: root
+            group: root
+            mode: '0644'
+          loop:
+            - hostname: '{{ ai_proxy_hostname }}'
+              backend_url: 'http://127.0.0.1:{{ ai_proxy_local_port }}'
+
+        - name: Enable AI vhost without touching Paperless
+          ansible.builtin.file:
+            src: '{{ ai_proxy_vhost }}'
+            dest: '{{ ai_proxy_link }}'
+            state: link
+
+        - name: Validate combined Nginx configuration
+          ansible.builtin.command:
+            argv: [nginx, -t]
+          changed_when: false
+
+        - name: Reload Nginx only after validation
+          ansible.builtin.systemd_service:
+            name: nginx
+            state: reloaded
+
+        - name: Recheck unchanged Paperless configuration checksum
+          ansible.builtin.stat:
+            path: '{{ ai_proxy_paperless_link }}'
+            follow: true
+            checksum_algorithm: sha256
+          register: ai_proxy_paperless_after
+
+        - name: Require unchanged Paperless vhost
+          ansible.builtin.assert:
+            that:
+              - ai_proxy_paperless_before.stat.checksum == ai_proxy_paperless_after.stat.checksum
+
+      rescue:
+        - name: Remove only newly staged AI vhost link
+          ansible.builtin.file:
+            path: '{{ ai_proxy_link }}'
+            state: absent
+
+        - name: Remove only newly staged AI vhost file
+          ansible.builtin.file:
+            path: '{{ ai_proxy_vhost }}'
+            state: absent
+
+        - name: Stop and disable newly staged AI tunnel
+          ansible.builtin.systemd_service:
+            name: '{{ ai_proxy_unit }}'
+            state: stopped
+            enabled: false
+          failed_when: false
+
+        - name: Remove newly staged AI tunnel unit
+          ansible.builtin.file:
+            path: '/etc/systemd/system/{{ ai_proxy_unit }}'
+            state: absent
+
+        - name: Refresh systemd after rollback
+          ansible.builtin.systemd_service:
+            daemon_reload: true
+
+        - name: Validate original Nginx after rollback
+          ansible.builtin.command:
+            argv: [nginx, -t]
+          changed_when: false
+
+        - name: Reload original Nginx after rollback
+          ansible.builtin.systemd_service:
+            name: nginx
+            state: reloaded
+
+        - name: Report refused or rolled-back activation
+          ansible.builtin.fail:
+            msg: >-
+              Bergen-AI activation failed and the new AI vhost/tunnel were
+              removed. Paperless and TLS source were not intentionally changed.

@@ -1,0 +1,37 @@
+# Managed by Ansible: {{ item.hostname }}
+server {
+    listen 443 ssl;
+    server_name {{ item.hostname }};
+
+    ssl_certificate {{ reverse_proxy_tls_cert_path }};
+    ssl_certificate_key {{ reverse_proxy_tls_key_path }};
+    ssl_protocols TLSv1.2 TLSv1.3;
+    ssl_session_tickets off;
+
+    server_tokens off;
+    client_max_body_size {{ reverse_proxy_client_max_body_size }};
+    proxy_read_timeout {{ reverse_proxy_read_timeout }};
+
+{% for cidr in reverse_proxy_allow_cidrs %}
+    allow {{ cidr }};
+{% endfor %}
+    deny all;
+
+    add_header X-Content-Type-Options "nosniff" always;
+    add_header Referrer-Policy "same-origin" always;
+{% if reverse_proxy_hsts_enabled | bool %}
+    add_header Strict-Transport-Security "max-age=31536000" always;
+{% endif %}
+
+    location / {
+        proxy_pass {{ item.backend_url }};
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $remote_addr;
+        proxy_set_header X-Forwarded-Host $host;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection $reverse_proxy_connection_upgrade;
+    }
+}

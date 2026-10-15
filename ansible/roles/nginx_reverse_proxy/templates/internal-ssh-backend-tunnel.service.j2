@@ -1,0 +1,31 @@
+# Managed by Ansible. Dedicated Bergen-AI SSH backend tunnel only.
+[Unit]
+Description=Bergen-AI private SSH backend tunnel
+Documentation=man:ssh(1)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User={{ ai_proxy_tunnel_user }}
+Group={{ ai_proxy_tunnel_user }}
+WorkingDirectory={{ ai_proxy_tunnel_home }}
+UMask=0077
+ExecStart=/usr/bin/ssh -N -T -4 -b {{ ai_proxy_source_address }} -F {{ ai_proxy_ssh_config_path }} -o BatchMode=yes -o IdentitiesOnly=yes -o PasswordAuthentication=no -o KbdInteractiveAuthentication=no -o PreferredAuthentications=publickey -o StrictHostKeyChecking=yes -o HostKeyAlgorithms=ssh-ed25519 -o ExitOnForwardFailure=yes -o ServerAliveInterval=30 -o ServerAliveCountMax=3 -o ForwardAgent=no -o ForwardX11=no -o PermitLocalCommand=no -o ControlMaster=no -o ProxyCommand=none -o GatewayPorts=no -L 127.0.0.1:{{ ai_proxy_local_port }}:127.0.0.1:{{ ai_proxy_remote_port }} {{ ai_proxy_ssh_alias }}
+Restart=on-failure
+RestartSec=10
+TimeoutStartSec=30
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+CapabilityBoundingSet=
+LockPersonality=true
+
+[Install]
+WantedBy=multi-user.target

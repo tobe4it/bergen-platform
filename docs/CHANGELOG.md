@@ -33,6 +33,50 @@ The project follows **Semantic Versioning (SemVer)** and the changelog format is
 
 ---
 
+## [0.10.0] - 2026-10-15
+
+Internal reverse-proxy and Bergen-AI HTTPS access release.
+
+### Added
+
+- Reusable Nginx reverse-proxy role for an existing dedicated internal Debian
+  LXC, with TLS-only virtual hosts, WebSocket forwarding, private client CIDR
+  allowlists and a rejecting default TLS server.
+- Read-only Proxmox/live-proxy preflights and a guarded, explicitly approved
+  Bergen-AI first-install playbook.
+- Separate non-root Bergen-AI SSH tunnel identity and hardened systemd unit,
+  forwarding proxy loopback TCP 13000 to Open WebUI loopback TCP 3000.
+- Rollback of only newly staged AI files and checksum protection for the
+  existing Paperless vhost.
+- Operational documentation and static safety-contract tests.
+
+### Fixed
+
+- SSH configuration validation now uses `runuser` on the minimal proxy LXC
+  instead of assuming that `sudo` is installed.
+- Activation validates the effective SSH user, identity file, dedicated
+  known-hosts file, strict host-key checking, batch mode and identity isolation
+  rather than merely parsing the SSH configuration.
+
+### Verified
+
+- Five Bergen-AI proxy contract tests passed and the activation playbook passed
+  its Ansible syntax check on the controller.
+- Read-only live preflight completed with `changed=0` and `failed=0`.
+- Activation completed with `ok=24`, `changed=5`, `failed=0` and preserved
+  the Paperless vhost checksum.
+- Open WebUI returned HTTP 200 locally on the AI guest and through the dedicated
+  SSH tunnel; certificate coverage, internal DNS agreement, `nginx -t` and
+  Nginx reload passed.
+- Access through an existing Synology proxy was confirmed.
+
+### Follow-up
+
+- Diagnose direct access from the iPad client path separately; verify WebSocket
+  use and an actual application login.
+- Prove automatic wildcard-certificate distribution and Nginx reload after a
+  real renewal.
+
 ## [0.9.2] - 2026-10-11
 
 Mail gateway TLS and Certbot maintenance release. The gateway certificate
