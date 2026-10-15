@@ -538,8 +538,44 @@ Ansible-Syntaxprüfung vor Remote-Probe:
       ansible/playbooks/audit-paperless-synology-renameat2.yml \
       --syntax-check
 
-**Der Live-Synology-Fixture-Test wurde noch nicht
-ausgeführt** (nur vorbereitet).
+**Live-Stand 15.10.2026:** Die neue Offline-Testserie
+lief zunächst mit 8/8 grün und der reine
+`paperless-scan`-Preflight bestand mit
+`PROTECTED_SUBVOLUME_ID 7446`,
+`PROTECTED_SOURCE_SCOPES_VERIFIED 2`,
+`PROBE_DISABLED`, `NO_FILES_CHANGED`.
+Der nachfolgende Live-`--probe`-Versuch
+**brach noch vor dem Kernel-Rename** mit
+`SYNODB_RENAME_PROBE_BLOCKED UNSAFE_NEW_FIXTURE`
+ab. Die genaue Abweichung (UID, POSIX-Modus,
+Device oder Verzeichnisart des gerade angelegten
+`mkdtemp`-Ordners unter
+`/volume1/paperless-scan/`) ist noch nicht
+geklärt.
+
+**Wichtige Sicherheitskorrektur:** Die erste Version
+prüfte `UNSAFE_NEW_FIXTURE` außerhalb des
+`try/finally`-Cleanup. Daher kann ein
+`.bergen-rename-probe-*`-Restordner auf der NAS
+verblieben sein. Er darf **nicht blind gelöscht**
+werden; zuerst nur lesend den Inhalt, Inode,
+Eigentümer, Modus, Device und native Synology-ACL
+inventarisieren. In der folgenden Entwicklungsfassung
+liegt auch dieser Check innerhalb von `try/finally`:
+Vor Beginn des eigentlichen Fixtures wird nur
+`rmdir` auf einem nachweislich unveränderten,
+**leeren** eigenen Testordner versucht; nach Start
+nur eine exakt bekannte Teststruktur gelöscht,
+bei fremden Dateien oder Inodewechsel weiterhin
+fail-closed. Zusätzliche fünf Offline-Tests
+wurden ergänzt (jetzt 13, **erneute Ausführung
+noch ausstehend**).
+
+**Keinen erneuten Live-Probe versuchen**, bevor
+der verbliebene Testordner geprüft, die Ursache
+der geänderten Verzeichnismetadaten ermittelt
+und die korrigierte 13-Test-Suite bestanden ist.
+Beide Archiv-Commit-Gates bleiben gesperrt.
 
 ## Noch gesperrte produktive Verschiebung
 
