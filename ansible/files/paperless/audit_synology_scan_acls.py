@@ -61,7 +61,12 @@ def inspect(parent):
         print("ARCHIVE_CANDIDATE", "ABSENT" if not candidate.exists() and not candidate.is_symlink() else "EXISTS_REVIEW")
         # The source ACL is what matters for creating/removing entries. The
         # parent ACL helps identify inherited grants and DSM Home behavior.
-        for label, path in (("SOURCE", folder), ("PARENT", folder.parent)):
+        targets = [("SOURCE", folder), ("PARENT", folder.parent)]
+        if candidate.exists() or candidate.is_symlink():
+            if candidate.is_symlink() or not candidate.is_dir():
+                raise RuntimeError("UNSAFE_ARCHIVE_CANDIDATE " + scope)
+            targets.append(("HIDDEN_ARCHIVE", candidate))
+        for label, path in targets:
             st = path.lstat()
             if not stat.S_ISDIR(st.st_mode):
                 raise RuntimeError("UNSAFE_ACL_PATH " + scope + " " + label)
@@ -83,6 +88,22 @@ def inspect(parent):
                 print("BLOCKER", scope, label, "ACL_OUTPUT_TRUNCATED")
             if result.returncode != 0:
                 print("BLOCKER", scope, label, "ACL_QUERY_FAILED")
+            if label == "HIDDEN_ARCHIVE" and result.returncode == 0:
+                for line in lines:
+                    if (":allow:" in line
+                            and any(marker in line for marker in (
+                                "group:Familie@bergen.intern:",
+                                "group:Eltern@bergen.intern:",
+                                "group:Kinder@bergen.intern:",
+                                "group:users:",
+                                "group:everyone:",
+                                "user:guest:",
+                            ))):
+                        print("BLOCKER", scope,
+                              "HIDDEN_ARCHIVE_INHERITED_USER_GROUP_ACCESS")
+                        break
+                else:
+                    print("HIDDEN_ARCHIVE_ACL_MANUAL_EFFECTIVE_CHECK_REQUIRED", scope)
         print("REVIEW_REQUIRED", scope, "SYNC_USER_DELETE_CHILD_RENAME_AND_ACL_INHERITANCE")
     print("NO_FILES_CHANGED")
 
