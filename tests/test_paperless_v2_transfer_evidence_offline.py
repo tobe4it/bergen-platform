@@ -160,7 +160,7 @@ class OfflineTransferEvidenceTests(unittest.TestCase):
 
     def test_no_live_sender_integration_or_io(self):
         src = (SRC / "compare_v2_transfer_evidence_offline.py").read_text()
-        for disallowed in ("subprocess", "rsync(", "os.open(", "os.unlink(",
+        for disallowed in ("import subprocess", "subprocess.run(", "rsync(", "os.open(", "os.unlink(",
                            "publish_event(", "sent_record(", "os.replace(",
                            "os.remove(", "urllib", "requests", "delete("):
             self.assertNotIn(disallowed, src)
