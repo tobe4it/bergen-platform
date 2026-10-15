@@ -29,3 +29,8 @@ ansible/vars/selfhost-acme.vault.yml
 
 # Site-specific reverse proxy topology and certificate endpoints
 ansible/group_vars/all/bergen-proxy.yml
+
+# Open WebUI OIDC site settings and encrypted credentials
+ansible/vars/ai-oidc.local.yml
+ansible/vars/ai-oidc.vault.yml
+ansible/vars/ai-oidc.vault.yml*
