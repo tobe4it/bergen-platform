@@ -296,6 +296,12 @@ class OfflineSessionTests(unittest.TestCase):
                                      self.transport, self.receiver)
         self.assertFalse(self.prepared_events())
 
+    def test_unknown_well_formed_scope_is_not_approved(self):
+        with self.assertRaisesRegex(ValueError, "UNAPPROVED_OFFLINE_SCOPE"):
+            session.run_offline_once(self.journal, self.source, "Other",
+                                     self.transport, self.receiver)
+        self.assertFalse(self.prepared_events())
+
     def test_unexpected_transport_callback_shape_blocks_receiver(self):
         def malformed(snapshot, prepared):
             self.calls.append("transport")
