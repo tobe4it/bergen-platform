@@ -6,6 +6,7 @@
 - import_playbook: audit-paperless-synology-mounts.yml
 - import_playbook: audit-paperless-synology-acls.yml
 - import_playbook: audit-paperless-synology-archive.yml
+- import_playbook: audit-paperless-receipt-history.yml
 
 - name: Retain mandatory operator release gate
   hosts: localhost
