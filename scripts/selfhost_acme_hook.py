@@ -59,6 +59,12 @@ def load_config(path=DEFAULT_CONFIG):
         raise HookError("Exactly two distinct numeric record IDs are required")
     if type(cfg.get("tls_rsa2048_compat", False)) is not bool:
         raise HookError("tls_rsa2048_compat must be a boolean")
+    # No state_dir means the original single-zone installation; never relocate it.
+    if "state_dir" in cfg and not (
+        isinstance(cfg["state_dir"], str)
+        and re.fullmatch(r"/var/lib/selfhost-acme/instances/[a-z0-9][a-z0-9_-]{0,31}", cfg["state_dir"])
+    ):
+        raise HookError("Unsafe per-instance state_dir")
     if not isinstance(servers, list) or len(servers) < 2 or any(
         not isinstance(s, str) or not DOMAIN.fullmatch(s) for s in servers
     ):
@@ -242,10 +248,11 @@ def main(argv=None, environ=None):
         raise HookError("Certbot selfHOST hook must be executed as root")
     os.umask(0o077)
     cfg = load_config(environ.get("SELFHOST_ACME_CONFIG", DEFAULT_CONFIG))
+    state_dir = cfg.get("state_dir", DEFAULT_STATE_DIR)
     if argv[0] == "auth":
-        present(cfg, environ)
+        present(cfg, environ, state_dir)
     else:
-        cleanup(cfg, environ)
+        cleanup(cfg, environ, state_dir)
 
 
 if __name__ == "__main__":
