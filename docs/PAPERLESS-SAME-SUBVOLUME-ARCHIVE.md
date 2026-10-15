@@ -119,6 +119,47 @@ und Paperless-Variablen stammen aus dem bestehenden
 ignorierten Inventar und Vault. Keine Dateinamen,
 Kennwörter oder Belege in Git oder PR-Kommentaren speichern.
 
+## DSM-ACLs: Linux-Modus auf neu angelegten Archivordnern
+
+Nach dem Anlegen der vier versteckten Ordner auf MountainCloud gab
+`synoacltool -get` auf ihnen `rc=255` mit
+`(synoacltool.c, 596)It's Linux mode` zurück. Das bedeutet in diesem
+konkreten Fall: **keine native Synology-ACL auf dem Archivordner**.
+Die ursprünglichen Scan-Eingangsordner bleiben dagegen
+DSM-ACL-gesteuert. Der private Archivordner wird nicht in DSM-ACLs
+umgewandelt, solange ein wirksamer POSIX-Modus ausreicht.
+
+Der Read-only-Audit akzeptiert ausschließlich die eindeutige
+Linux-Modus-Meldung bei `root`-geprüftem Verzeichnistyp,
+Eigentümer `paperless-sync`, POSIX-Modus `0700` und
+demselben `st_dev` wie der Scan-Eingangsordner. Er gibt
+`HIDDEN_ARCHIVE_POSIX_PRIVATE <scope>` aus.
+Andere `synoacltool`-Fehler, abweichende Eigentümer/Modi,
+Device-Wechsel oder neu auftretende native DSM-ACLs
+bleiben ausdrücklich **BLOCKER**.
+
+Beispiel für die strenge erneute Prüfung:
+
+    ansible-playbook -i ansible/inventory.yml -i ansible/inventory.local.yml \
+      ansible/playbooks/audit-paperless-synology-acls.yml \
+      --vault-id paperless@prompt \
+      -e @ansible/vars/paperless.vault.yml \
+      -e @ansible/vars/paperless-synology.local.yml \
+      -e '{"paperless_require_hidden_archives": true}'
+
+**Das ist noch keine produktive Freigabe.** Die effektiven
+Zugriffsrechte müssen mit echten nichtprivilegierten NAS-/
+LDAP-Identitäten positiv (`paperless-sync`) und negativ
+(Familie, Eltern, Kinder, sonstige Benutzer) überprüft werden.
+Insbesondere haben Mitglieder der Familiengruppen umfassende
+Rechte auf den **übergeordneten Eingangsordnern**. Damit muss
+gesondert geprüft werden, ob der versteckte Archivordner
+selbst umbenannt oder entfernt werden könnte. Ein rein
+privater Inhalt (`0700`) schützt nicht automatisch den
+Verzeichniseintrag im beschreibbaren Elternverzeichnis.
+Solche Prüfungen dürfen die realen Archive nicht als
+Testobjekte umbenennen oder löschen.
+
 ## Noch gesperrte produktive Verschiebung
 
 Der echte Commit benötigt eine von root außerhalb
