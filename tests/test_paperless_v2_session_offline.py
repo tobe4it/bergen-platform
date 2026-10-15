@@ -182,6 +182,30 @@ class OfflineSessionTests(unittest.TestCase):
         self.assertEqual(self.calls, ["transport"])
         self.assertEqual(len(self.prepared_events()), 1)
 
+    def test_snapshot_modified_by_transport_blocks_receiver(self):
+        def mutate(snapshot, prepared):
+            result = self.transport(snapshot, prepared)
+            snapshot.write_bytes(PDF + b"spoofed")
+            return result
+        with self.assertRaisesRegex(RuntimeError, "OFFLINE_SNAPSHOT_CHANGED"):
+            self.run(transport=mutate)
+        self.assertEqual(self.calls, ["transport"])
+        self.assertEqual(len(self.prepared_events()), 1)
+
+    def test_snapshot_modified_during_receiver_blocks_completion(self):
+        retained = []
+        def transport(snapshot, prepared):
+            retained.append(snapshot)
+            return self.transport(snapshot, prepared)
+        def receiver(prepared):
+            result = self.receiver(prepared)
+            retained[0].write_bytes(PDF + b"spoofed")
+            return result
+        with self.assertRaisesRegex(RuntimeError, "OFFLINE_SNAPSHOT_CHANGED"):
+            self.run(transport=transport, receiver=receiver)
+        self.assertEqual(self.calls, ["transport", "receiver"])
+        self.assertEqual(len(self.prepared_events()), 1)
+
     def test_changed_source_during_receiver_blocks_complete_result(self):
         def change(prepared):
             result = self.receiver(prepared)
