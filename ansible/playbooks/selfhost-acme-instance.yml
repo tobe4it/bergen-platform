@@ -90,6 +90,30 @@
         group: root
         mode: '0700'
 
+    - name: Refuse accidental reuse of a slug for a different DNS zone or TXT slots
+      ansible.builtin.command:
+        argv:
+          - /usr/bin/python3
+          - -c
+          - |
+            import json, pathlib, sys
+            path = pathlib.Path(sys.argv[1])
+            if not path.exists() and not path.is_symlink():
+                sys.exit(0)
+            if path.is_symlink() or not path.is_file():
+                sys.exit(2)
+            existing = json.loads(path.read_text())
+            if existing.get("zone") != sys.argv[2]:
+                sys.exit(3)
+            if existing.get("record_ids") != [int(sys.argv[3]), int(sys.argv[4])]:
+                sys.exit(4)
+          - "{{ acme_config }}"
+          - "{{ selfhost_acme_zone }}"
+          - "{{ selfhost_acme_record_ids[0] | string }}"
+          - "{{ selfhost_acme_record_ids[1] | string }}"
+      changed_when: false
+      no_log: true
+
     - name: Write only this instance configuration, never log credentials
       ansible.builtin.copy:
         content: "{{ {'api_key': selfhost_acme_api_key, 'zone': selfhost_acme_zone, 'record_ids': selfhost_acme_record_ids, 'nameservers': selfhost_acme_nameservers, 'state_dir': acme_state, 'tls_rsa2048_compat': selfhost_acme_tls_rsa2048_compat | default(false)} | to_nice_json }}\n"
