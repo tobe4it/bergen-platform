@@ -129,6 +129,47 @@ def subvol_id(binary, path):
     return out
 
 
+def cleanup_fixture(fixture, root, original, invoked, site):
+    """Never delete beyond a single verified new synthetic fixture."""
+    # Cleanup is guaranteed to be attempted even when the immediately
+    # created fixture fails its initial UID/mode/device validation.
+    # Only delete the precise directory created by this invocation.
+    require(fixture.parent == root and
+            fixture.name.startswith(".bergen-rename-probe-") and
+            original is not None,
+            "FIXTURE_CLEANUP_REQUIRES_MANUAL_REVIEW")
+    current = fixture.lstat()
+    require(stat.S_ISDIR(current.st_mode) and
+            current.st_ino == original.st_ino and
+            current.st_dev == original.st_dev,
+            "FIXTURE_CLEANUP_REQUIRES_MANUAL_REVIEW")
+    if not invoked:
+        # Must be empty: do not recursively delete any unknown files
+        # if the root-level directory was unsafe from the beginning.
+        os.rmdir(fixture)
+        print("ISOLATED_EMPTY_FIXTURE_CLEANED", site)
+    else:
+        # Known fixture structure only; unexpected paths block deletion.
+        expected = {
+            "scan-fixture": {"test.pdf"},
+            "archive-fixture": {"collision.pdf", "renamed.pdf"},
+        }
+        with os.scandir(fixture) as stream:
+            children = list(stream)
+        require(all(c.name in expected and not c.is_symlink()
+                    and c.is_dir(follow_symlinks=False) for c in children),
+                "FIXTURE_UNEXPECTED_CONTENT_REQUIRES_MANUAL_REVIEW")
+        for child in children:
+            with os.scandir(child.path) as stream:
+                require(all(f.name in expected[child.name] and
+                            f.is_file(follow_symlinks=False) for f in stream),
+                        "FIXTURE_UNEXPECTED_CONTENT_REQUIRES_MANUAL_REVIEW")
+        shutil.rmtree(fixture)
+        print("ISOLATED_RENAME_FIXTURE_CLEANED", site)
+    require(not fixture.exists() and not fixture.is_symlink(),
+            "FIXTURE_CLEANUP_INCOMPLETE")
+
+
 def inspect(state_parent, site, probe):
     require(os.geteuid() == 0 and state_parent.is_absolute()
             and ".." not in state_parent.parts, "ROOT_REQUIRED")
@@ -202,43 +243,7 @@ def inspect(state_parent, site, probe):
                 str(r.returncode) + "_" +
                 r.stderr.strip()[:220].replace(" ", "_"))
     finally:
-        # Cleanup is guaranteed to be attempted even when the immediately
-        # created fixture fails its initial UID/mode/device validation.
-        # Only delete the precise directory created by this invocation.
-        require(fixture.parent == root and
-                fixture.name.startswith(".bergen-rename-probe-") and
-                original is not None,
-                "FIXTURE_CLEANUP_REQUIRES_MANUAL_REVIEW")
-        current = fixture.lstat()
-        require(stat.S_ISDIR(current.st_mode) and
-                current.st_ino == original.st_ino and
-                current.st_dev == original.st_dev,
-                "FIXTURE_CLEANUP_REQUIRES_MANUAL_REVIEW")
-        if not invoked:
-            # Must be empty: do not recursively delete any unknown files
-            # if the root-level directory was unsafe from the beginning.
-            os.rmdir(fixture)
-            print("ISOLATED_EMPTY_FIXTURE_CLEANED", site)
-        else:
-            # Known fixture structure only; unexpected paths block deletion.
-            expected = {
-                "scan-fixture": {"test.pdf"},
-                "archive-fixture": {"collision.pdf", "renamed.pdf"},
-            }
-            with os.scandir(fixture) as stream:
-                children = list(stream)
-            require(all(c.name in expected and not c.is_symlink()
-                        and c.is_dir(follow_symlinks=False) for c in children),
-                    "FIXTURE_UNEXPECTED_CONTENT_REQUIRES_MANUAL_REVIEW")
-            for child in children:
-                with os.scandir(child.path) as stream:
-                    require(all(f.name in expected[child.name] and
-                                f.is_file(follow_symlinks=False) for f in stream),
-                            "FIXTURE_UNEXPECTED_CONTENT_REQUIRES_MANUAL_REVIEW")
-            shutil.rmtree(fixture)
-            print("ISOLATED_RENAME_FIXTURE_CLEANED", site)
-        require(not fixture.exists() and not fixture.is_symlink(),
-                "FIXTURE_CLEANUP_INCOMPLETE")
+        cleanup_fixture(fixture, root, original, invoked, site)
     print("PROTECTED_ARCHIVE_UNCHANGED")
     print("SCAN_AND_RECEIPTS_UNCHANGED")
     print("ARCHIVE_COMMIT_NOT_AUTHORIZED")
