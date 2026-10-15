@@ -212,7 +212,11 @@ def archive_one(source_dir, state_dir, scope, filename, proof, *, commit=False,
             and "\x00" not in filename and filename.lower().endswith(".pdf")
             and len(filename.encode("utf-8")) <= 255,
             "INVALID_ARCHIVE_SOURCE")
-    require(type(commit) is bool, "INVALID_ARCHIVE_MODE")
+    require(type(commit) is bool and isinstance(source_dir, Path)
+            and isinstance(state_dir, Path) and source_dir.is_absolute()
+            and state_dir.is_absolute() and ".." not in source_dir.parts
+            and ".." not in state_dir.parts,
+            "INVALID_ARCHIVE_MODE_OR_PATHS")
     require(type(max_size) is int and 0 < max_size <= MAX_BYTES
             and type(quiet_seconds) is int and 30 <= quiet_seconds <= 3600,
             "INVALID_ARCHIVE_LIMITS")
@@ -231,9 +235,19 @@ def archive_one(source_dir, state_dir, scope, filename, proof, *, commit=False,
                          dir_fd=state_fd)
         try:
             flock(lockfd, LOCK_EX | LOCK_NB)
+            source_before = source_dir.lstat()
+            require(stat.S_ISDIR(source_before.st_mode)
+                    and source_before.st_nlink >= 1,
+                    "UNSAFE_SOURCE_PARENT")
             sourcefd = os.open(source_dir, os.O_RDONLY | os.O_DIRECTORY
                                | os.O_NOFOLLOW | os.O_CLOEXEC)
             try:
+                source_current = os.fstat(sourcefd)
+                require((source_before.st_dev, source_before.st_ino,
+                         source_before.st_mode) ==
+                        (source_current.st_dev, source_current.st_ino,
+                         source_current.st_mode),
+                        "SOURCE_PARENT_CHANGED")
                 source_info = os.stat(filename, dir_fd=sourcefd,
                                       follow_symlinks=False)
                 signature = source_signature(source_info)
@@ -262,6 +276,7 @@ def archive_one(source_dir, state_dir, scope, filename, proof, *, commit=False,
                             "ARCHIVE_NOT_SAME_FILESYSTEM")
                     journalfd = _check_dir(state_dir / JOURNAL_DIR, sync_uid)
                     try:
+                        # A corrupt/unknown journal must never be ignored.
                         files = os.listdir(journalfd)
                         require(not any(x.startswith(sender_id + ".") for x in files),
                                 "ARCHIVE_JOURNAL_ALREADY_EXISTS")
