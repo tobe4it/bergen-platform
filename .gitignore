@@ -4,6 +4,15 @@ ansible/group_vars/all/vault.yml
 ansible/group_vars/all/bergen-mail.yml
 ansible/group_vars/all/bergen-daytrade.yml
 ansible/group_vars/all/bergen-evcc.yml
+
+# Legacy local IBM MQ lab inputs remain ignored after the lab moved to
+# https://github.com/tobe4it/bergen-mq-lab. This prevents existing controller
+# files from becoming accidental untracked commits during migration.
+ansible/vars/mq.local.yml
+ansible/vars/mq-lab.local.yml
+ansible/group_vars/all/bergen-mq-lab.yml
+ansible/vars/bergen-mq-*.local.yml
+ansible/vars/mq-topology/
 ansible/inventory.local.yml
 # Site-local inventory editor backups may contain credentials or host addresses.
 ansible/inventory.local.yml~
