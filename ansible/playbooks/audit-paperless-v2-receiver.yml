@@ -1,0 +1,83 @@
+---
+# Receiver-side proof only. Nothing is installed, sent, archived, or deleted.
+# No v2 files are expected yet; execute only against an independently
+# selected existing v2 receiver file. --syntax-check is safe anytime.
+- name: Read-only independent Paperless v2 receiver file proof
+  hosts: venombox
+  gather_facts: false
+  become: true
+  tasks:
+    - name: Require explicit v2 receiver expectation, no automated discovery
+      ansible.builtin.assert:
+        that:
+          - inventory_hostname == 'venombox'
+          - not ansible_check_mode
+          - paperless_receiver_scope is defined
+          - paperless_receiver_scope in ['Privat/thomas', 'Privat/nadja', 'Eltern', 'Familie']
+          - paperless_receiver_basename is defined
+          - paperless_receiver_basename is match('^nas-v2-[a-f0-9]{32}-[a-f0-9]{64}\.pdf$')
+          - paperless_receiver_sha256 is defined
+          - paperless_receiver_sha256 is match('^[a-f0-9]{64}$')
+          - paperless_receiver_size is defined
+          - (paperless_receiver_size | string) is match('^[1-9][0-9]{0,9}$')
+          - paperless_receiver_size | int <= 536870912
+        fail_msg: "Exact staged v2 destination, SHA-256 and original size are required"
+
+    - name: Confirm expected confined guest identity
+      ansible.builtin.command:
+        argv: [pct, config, '126']
+      register: paperless_receiver_lxc
+      changed_when: false
+
+    - name: Reject wrong container or privileged configuration
+      ansible.builtin.assert:
+        that:
+          - "'hostname: bergen-paperless' in paperless_receiver_lxc.stdout_lines"
+          - "'unprivileged: 1' in paperless_receiver_lxc.stdout_lines"
+          - "'lxc.apparmor.profile: unconfined' not in paperless_receiver_lxc.stdout"
+
+    - name: Confirm guest is running
+      ansible.builtin.command:
+        argv: [pct, status, '126']
+      register: paperless_receiver_guest
+      changed_when: false
+      failed_when: >-
+        paperless_receiver_guest.rc != 0 or
+        paperless_receiver_guest.stdout | trim != 'status: running'
+
+    - name: Stream verifier into LXC as restricted paperless-ingest identity
+      ansible.builtin.command:
+        argv:
+          - pct
+          - exec
+          - '126'
+          - --
+          - /usr/sbin/runuser
+          - -u
+          - paperless-ingest
+          - --
+          - /usr/bin/python3
+          - '-'
+          - "{{ paperless_receiver_scope }}"
+          - "{{ paperless_receiver_basename }}"
+          - "{{ paperless_receiver_sha256 }}"
+          - "{{ paperless_receiver_size | string }}"
+        stdin: "{{ lookup('ansible.builtin.file', playbook_dir + '/../files/paperless/verify_receiver_v2_staging.py', rstrip=False) }}"
+      register: paperless_receiver_audit
+      changed_when: false
+
+    - name: Require digest match, point-in-time limitation and release block
+      ansible.builtin.assert:
+        that:
+          - "('RECEIVER_SHA256 ' ~ paperless_receiver_sha256) in paperless_receiver_audit.stdout_lines"
+          - "('RECEIVER_BYTES ' ~ (paperless_receiver_size | string)) in paperless_receiver_audit.stdout_lines"
+          - "'RECEIVER_POINT_IN_TIME_VERIFIED' in paperless_receiver_audit.stdout_lines"
+          - "'NEW_FILE_NOT_ATTESTED' in paperless_receiver_audit.stdout_lines"
+          - "'PAPERLESS_IMPORT_NOT_ATTESTED' in paperless_receiver_audit.stdout_lines"
+          - "'SENT_NOT_AUTHORIZED' in paperless_receiver_audit.stdout_lines"
+          - "'SOURCE_DELETE_NOT_AUTHORIZED' in paperless_receiver_audit.stdout_lines"
+          - "'NO_FILES_CHANGED' in paperless_receiver_audit.stdout_lines"
+
+    - name: Display receiver point-in-time SHA and safety markers
+      ansible.builtin.debug:
+        var: paperless_receiver_audit.stdout_lines
