@@ -95,6 +95,76 @@ class IsolatedSynologyRenameTests(unittest.TestCase):
                     exec(probe.UNPRIVILEGED_FIXTURE, {"__name__": "__main__"})
             self.assertEqual(list(root.iterdir()), [])
 
+    def test_failed_initial_validation_cleans_only_empty_fixture(self):
+        with tempfile.TemporaryDirectory(prefix="rename-safety-") as tmp:
+            root = Path(tmp)
+            fixture = root / ".bergen-rename-probe-owned"
+            fixture.mkdir(mode=0o700)
+            original = fixture.lstat()
+            with contextlib.redirect_stdout(io.StringIO()):
+                probe.cleanup_fixture(fixture, root, original, False, "homes")
+            self.assertFalse(fixture.exists())
+
+    def test_failed_initial_validation_never_recursively_deletes_unknown_entry(self):
+        with tempfile.TemporaryDirectory(prefix="rename-safety-") as tmp:
+            root = Path(tmp)
+            fixture = root / ".bergen-rename-probe-owned"
+            fixture.mkdir(mode=0o700)
+            original = fixture.lstat()
+            unknown = fixture / "do-not-delete.pdf"
+            unknown.write_bytes(b"do not delete")
+            with self.assertRaises(OSError):
+                probe.cleanup_fixture(fixture, root, original, False, "homes")
+            self.assertEqual(unknown.read_bytes(), b"do not delete")
+
+    def test_cleanup_rejects_unexpected_file_after_fixture_invocation(self):
+        with tempfile.TemporaryDirectory(prefix="rename-safety-") as tmp:
+            root = Path(tmp)
+            fixture = root / ".bergen-rename-probe-owned"
+            fixture.mkdir(mode=0o700)
+            original = fixture.lstat()
+            (fixture / "unrelated.txt").write_bytes(b"preserve")
+            with self.assertRaisesRegex(
+                    RuntimeError, "FIXTURE_UNEXPECTED_CONTENT_REQUIRES_MANUAL_REVIEW"):
+                probe.cleanup_fixture(fixture, root, original, True, "homes")
+            self.assertTrue((fixture / "unrelated.txt").exists())
+
+    def test_cleanup_known_fixture_removes_only_own_directory(self):
+        with tempfile.TemporaryDirectory(prefix="rename-safety-") as tmp:
+            root = Path(tmp)
+            fixture = root / ".bergen-rename-probe-owned"
+            fixture.mkdir(mode=0o700)
+            original = fixture.lstat()
+            (fixture / "scan-fixture").mkdir(mode=0o700)
+            (fixture / "archive-fixture").mkdir(mode=0o700)
+            (fixture / "archive-fixture/renamed.pdf").write_bytes(b"test")
+            (fixture / "archive-fixture/collision.pdf").write_bytes(b"other")
+            neighbor = root / "keep.txt"
+            neighbor.write_bytes(b"remain")
+            with contextlib.redirect_stdout(io.StringIO()):
+                probe.cleanup_fixture(fixture, root, original, True, "homes")
+            self.assertFalse(fixture.exists())
+            self.assertEqual(neighbor.read_bytes(), b"remain")
+
+    def test_cleanup_rejects_wrong_inode_or_outside_scope(self):
+        with tempfile.TemporaryDirectory(prefix="rename-safety-") as tmp:
+            root = Path(tmp)
+            fixture = root / ".bergen-rename-probe-owned"
+            fixture.mkdir(mode=0o700)
+            st = fixture.lstat()
+            incorrect = SimpleNamespace(st_mode=st.st_mode, st_dev=st.st_dev,
+                                        st_ino=st.st_ino + 1)
+            with self.assertRaisesRegex(
+                    RuntimeError, "FIXTURE_CLEANUP_REQUIRES_MANUAL_REVIEW"):
+                probe.cleanup_fixture(fixture, root, incorrect, False, "homes")
+            other = root / "not-a-probe"
+            other.mkdir(mode=0o700)
+            with self.assertRaisesRegex(
+                    RuntimeError, "FIXTURE_CLEANUP_REQUIRES_MANUAL_REVIEW"):
+                probe.cleanup_fixture(other, root, other.lstat(), False, "homes")
+            self.assertTrue(fixture.exists())
+            self.assertTrue(other.exists())
+
     def test_no_live_archive_path_is_used_as_fixture_target(self):
         text = MODULE.read_text()
         self.assertIn('prefix=".bergen-rename-probe-"', text)
