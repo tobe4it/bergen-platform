@@ -27,7 +27,7 @@ def legacy(status="SENT", sig=SIG):
 class V2TransferContractTests(unittest.TestCase):
     def test_receipt_id_and_receiver_filename_are_bound(self):
         name = v.receiver_filename(SCOPE, NAME, DIGEST, SIG)
-        self.assertRegex(name, r"\\Anas-v2-[0-9a-f]{64}\\.pdf\\Z")
+        self.assertRegex(name, r"\Anas-v2-[0-9a-f]{64}\.pdf\Z")
         self.assertLess(len(name), 255)
         self.assertEqual(v.receiver_destination(SCOPE, NAME, DIGEST, SIG), SCOPE + "/" + name)
         self.assertEqual(v.receipt_filename(SCOPE, NAME, DIGEST, SIG),
