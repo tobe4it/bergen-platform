@@ -46,6 +46,17 @@ class BergenAiProxyContracts(unittest.TestCase):
         self.assertIn("CapabilityBoundingSet=", unit)
         self.assertNotIn("User=root", unit)
 
+    def test_ssh_config_validation_uses_runuser_without_sudo(self):
+        play = yaml.safe_load(ACTIVATE.read_text())[0]
+        task = next(
+            task for task in play["tasks"]
+            if task["name"] == "Verify reviewed SSH client configuration parses as the dedicated identity"
+        )
+        self.assertNotIn("become_user", task)
+        argv = task["ansible.builtin.command"]["argv"]
+        self.assertEqual(argv[:4], ["/usr/sbin/runuser", "-u", "{{ ai_proxy_tunnel_user }}", "--"])
+        self.assertEqual(argv[4], "ssh")
+
     def test_ssh_tunnel_is_loopback_only_with_hostkey_enforcement(self):
         text = TUNNEL.read_text()
         self.assertIn("-L 127.0.0.1:{{ ai_proxy_local_port }}:127.0.0.1:{{ ai_proxy_remote_port }}", text)
