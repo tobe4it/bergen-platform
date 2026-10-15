@@ -103,6 +103,31 @@ def _recheck_source(source, expected_stat, expected_digest):
         os.close(fd)
 
 
+def _recheck_snapshot(snapshot, expected_size, expected_digest):
+    try:
+        before = snapshot.lstat()
+    except OSError as exc:
+        raise RuntimeError("OFFLINE_SNAPSHOT_CHANGED") from exc
+    if (not stat.S_ISREG(before.st_mode) or before.st_uid != os.geteuid()
+            or stat.S_IMODE(before.st_mode) != 0o600 or before.st_nlink != 1
+            or before.st_size != expected_size):
+        raise RuntimeError("OFFLINE_SNAPSHOT_CHANGED")
+    fd = os.open(snapshot, os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC)
+    try:
+        if _identity(os.fstat(fd)) != _identity(before):
+            raise RuntimeError("OFFLINE_SNAPSHOT_CHANGED")
+        digest = hashlib.sha256()
+        with os.fdopen(fd, "rb", closefd=False) as inp:
+            for block in iter(lambda: inp.read(1024 * 1024), b""):
+                digest.update(block)
+        if (digest.hexdigest() != expected_digest
+                or _identity(os.fstat(fd)) != _identity(before)
+                or _identity(snapshot.lstat()) != _identity(before)):
+            raise RuntimeError("OFFLINE_SNAPSHOT_CHANGED")
+    finally:
+        os.close(fd)
+
+
 def run_offline_once(journal, source, scope, transport_mock, receiver_mock):
     """Run ONE synthetic session; never retry and never commit SENT.
 
@@ -152,6 +177,7 @@ def run_offline_once(journal, source, scope, transport_mock, receiver_mock):
                 if store._read_checked(dirfd, prepared_name) != recorded_bytes:
                     raise RuntimeError("PREPARED_CHANGED_AFTER_RSYNC")
                 _recheck_source(source, st, digest)
+                _recheck_snapshot(snapshot, st.st_size, digest)
 
                 receiver_result = receiver_mock(copy.deepcopy(prepared))
                 if (not isinstance(receiver_result, tuple)
@@ -164,6 +190,7 @@ def run_offline_once(journal, source, scope, transport_mock, receiver_mock):
                 if store._read_checked(dirfd, prepared_name) != recorded_bytes:
                     raise RuntimeError("PREPARED_CHANGED_AFTER_RECEIVER")
                 _recheck_source(source, st, digest)
+                _recheck_snapshot(snapshot, st.st_size, digest)
 
                 # Deliberately never create SENT; no authenticated transport
                 # or receiver provenance is available in this offline stage.
