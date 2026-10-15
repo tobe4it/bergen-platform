@@ -187,7 +187,8 @@ class ProcessPreflightTests(unittest.TestCase):
             self.assertFalse(opts["shell"])
             self.assertFalse(opts["check"])
             self.assertGreater(opts["timeout"], 0)
-            self.assertIsNone(opts["input"]) if len(self.called) == 0 else None
+        self.assertIsNone(self.called[0][1]["input"])
+        self.assertIsNone(self.called[1][1]["input"])
         commands = [shlex.split(x[0][-1]) for x in self.called]
         self.assertEqual(commands[0], ["sudo", "-n", "pct", "config", "126"])
         self.assertEqual(commands[1], ["sudo", "-n", "pct", "status", "126"])
