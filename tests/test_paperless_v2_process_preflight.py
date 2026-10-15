@@ -190,10 +190,10 @@ class ProcessPreflightTests(unittest.TestCase):
         self.assertIsNone(self.called[0][1]["input"])
         self.assertIsNone(self.called[1][1]["input"])
         commands = [shlex.split(x[0][-1]) for x in self.called]
-        self.assertEqual(commands[0], ["sudo", "-n", "pct", "config", "126"])
-        self.assertEqual(commands[1], ["sudo", "-n", "pct", "status", "126"])
+        self.assertEqual(commands[0], ["sudo", "-n", "/usr/sbin/pct", "config", "126"])
+        self.assertEqual(commands[1], ["sudo", "-n", "/usr/sbin/pct", "status", "126"])
         self.assertEqual(commands[2][:13], [
-            "sudo", "-n", "pct", "exec", "126", "--", "/usr/sbin/runuser",
+            "sudo", "-n", "/usr/sbin/pct", "exec", "126", "--", "/usr/sbin/runuser",
             "-u", "paperless-ingest", "--", "/usr/bin/python3", "-", "Familie"])
         self.assertEqual(commands[2][-3:],
                          [self.snapshot.name, SHA, str(len(PDF))])
