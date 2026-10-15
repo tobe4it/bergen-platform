@@ -138,13 +138,24 @@
       ansible.builtin.stat:
         path: "{{ acme_state }}/active.json"
       register: acme_active_state
+      when: (selfhost_acme_run_staging | default(false) | bool) or (selfhost_acme_issue_production | default(false) | bool)
 
-    - name: Refuse issuance when instance reservations require recovery
+    - name: Read existing instance reservations without logging values
+      ansible.builtin.slurp:
+        src: "{{ acme_state }}/active.json"
+      register: acme_active_state_raw
+      no_log: true
+      when:
+        - (selfhost_acme_run_staging | default(false) | bool) or (selfhost_acme_issue_production | default(false) | bool)
+        - acme_active_state.stat.exists
+
+    - name: Refuse issuance when this instance has active reservations
       ansible.builtin.assert:
         that:
-          - not acme_active_state.stat.exists
+          - not acme_active_state.stat.exists or (acme_active_state_raw.content | b64decode | from_json) == {}
         fail_msg: Reserved state exists; inspect and reconcile this instance separately
       when: (selfhost_acme_run_staging | default(false) | bool) or (selfhost_acme_issue_production | default(false) | bool)
+      no_log: true
 
     - name: Create isolated staging workspace when requested
       ansible.builtin.file:
