@@ -353,6 +353,47 @@ die beiden standortbezogenen Archivwurzeln
 noch ausdrücklich statt der bisherigen
 `.paperless-archive`-Unterordner verwenden.
 
+## Beide geschützten Standorte eingerichtet: 15.10.2026
+
+Die kontrollierte Verzeichniserstellung ist auf der Live-NAS
+für **beide** Standorte einzeln erfolgreich:
+
+- `paperless-scan`: Wurzel und `Eltern`/`Familie` erstellt;
+  Device `1048641`, `PROTECTED_SITE_PREPARED paperless-scan`.
+- `homes`: Wurzel, `Privat`, `Privat/thomas`,
+  `Privat/nadja` erstellt; Device `47`,
+  `PROTECTED_SITE_PREPARED homes`.
+
+Beide Playbooks meldeten `ok=4 changed=1 failed=0`,
+`NO_SCAN_OR_RECEIPT_FILES_CHANGED`,
+`ARCHIVE_GATE_ABSENT` und
+`ARCHIVE_COMMIT_NOT_AUTHORIZED`.
+Die zuvor korrigierten Regressionstests für zwei
+Standorte und ACL-Sonderfälle liefen mit **22/22 + 12/12**.
+
+Nach der Einrichtung wurde die noch fehlende
+**vollständige Read-only-Nachprüfung** des geschützten
+Archivbaums ergänzt: `--audit` überprüft auf jedem
+ausgewählten Standort alle erwarteten Unterverzeichnisse,
+UID `paperless-sync`, Modus `0700`, gleiches Device,
+Abwesenheit nativer DSM-ACLs und die exakte *leere*
+Struktur. Unerwartete PDFs/Dateien/Symlinks blockieren,
+ohne sie zu verändern. Erwartetes Ergebnis
+`PROTECTED_ARCHIVE_EMPTY_TREE_VERIFIED <site> <count>`;
+bei `homes` `4`, bei `paperless-scan` `3`.
+Diese nachträglich ergänzte Prüfung und ihre 15 Tests
+müssen erst noch auf `bp-controller` bzw. der NAS
+ausgeführt werden.
+
+**Die Archivierungsfreigabe ist weiterhin gesperrt**:
+Die vorhandene Worker-Implementierung verwendet
+noch die zuvor gesperrten Quell-Verzeichnisse.
+Ein Umstellen auf die geschützten Wurzeln,
+effektive LDAP-/SMB-Rechtetests, Backup- und
+Restore-Probe sowie echte Importbeweiskette sind
+noch nötig. Vor diesem Schritt darf keine Archiv-PDF
+entstehen.
+
 ## Noch gesperrte produktive Verschiebung
 
 Der echte Commit benötigt eine von root außerhalb
