@@ -20,6 +20,11 @@ import sys
 from pathlib import Path
 
 SCOPES = frozenset(("Familie", "Eltern", "Privat/thomas", "Privat/nadja"))
+SITE_SCOPES = {
+    "all": SCOPES,
+    "homes": frozenset(("Privat/thomas", "Privat/nadja")),
+    "paperless-scan": frozenset(("Eltern", "Familie")),
+}
 CANDIDATE = ".bergen-paperless-archive"
 ADMIN_GROUPS = frozenset(("administrators", "administrators@bergen.intern"))
 ACE = re.compile(
@@ -33,6 +38,14 @@ ACE = re.compile(
 OWNER_ACE = re.compile(
     r"(?:^|\s)(?:\?\s*)?\[[0-9]+\]\s+"
     r"owner::(allow|deny):([rwxpdDaARWcCo-]{13,15}):"
+    r"([fdin-]{4})\s+\(level:[0-9]+\)"
+)
+# Synology device roots may also expose everyone::, commonly with
+# traverse-only (--x----------) grants. Unlike owner:: this is
+# non-administrative; any write/delete grant must remain a BLOCKER.
+EVERYONE_ACE = re.compile(
+    r"(?:^|\s)(?:\?\s*)?\[[0-9]+\]\s+"
+    r"everyone::(allow|deny):([rwxpdDaARWcCo-]{13,15}):"
     r"([fdin-]{4})\s+\(level:[0-9]+\)"
 )
 LINUX_MODE = re.compile(r"\(synoacltool\.c,\s*[0-9]+\)It's Linux mode\Z")
@@ -92,10 +105,15 @@ def parse_native_aces(output):
             entries.append(match.groups())
         else:
             owner = OWNER_ACE.search(line)
-            if owner is None:
-                raise RuntimeError("UNRECOGNIZED_NATIVE_ACL_ENTRY " + acl_excerpt(line))
-            effect, permissions, inherit = owner.groups()
-            entries.append(("owner", "", effect, permissions, inherit))
+            if owner is not None:
+                effect, permissions, inherit = owner.groups()
+                entries.append(("owner", "", effect, permissions, inherit))
+            else:
+                everyone = EVERYONE_ACE.search(line)
+                if everyone is None:
+                    raise RuntimeError("UNRECOGNIZED_NATIVE_ACL_ENTRY " + acl_excerpt(line))
+                effect, permissions, inherit = everyone.groups()
+                entries.append(("everyone", "", effect, permissions, inherit))
         if len(entries) > 100:
             raise RuntimeError("ACL_ENTRY_LIMIT")
     require(entries, "NATIVE_ACL_EMPTY")
@@ -149,7 +167,9 @@ def acl_tool():
     raise RuntimeError("SYNOACLTOOL_MISSING")
 
 
-def inspect(parent):
+def inspect(parent, site="all"):
+    require(site in SITE_SCOPES, "INVALID_SITE")
+    selected_scopes = SITE_SCOPES[site]
     require(os.geteuid() == 0 and parent.is_absolute()
             and ".." not in parent.parts and parent != Path("/"),
             "ROOT_AND_ABSOLUTE_STATE_PARENT_REQUIRED")
@@ -168,7 +188,10 @@ def inspect(parent):
     scopes_seen = set()
     blockers = 0
     for source, scope in SETTINGS["sources"]:
-        require(scope in SCOPES and scope not in scopes_seen, "INVALID_SCOPE")
+        require(scope in SCOPES, "INVALID_SCOPE")
+        if scope not in selected_scopes:
+            continue
+        require(scope not in scopes_seen, "DUPLICATE_SCOPE")
         scopes_seen.add(scope)
         source_info = checked_directory(source)
         root = device_boundary(source)
@@ -216,7 +239,8 @@ def inspect(parent):
             blockers += 1
         by_device[source_info.st_dev] = root
         print("EFFECTIVE_IDENTITIES_AND_SUBVOLUME_ID_REVIEW_REQUIRED", scope)
-    require(scopes_seen == SCOPES, "MISSING_SCOPE")
+    require(scopes_seen == selected_scopes, "MISSING_SITE_SCOPE")
+    print("SELECTED_SITE", site)
     print("CANDIDATE_DEVICE_COUNT", len(by_device))
     print("ARCHIVE_PARENT_BLOCKERS", blockers)
     print("ARCHIVE_PARENT_CANDIDATES_BLOCKED" if blockers else
@@ -225,6 +249,9 @@ def inspect(parent):
 
 
 if __name__ == "__main__":
-    if len(sys.argv) != 2:
-        raise SystemExit("usage: audit_synology_protected_archive_candidates.py STATE_PARENT")
-    inspect(Path(sys.argv[1]))
+    if (len(sys.argv) not in (2, 4)
+            or (len(sys.argv) == 4 and sys.argv[2] != "--site")):
+        raise SystemExit(
+            "usage: audit_synology_protected_archive_candidates.py STATE_PARENT"
+            " [--site all|homes|paperless-scan]")
+    inspect(Path(sys.argv[1]), sys.argv[3] if len(sys.argv) == 4 else "all")
