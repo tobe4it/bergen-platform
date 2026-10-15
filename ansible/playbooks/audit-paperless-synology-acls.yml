@@ -55,14 +55,14 @@
             'ARCHIVE_JOURNAL_PRESENT' in paperless_dsm_acl_audit.stdout_lines
           - >-
             not (paperless_require_hidden_archives | default(false) | bool) or
-            'ACL_RESULT Privat/thomas HIDDEN_ARCHIVE rc=0' in paperless_dsm_acl_audit.stdout_lines
+            'HIDDEN_ARCHIVE_POSIX_PRIVATE Privat/thomas' in paperless_dsm_acl_audit.stdout_lines
           - >-
             not (paperless_require_hidden_archives | default(false) | bool) or
-            'ACL_RESULT Privat/nadja HIDDEN_ARCHIVE rc=0' in paperless_dsm_acl_audit.stdout_lines
+            'HIDDEN_ARCHIVE_POSIX_PRIVATE Privat/nadja' in paperless_dsm_acl_audit.stdout_lines
           - >-
             not (paperless_require_hidden_archives | default(false) | bool) or
-            'ACL_RESULT Eltern HIDDEN_ARCHIVE rc=0' in paperless_dsm_acl_audit.stdout_lines
+            'HIDDEN_ARCHIVE_POSIX_PRIVATE Eltern' in paperless_dsm_acl_audit.stdout_lines
           - >-
             not (paperless_require_hidden_archives | default(false) | bool) or
-            'ACL_RESULT Familie HIDDEN_ARCHIVE rc=0' in paperless_dsm_acl_audit.stdout_lines
-        fail_msg: "DSM archive ACLs blocked or missing: do not move any PDFs; review the printed report"
+            'HIDDEN_ARCHIVE_POSIX_PRIVATE Familie' in paperless_dsm_acl_audit.stdout_lines
+        fail_msg: "Synology archive ACL check incomplete or unsafe: review POSIX mode and effective-user access before any real move"
