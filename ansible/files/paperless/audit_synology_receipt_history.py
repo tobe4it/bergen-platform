@@ -154,7 +154,7 @@ def audit_directory(directory, scopes, *, expected_owner=None):
                                 or item['document_id'] <= 0
                                 or item.get('recovery_reason') != 'verified_paperless_import'
                                 or not isinstance(item.get('bridge_receipt'), str)
-                                or not re.fullmatch(r'[a-f0-9]{24}\\.json', item['bridge_receipt'])
+                                or not re.fullmatch(r'[a-f0-9]{24}\.json', item['bridge_receipt'])
                                 or type(item.get('sent_at')) not in (int, float)
                                 or type(item.get('reconciled_at')) not in (int, float)):
                             reject('INVALID_LEGACY_REPAIR_METADATA')
