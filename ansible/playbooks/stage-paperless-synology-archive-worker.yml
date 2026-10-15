@@ -50,8 +50,10 @@
           test "$(stat -c '%u:%a' "$PARENT")" = "0:755"
           test "$(stat -c '%u:%a' "$BIN")" = "0:755"
           test ! -L "$PARENT" && test ! -L "$BIN"
-          test ! -e "$PARENT/archive-move.enabled"
-          test ! -L "$PARENT/archive-move.enabled"
+          for gate in archive-move.enabled archive-move.homes.enabled archive-move.paperless-scan.enabled; do
+            test ! -e "$PARENT/$gate"
+            test ! -L "$PARENT/$gate"
+          done
           if test -e "$TARGET" || test -L "$TARGET"; then
             test ! -L "$TARGET"
             test -f "$TARGET"
@@ -138,8 +140,10 @@
               BIN="$PARENT/bin"
               SOURCE={{ archive_temp_path.stdout | trim | quote }}
               TARGET="$BIN/synology_same_volume_archive_move.py"
-              test ! -e "$PARENT/archive-move.enabled"
-              test ! -L "$PARENT/archive-move.enabled"
+              for gate in archive-move.enabled archive-move.homes.enabled archive-move.paperless-scan.enabled; do
+                test ! -e "$PARENT/$gate"
+                test ! -L "$PARENT/$gate"
+              done
               test "$(sha256sum "$SOURCE" | cut -d ' ' -f 1)" = {{ archive_worker_local.stat.checksum | quote }}
               if test -e "$TARGET" || test -L "$TARGET"; then
                 test ! -L "$TARGET"
@@ -151,7 +155,10 @@
               test "$(sha256sum "$TMP" | cut -d ' ' -f 1)" = {{ archive_worker_local.stat.checksum | quote }}
               mv -f "$TMP" "$TARGET"
               trap - EXIT
-              test ! -e "$PARENT/archive-move.enabled"
+              for gate in archive-move.enabled archive-move.homes.enabled archive-move.paperless-scan.enabled; do
+                test ! -e "$PARENT/$gate"
+                test ! -L "$PARENT/$gate"
+              done
               echo ARCHIVE_WORKER_STAGED_DISABLED
           register: archive_worker_install
           changed_when: true
