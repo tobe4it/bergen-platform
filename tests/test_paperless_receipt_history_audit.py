@@ -82,6 +82,52 @@ class HistoryAuditTests(unittest.TestCase):
         write_record(self.root, path.name, rec)
         self.assertEqual(self.result()['total_receipts'], 1)
 
+    def test_verified_recovery_receipt_matches_real_repair_writer(self):
+        # repair_synology_prepared_receipt.py adds these two fields after
+        # a fresh verified Paperless import, preserving original v1 key.
+        path, obj = legacy(self.root)
+        obj.update(
+            status='SENT',
+            manually_confirmed_imported=True,
+            bridge_receipt='a' * 24 + '.json',
+            document_id=23,
+            recovery_reason='verified_paperless_import',
+            sent_at=1791972000.0,
+            reconciled_at=1791972001.0,
+        )
+        write_record(self.root, path.name, obj)
+        result = self.result()
+        self.assertEqual(result['total_v1_sent'], 1)
+        self.assertEqual(result['unresolved'], 0)
+
+    def test_repair_receipt_incomplete_metadata_fails_closed(self):
+        path, obj = legacy(self.root)
+        obj.update(
+            manually_confirmed_imported=True,
+            bridge_receipt='a' * 24 + '.json',
+            document_id=23,
+            recovery_reason='verified_paperless_import',
+            reconciled_at=1791972001.0,
+        )
+        for bad in (
+            dict(obj, recovery_reason='other_reason'),
+            dict(obj, document_id=True),
+            dict(obj, bridge_receipt='not-a-bridge'),
+            dict(obj, manually_confirmed_imported=False),
+            dict(obj, status='PREPARED'),
+        ):
+            with self.subTest(bad=bad):
+                write_record(self.root, path.name, bad)
+                with self.assertRaisesRegex(RuntimeError, 'INVALID_LEGACY_REPAIR_METADATA'):
+                    self.result()
+
+    def test_unrecognized_repair_extra_field_still_rejected(self):
+        path, obj = legacy(self.root)
+        obj['some_unreviewed_key'] = True
+        write_record(self.root, path.name, obj)
+        with self.assertRaisesRegex(RuntimeError, 'INVALID_LEGACY_RECEIPT_SCHEMA'):
+            self.result()
+
     def test_both_v2_events_and_v1_coexist(self):
         legacy(self.root)
         v2(self.root, 'PREPARED')
