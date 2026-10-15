@@ -20,6 +20,7 @@ import compare_v2_transfer_evidence_offline as compare
 import synology_receipt_v2_store as store
 
 MAX_BYTES = 512 * 1024 * 1024
+ALLOWED_SCOPES = frozenset({"Privat/thomas", "Privat/nadja", "Eltern", "Familie"})
 
 
 def _identity(st):
@@ -136,6 +137,8 @@ def run_offline_once(journal, source, scope, transport_mock, receiver_mock):
         receiver_mock(deepcopied_prepared) -> (rc, out)
     Even perfectly matching callback outputs remain UNAUTHENTICATED.
     """
+    if type(scope) is not str or scope not in ALLOWED_SCOPES:
+        raise ValueError("UNAPPROVED_OFFLINE_SCOPE")
     if not callable(transport_mock) or not callable(receiver_mock):
         raise ValueError("OFFLINE_CALLBACKS_REQUIRED")
     store.validate(scope, source.name if isinstance(source, Path) else "",
