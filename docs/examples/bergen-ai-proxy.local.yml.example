@@ -3,10 +3,10 @@
 # ansible/group_vars/all/bergen-proxy.yml.
 # These values are examples, not verified live configuration.
 # Provision a SEPARATE restricted SSH identity and host-key pinning first.
-ai_proxy_tunnel_user: bergen-ai-tunnel-client
-ai_proxy_tunnel_home: /var/lib/bergen-ai-tunnel
-ai_proxy_ssh_config_path: /var/lib/bergen-ai-tunnel/.ssh/config
-ai_proxy_ssh_alias: bergen-ai-tunnel
+ai_proxy_tunnel_user: example-ai-tunnel
+ai_proxy_tunnel_home: /var/lib/example-ai-tunnel
+ai_proxy_ssh_config_path: /var/lib/example-ai-tunnel/.ssh/config
+ai_proxy_ssh_alias: example-ai-backend
 # Must match the existing proxy's selected source IPv4 address.
 ai_proxy_source_address: 192.0.2.10
 
