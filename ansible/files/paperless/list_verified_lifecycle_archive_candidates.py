@@ -80,14 +80,50 @@ def parse_lifecycle(raw):
     return imported, deleted
 
 
+def archived_evidence(raw):
+    """Validate audited archive records before excluding these from choices."""
+    if raw is None:
+        return []
+    if not isinstance(raw, str):
+        raise ValueError("INVALID_ARCHIVED_CANDIDATE_EVIDENCE")
+    rows = raw.splitlines()
+    if not rows or rows[-1] != "NO_FILES_CHANGED" or rows.count("NO_FILES_CHANGED") != 1:
+        raise ValueError("INVALID_ARCHIVED_CANDIDATE_MARKER")
+    data = selector.parse_jsonl(
+        "\n".join(rows[:-1]),
+        ("schema_version", "sender_receipt", "scope", "source",
+         "receiver_source", "sha256", "bridge_receipt",
+         "document_id", "archive_site", "archive_month",
+         "archive_name", "signature"))
+    return data
+
+
 def report(bundle):
-    if not isinstance(bundle, dict) or set(bundle) != {"nas", "paperless_lifecycle", "lifecycle_report"}:
+    if (not isinstance(bundle, dict)
+            or set(bundle) not in (
+                {"nas", "paperless_lifecycle", "lifecycle_report"},
+                {"nas", "paperless_lifecycle", "lifecycle_report", "archived"})):
         raise ValueError("INVALID_LIFECYCLE_CANDIDATE_REQUEST")
     sent = selector.parse_jsonl(
         bundle["nas"], ("sender_receipt", "scope", "source", "receiver_source", "sha256"))
     imported, deleted = parse_lifecycle(bundle["paperless_lifecycle"])
-    if not sent or len(sent) != len(imported):
+    archived = archived_evidence(bundle.get("archived"))
+    if (len(imported) != len(sent) + len(archived)
+            or not imported):
         raise ValueError("LIFECYCLE_COUNTS_DO_NOT_MATCH")
+    imported_by_receiver = {x["receiver_source"]: x for x in imported}
+    src_receivers = {x["receiver_source"] for x in sent}
+    archived_receivers = set()
+    for item in archived:
+        receiver = item["receiver_source"]
+        live = imported_by_receiver.get(receiver)
+        if (receiver in src_receivers or receiver in archived_receivers
+                or live is None
+                or live["sha256"] != item["sha256"]
+                or live["bridge_receipt"] != item["bridge_receipt"]
+                or live["document_id"] != item["document_id"]):
+            raise ValueError("UNMATCHED_ARCHIVED_OR_DUPLICATE_SOURCE")
+        archived_receivers.add(receiver)
 
     # The Ansible caller MUST have just run the full independent audited
     # journals+NAS absences+Paperless ACL matcher. Require all its markers.
@@ -104,6 +140,11 @@ def report(bundle):
         "NO_RECEIPTS_CHANGED",
         "NO_FILES_CHANGED",
     }
+    if "archived" in bundle:
+        required |= {
+            "NAS_ARCHIVED_VERIFIED " + str(len(archived)),
+            "NAS_CURRENT_ORIGINALS_VERIFIED " + str(len(imported)),
+        }
     if not required.issubset(set(lines)) or len(lines) != len(set(lines)):
         raise ValueError("LIFECYCLE_AUDIT_INCOMPLETE")
 
