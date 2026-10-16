@@ -52,7 +52,7 @@ class InternalReverseProxyContracts(unittest.TestCase):
         for path in ROLE.rglob("*"):
             if path.is_file():
                 txt = path.read_text()
-                self.assertNotIn("thebergens.net", txt)
+                self.assertNotIn("site-specific.invalid", txt)
                 self.assertNotIn("BEGIN PRIVATE KEY", txt)
 
 
