@@ -163,6 +163,63 @@ def test_refuses_active_certbot_process(monkeypatch, tmp_path):
     assert json.loads(state_path.read_text()) == reservations()
 
 
+def test_isolated_instance_cli_selects_only_its_private_paths(monkeypatch):
+    called = {}
+    cfg_instance = {
+        **cfg(),
+        "state_dir": "/var/lib/selfhost-acme/instances/secondary-zone",
+    }
+    monkeypatch.setattr(recover.os, "geteuid", lambda: 0)
+
+    def load(path=hook.DEFAULT_CONFIG):
+        called["config"] = path
+        return cfg_instance
+
+    def reconcile_stub(loaded, *, apply=False, state_dir):
+        called["state_dir"] = state_dir
+        called["apply"] = apply
+        assert loaded is cfg_instance
+
+    monkeypatch.setattr(hook, "load_config", load)
+    monkeypatch.setattr(recover, "reconcile", reconcile_stub)
+    recover.main(["--check", "--instance", "secondary-zone"])
+    assert called == {
+        "config": "/etc/letsencrypt/selfhost-acme.d/secondary-zone.json",
+        "state_dir": "/var/lib/selfhost-acme/instances/secondary-zone",
+        "apply": False,
+    }
+
+
+def test_legacy_cli_keeps_default_paths(monkeypatch):
+    called = {}
+    monkeypatch.setattr(recover.os, "geteuid", lambda: 0)
+    monkeypatch.setattr(hook, "load_config", lambda path=hook.DEFAULT_CONFIG: cfg())
+    monkeypatch.setattr(recover, "reconcile",
+                        lambda loaded, *, apply, state_dir: called.update(
+                            state_dir=state_dir, apply=apply))
+    recover.main(["--check"])
+    assert called == {"state_dir": hook.DEFAULT_STATE_DIR, "apply": False}
+
+
+@pytest.mark.parametrize("instance", ["../legacy", "zone.other", "", "a/b", "UpperCase"])
+def test_isolated_recovery_rejects_unsafe_instance_names(monkeypatch, instance):
+    monkeypatch.setattr(recover.os, "geteuid", lambda: 0)
+    monkeypatch.setattr(hook, "load_config",
+                        lambda *args: pytest.fail("No config access for invalid slug"))
+    with pytest.raises(hook.HookError, match="Invalid isolated ACME instance slug"):
+        recover.main(["--check", "--instance", instance])
+
+
+def test_isolated_recovery_rejects_mismatched_state_path(monkeypatch):
+    monkeypatch.setattr(recover.os, "geteuid", lambda: 0)
+    monkeypatch.setattr(hook, "load_config",
+                        lambda *args: {**cfg(), "state_dir": "/var/lib/selfhost-acme"})
+    monkeypatch.setattr(recover, "reconcile",
+                        lambda *args, **kwargs: pytest.fail("No reconciliation with wrong state"))
+    with pytest.raises(hook.HookError, match="does not match"):
+        recover.main(["--apply", "--instance", "secondary-zone"])
+
+
 def test_no_site_identifiers_or_api_credentials_in_recovery_source():
     code = (SCRIPTS / "selfhost_acme_recover.py").read_text()
     assert "11111111" not in code and "22222222" not in code
