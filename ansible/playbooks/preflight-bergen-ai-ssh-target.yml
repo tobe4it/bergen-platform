@@ -1,10 +1,21 @@
 ---
 # Read-only backend readiness. Does not read secrets or modify SSH services.
 - name: Inspect Bergen-AI backend for existing-proxy SSH tunnel
-  hosts: "{{ site_pve_inventory_host | mandatory }}"
+  hosts: proxmox_hosts
   become: true
   gather_facts: false
   tasks:
+    - name: Require exact reviewed Proxmox target before inspecting backend
+      ansible.builtin.assert:
+        that:
+          - site_pve_inventory_host is defined
+          - inventory_hostname == site_pve_inventory_host
+          - site_ai_backend_vmid is defined
+          - site_ai_backend_hostname is defined
+        fail_msg: >-
+          The reviewed local Proxmox host or required site variables are missing;
+          refusing to inspect any unrelated node.
+
     - name: Require exact AI LXC identity
       ansible.builtin.command:
         argv: [pct, exec, "{{ site_ai_backend_vmid | mandatory }}", --, hostname, -s]
