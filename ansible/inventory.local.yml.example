@@ -16,6 +16,12 @@ all:
           ansible_host: 192.0.2.10
           ansible_user: root
           ansible_python_interpreter: /usr/bin/python3
+    reverse_proxy_nodes:
+      hosts:
+        proxy-node:
+          ansible_host: 192.0.2.50
+          ansible_user: root
+          ansible_python_interpreter: /usr/bin/python3
     ai_nodes:
       hosts:
         ai-node:
