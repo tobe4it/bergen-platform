@@ -13,12 +13,25 @@ TUNNEL = ROOT / "ansible/roles/nginx_reverse_proxy/templates/internal-ssh-backen
 class BergenAiProxyContracts(unittest.TestCase):
     def test_read_only_preflight_uses_existing_proxmox_guest(self):
         play = yaml.safe_load(PREFLIGHT.read_text())[0]
-        self.assertEqual(play["hosts"], "{{ site_pve_inventory_host | mandatory }}")
+        self.assertEqual(play["hosts"], "proxmox_hosts")
+        guard = play["tasks"][0]["ansible.builtin.assert"]["that"]
+        self.assertIn("site_pve_inventory_host is defined", guard)
+        self.assertIn("inventory_hostname == site_pve_inventory_host", guard)
         self.assertIn("pct", str(play))
         for task in play["tasks"]:
             self.assertNotIn("ansible.builtin.template", task)
             self.assertNotIn("ansible.builtin.systemd_service", task)
         self.assertIn("changed_when", str(play))
+
+    def test_backend_preflight_scopes_existing_proxmox_host(self):
+        path = ROOT / "ansible/playbooks/preflight-bergen-ai-ssh-target.yml"
+        play = yaml.safe_load(path.read_text())[0]
+        self.assertEqual(play["hosts"], "proxmox_hosts")
+        guard = play["tasks"][0]["ansible.builtin.assert"]["that"]
+        self.assertIn("site_pve_inventory_host is defined", guard)
+        self.assertIn("inventory_hostname == site_pve_inventory_host", guard)
+        self.assertIn("site_ai_backend_vmid is defined", guard)
+        self.assertIn("site_ai_backend_hostname is defined", guard)
 
     def test_activation_requires_approval_and_reuses_site_template(self):
         play = yaml.safe_load(ACTIVATE.read_text())[0]
