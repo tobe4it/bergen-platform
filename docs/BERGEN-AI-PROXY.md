@@ -8,7 +8,7 @@ certificate.
 
 ## Verified baseline
 
-- The existing `bergen-proxy` LXC runs Nginx on TCP 443 and has no TCP 80
+- The existing reverse-proxy LXC runs Nginx on TCP 443 and has no TCP 80
   listener.
 - `paperless.example.net` uses the existing
   `50-internal-paperless.example.net.conf` vhost and the loopback upstream
@@ -17,7 +17,7 @@ certificate.
   forward. Its identity is not reused for Bergen-AI.
 - The proxy uses the existing certificate files
   `/etc/nginx/tls/fullchain.pem` and `/etc/nginx/tls/privkey.pem`.
-- Open WebUI listens on loopback TCP 3000 in the Bergen-AI guest.
+- Open WebUI listens on loopback TCP 3000 in the AI backend guest.
 - Internal DNS resolves `ai.example.net` and
   `paperless.example.net` to the same proxy address.
 - The existing certificate covers `ai.example.net`, and `nginx -t`
@@ -33,7 +33,7 @@ https://ai.example.net
   -> existing Nginx in the dedicated proxy LXC
   -> http://127.0.0.1:13000 on the proxy
   -> dedicated SSH local forward
-  -> 127.0.0.1:3000 in the Bergen-AI guest
+  -> 127.0.0.1:3000 in the AI backend guest
 ```
 
 The additional backend listener binds only to proxy loopback. The playbook does
