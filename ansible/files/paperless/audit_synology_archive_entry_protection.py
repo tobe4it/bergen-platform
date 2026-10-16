@@ -84,7 +84,7 @@ def get_aces(tool, directory):
                        text=True, encoding="utf-8", errors="replace",
                        timeout=20, check=False)
     if r.returncode != 0:
-        raise RuntimeError("SOURCE_NATIVE_ACL_QUERY_FAILED")
+        raise RuntimeError("ACTIVE_ARCHIVE_NATIVE_ACL_QUERY_FAILED")
     return parse_aces(r.stdout)
 
 
@@ -122,7 +122,7 @@ def protected_entry_targets(sources, service_uid, move):
         if (archive_root.name != move.PROTECTED_ARCHIVE_DIR or
                 site_root.name != site or
                 protected != archive_root.joinpath(*parts) or
-                not source.is_relative_to(site_root) or
+                site_root not in source.parents or
                 source == site_root or
                 source_stat.st_dev != protected.lstat().st_dev):
             raise RuntimeError("WRONG_ACTIVE_ARCHIVE_LOCATION")
