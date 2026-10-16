@@ -44,6 +44,10 @@ class BergenAiProxyContracts(unittest.TestCase):
             config["lxc_hostname"],
             "{{ site_ai_backend_hostname | mandatory }}",
         )
+        self.assertEqual(
+            config["lxc_vmid"],
+            "{{ site_ai_backend_vmid | mandatory }}",
+        )
 
     def test_oidc_targets_unambiguous_logical_ai_group(self):
         path = ROOT / "ansible/playbooks/configure-open-webui-oidc.yml"
