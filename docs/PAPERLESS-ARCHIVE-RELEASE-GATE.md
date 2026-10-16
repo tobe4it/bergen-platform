@@ -275,7 +275,7 @@ later step with verified restore, not implied by archival relocation.
 ## One-PDF live-move release preparation — NOT authorized (16.10.2026)
 
 The first complete lifecycle-aware preview of
-`Familie/Bergen-Platform-fuer-Dummies.pdf` passed:
+one operator-selected PDF from the verified candidate list passed:
 `ARCHIVE_DRY_RUN_VERIFIED`, `SOURCE_UNCHANGED`,
 `NO_RECEIPTS_CHANGED`, `NO_FILES_CHANGED`,
 `ARCHIVE_NOT_AUTHORIZED`, `PURGE_NOT_AUTHORIZED`.
