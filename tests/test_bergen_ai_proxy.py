@@ -13,7 +13,7 @@ TUNNEL = ROOT / "ansible/roles/nginx_reverse_proxy/templates/internal-ssh-backen
 class BergenAiProxyContracts(unittest.TestCase):
     def test_read_only_preflight_uses_existing_proxmox_guest(self):
         play = yaml.safe_load(PREFLIGHT.read_text())[0]
-        self.assertEqual(play["hosts"], "venombox")
+        self.assertEqual(play["hosts"], "{{ site_pve_inventory_host | mandatory }}")
         self.assertIn("pct", str(play))
         for task in play["tasks"]:
             self.assertNotIn("ansible.builtin.template", task)
