@@ -41,7 +41,7 @@ or create replacement accounts to work around this; chats remain owned by user I
 
 The deployed application is reachable via `https://ai.example.net`.
 Synology discovery at
-`https://sehnde.example.org:5001/webman/sso/.well-known/openid-configuration`
+`https://nas.example.org:5001/webman/sso/.well-known/openid-configuration`
 returned HTTP 200 with certificate validation on 192.0.2.11. The other DNS answer,
 192.0.2.145, timed out from bergen-ai. Discovery also succeeded inside Open WebUI,
 but mixed reachable/unreachable answers can cause delay or intermittent failures.
