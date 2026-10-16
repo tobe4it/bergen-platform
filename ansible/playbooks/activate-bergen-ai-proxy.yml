@@ -25,7 +25,10 @@
       ansible.builtin.assert:
         that:
           - ai_proxy_deployment_approved | default(false) | bool
-          - inventory_hostname == 'bergen-proxy'
+          - ai_proxy_expected_inventory_hostname is defined
+          - inventory_hostname == ai_proxy_expected_inventory_hostname
+          - ai_proxy_hostname is defined
+          - paperless_proxy_hostname is defined
           - inventory_hostname in groups.get('reverse_proxy_nodes', [])
           - ai_proxy_tunnel_user is defined
           - ai_proxy_tunnel_user is match('^[a-z_][a-z0-9_-]{0,30}$')
