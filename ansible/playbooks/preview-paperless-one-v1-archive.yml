@@ -1,0 +1,153 @@
+---
+# One-file NAS archive DRY-RUN only; no --commit code path, no file moves,
+# no archive journal writes, no NAS installation and no release gate creation.
+# The shared lifecycle play already independently verifies EXACT deleted IDs
+# 15 and 26, all 22 live imports and 22 original NAS source hashes/receipts.
+- import_playbook: audit-paperless-import-lifecycle-15-26.yml
+  vars:
+    paperless_lifecycle_quiet: true
+
+- name: Preview exactly one fully lifecycle-verified v1 NAS archive move
+  hosts: venombox
+  gather_facts: false
+  become: true
+  tasks:
+    - name: Require exact single source and permanently non-committing preview mode
+      ansible.builtin.assert:
+        that:
+          - inventory_hostname == 'venombox'
+          - not ansible_check_mode
+          - paperless_archive_only is defined
+          - paperless_archive_only is string
+          - paperless_archive_only is match('^(Familie|Eltern|Privat/(thomas|nadja))/[^/\\]+\.pdf$')
+          - (paperless_archive_commit | default(false)) is sameas false
+          - synology_admin is defined
+          - synology_config is defined
+          - synology_config.schema_version == 1
+          - synology_config.sync_user == 'paperless-sync'
+          - synology_config.state_parent is match('^/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$')
+          - lifecycle_report is defined
+          - "'IMPORT_LIFECYCLE_RECONCILED' in lifecycle_report.stdout_lines"
+          - "'DELETED_BY_USER 2' in lifecycle_report.stdout_lines"
+          - "'ARCHIVE_NOT_AUTHORIZED' in lifecycle_report.stdout_lines"
+          - lifecycle_nas_live is defined
+          - lifecycle_paperless_live is defined
+        fail_msg: "Only one verified NAS source and read-only preview are permitted"
+
+    - name: Generate private exact-match source/import proof from verified lifecycle
+      ansible.builtin.command:
+        argv:
+          - /usr/bin/python3
+          - "{{ playbook_dir }}/../files/paperless/select_one_verified_lifecycle_archive_preview.py"
+        stdin: >-
+          {{ {'nas': lifecycle_nas_live.stdout,
+              'paperless_lifecycle': lifecycle_paperless_live.stdout,
+              'lifecycle_report': lifecycle_report.stdout,
+              'only': paperless_archive_only} | to_json }}
+      delegate_to: localhost
+      become: false
+      register: preview_private_proof
+      changed_when: false
+      no_log: true
+
+    - name: Hash reviewed local disabled archive worker
+      ansible.builtin.stat:
+        path: "{{ playbook_dir }}/../files/paperless/synology_same_volume_archive_move.py"
+        checksum_algorithm: sha256
+      delegate_to: localhost
+      become: false
+      register: preview_worker_local
+      changed_when: false
+
+    - name: Require local reviewed worker to be a regular file
+      ansible.builtin.assert:
+        that:
+          - preview_worker_local.stat.exists
+          - preview_worker_local.stat.isreg
+          - not preview_worker_local.stat.islnk
+
+    - name: Verify staged NAS worker bytes/ownership and all commit gates absent
+      ansible.builtin.command:
+        argv:
+          - ssh
+          - -T
+          - -o
+          - BatchMode=yes
+          - -o
+          - StrictHostKeyChecking=yes
+          - -o
+          - ConnectTimeout=15
+          - "{{ synology_admin }}"
+          - sudo -n /bin/sh -s
+        stdin: |
+          set -eu
+          PARENT={{ synology_config.state_parent | quote }}
+          BIN="$PARENT/bin"
+          TARGET="$BIN/synology_same_volume_archive_move.py"
+          test ! -L "$PARENT" && test ! -L "$BIN" && test ! -L "$TARGET"
+          test "$(stat -c '%u:%a' "$PARENT")" = "0:755"
+          test "$(stat -c '%u:%a' "$BIN")" = "0:755"
+          test "$(stat -c '%u:%a' "$TARGET")" = "0:644"
+          for gate in archive-move.enabled archive-move.homes.enabled archive-move.paperless-scan.enabled; do
+            test ! -e "$PARENT/$gate" && test ! -L "$PARENT/$gate"
+          done
+          test "$(sha256sum "$TARGET" | cut -d ' ' -f 1)" = {{ preview_worker_local.stat.checksum | quote }}
+          echo ARCHIVE_WORKER_VERIFIED_DISABLED
+      delegate_to: localhost
+      become: false
+      register: preview_worker_guard
+      changed_when: false
+      no_log: true
+
+    - name: Require exact staged worker with disabled release
+      ansible.builtin.assert:
+        that:
+          - preview_worker_guard.rc == 0
+          - preview_worker_guard.stdout_lines == ['ARCHIVE_WORKER_VERIFIED_DISABLED']
+          - (preview_worker_guard.stderr | trim) == ''
+        fail_msg: "Reviewed NAS archive worker missing, changed or enabled; preview blocked"
+
+    - name: Run pinned NAS worker with NO commit option and private exact-match proof
+      ansible.builtin.command:
+        argv:
+          - ssh
+          - -T
+          - -o
+          - BatchMode=yes
+          - -o
+          - StrictHostKeyChecking=yes
+          - -o
+          - ConnectTimeout=15
+          - "{{ synology_admin }}"
+          - >-
+            sudo -n -u {{ synology_config.sync_user | quote }}
+            /usr/bin/python3
+            {{ (synology_config.state_parent ~ '/bin/synology_same_volume_archive_move.py') | quote }}
+            --state-parent {{ synology_config.state_parent | quote }}
+            --only {{ paperless_archive_only | quote }}
+        stdin: "{{ preview_private_proof.stdout }}"
+      delegate_to: localhost
+      become: false
+      register: preview_nas_execution
+      changed_when: false
+      no_log: true
+
+    - name: Require only the read-only result and no purge or archive move
+      ansible.builtin.assert:
+        that:
+          - preview_nas_execution.rc == 0
+          - (preview_nas_execution.stderr | trim) == ''
+          - preview_nas_execution.stdout_lines | length == 2
+          - preview_nas_execution.stdout_lines[0] is match('^ARCHIVE_DRY_RUN [a-f0-9]{64}\.json 20[0-9]{2}-(0[1-9]|1[0-2]) [a-f0-9]{64}\.pdf$')
+          - preview_nas_execution.stdout_lines[1] == 'ARCHIVE_PURGE_DISABLED'
+        fail_msg: "No successful read-only archive preview evidence; do not move a source"
+
+    - name: Display non-authorizing archive dry-run result with no private IDs
+      ansible.builtin.debug:
+        msg:
+          - ARCHIVE_DRY_RUN_VERIFIED
+          - SOURCE_UNCHANGED
+          - NO_RECEIPTS_CHANGED
+          - NO_FILES_CHANGED
+          - ARCHIVE_NOT_AUTHORIZED
+          - PURGE_NOT_AUTHORIZED
