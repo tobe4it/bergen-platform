@@ -7,7 +7,7 @@
   # Preserve the original ad-hoc variable names as compatibility aliases while
   # delegating all configuration and validation to the reusable role.
   vars:
-    remote_syslog_server: "{{ syslog_server | default('192.168.20.164') }}"
+    remote_syslog_server: "{{ syslog_server | mandatory }}"
     remote_syslog_port: "{{ syslog_port | default(514) }}"
     remote_syslog_protocol: "{{ syslog_protocol | default('tcp') }}"
     remote_syslog_config_path: >-
