@@ -2,9 +2,12 @@
 
 The existing single-zone DNS-01 deployment remains supported and unchanged.
 Use **one instance per DNS zone** only when more than one zone is needed.
-Each instance has its own API access, exactly two dedicated DNS TXT records,
-root-only credentials, private challenge state, staging workspace and Certbot
-lineage. The same reviewed Python hook supports all instances.
+Each instance has an independently configured DNS-API access and exactly two
+zone-specific DNS TXT records, private challenge state, staging workspace and
+Certbot lineage. The same reviewed Python hook supports all instances.
+If the provider offers a shared account-level API key for multiple accesses,
+the same credential may be reused in multiple instance configurations. Do not
+assume that the access separation implies cryptographically separate keys.
 
 This does **not** create a multi-zone SAN certificate. Each instance issues
 exactly `zone` and `*.zone`. Wildcards do not cover the apex unless the apex
@@ -47,17 +50,24 @@ cp ansible/vars/selfhost-acme-instance.local.yml.example \
 chmod 600 ansible/vars/selfhost-acme-secondary-zone.local.yml
 vim ansible/vars/selfhost-acme-secondary-zone.local.yml
 
-umask 077
-EDITOR=vim ansible-vault create \
-  ansible/vars/selfhost-acme-secondary-zone.vault.yml
+## If your provider gives a distinct key per access, create a separate Vault:
+# umask 077
+# EDITOR=vim ansible-vault create \
+#   ansible/vars/selfhost-acme-secondary-zone.vault.yml
 ```
 
-In the encrypted file set only `selfhost_acme_api_key` to the complete
-API credential for this zone. It must be a **separate scoped credential**
-and not a second copy of the legacy API key. Provision exactly two
-dedicated `_acme-challenge` TXT slots at the zone's authoritative provider
-and enter their numeric IDs in the ignored local YAML. Provide all relevant
-authoritative nameservers.
+Use the **existing** ignored `ansible/vars/selfhost-acme.vault.yml` when
+selfHOST exposes one account-level API key shared by multiple ACME-API accesses.
+If your provider supplies a different per-access key, instead create a separate
+encrypted `selfhost-acme-secondary-zone.vault.yml` containing the corresponding
+`selfhost_acme_api_key`. Never invent a replacement key locally, and never
+put a raw key in an unencrypted local variables file.
+
+Provision exactly two dedicated `_acme-challenge` TXT slots for the new zone,
+under its own ACME-API access, and enter their numeric IDs in the ignored local
+YAML. Provide all relevant authoritative nameservers. Provider-side permissions
+must be confirmed by an isolated staging request; shared keys mean compromise
+of that key can affect all accesses permitted by the provider.
 
 The existing ignored `ansible/vars/mail-tls.local.yml` supplies only the
 approved source host and SSH identity. A second zone does not need a second
@@ -74,14 +84,14 @@ ansible-playbook -i ansible/inventory.yml -i ansible/inventory.local.yml \
   ansible/playbooks/selfhost-acme-instance.yml \
   -e @ansible/vars/mail-tls.local.yml \
   -e @ansible/vars/selfhost-acme-secondary-zone.local.yml \
-  -e @ansible/vars/selfhost-acme-secondary-zone.vault.yml \
+  -e @ansible/vars/selfhost-acme.vault.yml \
   --vault-id infra@prompt --syntax-check
 
 ansible-playbook -i ansible/inventory.yml -i ansible/inventory.local.yml \
   ansible/playbooks/selfhost-acme-instance.yml \
   -e @ansible/vars/mail-tls.local.yml \
   -e @ansible/vars/selfhost-acme-secondary-zone.local.yml \
-  -e @ansible/vars/selfhost-acme-secondary-zone.vault.yml \
+  -e @ansible/vars/selfhost-acme.vault.yml \
   --vault-id infra@prompt
 ```
 
