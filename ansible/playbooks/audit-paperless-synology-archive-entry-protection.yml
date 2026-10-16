@@ -1,6 +1,7 @@
 ---
-# Read-only DSM archive entry protection audit. Never rename the real archive.
-- name: Inspect scan-parent delete-child rights affecting hidden archives
+# Read-only DSM ACL audit of deployed protected SAME-SITE archive parents.
+# Never rename the real archive or write to site/journal/source/backup.
+- name: Audit native ACLs of active protected Paperless archive parents
   hosts: localhost
   connection: local
   gather_facts: false
@@ -15,7 +16,7 @@
           - synology_config.sync_user == 'paperless-sync'
           - synology_config.state_parent is match('^/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$')
 
-    - name: Audit native DSM source-directory ACE grants without writes
+    - name: Audit native DSM site-root and protected-archive parent ACEs without writes
       ansible.builtin.command:
         argv:
           - ssh
@@ -33,7 +34,7 @@
       register: archive_entry_audit
       changed_when: false
 
-    - name: Show exact per-scope directory entry risk findings
+    - name: Display anonymous protected-parent ACL risk findings
       ansible.builtin.debug:
         var: archive_entry_audit.stdout_lines
 
@@ -44,4 +45,7 @@
           - "'ARCHIVE_ENTRY_PROTECTION_BLOCKED' not in archive_entry_audit.stdout_lines"
           - "'BLOCKER ' not in archive_entry_audit.stdout"
           - "'ARCHIVE_ENTRY_PROTECTION_NEEDS_EFFECTIVE_TEST' in archive_entry_audit.stdout_lines"
-        fail_msg: "Archive parent folder has potentially destructive non-admin grants; do not move PDFs. See audit above."
+          - "'DSM_SMB_EFFECTIVE_RENAME_NOT_TESTED' in archive_entry_audit.stdout_lines"
+          - "'ARCHIVE_COMMIT_NOT_AUTHORIZED' in archive_entry_audit.stdout_lines"
+          - "'ACTIVE_PROTECTED_ARCHIVE_PARENTS_AUDITED ' in archive_entry_audit.stdout"
+        fail_msg: "Active protected archive has unverified DSM native ACL or potentially destructive non-admin grants; no additional PDF moves authorized."
