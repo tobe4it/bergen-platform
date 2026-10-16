@@ -2,23 +2,23 @@
 # Read-only preflight. Uses the already established Proxmox transport.
 # No service changes, certificate copies, SSH connections or DNS writes.
 - name: Inspect existing HTTPS proxy before adding Bergen-AI
-  hosts: venombox
+  hosts: "{{ site_pve_inventory_host | mandatory }}"
   become: true
   gather_facts: false
   tasks:
     - name: Verify existing proxy LXC identity
       ansible.builtin.command:
-        argv: [pct, exec, '125', --, hostname, -s]
+        argv: [pct, exec, "{{ site_ai_proxy_vmid | mandatory }}", --, hostname, -s]
       register: ai_proxy_identity
       changed_when: false
-      failed_when: ai_proxy_identity.stdout | trim != 'bergen-proxy'
+      failed_when: ai_proxy_identity.stdout | trim != (site_ai_proxy_hostname | mandatory)
 
     - name: Inspect existing Paperless path, AI name, TLS and port
       ansible.builtin.command:
         argv:
           - pct
           - exec
-          - '125'
+          - "{{ site_ai_proxy_vmid | mandatory }}"
           - --
           - python3
           - -c
@@ -26,6 +26,7 @@
             import pathlib
             import socket
             import subprocess
+            import sys
 
             def run(args):
                 try:
@@ -33,8 +34,8 @@
                 except (OSError, subprocess.TimeoutExpired):
                     return None
 
-            paperless = pathlib.Path('/etc/nginx/sites-enabled/50-internal-paperless.thebergens.net.conf')
-            ai = pathlib.Path('/etc/nginx/sites-enabled/50-internal-ai.thebergens.net.conf')
+            paperless = pathlib.Path('/etc/nginx/sites-enabled/50-internal-paperless.' + sys.argv[1] + '.conf')
+            ai = pathlib.Path('/etc/nginx/sites-enabled/50-internal-ai.' + sys.argv[2] + '.conf')
             print('PAPERLESS_VHOST_PRESENT', paperless.is_file())
             print('AI_VHOST_PRESENT', ai.exists() or ai.is_symlink())
             for port in (18000, 13000, 443):
@@ -45,7 +46,7 @@
                 finally:
                     sock.close()
                 print('LOCAL_TCP_' + str(port), 'LISTENING' if occupied else 'NOT_LISTENING')
-            for hostname in ('paperless.thebergens.net', 'ai.thebergens.net'):
+            for hostname in (sys.argv[1], sys.argv[2]):
                 try:
                     addresses = sorted({x[4][0] for x in socket.getaddrinfo(
                         hostname, None, family=socket.AF_INET)})
@@ -55,7 +56,7 @@
             cert = pathlib.Path('/etc/nginx/tls/fullchain.pem')
             if cert.is_file():
                 check = run(['openssl', 'x509', '-in', str(cert), '-noout',
-                             '-checkhost', 'ai.thebergens.net'])
+                             '-checkhost', sys.argv[2]])
                 print('CERT_COVERS_AI', bool(check and check.returncode == 0
                      and 'does match certificate' in check.stdout))
             else:
@@ -63,6 +64,8 @@
             nginx = run(['nginx', '-t'])
             print('NGINX_TEST_OK', bool(nginx and nginx.returncode == 0))
             print('NOTICE read-only; no key contents or SSH configuration printed')
+          - "{{ paperless_proxy_hostname | mandatory }}"
+          - "{{ ai_proxy_hostname | mandatory }}"
       register: ai_proxy_readiness
       changed_when: false
 
