@@ -40,6 +40,11 @@ Vault plaintext contents while editing (never commit or paste the key):
     selfhost_acme_api_key: "CHANGE_ME_COMPLETE_ID.DOT_SECRET"
 
 The encrypted Vault file is also Git-ignored. Restrict it to mode 0600.
+For deployments with multiple DNS-01 accesses, this legacy Vault must contain
+**only the credential matching this legacy zone**. Use a different ignored
+encrypted Vault (for example `selfhost-acme-secondary-zone.vault.yml`) for
+a different access with a different key; see the multi-instance guide. Do not
+overwrite the legacy remote JSON or controller Vault with another zone's key.
 Ansible needs the Vault password at every execution, and the secret is
 transferred using normal verified SSH plus privilege escalation. Vault
 protects the secret at rest on the controller, not in target process memory.
