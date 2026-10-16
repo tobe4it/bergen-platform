@@ -58,6 +58,7 @@
         stdin: "{{ lookup('ansible.builtin.file', playbook_dir + '/../files/paperless/export_verified_user_deletion_journals_15_26.py', rstrip=False) }}"
       register: lifecycle_journal
       changed_when: false
+      no_log: "{{ paperless_lifecycle_quiet | default(false) | bool }}"
 
     - name: Verify live Paperless absence of exactly document 26
       ansible.builtin.command:
@@ -65,6 +66,7 @@
         stdin: "{{ lookup('ansible.builtin.file', playbook_dir + '/../files/paperless/export_deleted_import_candidate.py', rstrip=False) }}"
       register: lifecycle_deleted_paperless
       changed_when: false
+      no_log: "{{ paperless_lifecycle_quiet | default(false) | bool }}"
 
     - name: Recheck absent NAS source and historical SENT receipt under sender lock
       ansible.builtin.command:
@@ -86,6 +88,7 @@
       become: false
       register: lifecycle_deleted_nas
       changed_when: false
+      no_log: "{{ paperless_lifecycle_quiet | default(false) | bool }}"
 
     - name: Verify live Paperless absence of exactly document 15
       ansible.builtin.command:
@@ -93,6 +96,7 @@
         stdin: "{{ lookup('ansible.builtin.file', playbook_dir + '/../files/paperless/export_deleted_import_candidate.py', rstrip=False) }}"
       register: lifecycle_deleted_paperless_15
       changed_when: false
+      no_log: "{{ paperless_lifecycle_quiet | default(false) | bool }}"
 
     - name: Verify absent NAS source and historical SENT receipt for document 15 under sender lock
       ansible.builtin.command:
@@ -116,6 +120,7 @@
       become: false
       register: lifecycle_deleted_nas_15
       changed_when: false
+      no_log: "{{ paperless_lifecycle_quiet | default(false) | bool }}"
 
     - name: Verify all remaining NAS originals against SENT receipts and file digests
       ansible.builtin.command:
@@ -137,6 +142,7 @@
       become: false
       register: lifecycle_nas_live
       changed_when: false
+      no_log: "{{ paperless_lifecycle_quiet | default(false) | bool }}"
 
     - name: Reverify every Paperless import and independently recheck deleted document absence
       ansible.builtin.command:
@@ -151,6 +157,7 @@
         stdin: "{{ {'journal': lifecycle_journal.stdout, 'deleted_15': lifecycle_deleted_paperless_15.stdout, 'deleted_26': lifecycle_deleted_paperless.stdout, 'nas_deleted_15': lifecycle_deleted_nas_15.stdout, 'nas_deleted_26': lifecycle_deleted_nas.stdout} | to_json }}"
       register: lifecycle_paperless_live
       changed_when: false
+      no_log: "{{ paperless_lifecycle_quiet | default(false) | bool }}"
 
     - name: Match every NAS original to live import or exactly two verified deletions
       ansible.builtin.command:
@@ -162,6 +169,7 @@
       become: false
       register: lifecycle_report
       changed_when: false
+      no_log: "{{ paperless_lifecycle_quiet | default(false) | bool }}"
 
     - name: Require complete lifecycle report without archive permission
       ansible.builtin.assert:
