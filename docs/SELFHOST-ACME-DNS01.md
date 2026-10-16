@@ -253,8 +253,8 @@ repeat the staging issuance while any local TXT slot remains reserved.
 ## Recover abandoned TXT reservations after a failed staging hook
 
 If a previous Certbot staging invocation failed while establishing HTTPS, the
-hook may have kept both source-side slots marked "reserved" despite BOTH
-authoritative DNS servers showing their idle values. Do NOT blindly remove
+hook may have kept one or both source-side slots marked "reserved" despite all
+authoritative DNS servers showing both slots in their idle state. Do NOT blindly remove
 /var/lib/selfhost-acme/active.json or repeat Certbot while these reservations
 are present. Use the controller-only reconciliation playbook:
 
@@ -288,8 +288,8 @@ are present. Use the controller-only reconciliation playbook:
          -e @ansible/vars/selfhost-acme.local.yml \
          --vault-id infra@prompt
 
-   Expected READY: exactly two abandoned reserved slots and both DNS slots
-   idle; both checks occur with the same protected state lock.
+   Expected READY: one or two abandoned reserved slots and both DNS slots
+   idle; the checks occur with the same protected state lock.
 6. Only if READY was observed, explicitly apply the local-only reconciliation:
 
        ansible-playbook -i ansible/inventory.yml \
@@ -300,8 +300,9 @@ are present. Use the controller-only reconciliation playbook:
          -e selfhost_acme_reconcile_apply=true \
          --vault-id infra@prompt
 
-   This refuses to run if a Certbot process is present, requires the two
-   known reserved tokens and corresponding authoritative DNS idle values,
+   This refuses to run if a Certbot process is present, permits only one or
+   two known reserved slots and requires both authoritative DNS slots idle,
+   with none of the saved validation tokens still present. It
    creates a private root-only JSON backup, and resets ONLY local hook state.
    It NEVER calls the selfHOST API, deletes TXT records or changes any cert.
    Repeat runs are idempotent (ALREADY_CLEAN).
