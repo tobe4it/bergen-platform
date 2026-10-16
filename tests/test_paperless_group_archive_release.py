@@ -106,7 +106,12 @@ class GroupExactReleaseTests(unittest.TestCase):
                 self.assertEqual(manifest["source"], "Scan.pdf")
                 self.assertEqual(manifest["sender_receipt"], p["sender_receipt"])
                 self.assertEqual(stat.S_IMODE(gate.stat().st_mode), 0o600)
-                self.assertTrue(argv[-1] == "--commit")
+                self.assertEqual(argv[-3:-1], ["--commit", "--release-fd"])
+                release_fd = int(argv[-1])
+                self.assertEqual(kwargs["pass_fds"], (release_fd,))
+                self.assertEqual(os.fstat(release_fd).st_ino, gate.stat().st_ino)
+                self.assertEqual(
+                    json.loads(os.pread(release_fd, 4097, 0)), manifest)
                 self.assertEqual(json.loads(kwargs["input"]), p)
                 captured.append(argv)
                 if outcome == "failure":
