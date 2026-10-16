@@ -691,3 +691,29 @@ original NAS archive. This demonstrates a single-file read/copy
 recovery path only, **not** recoverability from a separately stored
 backup, nor permission to enable the 30-day destructive purge.
 
+### 2026-10-16 ACL parser fail-closed live result and candidate remediation
+
+The first live corrected protected-path DSM ACL audit stopped without writes
+(`localhost ok=1 changed=0 failed=1`) at
+`UNPARSEABLE_ACL_ACE`. **No ACL security verdict was established.**
+Documented native `synoacltool -get` output includes
+`everyone::allow`, `owner::allow`, `system::allow` and whitespace in
+`(level: 0)`, whereas the first parser supported only user/group entries
+and `(level:0)`.
+
+The revised parser explicitly supports these DSM principal classes and spacing
+with a full-line strict match. Dangerous deletion/write+traverse grants to
+`everyone` and `system` are **blockers**, not silently exempted.
+`owner::` follows the separately validated actual directory owner.
+Unknown roles, unexpected principal names and malformed ACEs remain
+fail-closed. Added offline ACL fixtures for special roles, risk classification
+and unknown records. **The cause of the production parse error remains a
+hypothesis until a successful live run confirms the format.**
+
+Operator acceptance: pull feature branch; rerun full offline suite and
+read-only playbook syntax check; retry only the read-only ACL audit.
+If the same parser error returns, stop and inspect only sanitized ACL
+line structure. Do not weaken parser matching, do not print ACL
+principals in public logs, and do not infer permission safety from
+a failed audit. No archive move/merge/purge is authorized.
+
