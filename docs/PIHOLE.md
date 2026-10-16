@@ -34,7 +34,7 @@ UniFi VLAN clients
 - Pi-hole image: pinned in `bergen-pihole.yml`
 - Network: `vmbr6` / DMZ VLAN 6
 - Initial addressing: DHCP for first deployment/discovery
-- Stable address: `192.168.6.218` by UniFi DHCP reservation
+- Stable address: `192.0.2.218` by UniFi DHCP reservation
 - Pi-hole DHCP: disabled
 - Pi-hole NTP: disabled
 - DNS listening mode: `SINGLE` on `eth0`
@@ -52,7 +52,7 @@ vault_pihole_web_password: "use-a-long-random-password"
 
 Before later changing any UniFi network to use Pi-hole, verify the DNS forwarding
 chain cannot loop. With the default configuration Pi-hole forwards to
-`192.168.6.11` (Synology DNS). Synology DNS must therefore not forward back to
+`192.0.2.11` (Synology DNS). Synology DNS must therefore not forward back to
 Pi-hole or to a resolver that ultimately sends the same query back to Pi-hole.
 
 VMID `123` follows the current Bergen Platform allocation. If it is already in
@@ -100,7 +100,7 @@ contains an example `pihole_nodes` group:
 pihole_nodes:
   hosts:
     bergen-pihole:
-      ansible_host: 192.168.6.218
+      ansible_host: 192.0.2.218
       ansible_user: root
       ansible_python_interpreter: /usr/bin/python3
 ```
@@ -120,14 +120,14 @@ ansible-playbook ansible/playbooks/bootstrap-pihole.yml \
 Before changing DHCP DNS for any VLAN:
 
 ```bash
-nslookup example.org 192.168.6.218
-nslookup bergen.intern 192.168.6.218
+nslookup example.org 192.0.2.218
+nslookup bergen.intern 192.0.2.218
 ```
 
 Open:
 
 ```text
-http://192.168.6.218/admin/
+http://192.0.2.218/admin/
 ```
 
 Confirm that queries appear in Pi-hole and that internal Synology-hosted names
