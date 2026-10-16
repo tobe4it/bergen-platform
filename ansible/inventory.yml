@@ -1,6 +1,6 @@
 ---
-# Site-neutral inventory skeleton. Configure real hosts exclusively in
-# ansible/inventory.local.yml (ignored by Git).
+# Site-neutral inventory skeleton. Configure actual hosts only in the
+# ignored ansible/inventory.local.yml.
 all:
   children:
     controllers:
