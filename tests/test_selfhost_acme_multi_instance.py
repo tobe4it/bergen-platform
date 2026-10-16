@@ -126,6 +126,15 @@ def test_playbook_preserves_legacy_paths_and_limits_issuance():
     assert "selfhost_acme_run_staging | default(false) | bool" in rendered
     assert "--force-renewal" not in rendered
     assert "--expand" not in rendered
+    # Additional web/application certificates are explicitly EC-only.
+    for task in tasks:
+        if task.get("name", "").startswith(
+            ("Issue separate untrusted", "Explicitly issue")
+        ):
+            argv = task["ansible.builtin.command"]["argv"]
+            assert argv[argv.index("--key-type") + 1] == "ecdsa"
+            assert argv[argv.index("--elliptic-curve") + 1] == "secp256r1"
+    assert "Public Key Algorithm: id-ecPublicKey" in rendered
     for task in tasks:
         if "selfhost_acme_api_key" in repr(task):
             assert task["no_log"] is True
