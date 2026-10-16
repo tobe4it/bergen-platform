@@ -70,7 +70,15 @@ class GroupExactReleaseTests(unittest.TestCase):
         source = (CODE / "synology_one_group_archive_release.py").read_text()
         playbook = (ROOT / "ansible/playbooks/commit-paperless-one-group-v1-archive.yml").read_text()
         self.assertIn('GATE = "archive-move.paperless-scan.enabled"', source)
-        self.assertNotIn("archive-move.paperless-scan.enabled", playbook)
+        # The playbook must reject all release gates, not omit their names.
+        gate_guard = (
+            "for gate in archive-move.enabled archive-move.homes.enabled "
+            "archive-move.paperless-scan.enabled; do\n"
+            '            test ! -e "$PARENT/$gate" && test ! -L "$PARENT/$gate"\n'
+            "          done"
+        )
+        self.assertEqual(playbook.count(gate_guard), 3)
+        self.assertEqual(playbook.count("archive-move.paperless-scan.enabled"), 3)
         self.assertIn("ONE_GROUP_PDF_ARCHIVE_COMPLETED", playbook)
         self.assertIn("group_before_archive_count", playbook)
         self.assertIn("POST_MOVE_LIFECYCLE_RECONCILED", playbook)
