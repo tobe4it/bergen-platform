@@ -16,14 +16,17 @@ MAX_INPUT_BYTES = 16 * 1024 * 1024
 
 
 def select(bundle):
-    if not isinstance(bundle, dict) or set(bundle) != {
-            "nas", "paperless_lifecycle", "lifecycle_report", "only"}:
+    if not isinstance(bundle, dict) or set(bundle) not in (
+            {"nas", "paperless_lifecycle", "lifecycle_report", "only"},
+            {"nas", "paperless_lifecycle", "lifecycle_report", "only", "archived"}):
         raise ValueError("INVALID_PREVIEW_REQUEST")
     requested = bundle["only"]
     if not isinstance(requested, str):
         raise ValueError("INVALID_ARCHIVE_SELECTION")
     evidence = {key: bundle[key] for key in (
         "nas", "paperless_lifecycle", "lifecycle_report")}
+    if "archived" in bundle:
+        evidence["archived"] = bundle["archived"]
     # Complete private journal and full 1:1 live-import inventory validation
     # happens first. The Ansible caller must freshly run the independent
     # complete host+NAS lifecycle audit before handing this data to us.
