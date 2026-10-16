@@ -32,6 +32,7 @@
           - "'ARCHIVE_NOT_AUTHORIZED' in lifecycle_report.stdout_lines"
           - lifecycle_nas_live is defined
           - lifecycle_paperless_live is defined
+          - lifecycle_archived_live is defined
         fail_msg: "Only one verified NAS source and read-only preview are permitted"
 
     - name: Generate private exact-match source/import proof from verified lifecycle
@@ -42,6 +43,7 @@
         stdin: >-
           {{ {'nas': lifecycle_nas_live.stdout,
               'paperless_lifecycle': lifecycle_paperless_live.stdout,
+              'archived': lifecycle_archived_live.stdout,
               'lifecycle_report': lifecycle_report.stdout,
               'only': paperless_archive_only} | to_json }}
       delegate_to: localhost
