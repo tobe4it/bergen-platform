@@ -107,3 +107,45 @@ After those pass, omit `--syntax-check` for the live **read-only** evidence
 collection. No candidate selection or NAS worker enablement occurs. If the
 NAS has no live v2 SENT events, this is an expected development blocker,
 not a reason to fabricate a receipt or downgrade the authorization contract.
+
+
+## Read-only v1 archive dry-run candidate list (16.10.2026)
+
+The current sender uses v1 (24 SENT and no v2 event). The candidate list
+includes only NAS originals still present with a corresponding live-verified
+Paperless IMPORTED object. This does not authorize a move or purge.
+
+The read-only playbook `ansible/playbooks/list-paperless-v1-archive-candidates.yml`
+combines a locked NAS source/receipt/hash scan with the Paperless import and
+effective owner/ACL exporter. The controller tool
+`list_verified_archive_candidates.py` reuses the reviewed
+`select_one_verified_archive_move.py` validation contract for each matching
+original. Ansible suppresses raw receipt, document-ID and digest output.
+Only the scope/original PDF filename is deliberately visible in the
+operator terminal. A mismatch blocks or omits selection.
+
+On bp-controller, in the isolated PR #81 worktree:
+
+    python3 -m unittest discover -s tests -p 'test_paperless_list_verified_archive_candidates.py' -v
+
+    ansible-playbook -i ansible/inventory.yml \
+      -i ~/bergen-platform/ansible/inventory.local.yml \
+      ansible/playbooks/list-paperless-v1-archive-candidates.yml --syntax-check
+
+After passing, run the same playbook without --syntax-check with
+the ignored site variables and Vault:
+
+    ansible-playbook -i ansible/inventory.yml \
+      -i ~/bergen-platform/ansible/inventory.local.yml \
+      ansible/playbooks/list-paperless-v1-archive-candidates.yml \
+      --vault-id paperless@prompt \
+      -e "@$HOME/bergen-platform/ansible/vars/paperless.vault.yml" \
+      -e "@$HOME/bergen-platform/ansible/vars/paperless-synology.local.yml"
+
+Expected markers: `V1_VERIFIED_ARCHIVE_DRY_RUN_CANDIDATES N`,
+`CANDIDATE "Scope/Filename.pdf"`, `CANDIDATE_AUDIT_COMPLETE`,
+`NO_FILES_CHANGED`, `ARCHIVE_NOT_AUTHORIZED`, `PURGE_NOT_AUTHORIZED`.
+
+A listed candidate is a snapshot in time, not approval to move it.
+Never create site release gates or use --commit from this report.
+A fresh one-file dry-run must repeat the checks before any later approval.
