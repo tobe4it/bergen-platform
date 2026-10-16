@@ -203,3 +203,70 @@ still invokes the original strict \`export_imported_scans.py\`; it is
 receipts exist. Adapt that path to the independently verified lifecycle
 separately, with fresh tests and without a commit gate, before attempting
 any source dry-run. Do not create release flag files or activate purge.
+
+
+## First strictly non-committing one-file v1 NAS archive preview (16.10.2026)
+
+The first lifecycle-aware candidate inventory live run succeeded:
+`V1_VERIFIED_ARCHIVE_DRY_RUN_CANDIDATES 22`,
+`DELETED_BY_USER_EXCLUDED 2`,
+`CANDIDATE_AUDIT_COMPLETE`, `NO_FILES_CHANGED`,
+`ARCHIVE_NOT_AUTHORIZED`, `PURGE_NOT_AUTHORIZED`;
+Ansible: `venombox ok=17 changed=0 failed=0 skipped=1`.
+Distribution: `Eltern` 7, `Familie` 9, `Privat/thomas` 6,
+`Privat/nadja` 0.
+
+**Do not run the old `archive-paperless-verified-import.yml` yet.**
+It still uses `export_imported_scans.py` and fails because two historical
+`IMPORTED` receipts are legitimately `DELETED_BY_USER`.
+
+New, separate **dry-run only** entrypoint:
+`ansible/playbooks/preview-paperless-one-v1-archive.yml`.
+
+It imports the full 15/26 deletion lifecycle audit with suppressed private
+proof output; uses the reviewed
+`select_one_verified_lifecycle_archive_preview.py` to require precisely one
+currently live `IMPORTED` source and produce the private per-file proof; verifies
+root ownership and current exact source-code SHA-256 of the staged NAS worker;
+**requires all three release gate files absent**; calls that NAS worker
+with `--state-parent` and exact `--only` and **without any `--commit` option**.
+The NAS worker locks the sender state and repeats source signature, v1 SENT
+receipt, file SHA-256, and protected same-device destination checks.
+It must return `ARCHIVE_DRY_RUN` plus `ARCHIVE_PURGE_DISABLED`.
+The controller suppresses receipt hashes and reports only
+`ARCHIVE_DRY_RUN_VERIFIED`, `SOURCE_UNCHANGED`, `NO_RECEIPTS_CHANGED`,
+`NO_FILES_CHANGED`, `ARCHIVE_NOT_AUTHORIZED`, `PURGE_NOT_AUTHORIZED`.
+No archive or purge is authorized by a passing preview.
+
+After updating the dedicated PR worktree, run tests and syntax check first:
+
+    python3 -m unittest discover -s tests -p 'test_paperless_one_v1_archive_preview.py' -v
+
+    ansible-playbook -i ansible/inventory.yml \
+      -i ~/bergen-platform/ansible/inventory.local.yml \
+      ansible/playbooks/preview-paperless-one-v1-archive.yml --syntax-check
+
+Only after test and syntax acceptance, select **one original Scope/Filename.pdf
+from the previous live candidate output** and use the operator's ignored
+site-local vars and vault:
+
+    ansible-playbook -i ansible/inventory.yml \
+      -i ~/bergen-platform/ansible/inventory.local.yml \
+      ansible/playbooks/preview-paperless-one-v1-archive.yml \
+      --vault-id paperless@prompt \
+      -e "@$HOME/bergen-platform/ansible/vars/paperless.vault.yml" \
+      -e "@$HOME/bergen-platform/ansible/vars/paperless-synology.local.yml" \
+      -e '{"paperless_archive_only":"Familie/EXAMPLE.pdf","paperless_archive_commit":false}'
+
+The example filename is placeholder-only. Do not use it without an exact
+live candidate record. Never set `paperless_archive_commit=true`.
+
+**Important:** If the staged NAS worker is absent, has a different hash,
+or any commit gate exists, the preview **fails closed**. Do not automatically
+stage or activate it. Investigate and separately review the disabled worker
+stage before any code upload to MountainCloud.
+
+Production `renameat2(RENAME_NOREPLACE)` remains a distinct release
+milestone requiring the appropriate acceptance tests and explicit
+per-site administrative authorization; 30-day purge is a separate
+later step with verified restore, not implied by archival relocation.
