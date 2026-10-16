@@ -156,6 +156,43 @@ a deploy hook.** Consumers must be switched in a separate scoped operation,
 with `nginx -t`, certificate and SAN checks, and rollback. Automatic service
 reloads after future renewals must be verified separately.
 
+## Recover an isolated instance after an unsuccessful DNS API request
+
+If staging fails before DNS publication (for example, the API responds with
+HTTP 401), the hook deliberately retains the affected instance's local
+`reserved` entries. Do not remove the state file, attempt Certbot again,
+or run the **legacy** recovery helper without `--instance`.
+
+The shared recovery script accepts a strictly validated instance slug and
+derives the root-owned JSON config and state directory independently:
+
+```bash
+sudo python3 /usr/local/libexec/selfhost_acme_recover.py \
+  --check --instance secondary-zone
+```
+
+The read-only readiness check requires no running Certbot process, one or two
+well-formed reservations solely for this instance's configured record IDs,
+every configured authoritative DNS server to show **both** idle markers and
+none of the recorded challenge tokens. It also checks the configured
+`state_dir` exactly matches the private path derived from the slug.
+
+Only after the check reports `READY` and an operator authorizes recovery may
+the command be repeated with `--apply --instance secondary-zone`. This
+creates a root-only protected backup in the instance's own state directory
+before clearing its reservations. No selfHOST API requests, DNS changes,
+certificate changes or service reloads are performed. Recheck for
+`ALREADY_CLEAN` afterwards.
+
+From Ansible, select the instance explicitly with
+`-e selfhost_acme_reconcile_instance=secondary-zone` alongside the
+matching ignored instance local YAML. Without this extra variable the
+recovery playbook continues to operate on the **legacy** instance only.
+
+After a 401 response, verify that the dedicated provider access authorizes
+the two TXT record IDs and update only the matching instance's encrypted
+Vault, then run installation-only before attempting staging again.
+
 ## Operational safety
 
 - Do not restart Postfix, Collabora or Nginx as part of issuance.
