@@ -88,12 +88,37 @@ def synoacl_tool():
     raise RuntimeError("SYNOACLTOOL_UNAVAILABLE")
 
 
+def native_acl_failure_class(returncode, stdout, stderr):
+    """Classify failures without emitting native ACL content or identities."""
+    if type(returncode) is not int or returncode == 0:
+        raise RuntimeError("INVALID_NATIVE_ACL_FAILURE")
+    raw = (stdout + "\n" + stderr).casefold()
+    if any(token in raw for token in (
+            "no acl", "acl not found", "does not have acl",
+            "acl does not exist", "without acl")):
+        label = "NO_NATIVE_ACL_REPORTED"
+    elif any(token in raw for token in (
+            "not support", "unsupported", "operation not supported")):
+        label = "ACL_UNSUPPORTED_REPORTED"
+    elif any(token in raw for token in (
+            "permission denied", "access denied", "not permitted")):
+        label = "ACL_ACCESS_DENIED_REPORTED"
+    elif any(token in raw for token in (
+            "no such file", "not found", "does not exist")):
+        label = "ACL_PATH_NOT_FOUND_REPORTED"
+    else:
+        label = "UNCLASSIFIED_NATIVE_ACL_ERROR"
+    return "RC_" + str(returncode) + "_" + label
+
+
 def get_aces(tool, directory):
     r = subprocess.run([tool, "-get", str(directory)], capture_output=True,
                        text=True, encoding="utf-8", errors="replace",
                        timeout=20, check=False)
     if r.returncode != 0:
-        raise RuntimeError("ACTIVE_ARCHIVE_NATIVE_ACL_QUERY_FAILED")
+        raise RuntimeError(
+            "ACTIVE_ARCHIVE_NATIVE_ACL_QUERY_FAILED_" +
+            native_acl_failure_class(r.returncode, r.stdout, r.stderr))
     return parse_aces(r.stdout)
 
 
@@ -219,7 +244,14 @@ def audit(parent):
                 (entry.st_dev, entry.st_ino, entry.st_uid,
                  entry.st_mode)):
                 raise RuntimeError("ARCHIVE_PARENT_RACED")
-            aces = get_aces(tool, path)
+            try:
+                aces = get_aces(tool, path)
+            except RuntimeError as error:
+                # Site/kind are fixed enumerations, not ACL principal names,
+                # paths, original PDF filenames or native tool output.
+                print("NATIVE_ACL_READ_BLOCKED", site, kind, str(error),
+                      flush=True)
+                raise RuntimeError("NATIVE_ACL_READ_BLOCKED") from None
         finally:
             os.close(fd)
         grants = unsafe_parent_grants(aces, SETTINGS["sync_user"])
