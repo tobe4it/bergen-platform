@@ -458,3 +458,79 @@ above remains necessary, and a separate isolated canary protocol is
 required before first live source rename. Existing real protected
 directories and documents MUST NOT be renamed to test permissions.
 No broad site gate or destructive purge is enabled.
+
+
+## 2026-10-16 operator scope change: activate GROUPS FIRST
+
+The operator authorized archive moves of the previously reconciled 22 live
+v1 originals and then narrowed the immediate rollout: **activate group
+directories first**, i.e. 7 in \`Eltern\` and 9 in \`Familie\` on the
+\`paperless-scan\` Btrfs subvolume. The 6 \`Privat/thomas\` originals are
+**not** in this first activation; \`Privat/nadja\` has zero candidates.
+The two pinned \`DELETED_BY_USER\` records remain excluded. No purge is
+authorized.
+
+Site readiness evidence: the protected \`paperless-scan\` archive tree
+was read-only audited empty with secure native parent ACL status,
+and read-only NSS/POSIX tests denied listing/write+traverse to two named
+nonowners while positively verifying the service account. An SMB
+login by one family user allowed a known-path \`cd\` but \`ls\` returned
+\`NT_STATUS_ACCESS_DENIED\`. This proves denied enumeration, NOT universal
+SMB content or directory-entry rename/delete rights. The operator chose
+not to repeat SMB listing tests for additional users.
+
+A separate \`homes\` read-only prepared-site audit also passed:
+\`DEVICE_ROOT /volume1/homes\`, \`SOURCE_DEVICE 47\`,
+\`PROTECTED_ARCHIVE_EMPTY_TREE_VERIFIED homes 4\`,
+\`PARENT_ACL_STATUS NATIVE_PARENT_NO_OBVIOUS_DELETE_GRANT\`,
+\`PREPARE_DISABLED\`, \`NO_FILES_CHANGED\`,
+\`ARCHIVE_COMMIT_NOT_AUTHORIZED\`; localhost \`ok=4 changed=0 failed=0\`.
+This does NOT grant a private-directory rollout.
+
+### Controlled GROUP-only exact-one-PDF release — awaiting acceptance
+
+Prepared PR code, **not yet installed or run**:
+
+- \`ansible/files/paperless/synology_one_group_archive_release.py\`
+  is a root-owned NAS one-shot wrapper. It accepts only \`Eltern\`
+  and \`Familie\`, a controller-selected exact original and a private
+  import proof. It creates exactly one root-owned, 0600,
+  600-second canonical exact-PDF manifest at
+  \`archive-move.paperless-scan.enabled\` with \`O_EXCL\`, invokes the
+  previously staged archive worker as unprivileged \`paperless-sync\`,
+  and removes the gate in \`finally\`. It rejects any existing
+  site/global release flag, never creates an all-site authorization,
+  and never invokes a purge. If the process is interrupted with SIGKILL,
+  a surviving exact gate expires; investigate/remove safely before retry.
+- \`ansible/playbooks/stage-paperless-one-group-archive-release-runner.yml\`
+  stages only reviewed root-owned code with all three gates absent.
+- \`ansible/playbooks/commit-paperless-one-group-v1-archive.yml\`
+  imports the full independent 15/26 reconciler BEFORE selecting a
+  controller-verified one-PDF proof; checks exact staged NAS source
+  and runner hashes and absent gates; requires the explicit **typed**
+  \`paperless_archive_commit: true\` flag; invokes the one-shot root
+  wrapper; then independently repeats the FULL lifecycle audit to
+  require 22 live Paperless documents, exactly two pinned deletions,
+  the NAS source count reduced by one, the archived count increased by
+  one and **all gates absent**. Stops at any mismatch.
+- \`tests/test_paperless_group_archive_release.py\` exercises proof
+  validation, group-only restrictions, preexisting gate refusal and
+  synthetic temporary gate creation/revocation on success/failure.
+  These tests are not yet proven green on the controller.
+
+**Operational order**: operator first runs the new offline tests and
+Ansible syntax checks. Stage the new disabled runner ONLY after test
+acceptance; new staging changes root-owned code but no PDFs or archive
+receipts. Independently choose one already proven group PDF and run a
+SINGLE production commit as a canary. Examine complete new 21+1 live
+lifecycle before deciding on the other 15. Every subsequent source
+requires a fresh full proof, one-shot gate, atomic no-overwrite rename,
+revocation and full post-move audit. A failed or partial journal blocks
+all subsequent operations pending human recovery. No automated
+source-loop has been released yet; do not run blind for-loops of
+\`--commit\` or the historical incompatible archive playbook.
+
+**Important:** The operator's approval of archive relocation does NOT
+allow bypassing security/preflight/roll-forward checks, enabling
+permanent site flags, deleting archive originals, or applying this
+GROUP-only code to private user folders.
