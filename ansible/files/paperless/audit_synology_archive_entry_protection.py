@@ -18,10 +18,13 @@ import sys
 from pathlib import Path
 
 SCOPES = frozenset(("Familie", "Eltern", "Privat/thomas", "Privat/nadja"))
+# Native DSM ACLs include empty-name special principals and optional
+# whitespace inside the level field. Require a whole-record match.
 ACE = re.compile(
-    r"(?:^|\s)(?:\?\s*)?\[[0-9]+\]\s+"
-    r"(group|user):([^:]+):(allow|deny):([rwxpdDaARWcCo-]{13,15}):"
-    r"([fdin-]{4})\s+\(level:[0-9]+\)"
+    r"^\s*(?:\?\s*)?\[[0-9]+\]\s+"
+    r"(group|user|owner|everyone|system):([^:]*):"
+    r"(allow|deny):([rwxpdDaARWcCo-]{13,15}):"
+    r"([fdin-]{4})\s+\(level:\s*[0-9]+\)\s*"
 )
 ADMIN_GROUPS = frozenset(("administrators", "administrators@bergen.intern"))
 
@@ -34,10 +37,13 @@ def parse_aces(output):
     for line in output.splitlines():
         if "allow:" not in line and "deny:" not in line:
             continue
-        match = ACE.search(line)
+        match = ACE.fullmatch(line)
         if match is None:
             raise RuntimeError("UNPARSEABLE_ACL_ACE")
         role, principal, effect, perms, inherit = match.groups()
+        if ((role in ("group", "user") and not principal) or
+                (role in ("owner", "everyone", "system") and principal)):
+            raise RuntimeError("UNSUPPORTED_ACL_PRINCIPAL")
         if len(perms) < 6:
             raise RuntimeError("MALFORMED_ACL_PERMISSIONS")
         rows.append((role, principal, effect, perms, inherit))
@@ -49,7 +55,7 @@ def parse_aces(output):
 
 
 def unsafe_parent_grants(aces, service_user):
-    """Conservatively report any non-admin explicit allow granting deletion.
+    """Conservatively report any non-admin or global allow granting deletion.
 
     Deny ACEs and ACL ordering/effective identities require separate checks,
     so the presence of a risky allow is a blocker, not a proof of actual access.
@@ -58,16 +64,19 @@ def unsafe_parent_grants(aces, service_user):
     for role, principal, effect, perms, _inherit in aces:
         if effect != "allow":
             continue
+        # The owner:: principal resolves to the UID already checked for
+        # each protected directory (root at site root, sync user elsewhere).
+        if role == "owner":
+            continue
         if role == "group" and principal in ADMIN_GROUPS:
             continue
         if role == "user" and principal in (service_user, "root"):
             continue
-        # 'D' is delete-child on the scan directory, 'd' is delete
-        # permission on the scan directory itself. 'w'+'x' also
-        # indicates conventional parent rename risk with writable dirs.
+        # Neither 'everyone' nor 'system' is an exempt administrator here.
+        # D = delete-child, d = delete, w+x = parent write and traverse.
         if perms[5] == "D" or perms[4] == "d" or (
                 perms[1] == "w" and perms[2] == "x"):
-            risks.append((role, principal))
+            risks.append((role, principal or "<special>"))
     return risks
 
 
