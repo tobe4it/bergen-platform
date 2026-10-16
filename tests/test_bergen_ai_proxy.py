@@ -53,7 +53,11 @@ class BergenAiProxyContracts(unittest.TestCase):
         path = ROOT / "ansible/playbooks/configure-open-webui-oidc.yml"
         play = yaml.safe_load(path.read_text())[0]
         self.assertEqual(play["hosts"], "ai_nodes")
-        conditions = play["tasks"][0]["ansible.builtin.assert"]["that"]
+        guard = next(
+            task for task in play["tasks"]
+            if task["name"] == "Refuse ambiguous AI inventory and missing site identity"
+        )
+        conditions = guard["ansible.builtin.assert"]["that"]
         self.assertIn("groups.get('ai_nodes', []) | length == 1", conditions)
         self.assertIn("site_ai_backend_hostname is defined", conditions)
 
