@@ -717,3 +717,29 @@ line structure. Do not weaken parser matching, do not print ACL
 principals in public logs, and do not infer permission safety from
 a failed audit. No archive move/merge/purge is authorized.
 
+### 2026-10-16 second read-only ACL attempt: native ACL query failed
+
+The updated native ACE parser passed its 726 offline Paperless tests and
+the playbook passed Ansible syntax. The second live read-only audit
+(`localhost ok=1 changed=0 failed=1`) parsed the three site-root ACEs
+for `homes` and then stopped with
+`ACTIVE_ARCHIVE_NATIVE_ACL_QUERY_FAILED`, before any global safety
+verdict. This is a failed `synoacltool -get` command, **not** proof
+of a dangerous grant. The next lexically ordered target is the
+`homes` protected archive root.
+
+Added **diagnostics only** to the fail-closed auditor:
+`NATIVE_ACL_READ_BLOCKED <site> <kind>
+ACTIVE_ARCHIVE_NATIVE_ACL_QUERY_FAILED_RC_<rc>_<class>`.
+The class identifies only broad categories such as native ACL absent,
+unsupported, access denied, missing path, or unclassified.
+No returned raw ACEs, filesystem paths, user/group identities, or
+native tool error strings are printed. Unknown causes remain blocked;
+the return-code classification is an observation, not permission
+to skip an ACL/security check.
+
+After fresh offline tests and syntax acceptance, rerun only the read-only
+audit. Record the sanitized diagnostic markers and `PLAY RECAP`.
+Do not change Synology ACLs, source/archives, release gates,
+journals or 30-day expiry permissions on this basis.
+
