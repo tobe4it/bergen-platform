@@ -346,3 +346,60 @@ A private archive rename retains the original, and **does not** require
 an immediately preceding external backup. A future destructive purge
 does require independently tested backup plus restore and a separate
 explicit release. No purge feature is enabled or developed here.
+
+
+## Archive-aware read-only lifecycle audit — implementation pending live test
+
+Updated 2026-10-16 after the hardened worker's *second* non-committing
+NAS preview passed (`venombox ok=22 changed=0 failed=0 skipped=1`,
+`ARCHIVE_DRY_RUN_VERIFIED`, `NO_FILES_CHANGED`,
+`ARCHIVE_NOT_AUTHORIZED`, `PURGE_NOT_AUTHORIZED`).
+
+The new restricted NAS reader
+`ansible/files/paperless/audit_synology_completed_archive_moves.py`
+takes the shared `sync.lock` and inspects every protected archive
+journal. A `PREPARED` without `ARCHIVED`, an unknown/orphan entry,
+a conflicting/corrupt event, or an unexpected PDF in the protected
+archive **blocks** the entire audit. For each completed journal pair it
+matches the root-owned reference worker's v1 sender receipt, ensures the
+scan-inbox original is absent, verifies same archive filesystem and
+original inode, size, mtime and SHA-256 of the PDF (ctime may legitimately
+advance across the rename), and produces a restricted archived-proof
+record. The two permanent `DELETED_BY_USER` journals remain separate.
+There is no write path, and only `NO_FILES_CHANGED` marks completion.
+
+`audit-paperless-import-lifecycle-15-26.yml` now runs the archived
+reader before the full controller join. The updated
+`match_paperless_import_lifecycle_15_26.py` requires every live
+Paperless `IMPORTED` receipt to be backed by **exactly one** current
+live NAS source **OR** a complete verified archive. Both and neither
+fail closed. Distinct output:
+`NAS_SENT_VERIFIED N`,
+`NAS_ARCHIVED_VERIFIED M`,
+`NAS_CURRENT_ORIGINALS_VERIFIED N+M`,
+`PAPERLESS_LIVE_IMPORTED N+M`.
+It continues to require precisely the existing two pinned
+`DELETED_BY_USER` histories (IDs 15 and 26).
+
+`list-paperless-v1-archive-candidates.yml` and
+`preview-paperless-one-v1-archive.yml` pass the new archived proof.
+The candidate listing excludes archived originals even though their
+Paperless documents remain live. An already archived PDF cannot
+be offered for another archive preview.
+
+**Pending acceptance:** The new scripts and updated playbooks have
+only been prepared in the feature PR. Run the new synthetic suite
+`test_paperless_archived_lifecycle_reconciliation.py` along with the
+existing v1 lifecycle, candidate and preview suites; syntax-check all
+three updated playbooks. Then run the revised full audit **read-only**
+against the current zero-archived live NAS. Expected baseline:
+22 source originals + 0 archived = 22 live imports; exactly
+2 historical user deletions. Do NOT create any release gate or run
+`--commit` after just a successful zero-archive audit. A controlled
+21-source+1-archive scenario still requires independent acceptance
+after an explicitly approved one-PDF move.
+
+**The first real rename is STILL BLOCKED** until independent effective
+DSM rights/writer-quiescence, crash-recovery validation and a separately
+reviewed, one-shot gate install/commit/revoke process. The previous
+pure 10-minute exact-manifest generator is not an activation path.
