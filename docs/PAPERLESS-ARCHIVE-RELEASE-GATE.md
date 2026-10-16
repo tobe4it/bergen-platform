@@ -270,3 +270,79 @@ Production `renameat2(RENAME_NOREPLACE)` remains a distinct release
 milestone requiring the appropriate acceptance tests and explicit
 per-site administrative authorization; 30-day purge is a separate
 later step with verified restore, not implied by archival relocation.
+
+
+## One-PDF live-move release preparation — NOT authorized (16.10.2026)
+
+The first complete lifecycle-aware preview of
+`Familie/Bergen-Platform-fuer-Dummies.pdf` passed:
+`ARCHIVE_DRY_RUN_VERIFIED`, `SOURCE_UNCHANGED`,
+`NO_RECEIPTS_CHANGED`, `NO_FILES_CHANGED`,
+`ARCHIVE_NOT_AUTHORIZED`, `PURGE_NOT_AUTHORIZED`.
+Ansible: venombox `ok=22 changed=0 failed=0 skipped=1`.
+The staged NAS worker matched the OLD reviewed SHA-256, all gates absent.
+
+**Important newly discovered authorization risk:** The original
+`archive-move.<site>.enabled` semantics accepted *any* root-owned, 0600
+file and did not bind it to a source or live proof. This is too broad even
+for a single controlled pilot. The revised
+`synology_same_volume_archive_move.py` therefore requires **canonical
+JSON** with root:root 0600 ownership and a fixed schema, binding exact
+site, scope, original PDF filename, NAS SENT receipt identity,
+Paperless bridge receipt, document SHA-256 and positive Paperless document
+ID. Its issue/expiry epoch timestamps must provide no more than 15
+minutes of validity, and the issuing time may not lie in the future.
+An empty site flag or any wrong, stale or otherwise mismatched manifest
+is refused. The legacy global gate remains prohibited. On production
+commit, the worker reads the protected manifest *before* touching source
+or archive and rechecks source SHA/signature/import proof under sender
+lock before any durable write. The standalone
+`build_one_archive_release_manifest.py` is **pure**: it produces canonical
+bytes from one separately validated controller proof. It has NO CLI,
+no file writes, and cannot enable any gate.
+
+**No new worker has been staged yet.** The reviewed on-NAS worker
+was accepted for the dry-run but must be updated through the already
+disabled-only staging playbook after all tests and security review, and
+then previewed again. No activation flag, production PDF move or purge
+may be created during this preparation.
+
+**Blocker for a correct post-move lifecycle**: The current v1 audit
+`audit-paperless-import-lifecycle-15-26.yml` assumes all live imported
+PDF originals are still in the source folders. A successful rename would
+yield 21 original source files and 22 live imports; the current lifecycle
+matching would fail. Before any real move, implement and test a
+read-only archive-journal/live-inode/hash-aware lifecycle state:
+every live Paperless import must map **exclusively** to either a current
+NAS source + SENT receipt, **or** a protected archive file plus a complete
+`ARCHIVED` journal. The two pinned `DELETED_BY_USER` histories must
+remain distinct from both states. A `PREPARED`-only journal, duplicate
+live source+archive, vanished inode, wrong SHA, unexpected ACL or new
+unknown source should fail closed. Candidate lists and future previews
+must omit already archived documents but preserve reconciliation.
+A post-move verification must additionally verify the same NAS inode,
+same Btrfs device, restored original PDF bytes, protected archive
+permissions and live Paperless access, without treating that check as
+an expiry/purge approval.
+
+Release order:
+1. Unit tests for the tightened worker + manifest and disabled-only
+   staging/syntax review.
+2. Re-stage reviewed worker while all gates are ABSENT. Re-run the
+   same single-PDF dry-run with the newly staged SHA-256.
+3. Implement and live-read-only-test archive-aware reconciliation
+   (zero ARCHIVED should reproduce the current 22 live-original result).
+4. Review effective native DSM ACLs and subscriber/scanner write
+   quiescence; validate failure/restart/recovery cases.
+5. Prepare exact-one-file short-lived gate installation, explicit
+   approval, a single `renameat2(RENAME_NOREPLACE)` attempt and
+   fail-closed gate revocation in a separately reviewed release playbook.
+   Approval for the chosen PDF must be sought *again* immediately before
+   executing any of these mutating steps.
+6. Re-audit the new source/archive state and Paperless visibility. Any
+   incomplete journal requires manual reconciliation, never blind retry.
+
+A private archive rename retains the original, and **does not** require
+an immediately preceding external backup. A future destructive purge
+does require independently tested backup plus restore and a separate
+explicit release. No purge feature is enabled or developed here.
