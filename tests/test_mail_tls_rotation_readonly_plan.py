@@ -57,9 +57,13 @@ def test_all_actions_are_read_only():
 
 
 def test_no_site_identifiers_in_versioned_playbook():
+    import re
     content = PLAYBOOK.read_text(encoding="utf-8")
-    for forbidden in ("private-zone.invalid", "site-username", "site-hostname"):
-        assert forbidden not in content.lower()
+    assert not re.search(
+        r"(?<![0-9])(?:10|192[.]168|172[.](?:1[6-9]|2[0-9]|3[01]))[.][0-9]{1,3}[.][0-9]{1,3}",
+        content,
+    )
+    assert not re.search(r"\\b[a-z0-9.-]+[.]intern\\b", content, re.I)
 
 
 def test_private_key_readbacks_stay_local_and_redacted():
