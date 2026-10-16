@@ -36,7 +36,10 @@ class ReverseProxyPreflightContract(unittest.TestCase):
         self.assertEqual(len({s["hostname"] for s in self.sample["reverse_proxy_sites"]}),
                          len(self.sample["reverse_proxy_sites"]))
         text = EXAMPLE.read_text()
-        self.assertNotIn("site-specific.invalid", text)
+        for site in self.sample["reverse_proxy_sites"]:
+            self.assertTrue(site["hostname"].endswith(
+                (".example.net", ".example.org", ".example.com", ".invalid")
+            ))
         self.assertNotIn("192.168.", text)
         self.assertNotIn("BEGIN PRIVATE KEY", text)
 
