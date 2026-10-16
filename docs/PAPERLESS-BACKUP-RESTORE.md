@@ -43,3 +43,7 @@
 6. Erst nach bestandener Nachweiskette separate schriftliche Freigabe pro Site erwägen. **Weder `archive-move.paperless-scan.enabled` noch `archive-move.homes.enabled` erstellen**; `archive-move.enabled` muss ebenfalls fehlen.
 
 **Offen:** tatsächliches externes Backup-Ziel, zulässiger geschützter Exportpfad, Laufplan, Verschlüsselung/Retention, Wiederherstellungsnachweis und produktive Import-/Journal-End-to-End-Proben.
+
+## Akuter Speicherplatz-Blocker auf vorhandenem USB-Ziel (16.10.2026)
+
+Die NAS-seitige, **lesende** Mount-/statvfs-Prüfung ergab für `/volumeUSB1/usbshare1-2`: `fuseblk.ntfs`, ca. **14.901,9 GiB Gesamtkapazität**, lediglich **7,1 GiB verfügbar** (99,95 % belegt), Mount nicht read-only. Die vorhandene USB-Festplatte ist damit **nicht als zusätzlicher Backup-/Restore-Arbeitsbereich freigegeben**. Noch unbekannt: tatsächlich durch Hyper Backup genutzter Anteil, letztes erfolgreiches `task_4`-Backup, vorhandene Versionierung/Retention und Lösch-/Rotationsstrategie. **Kein manuelles Löschen von `.hbk`-Dateien oder Backup-Verzeichnissen**; bei Freiraumbedarf nur kontrollierte Maßnahmen anhand des Hyper-Backup-Auftrags nach zusätzlicher unabhängiger Sicherungsprüfung. Der State-Exporter kann mit synthetischen Daten entwickelt werden, aber produktive State-Snapshots und der externe Restore-Test dürfen nicht von diesem faktisch vollen Medium abhängen.
