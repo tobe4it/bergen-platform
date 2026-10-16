@@ -103,6 +103,8 @@ class GroupExactReleaseTests(unittest.TestCase):
                 captured.append(argv)
                 if outcome == "failure":
                     return SimpleNamespace(returncode=7, stdout="", stderr="fail")
+                if outcome == "timeout":
+                    raise m.subprocess.TimeoutExpired(argv, timeout=480)
                 return SimpleNamespace(returncode=0,
                     stdout=("ARCHIVE_MOVED " + p["sender_receipt"] +
                             " 2026-10 " + p["sender_receipt"][:-5] +
@@ -132,8 +134,8 @@ class GroupExactReleaseTests(unittest.TestCase):
                      return_value=SimpleNamespace(pw_uid=1048, pw_gid=1048,
                                                   pw_name="paperless-sync")), \
                  patch.dict(sys.modules, {"synology_config": SimpleNamespace(SETTINGS=settings)}):
-                if preexisting or outcome == "failure":
-                    with self.assertRaises(RuntimeError):
+                if preexisting or outcome in ("failure", "timeout"):
+                    with self.assertRaises(m.subprocess.TimeoutExpired if outcome == "timeout" else RuntimeError):
                         m.execute(parent, "Familie/Scan.pdf", p,
                                   call=fake_call, now=1234)
                 else:
@@ -147,6 +149,9 @@ class GroupExactReleaseTests(unittest.TestCase):
 
     def test_failed_worker_still_revokes_gate(self):
         self._run_temp(outcome="failure")
+
+    def test_timeout_still_revokes_gate(self):
+        self._run_temp(outcome="timeout")
 
     def test_preexisting_gate_refused_and_never_removed(self):
         self._run_temp(outcome="ok", preexisting=True)
