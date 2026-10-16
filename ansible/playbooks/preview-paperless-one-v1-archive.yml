@@ -19,7 +19,7 @@
           - not ansible_check_mode
           - paperless_archive_only is defined
           - paperless_archive_only is string
-          - paperless_archive_only is match('^(Familie|Eltern|Privat/(thomas|nadja))/[^/\\]+\.pdf$')
+          - paperless_archive_only is match('^(Familie|Eltern|Privat/(thomas|nadja))/[^/]+[.]pdf$')
           - (paperless_archive_commit | default(false)) is sameas false
           - synology_admin is defined
           - synology_config is defined
@@ -138,7 +138,7 @@
           - preview_nas_execution.rc == 0
           - (preview_nas_execution.stderr | trim) == ''
           - preview_nas_execution.stdout_lines | length == 2
-          - preview_nas_execution.stdout_lines[0] is match('^ARCHIVE_DRY_RUN [a-f0-9]{64}\.json 20[0-9]{2}-(0[1-9]|1[0-2]) [a-f0-9]{64}\.pdf$')
+          - preview_nas_execution.stdout_lines[0] is match('^ARCHIVE_DRY_RUN [a-f0-9]{64}[.]json 20[0-9]{2}-(0[1-9]|1[0-2]) [a-f0-9]{64}[.]pdf$')
           - preview_nas_execution.stdout_lines[1] == 'ARCHIVE_PURGE_DISABLED'
         fail_msg: "No successful read-only archive preview evidence; do not move a source"
 
