@@ -144,6 +144,59 @@
       changed_when: false
       no_log: "{{ paperless_lifecycle_quiet | default(false) | bool }}"
 
+    - name: Hash local reviewed NAS archive worker without changes
+      ansible.builtin.stat:
+        path: "{{ playbook_dir }}/../files/paperless/synology_same_volume_archive_move.py"
+        checksum_algorithm: sha256
+      delegate_to: localhost
+      become: false
+      register: lifecycle_worker_local
+      changed_when: false
+
+    - name: Require reviewed regular worker for trustworthy archived audit
+      ansible.builtin.assert:
+        that:
+          - lifecycle_worker_local.stat.exists
+          - lifecycle_worker_local.stat.isreg
+          - not lifecycle_worker_local.stat.islnk
+
+    - name: Verify staged NAS worker SHA and root-controlled code parent
+      ansible.builtin.command:
+        argv:
+          - ssh
+          - -T
+          - -o
+          - BatchMode=yes
+          - -o
+          - StrictHostKeyChecking=yes
+          - -o
+          - ConnectTimeout=15
+          - "{{ synology_admin }}"
+          - sudo -n /bin/sh -s
+        stdin: |
+          set -eu
+          PARENT={{ synology_config.state_parent | quote }}
+          BIN="$PARENT/bin"
+          TARGET="$BIN/synology_same_volume_archive_move.py"
+          test ! -L "$BIN" && test ! -L "$TARGET"
+          test "$(stat -c '%u:%a' "$BIN")" = "0:755"
+          test "$(stat -c '%u:%g:%a' "$TARGET")" = "0:0:644"
+          test "$(sha256sum "$TARGET" | cut -d ' ' -f 1)" = {{ lifecycle_worker_local.stat.checksum | quote }}
+          echo VERIFIED_REVIEWED_ARCHIVE_CODE
+      delegate_to: localhost
+      become: false
+      register: lifecycle_worker_integrity
+      changed_when: false
+      no_log: "{{ paperless_lifecycle_quiet | default(false) | bool }}"
+
+    - name: Require exact staged and reviewed NAS archive code
+      ansible.builtin.assert:
+        that:
+          - lifecycle_worker_integrity.rc == 0
+          - lifecycle_worker_integrity.stdout_lines == ['VERIFIED_REVIEWED_ARCHIVE_CODE']
+          - (lifecycle_worker_integrity.stderr | trim) == ''
+        fail_msg: "NAS archive code differs from reviewed repository; no reconciliation allowed"
+
     - name: Audit all completed NAS archive journals and PDF inodes under sender lock
       ansible.builtin.command:
         argv:
