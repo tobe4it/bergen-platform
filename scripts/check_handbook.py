@@ -19,8 +19,8 @@ def check():
     en = {p[3:] for p in pages if p.startswith('EN-')}
     if de != en:
         errors.append(f'Unpaired language pages: {de ^ en}')
-    if len(de) != 12:
-        errors.append(f'Expected 12 pages per language, got {len(de)}')
+    if len(de) != 13:
+        errors.append(f'Expected 13 pages per language, got {len(de)}')
     for stem, p in pages.items():
         text = p.read_text(encoding='utf-8')
         if MARK not in text:

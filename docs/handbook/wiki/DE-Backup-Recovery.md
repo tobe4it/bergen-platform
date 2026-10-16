@@ -46,7 +46,7 @@ Die folgende Matrix beschreibt den erforderlichen Umfang. Sie ist keine Liste na
 | Nextcloud | Daten, Datenbank, Konfiguration und Anpassungen; externe Speicher/Apps und gegebenenfalls Schlüssel ergänzen. |
 | Paperless | Nach Einrichtung Dokumente, Datenbank, Konfiguration, Export und Versionsstände; Intake-Zugang getrennt sichern. |
 | EVCC / MQTT | evcc.db und ggf. evcc.yaml; MQTT-Konfiguration, Benutzer/ACL und benötigte Persistenz. |
-| KI / MQ / Protokolle | Zu erhaltende Inhalte bewusst auswählen; MQ-Persistenz/PKI, KI-Konfiguration/Chats, relevante Protokolle. |
+| KI / Protokolle | Zu erhaltende Inhalte bewusst auswählen; KI-Konfiguration/Chats, relevante Protokolle. |
 
 ### Zusätzliche LXC-Speicher prüfen
 Proxmox sichert zusätzliche Volume-Mountpoints nicht automatisch alle mit. Bei verwalteten Volumes kann die Backup-Option sie einbeziehen. Inhalte von Bind- und Device-Mounts werden nicht als normale Gastdaten mitgesichert und benötigen eine andere Sicherung.

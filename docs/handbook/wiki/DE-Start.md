@@ -5,13 +5,17 @@
 
 Sie müssen kein Linux-Experte sein, um die Plattform sinnvoll zu nutzen und eine Übergabe vorzubereiten. Dieses Handbuch erklärt, welche Aufgabe jedes System hat, wie Abhängigkeiten funktionieren und wann eine eingewiesene Betreuungsperson benötigt wird.
 
-## Drei Lesepfade
+## Vier Lesepfade
 
+- **Noch keine eigene Umgebung?** [Selbst betriebene IT von Grund auf aufbauen](DE-Self-Hosting.md): Voraussetzungen verstehen, im Labor üben, die erste Installation prüfen und schrittweise erweitern.
 - **Ausfall oder Nachlass:** Soforthilfe lesen, Ansprechpartner und privaten Notfallzugang suchen, vorhandene Daten erhalten.
 - **Alltägliche Nutzung:** Anwendungsseiten lesen, berechtigte persönliche Zugänge verwenden und Fehler genau beschreiben.
 - **Betreuung übernehmen:** Grundlagen, Automation und Backup durcharbeiten, privaten Bestand erfassen und eine isolierte Wiederherstellung nachweisen.
 
 ## Inhalt
+
+**Neu anfangen:** [Lern- und Aufbaupfad für selbst betriebene IT](DE-Self-Hosting.md).
+
 1. [Soforthilfe](DE-Emergency.md)
 
 2. [Architektur](DE-Architecture.md)
