@@ -221,6 +221,37 @@ class EntryProtectionTests(unittest.TestCase):
         self.assertIn("get_aces(tool, path)", script)
         self.assertNotIn('source / ".paperless-archive"', script)
 
+
+    def test_native_acl_failures_report_safe_error_categories_only(self):
+        results = [
+            ("SYNO: No ACL found for /secret/user", "NO_NATIVE_ACL_REPORTED"),
+            ("operation not supported", "ACL_UNSUPPORTED_REPORTED"),
+            ("Permission denied for /secret/user", "ACL_ACCESS_DENIED_REPORTED"),
+            ("No such file or directory", "ACL_PATH_NOT_FOUND_REPORTED"),
+            ("Unexpected native error for /secret/user",
+             "UNCLASSIFIED_NATIVE_ACL_ERROR"),
+        ]
+        for error, expected in results:
+            with self.subTest(error=expected):
+                value = m.native_acl_failure_class(255, "", error)
+                self.assertIn("RC_255_" + expected, value)
+                self.assertNotIn("/secret/", value)
+        with self.assertRaisesRegex(
+                RuntimeError, "INVALID_NATIVE_ACL_FAILURE"):
+            m.native_acl_failure_class(0, "", "")
+
+    def test_native_acl_failed_command_does_not_publish_raw_principals(self):
+        from types import SimpleNamespace
+        message = "No ACL found for /volume1/homes/alice@example.invalid"
+        completed = SimpleNamespace(returncode=255, stdout="", stderr=message)
+        with patch.object(m.subprocess, "run", return_value=completed):
+            with self.assertRaisesRegex(
+                    RuntimeError,
+                    "ACTIVE_ARCHIVE_NATIVE_ACL_QUERY_FAILED_RC_255_"
+                    "NO_NATIVE_ACL_REPORTED") as captured:
+                m.get_aces("/trusted/synoacltool", Path("/dummy"))
+        self.assertNotIn("alice", str(captured.exception))
+
     def test_readonly_probe_contains_no_archive_mutations(self):
         code = FILE.read_text()
         for token in ("os.rename(", "os.replace(", "os.unlink(", ".unlink(",
