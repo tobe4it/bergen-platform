@@ -35,8 +35,12 @@ except PermissionError:
     listed = False
 else:
     try:
-        os.listdir(descriptor)
-        listed = True
+        try:
+            os.listdir(descriptor)
+        except PermissionError:
+            listed = False
+        else:
+            listed = True
     finally:
         os.close(descriptor)
 write_access = os.access(path, os.W_OK | os.X_OK, effective_ids=True)
@@ -156,7 +160,7 @@ if __name__ == "__main__":
         require(len(sys.argv) == 3, "ARGUMENTS_REQUIRED")
         audit(Path(sys.argv[1]), sys.argv[2])
     except (OSError, ValueError, RuntimeError, TypeError,
-            subprocess.TimeoutExpired):
+            subprocess.TimeoutExpired, subprocess.SubprocessError):
         # Never disclose usernames, NSS records, or archive paths on failures.
         print("ARCHIVE_EFFECTIVE_LOCAL_ACCESS_BLOCKED", file=sys.stderr)
         sys.exit(1)
