@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Read-only effective NAS POSIX/NSS access test for protected paperless-scan archive.
+"""Read-only effective NAS POSIX/NSS access test for both protected archive sites.
 
 Root orchestration resolves exact operator-selected NSS users. Each access
 probe drops supplementary groups, resets them from NSS via initgroups, then
@@ -17,8 +17,10 @@ import sys
 from pathlib import Path
 
 USER_NAME = re.compile(r"[A-Za-z_][A-Za-z0-9_.-]*(?:@[A-Za-z0-9_.-]+)?\Z")
-SITE = "paperless-scan"
-SCOPES = ("Eltern", "Familie")
+SITE_SCOPES = {
+    "paperless-scan": ("Eltern", "Familie"),
+    "homes": ("Privat/thomas", "Privat/nadja"),
+}
 
 # Child is executed only after root has dropped to the selected UID/GID.
 # Output deliberately contains no names, paths, or original PDF contents.
@@ -87,13 +89,13 @@ def probe(identity, path):
     return parse_probe(response.stdout)
 
 
-def verdict(owner_results, denied_results):
+def verdict(owner_results, denied_results, *, expected_paths=3):
     """Pure policy check; no filesystem interaction."""
-    require(len(owner_results) == 3 and
+    require(expected_paths in (3, 4) and len(owner_results) == expected_paths and
             all(row == {"list": True, "write_access": True}
                 for row in owner_results), "SYNC_OWNER_ARCHIVE_ACCESS_BLOCKED")
     require(len(denied_results) >= 2 and
-            all(len(rows) == 3 for rows in denied_results) and
+            all(len(rows) == expected_paths for rows in denied_results) and
             all(row == {"list": False, "write_access": False}
                 for rows in denied_results for row in rows),
             "NONOWNER_ARCHIVE_ACCESS_NOT_DENIED")
@@ -103,7 +105,8 @@ def verdict(owner_results, denied_results):
             "ARCHIVE_COMMIT_NOT_AUTHORIZED", "NO_FILES_CHANGED"]
 
 
-def audit(parent, denied_raw):
+def audit(parent, denied_raw, site):
+    require(site in SITE_SCOPES, "INVALID_ARCHIVE_SITE")
     require(os.geteuid() == 0 and parent.is_absolute() and
             parent != Path("/") and ".." not in parent.parts,
             "NAS_ROOT_READ_ONLY_AUDIT_REQUIRED")
@@ -139,26 +142,36 @@ def audit(parent, denied_raw):
     require(set(sources) == {"Eltern", "Familie", "Privat/thomas",
                             "Privat/nadja"}, "UNEXPECTED_SCOPES")
     targets = [move._validated_protected_scope(
-        sources[scope], scope, owner.pw_uid) for scope in SCOPES]
-    archive_root = targets[0].parent
-    require(targets[1].parent == archive_root and
-            archive_root.name == ".bergen-paperless-archive",
-            "UNEXPECTED_PROTECTED_ARCHIVE_ROOT")
+        sources[scope], scope, owner.pw_uid) for scope in SITE_SCOPES[site]]
+    if site == "paperless-scan":
+        archive_root = targets[0].parent
+        require(targets[1].parent == archive_root and
+                archive_root.name == ".bergen-paperless-archive",
+                "UNEXPECTED_PROTECTED_ARCHIVE_ROOT")
+        paths = [archive_root, *targets]
+    else:
+        scope_parent = targets[0].parent
+        archive_root = scope_parent.parent
+        require(targets[1].parent == scope_parent and
+                scope_parent.name == "Privat" and
+                archive_root.name == ".bergen-paperless-archive",
+                "UNEXPECTED_PROTECTED_ARCHIVE_ROOT")
+        paths = [archive_root, scope_parent, *targets]
     rootfd = move._check_dir(archive_root, owner.pw_uid)
     os.close(rootfd)
-    paths = [archive_root, *targets]
     owner_results = [probe(owner, path) for path in paths]
     denied_results = [[probe(person, path) for path in paths]
                       for person in others]
-    print("SELECTED_SITE", SITE)
-    for line in verdict(owner_results, denied_results):
+    print("SELECTED_SITE", site)
+    for line in verdict(owner_results, denied_results,
+                        expected_paths=len(paths)):
         print(line)
 
 
 if __name__ == "__main__":
     try:
-        require(len(sys.argv) == 3, "ARGUMENTS_REQUIRED")
-        audit(Path(sys.argv[1]), sys.argv[2])
+        require(len(sys.argv) == 4, "ARGUMENTS_REQUIRED")
+        audit(Path(sys.argv[1]), sys.argv[2], sys.argv[3])
     except (OSError, ValueError, RuntimeError, TypeError,
             subprocess.TimeoutExpired, subprocess.SubprocessError):
         # Never disclose usernames, NSS records, or archive paths on failures.
