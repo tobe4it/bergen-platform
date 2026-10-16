@@ -403,3 +403,58 @@ after an explicitly approved one-PDF move.
 DSM rights/writer-quiescence, crash-recovery validation and a separately
 reviewed, one-shot gate install/commit/revoke process. The previous
 pure 10-minute exact-manifest generator is not an activation path.
+
+
+## Protected archive effective LOCAL (NSS/POSIX) access — pending live test
+
+The operator's **read-only existing protected-site audit** for
+\`paperless-scan\` passed on 2026-10-16:
+
+- \`DEVICE_ROOT /volume1/paperless-scan\`,
+  \`SOURCE_DEVICE 1048641\`;
+- \`PARENT_ACL_STATUS NATIVE_PARENT_NO_OBVIOUS_DELETE_GRANT\`;
+- \`PROTECTED_ARCHIVE_CANDIDATE EXISTS\`,
+  \`PROTECTED_ARCHIVE_EMPTY_TREE_VERIFIED paperless-scan 3\`;
+- \`PREPARE_DISABLED\`, \`NO_FILES_CHANGED\`,
+  \`ARCHIVE_COMMIT_NOT_AUTHORIZED\`;
+- Ansible localhost \`ok=4 changed=0 failed=0\`.
+
+This verifies the existing protected directory tree and static parent ACL
+classification, **not** actual effective LDAP users or an SMB session.
+
+New dedicated **nonmutating** follow-up:
+\`ansible/playbooks/audit-paperless-synology-effective-archive-access.yml\`
+uses the restricted, fixed-site Python reader
+\`ansible/files/paperless/audit_synology_effective_archive_access.py\`.
+The operator must explicitly name 2–8 distinct real NSS usernames;
+there are no guessed/default principals. On MountainCloud a root
+orchestrator resolves each identity, then drops UID/GID and initializes
+its actual NSS supplementary groups BEFORE probing the protected root,
+\`Eltern\` and \`Familie\` directories. It requires the actual
+\`paperless-sync\` account to open/list and have write+traverse access,
+and EVERY named non-owner account to have NEITHER directory-list nor
+write+traverse access. It only opens directories, lists entries and
+queries \`os.access\`; **no create/rename/unlink attempts**. Ansible
+suppresses identities and private filesystem output and prints status
+and counts only. Any missing NSS user, wrong group/UID, denied owner or
+unexpected nonowner permission BLOCKS release.
+
+Operator acceptance order: offline
+\`tests/test_paperless_effective_protected_archive_access.py\` plus Ansible
+syntax check; select real usernames after verifying NSS resolution; run
+the playbook with ignored NAS/vault vars plus
+\`-e '{"paperless_archive_denied_users":["<first-confirmed-NSS-user>","<second-confirmed-NSS-user>"]}'\`.
+Bracketed names are placeholders, not actual account recommendations.
+Expected verdict \`ARCHIVE_LOCAL_OWNER_ACCESS_VERIFIED\`,
+\`ARCHIVE_LOCAL_NEGATIVE_IDENTITIES_DENIED N\`,
+\`SMB_EFFECTIVE_ACCESS_NOT_TESTED\`, \`NO_FILES_CHANGED\`,
+\`ARCHIVE_COMMIT_NOT_AUTHORIZED\`.
+
+**Remaining material limitation:** A local root-orchestrated UID/GID
+test does NOT demonstrate what a DSM/SMB session can do, nor can it
+prove the inability to rename/remove the *protected archive entry*
+without a controlled disposable test. Native parent ACL inspection
+above remains necessary, and a separate isolated canary protocol is
+required before first live source rename. Existing real protected
+directories and documents MUST NOT be renamed to test permissions.
+No broad site gate or destructive purge is enabled.
