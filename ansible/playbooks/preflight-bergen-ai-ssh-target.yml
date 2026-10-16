@@ -1,23 +1,23 @@
 ---
 # Read-only backend readiness. Does not read secrets or modify SSH services.
 - name: Inspect Bergen-AI backend for existing-proxy SSH tunnel
-  hosts: venombox
+  hosts: "{{ site_pve_inventory_host | mandatory }}"
   become: true
   gather_facts: false
   tasks:
     - name: Require exact AI LXC identity
       ansible.builtin.command:
-        argv: [pct, exec, '110', --, hostname, -s]
+        argv: [pct, exec, "{{ site_ai_backend_vmid | mandatory }}", --, hostname, -s]
       register: ai_guest_name
       changed_when: false
-      failed_when: ai_guest_name.stdout | trim != 'bergen-ai'
+      failed_when: ai_guest_name.stdout | trim != (site_ai_backend_hostname | mandatory)
 
     - name: Collect sanitized IPv4 SSH and Open WebUI listeners
       ansible.builtin.command:
         argv:
           - pct
           - exec
-          - '110'
+          - "{{ site_ai_backend_vmid | mandatory }}"
           - --
           - python3
           - -c
