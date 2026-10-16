@@ -15,31 +15,31 @@ GitHub
   |
   +-- Bergen Platform Repository
         |
-        +-- bp-controller (Ansible Controller)
+        +-- automation-controller (Ansible Controller)
               |
               +-- Proxmox VE
                     |
                     +-- Debian LXCs
                           |
-                          +-- bergen-ai
+                          +-- AI service LXC
                           |     +-- Ollama
                           |     +-- Open WebUI
                           |     +-- OpenLDAP Authentication
                           |
-                          +-- bergen-mail
+                          +-- mail service LXC
                           |     +-- Postfix submission and local delivery
                           |     +-- Dovecot LMTP and IMAPS
                           |     +-- LDAP authentication
                           |
-                          +-- bergen-pihole
+                          +-- DNS filtering LXC
                           |     +-- Pi-hole DNS filtering
                           |     +-- Podman / Quadlet
                           |
-                          +-- bergen-evcc
+                          +-- energy management LXC
                           |     +-- Native EVCC service
                           |     +-- MQTT integration
                           |
-                          +-- daytrade
+                          +-- market data LXC
                           |     +-- Provider-neutral collector
                           |     +-- Alpaca / IBKR / replay adapters
                           |
@@ -50,7 +50,7 @@ Public Infrastructure
   +-- mail-gateway
         +-- Public SMTP edge policy
         +-- DKIM and internet delivery
-        +-- Private relay to bergen-mail
+        +-- Private relay to the mail service
 
 Synology NAS
   |
