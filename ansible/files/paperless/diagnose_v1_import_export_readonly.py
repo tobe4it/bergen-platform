@@ -80,6 +80,14 @@ def diagnose(mod):
             verified_id = mod.verify(document_name, record["sha256"], owner, group)
         except BaseException:
             fail("PAPERLESS_LIVE_VERIFICATION_FAILED")
+        # The existing reconciler returns None when the original filename
+        # has no matching Paperless document. That is materially different
+        # from a *different* positive document ID, including after a user
+        # intentionally removed an already imported document.
+        if verified_id is None:
+            fail("PAPERLESS_DOCUMENT_NOT_FOUND")
+        if type(verified_id) is not int or verified_id <= 0:
+            fail("PAPERLESS_VERIFIER_INVALID_RESULT")
         if verified_id != document_id:
             fail("PAPERLESS_DOCUMENT_ID_MISMATCH")
         counts["verified_v1_imports"] += 1
