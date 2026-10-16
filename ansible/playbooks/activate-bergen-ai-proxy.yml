@@ -16,9 +16,9 @@
     reverse_proxy_read_timeout: 120s
     reverse_proxy_hsts_enabled: false
     ai_proxy_unit: bergen-ai-backend-tunnel.service
-    ai_proxy_vhost: /etc/nginx/sites-available/50-internal-ai.thebergens.net.conf
-    ai_proxy_link: /etc/nginx/sites-enabled/50-internal-ai.thebergens.net.conf
-    ai_proxy_paperless_link: /etc/nginx/sites-enabled/50-internal-paperless.thebergens.net.conf
+    ai_proxy_vhost: "/etc/nginx/sites-available/50-internal-ai.{{ ai_proxy_hostname }}.conf"
+    ai_proxy_link: "/etc/nginx/sites-enabled/50-internal-ai.{{ ai_proxy_hostname }}.conf"
+    ai_proxy_paperless_link: "/etc/nginx/sites-enabled/50-internal-paperless.{{ paperless_proxy_hostname }}.conf"
 
   tasks:
     - name: Require explicit authorization and reviewed local settings
@@ -151,7 +151,7 @@
           - "import socket,sys; print(','.join(sorted({x[4][0] for x in socket.getaddrinfo(sys.argv[1], None, family=socket.AF_INET)})))"
           - '{{ item }}'
       loop:
-        - paperless.thebergens.net
+        - '{{ paperless_proxy_hostname }}'
         - '{{ ai_proxy_hostname }}'
       register: ai_proxy_dns
       changed_when: false
