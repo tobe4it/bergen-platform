@@ -1,8 +1,7 @@
 ---
-# Approved GROUPS-ONLY one-PDF commit. Each invocation is one source, not a
-# global gate. Private root runner creates and revokes 600s exact-PDF release.
-# NEVER use for private scopes, deleted documents, or an archive purge.
-# Full read-only lifecycle is executed again after any successful move.
+# Operator-authorized GROUPS-ONLY one-PDF commit, exact 10-minute gate.
+# A full independent lifecycle audit follows each successful individual move.
+# No private documents, no automatic purge, no broad site gate.
 - import_playbook: audit-paperless-import-lifecycle-15-26.yml
   vars:
     paperless_lifecycle_quiet: true
@@ -19,7 +18,7 @@
           - not ansible_check_mode
           - paperless_archive_only is defined
           - paperless_archive_only is string
-          - paperless_archive_only is match('^(Familie|Eltern)/[^/]+[.]pdf
+          - paperless_archive_only is match('^(Familie|Eltern)/[^/]+[.]pdf$')
           - (paperless_archive_commit | default(false)) is sameas true
           - synology_admin is defined
           - synology_config is defined
@@ -108,97 +107,6 @@
           - preview_worker_guard.stdout_lines == ['ARCHIVE_WORKER_VERIFIED_DISABLED']
           - (preview_worker_guard.stderr | trim) == ''
         fail_msg: "Reviewed NAS archive worker missing, changed or gate present; commit blocked"
-
-)
-          - (paperless_archive_commit | default(false)) is sameas false
-          - synology_admin is defined
-          - synology_config is defined
-          - synology_config.schema_version == 1
-          - synology_config.sync_user == 'paperless-sync'
-          - synology_config.state_parent is match('^/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$')
-          - lifecycle_report is defined
-          - "'IMPORT_LIFECYCLE_RECONCILED' in lifecycle_report.stdout_lines"
-          - "'DELETED_BY_USER 2' in lifecycle_report.stdout_lines"
-          - "'ARCHIVE_NOT_AUTHORIZED' in lifecycle_report.stdout_lines"
-          - lifecycle_nas_live is defined
-          - lifecycle_paperless_live is defined
-          - lifecycle_archived_live is defined
-        fail_msg: "Only one verified NAS source and read-only preview are permitted"
-
-    - name: Generate private exact-match source/import proof from verified lifecycle
-      ansible.builtin.command:
-        argv:
-          - /usr/bin/python3
-          - "{{ playbook_dir }}/../files/paperless/select_one_verified_lifecycle_archive_preview.py"
-        stdin: >-
-          {{ {'nas': lifecycle_nas_live.stdout,
-              'paperless_lifecycle': lifecycle_paperless_live.stdout,
-              'archived': lifecycle_archived_live.stdout,
-              'lifecycle_report': lifecycle_report.stdout,
-              'only': paperless_archive_only} | to_json }}
-      delegate_to: localhost
-      become: false
-      register: preview_private_proof
-      changed_when: false
-      no_log: true
-
-    - name: Hash reviewed local disabled archive worker
-      ansible.builtin.stat:
-        path: "{{ playbook_dir }}/../files/paperless/synology_same_volume_archive_move.py"
-        checksum_algorithm: sha256
-      delegate_to: localhost
-      become: false
-      register: preview_worker_local
-      changed_when: false
-
-    - name: Require local reviewed worker to be a regular file
-      ansible.builtin.assert:
-        that:
-          - preview_worker_local.stat.exists
-          - preview_worker_local.stat.isreg
-          - not preview_worker_local.stat.islnk
-
-    - name: Verify staged NAS worker bytes/ownership and all commit gates absent
-      ansible.builtin.command:
-        argv:
-          - ssh
-          - -T
-          - -o
-          - BatchMode=yes
-          - -o
-          - StrictHostKeyChecking=yes
-          - -o
-          - ConnectTimeout=15
-          - "{{ synology_admin }}"
-          - sudo -n /bin/sh -s
-        stdin: |
-          set -eu
-          PARENT={{ synology_config.state_parent | quote }}
-          BIN="$PARENT/bin"
-          TARGET="$BIN/synology_same_volume_archive_move.py"
-          test ! -L "$PARENT" && test ! -L "$BIN" && test ! -L "$TARGET"
-          test "$(stat -c '%u:%a' "$PARENT")" = "0:755"
-          test "$(stat -c '%u:%a' "$BIN")" = "0:755"
-          test "$(stat -c '%u:%a' "$TARGET")" = "0:644"
-          for gate in archive-move.enabled archive-move.homes.enabled archive-move.paperless-scan.enabled; do
-            test ! -e "$PARENT/$gate" && test ! -L "$PARENT/$gate"
-          done
-          test "$(sha256sum "$TARGET" | cut -d ' ' -f 1)" = {{ preview_worker_local.stat.checksum | quote }}
-          echo ARCHIVE_WORKER_VERIFIED_DISABLED
-      delegate_to: localhost
-      become: false
-      register: preview_worker_guard
-      changed_when: false
-      no_log: true
-
-    - name: Require exact staged worker with disabled release
-      ansible.builtin.assert:
-        that:
-          - preview_worker_guard.rc == 0
-          - preview_worker_guard.stdout_lines == ['ARCHIVE_WORKER_VERIFIED_DISABLED']
-          - (preview_worker_guard.stderr | trim) == ''
-        fail_msg: "Reviewed NAS archive worker missing, changed or enabled; preview blocked"
-
 
     - name: Hash exact one-group-PDF release runner code
       ansible.builtin.stat:
