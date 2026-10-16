@@ -40,4 +40,4 @@ ansible/vars/ai-oidc.vault.yml*
 
 # All machine-specific inventory, DNS, certificate paths and endpoints
 ansible/group_vars/all/site.local.yml
-ansible/group_vars/all/site.local.yml*
+ansible/group_vars/all/site.local.yml~
