@@ -9,12 +9,16 @@
       ansible.builtin.assert:
         that:
           - site_pve_inventory_host is defined
-          - inventory_hostname == site_pve_inventory_host
+          - site_pve_inventory_host in groups.get('proxmox_hosts', [])
           - site_ai_backend_vmid is defined
           - site_ai_backend_hostname is defined
         fail_msg: >-
           The reviewed local Proxmox host or required site variables are missing;
           refusing to inspect any unrelated node.
+
+    - name: Skip Proxmox hosts other than the locally selected target
+      ansible.builtin.meta: end_host
+      when: inventory_hostname != site_pve_inventory_host
 
     - name: Require exact AI LXC identity
       ansible.builtin.command:
