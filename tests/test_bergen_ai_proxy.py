@@ -37,6 +37,22 @@ class BergenAiProxyContracts(unittest.TestCase):
         self.assertIn("site_ai_backend_vmid is defined", guard)
         self.assertIn("site_ai_backend_hostname is defined", guard)
 
+    def test_ai_lxc_hostname_comes_from_site_local_settings(self):
+        path = ROOT / "ansible/group_vars/all/bergen-ai.yml"
+        config = yaml.safe_load(path.read_text())
+        self.assertEqual(
+            config["lxc_hostname"],
+            "{{ site_ai_backend_hostname | mandatory }}",
+        )
+
+    def test_oidc_targets_unambiguous_logical_ai_group(self):
+        path = ROOT / "ansible/playbooks/configure-open-webui-oidc.yml"
+        play = yaml.safe_load(path.read_text())[0]
+        self.assertEqual(play["hosts"], "ai_nodes")
+        conditions = play["tasks"][0]["ansible.builtin.assert"]["that"]
+        self.assertIn("groups.get('ai_nodes', []) | length == 1", conditions)
+        self.assertIn("site_ai_backend_hostname is defined", conditions)
+
     def test_activation_requires_approval_and_reuses_site_template(self):
         play = yaml.safe_load(ACTIVATE.read_text())[0]
         self.assertEqual(play["hosts"], "reverse_proxy_nodes")
