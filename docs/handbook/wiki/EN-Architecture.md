@@ -39,7 +39,7 @@ For each service record its purpose, actual host and guest ID, address, user-fac
 
 Record the active mailbox source explicitly. A newly installed backend and a repaired public certificate do not prove that every mailbox has migrated. Likewise, a Paperless feature branch does not prove an accepted archive is running.
 
-Typical groups to record are network and telephony; NAS/DNS/LDAP; Proxmox; controller; mail gateway and backend; Pi-hole; Nextcloud; EVCC; MQTT/Homey; Paperless; proxy; logs; and any AI, MQ or market-data components.
+Typical groups to record are network and telephony; NAS/DNS/LDAP; Proxmox; controller; mail gateway and backend; Pi-hole; Nextcloud; EVCC; MQTT/Homey; Paperless; proxy; logs; and any AI or market-data components.
 
 ## Set priorities
 

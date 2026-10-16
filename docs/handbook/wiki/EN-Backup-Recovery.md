@@ -34,7 +34,7 @@ Keep suitable history, a copy outside the primary system and a tested decryption
 | Nextcloud | Data, database, configuration, customization, apps, external storage and relevant keys |
 | Paperless | Documents, database, configuration, exports, exact versions and intake recovery |
 | EVCC / MQTT | EVCC database/configuration; broker users, ACLs, configuration and necessary persistence |
-| AI / MQ / logs | Deliberately selected history/settings, MQ persistence/PKI and relevant retained logs |
+| AI / logs | Deliberately selected history/settings and relevant retained logs |
 
 Additional managed LXC volumes need explicit backup inclusion. Bind/device mounts are not included as ordinary managed guest data and need another method. `backup=1` is a configuration indication, not evidence of a completed or readable backup. Check logs and actual recovered content.
 

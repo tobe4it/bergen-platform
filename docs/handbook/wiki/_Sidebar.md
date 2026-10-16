@@ -7,6 +7,7 @@
 
 [Start](DE-Start.md)
 
+- [Neu anfangen: eigene IT aufbauen](DE-Self-Hosting.md)
 - [Soforthilfe](DE-Emergency.md)
 - [Architektur](DE-Architecture.md)
 - [Netzwerk und Identität](DE-Network-Identity.md)
@@ -23,6 +24,7 @@
 
 [Start](EN-Start.md)
 
+- [Start from zero: self-hosting](EN-Self-Hosting.md)
 - [Emergency](EN-Emergency.md)
 - [Architecture](EN-Architecture.md)
 - [Networks and identities](EN-Network-Identity.md)

@@ -5,13 +5,17 @@
 
 You do not need to be a Linux expert to use the platform or prepare a handover. This handbook explains each system's role, its dependencies and the point at which a trained caretaker should take over.
 
-## Three reading paths
+## Four reading paths
 
+- **No deployment yet?** [Build your own self-hosted IT from scratch](EN-Self-Hosting.md): understand prerequisites, practise in a lab, verify a first installation and expand gradually.
 - **Outage or estate handover:** Start with emergency help, find the private contact and recovery route, and preserve existing data.
 - **Everyday use:** Read the application sections, use authorized personal accounts, and describe failures accurately.
 - **New caretaker:** Study fundamentals, automation and recovery; inventory the actual deployment and prove isolated restoration.
 
 ## Contents
+
+**Starting from zero:** [Self-hosting learning and setup path](EN-Self-Hosting.md).
+
 1. [Emergency](EN-Emergency.md)
 
 2. [Architecture](EN-Architecture.md)

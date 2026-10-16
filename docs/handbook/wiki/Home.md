@@ -6,6 +6,11 @@ An approachable guide to using, understanding and taking over a Bergen Platform 
 - [Deutsch: Bergen-Platform für Einsteiger](DE-Start.md)
 - [English: Bergen Platform for beginners](EN-Start.md)
 
+## Noch keine Installation? / No installation yet?
+
+- [Deutsch: Von null zur eigenen IT](DE-Self-Hosting.md)
+- [English: From zero to self-hosted IT](EN-Self-Hosting.md)
+
 **Public edition 1.0 / Öffentliche Ausgabe 1.0, 2026-10-14.**
 
 The public handbook explains systems and procedures. Every deployment keeps its actual inventory, contacts, credentials and recovery evidence privately. Blank emergency printouts are public; completed ones never are.

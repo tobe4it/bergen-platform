@@ -150,7 +150,7 @@ systemctl --failed --no-pager
 Der erste Aufruf zeigt laufende Container, der zweite auch gestoppte. Root und ein normaler Benutzer können unterschiedliche Podman-Container sehen. Ein leerer Befund allein beweist deshalb nicht, dass die Anwendung fehlt.
 
 ### Dauerhafte Daten erkennen
-Die Betreuung dokumentiert für jeden Container Image-Version, eingebundene Pfade und Backup-Zuordnung. Bei Pi-hole müssen Einstellungen erhalten bleiben; bei MQ die Managerdaten. Paperless soll Dokumente und Datenbank dauerhaft getrennt vom austauschbaren Image ablegen.
+Die Betreuung dokumentiert für jeden Container Image-Version, eingebundene Pfade und Backup-Zuordnung. Bei Pi-hole müssen Einstellungen erhalten bleiben. Paperless soll Dokumente und Datenbank dauerhaft getrennt vom austauschbaren Image ablegen.
 
 Ein **Reverse Proxy** nimmt Webanfragen entgegen und leitet sie an eine interne Anwendung weiter. Er kann HTTPS/TLS betreuen, während die Anwendung auf einem anderen Port läuft. Bei einem Proxy-Dienst sind deshalb öffentliche Namen, TLS-Zuständigkeit und interne Ziele gemeinsam zu erfassen.
 

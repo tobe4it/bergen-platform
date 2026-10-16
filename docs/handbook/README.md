@@ -6,6 +6,7 @@ not published: it contains private infrastructure details.
 
 - [Deutsch](wiki/DE-Start.md)
 - [English](wiki/EN-Start.md)
+- [Start from zero / Von null anfangen](wiki/DE-Self-Hosting.md) ([English](wiki/EN-Self-Hosting.md))
 - [German blank emergency printout](print/Emergency-Secrets-DE.pdf)
 - [English blank emergency printout](print/Emergency-Secrets-EN.pdf)
 
@@ -14,6 +15,9 @@ private inventories, recovery codes, passwords and keys remain offline or in a
 protected private system. Fill the emergency form by hand after printing. For
 secrets already managed by a vault/password manager, record a reference rather
 than duplicate the value. The form is not a replacement for a recoverable vault.
+
+The beginner path starts before installation. Specialist IBM MQ material stays
+in the technical repository documentation and is outside this user wiki.
 
 ## Editing and publishing
 
@@ -58,6 +62,10 @@ operation; integrate that navigation manually instead of overwriting it.
 An initialized wiki and valid authentication are prerequisites. Never paste a
 token into the command line or a repository file; use your existing credential
 manager or authenticated SSH setup.
+
+When editing through the GitHub web editor, use spaces in page titles
+(e.g. `DE Self Hosting`) so GitHub creates `DE-Self-Hosting.md`. Typing literal
+hyphens in a title produces Unicode hyphens and breaks the source links.
 
 ## Print templates
 
