@@ -149,3 +149,57 @@ Expected markers: `V1_VERIFIED_ARCHIVE_DRY_RUN_CANDIDATES N`,
 A listed candidate is a snapshot in time, not approval to move it.
 Never create site release gates or use --commit from this report.
 A fresh one-file dry-run must repeat the checks before any later approval.
+
+
+## Verified 15/26 deletion lifecycle in the v1 candidate list (16.10.2026)
+
+The first v1 list attempt stopped at \`export_imported_scans.py\`, because
+two historically \`IMPORTED\` bridge receipts still exist after deliberate
+deletions. The LXC read-only diagnostic returned
+\`PAPERLESS_DOCUMENT_NOT_FOUND\`; no receipt was edited or excused.
+
+The independent **live** \`audit-paperless-import-lifecycle-15-26.yml\`
+then passed with \`PAPERLESS_LIVE_IMPORTED 22\`, \`NAS_SENT_VERIFIED 22\`,
+\`DELETED_BY_USER 2\`, \`IMPORT_LIFECYCLE_RECONCILED\`,
+\`NO_RECEIPTS_CHANGED\`, \`NO_FILES_CHANGED\`. It checked the two specific
+published/hashed user-deletion journals, their NAS source absence, and
+live Paperless absence; all other 22 sources matched real imports.
+It did **not** grant archive authorization.
+
+The corrected \`list-paperless-v1-archive-candidates.yml\` imports this
+full audited playbook, requiring a fresh successful run. It sets
+\`paperless_lifecycle_quiet=true\`, so the imported lifecycle check
+suppresses raw receipt/identifier logs; otherwise its normal standalone
+output is unchanged. The pure controller tool
+\`list_verified_lifecycle_archive_candidates.py\` accepts only the
+registered live NAS inventory, the live status-tagged lifecycle evidence
+and the success report from that run. It validates that deletions are
+**exactly** pinned records 15 and 26, strips only those two
+\`DELETED_BY_USER\` records, then reuses the existing exact v1 sender/import
+selector for **all** remaining files. Unknown deletion, missing audit
+marker, mismatch, duplicate or extra source blocks the whole list.
+Candidates are moment-in-time scope/original PDF names only, *not*
+authorization to move the files.
+
+First in \`~/bergen-platform-pr81\` after a clean fast-forward:
+
+    python3 -m unittest discover -s tests -p 'test_paperless_list_verified_lifecycle_archive_candidates.py' -v
+
+    ansible-playbook -i ansible/inventory.yml \
+      -i ~/bergen-platform/ansible/inventory.local.yml \
+      ansible/playbooks/list-paperless-v1-archive-candidates.yml --syntax-check
+
+Only after success may the operator rerun the candidate playbook without
+\`--syntax-check\`, using \`--vault-id paperless@prompt\` and the two
+site-local var files. Expected success: 22 \`CANDIDATE\` rows,
+\`DELETED_BY_USER_EXCLUDED 2\`, \`CANDIDATE_AUDIT_COMPLETE\`,
+\`NO_FILES_CHANGED\`, \`ARCHIVE_NOT_AUTHORIZED\`, \`PURGE_NOT_AUTHORIZED\`.
+The count 22 is expected from the prior separate live audit, **not**
+yet proof of this newly modified playbook; verify actual output.
+
+IMPORTANT: the existing \`archive-paperless-verified-import.yml\`
+still invokes the original strict \`export_imported_scans.py\`; it is
+**not** ready for the one-file dry-run while historical imported/deleted
+receipts exist. Adapt that path to the independently verified lifecycle
+separately, with fresh tests and without a commit gate, before attempting
+any source dry-run. Do not create release flag files or activate purge.
