@@ -24,6 +24,7 @@
           - "'NO_FILES_CHANGED' in lifecycle_report.stdout_lines"
           - lifecycle_nas_live is defined
           - lifecycle_paperless_live is defined
+          - lifecycle_archived_live is defined
         fail_msg: "Lifecycle evidence unavailable; source files cannot be selected"
 
     - name: Select only currently imported NAS original names under exact v1 proof join
@@ -34,6 +35,7 @@
         stdin: >-
           {{ {'nas': lifecycle_nas_live.stdout,
               'paperless_lifecycle': lifecycle_paperless_live.stdout,
+              'archived': lifecycle_archived_live.stdout,
               'lifecycle_report': lifecycle_report.stdout} | to_json }}
       delegate_to: localhost
       become: false
