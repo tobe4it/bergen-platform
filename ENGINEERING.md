@@ -35,6 +35,20 @@ Every task should report **changed** only when the managed system has actually c
 
 ---
 
+## Privacy and portability
+
+All versioned examples, tests, default variables, playbooks, release notes and
+documentation must use site-neutral data. Never commit personal or production
+domains, internal DNS realms, IP addresses, mailboxes, concrete Proxmox host
+identities, or selfHOST record identifiers. Use reserved example domains and
+documentation networks; keep real values in ignored site-local YAML and Vault
+files. Do not include real site details in commit or PR messages.
+
+See [Site-local configuration](docs/SITE-LOCAL-CONFIGURATION.md) for the
+deployment boundary and migration steps.
+
+---
+
 ## Declarative Infrastructure
 
 Infrastructure is described as desired state.
