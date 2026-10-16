@@ -220,6 +220,19 @@ def test_isolated_recovery_rejects_mismatched_state_path(monkeypatch):
         recover.main(["--apply", "--instance", "secondary-zone"])
 
 
+def test_recovery_playbook_requires_explicit_instance_selector():
+    import yaml
+    path = ROOT / "ansible/playbooks/selfhost-acme-reconcile.yml"
+    plays = yaml.safe_load(path.read_text())
+    controller = repr(plays[0]["tasks"])
+    remote = repr(plays[1]["tasks"])
+    assert "selfhost_acme_reconcile_instance" in controller
+    assert "selfhost_acme_instance" in controller
+    assert "--instance" in remote
+    assert "selfhost_acme_reconcile_instance is defined" in remote
+    assert "selfhost_acme_reconcile_apply | default(false) | bool" in remote
+
+
 def test_no_site_identifiers_or_api_credentials_in_recovery_source():
     code = (SCRIPTS / "selfhost_acme_recover.py").read_text()
     assert "11111111" not in code and "22222222" not in code
