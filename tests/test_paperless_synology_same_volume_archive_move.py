@@ -351,12 +351,62 @@ class SameVolumeArchiveTests(unittest.TestCase):
                     target.parts[-len(scope.split("/")):],
                     tuple(scope.split("/")))
 
+    def make_release(self, *, site="paperless-scan", scope=SCOPE,
+                     source=NAME, overrides=None):
+        now = int(time.time())
+        record = {
+            "schema_version": 1, "release": "one_original_pdf",
+            "site": site, "scope": scope, "source": source,
+            "sender_receipt": self.proof["sender_receipt"],
+            "bridge_receipt": self.proof["bridge_receipt"],
+            "sha256": self.proof["sha256"],
+            "document_id": self.proof["document_id"],
+            "issued_at": now, "expires_at": now + 600,
+        }
+        if overrides:
+            record.update(overrides)
+        return record
+
+    def add_gate(self, record, *, site="paperless-scan"):
+        gate = self.base / ("archive-move." + site + ".enabled")
+        gate.write_text(json.dumps(record, sort_keys=True,
+                                   separators=(",", ":"),
+                                   ensure_ascii=True) + "\n")
+        gate.chmod(0o600)
+        return gate
+
+    def with_fake_root_gate(self, gate, callback):
+        original_lstat, original_fstat = Path.lstat, os.fstat
+        def as_root(st):
+            # Preserve real inode, device, link and size values, but simulate
+            # root-owned release manifest without requiring root test user.
+            return SimpleNamespace(st_mode=st.st_mode, st_uid=0, st_gid=0,
+                                   st_nlink=st.st_nlink, st_size=st.st_size,
+                                   st_dev=st.st_dev, st_ino=st.st_ino)
+        def lstat(path):
+            st = original_lstat(path)
+            return as_root(st) if path == gate else st
+        def fstat(fd):
+            st = original_fstat(fd)
+            return as_root(st) if st.st_ino == original_lstat(gate).st_ino else st
+        with patch.object(Path, "lstat", lstat), patch.object(move.os, "fstat", fstat):
+            return callback()
+
+    def check_gate(self, gate, *, site="paperless-scan", scope=SCOPE,
+                   source=NAME, proof=None):
+        return self.with_fake_root_gate(
+            gate, lambda: move._require_site_commit_gate(
+                self.base, site, scope, source,
+                self.proof if proof is None else proof))
+
     def test_site_commit_gates_absent_by_default(self):
-        for site in ("homes", "paperless-scan"):
+        for site, scope in (("homes", "Privat/thomas"),
+                            ("paperless-scan", "Familie")):
             with self.subTest(site=site):
                 with self.assertRaisesRegex(
                         RuntimeError, "ARCHIVE_SITE_GATE_NOT_APPROVED"):
-                    move._require_site_commit_gate(self.base, site)
+                    move._require_site_commit_gate(
+                        self.base, site, scope, NAME, self.proof)
 
     def test_legacy_global_gate_never_activates_site(self):
         legacy = self.base / "archive-move.enabled"
@@ -364,37 +414,97 @@ class SameVolumeArchiveTests(unittest.TestCase):
         legacy.chmod(0o600)
         with self.assertRaisesRegex(
                 RuntimeError, "LEGACY_ARCHIVE_GATE_MUST_BE_ABSENT"):
-            move._require_site_commit_gate(self.base, "paperless-scan")
+            move._require_site_commit_gate(
+                self.base, "paperless-scan", SCOPE, NAME, self.proof)
+
+    def test_empty_site_gate_no_longer_authorizes_any_file(self):
+        gate = self.base / "archive-move.paperless-scan.enabled"
+        gate.write_bytes(b"")
+        gate.chmod(0o600)
+        with self.assertRaisesRegex(
+                RuntimeError, "ARCHIVE_SITE_GATE_NOT_APPROVED"):
+            self.check_gate(gate)
 
     def test_symlink_or_wrong_mode_site_gate_is_rejected(self):
         gate = self.base / "archive-move.paperless-scan.enabled"
         gate.symlink_to(self.state / "sync.lock")
         with self.assertRaisesRegex(RuntimeError, "ARCHIVE_SITE_GATE_NOT_APPROVED"):
-            move._require_site_commit_gate(self.base, "paperless-scan")
+            move._require_site_commit_gate(
+                self.base, "paperless-scan", SCOPE, NAME, self.proof)
         gate.unlink()
         gate.write_bytes(b"")
         gate.chmod(0o644)
         with self.assertRaisesRegex(RuntimeError, "ARCHIVE_SITE_GATE_NOT_APPROVED"):
-            move._require_site_commit_gate(self.base, "paperless-scan")
+            move._require_site_commit_gate(
+                self.base, "paperless-scan", SCOPE, NAME, self.proof)
 
-    def test_gate_cannot_authorize_other_site(self):
-        gate = self.base / "archive-move.homes.enabled"
-        gate.write_bytes(b"")
+    def test_valid_exact_source_release_is_accepted(self):
+        gate = self.add_gate(self.make_release())
+        self.assertTrue(self.check_gate(gate))
+
+    def test_release_is_bound_to_exact_filename_and_scope(self):
+        gate = self.add_gate(self.make_release())
+        with self.assertRaisesRegex(RuntimeError, "ARCHIVE_GATE_WRONG_SOURCE_OR_PROOF"):
+            self.check_gate(gate, source="Other.pdf")
+        with self.assertRaisesRegex(RuntimeError, "INVALID_ARCHIVE_SITE"):
+            self.check_gate(gate, scope="Privat/thomas")
+
+    def test_release_is_bound_to_document_id_receipts_and_digest(self):
+        gate = self.add_gate(self.make_release())
+        for key, value in (
+                ("document_id", 99),
+                ("sender_receipt", "d"*64 + ".json"),
+                ("bridge_receipt", "f"*24 + ".json"),
+                ("sha256", "f"*64)):
+            with self.subTest(key=key), self.assertRaisesRegex(
+                    RuntimeError, "ARCHIVE_GATE_WRONG_SOURCE_OR_PROOF"):
+                self.check_gate(gate, proof=dict(self.proof, **{key: value}))
+
+    def test_release_expires_and_future_release_denied(self):
+        now = int(time.time())
+        for attrs in (
+                {"issued_at": now - 901, "expires_at": now + 10},
+                {"issued_at": now, "expires_at": now - 1},
+                {"issued_at": now + 100, "expires_at": now + 700},
+                {"issued_at": now, "expires_at": now + 901},
+        ):
+            with self.subTest(attrs=attrs):
+                gate = self.add_gate(self.make_release(overrides=attrs))
+                with self.assertRaisesRegex(
+                        RuntimeError, "ARCHIVE_GATE_EXPIRED_OR_INVALID"):
+                    self.check_gate(gate)
+
+    def test_extra_manifest_field_is_denied(self):
+        gate = self.add_gate(self.make_release(overrides={"wildcard": True}))
+        with self.assertRaisesRegex(
+                RuntimeError, "ARCHIVE_GATE_WRONG_SOURCE_OR_PROOF"):
+            self.check_gate(gate)
+
+    def test_duplicate_json_gate_field_is_denied(self):
+        gate = self.base / "archive-move.paperless-scan.enabled"
+        gate.write_text('{"schema_version":1,"schema_version":2}\n')
         gate.chmod(0o600)
-        original = Path.lstat
+        with self.assertRaisesRegex(
+                RuntimeError, "DUPLICATE_ARCHIVE_GATE_FIELD"):
+            self.check_gate(gate)
 
-        def simulate_root_gate(path):
-            st = original(path)
-            if path == gate:
-                return SimpleNamespace(st_mode=st.st_mode, st_uid=0,
-                                       st_nlink=st.st_nlink)
-            return st
+    def test_site_gate_does_not_authorize_other_site(self):
+        gate = self.add_gate(
+            self.make_release(site="homes", scope="Privat/thomas"),
+            site="homes")
+        self.assertTrue(self.check_gate(
+            gate, site="homes", scope="Privat/thomas"))
+        with self.assertRaisesRegex(RuntimeError, "ARCHIVE_SITE_GATE_NOT_APPROVED"):
+            move._require_site_commit_gate(
+                self.base, "paperless-scan", SCOPE, NAME, self.proof)
 
-        with patch.object(Path, "lstat", simulate_root_gate):
-            move._require_site_commit_gate(self.base, "homes")
-            with self.assertRaisesRegex(
-                    RuntimeError, "ARCHIVE_SITE_GATE_NOT_APPROVED"):
-                move._require_site_commit_gate(self.base, "paperless-scan")
+    def test_noncanonical_gate_is_denied(self):
+        gate = self.base / "archive-move.paperless-scan.enabled"
+        gate.write_text(json.dumps(self.make_release(), indent=2) + "\n")
+        gate.chmod(0o600)
+        with self.assertRaisesRegex(
+                RuntimeError, "ARCHIVE_GATE_NOT_CANONICAL"):
+            self.check_gate(gate)
 
     def test_disabled_worker_staging_rejects_both_site_gates(self):
         stage_yaml = (CODE.parent.parent / "playbooks" /
