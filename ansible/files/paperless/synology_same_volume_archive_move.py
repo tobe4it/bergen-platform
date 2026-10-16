@@ -128,7 +128,7 @@ def _validate_archive_scope_path(archive_scope_dir, source_dir, scope):
             "ARCHIVE_NOT_IN_PROTECTED_SITE")
 
 
-def _require_site_commit_gate(state_parent, site, scope, filename, proof):
+def _require_site_commit_gate(state_parent, site, scope, filename, proof, release_fd=None):
     """Require a short-lived, root-owned, *exact-one-PDF* release manifest.
 
     A legacy empty 0600 site gate MUST NOT authorize all files at a site.
@@ -150,19 +150,24 @@ def _require_site_commit_gate(state_parent, site, scope, filename, proof):
     require(stat.S_ISREG(st.st_mode) and st.st_uid == 0 and st.st_gid == 0
             and st.st_nlink == 1 and stat.S_IMODE(st.st_mode) == 0o600
             and 0 < st.st_size <= 4096, "ARCHIVE_SITE_GATE_NOT_APPROVED")
-    fd = os.open(gate, os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC)
+    # 0600 gate is deliberately unreadable by paperless-sync. Only the
+    # reviewed root one-shot runner can open it and delegate its read-only fd.
+    require(type(release_fd) is int and release_fd >= 3,
+            "ARCHIVE_RELEASE_DESCRIPTOR_REQUIRED")
     try:
-        opened = os.fstat(fd)
-        require((st.st_dev, st.st_ino, st.st_size, st.st_uid, st.st_gid,
-                 st.st_mode, st.st_nlink) ==
-                (opened.st_dev, opened.st_ino, opened.st_size, opened.st_uid,
-                 opened.st_gid, opened.st_mode, opened.st_nlink),
-                "ARCHIVE_GATE_CHANGED")
-        with os.fdopen(fd, "rb", closefd=False) as stream:
-            raw = stream.read(4097)
-        require(len(raw) == st.st_size, "ARCHIVE_GATE_CHANGED")
-    finally:
-        os.close(fd)
+        opened = os.fstat(release_fd)
+        raw = os.pread(release_fd, 4097, 0)
+    except (OSError, ValueError):
+        raise RuntimeError("ARCHIVE_RELEASE_DESCRIPTOR_UNREADABLE") from None
+    require(stat.S_ISREG(opened.st_mode) and opened.st_uid == 0 and
+            opened.st_gid == 0 and opened.st_nlink == 1 and
+            stat.S_IMODE(opened.st_mode) == 0o600 and
+            (st.st_dev, st.st_ino, st.st_size, st.st_uid, st.st_gid,
+             st.st_mode, st.st_nlink) ==
+            (opened.st_dev, opened.st_ino, opened.st_size, opened.st_uid,
+             opened.st_gid, opened.st_mode, opened.st_nlink),
+            "ARCHIVE_RELEASE_DESCRIPTOR_MISMATCH")
+    require(len(raw) == st.st_size, "ARCHIVE_GATE_CHANGED")
     def unique(pairs):
         result = {}
         for key, value in pairs:
@@ -512,7 +517,10 @@ def main():
     parser.add_argument("--state-parent", required=True)
     parser.add_argument("--only", required=True, help="exact Scope/Filename.pdf")
     parser.add_argument("--commit", action="store_true")
+    parser.add_argument("--release-fd", type=int)
     args = parser.parse_args()
+    require(args.commit or args.release_fd is None,
+            "RELEASE_DESCRIPTOR_FORBIDDEN_IN_DRY_RUN")
 
     parent = Path(args.state_parent)
     require(parent.is_absolute() and parent.parent != parent
@@ -542,7 +550,8 @@ def main():
             "LEGACY_ARCHIVE_GATE_MUST_BE_ABSENT")
     proof = _read_json_stdin()
     if args.commit:
-        _require_site_commit_gate(parent, site, scope, filename, proof)
+        _require_site_commit_gate(parent, site, scope, filename, proof,
+                                  release_fd=args.release_fd)
     result = archive_one(source_dir, SETTINGS["state"], scope, filename, proof,
                          archive_scope_dir=archive_scope_dir,
                          commit=args.commit,
