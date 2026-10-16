@@ -76,24 +76,34 @@ Ausführung:
 python3 -m unittest discover -s tests -p 'test_paperless_v2_quarantine_fixture.py' -v
 ```
 
-## Erste Zielstufe: geprüfte Archivverschiebung ohne automatische Bereinigung
+## Erste Zielstufe: geschützter NAS-Archiv-Move, ohne Auto-Purge
 
-Die erste gewünschte Funktion ist **nicht** ein 30-Tage-Purge:
-nach unabhängig und frisch verifiziertem Paperless-Import wird
-das Original in das private NAS-Archiv kopiert. Erst nach
-dauerhafter SHA-256- und Journalbestätigung wird es aus
-dem Scan-Eingangsordner entfernt; im Archiv bleibt es für
-mindestens 30 Tage und ohne freigegebenen Purge sogar länger.
-Dies ist wegen der getrennten Btrfs-Subvolumes keine atomare
-`rename`-Operation. Ein Source-`unlink` ist bereits eine
-Löschung am Ursprungsort und bleibt voll testpflichtig.
+**Freigaben trennen:** Ein nachweislich in Paperless importiertes Original
+kann auch zwischen zwei täglichen Backups in einen geschützten NAS-Archivpfad
+verschoben werden. Der Ortswechsel erzeugt keine gewollte Datenvernichtung;
+das Original bleibt erhalten. Ein unmittelbar zuvor erfolgreiches Backup
+ist daher **kein hartes Gate für diesen ersten Schritt**.
 
-Ein automatischer Retention-/Expiry-Dienst gehört **nicht** zur
-ersten Freigabe, und kein Ablaufdatum allein darf jemals ein
-Unlink im Archiv auslösen. Die 19 historischen v1-Receipts
-bleiben erhalten. Alle produktiven Archiv- und Inbox-
-Schreiboperationen sind bis zum kontrollierten Live-Nachweis
-weiterhin gesperrt.
+Auf MountainCloud sind für alle vier Scopes geschützte Archivpfade **auf
+dem jeweiligen gleichen Btrfs-Subvolume wie der Scanner-Eingang**
+vorbereitet. Der bereits installierte, aber deaktivierte v1-Worker
+`synology_same_volume_archive_move.py` verwendet dafür ausschließlich
+atomisches `renameat2(RENAME_NOREPLACE)`, niemals Copy-Delete.
+Die beiden produktiven Commit-Gates sind weiterhin **nicht gesetzt**.
+
+Die v2-Funktion `v2_quarantine_fixture_only.py` testet dagegen einen
+**anderen**, früher konzipierten Copy-/Unlink-Pfad ausschließlich unter
+`/tmp`. Ihre Sicherheitsnachweise sind **kein** Produktionsnachweis für
+eine v2-Archivverschiebung. Vor der ersten produktiven Freigabe müssen
+v2-Receipt, authentifizierter IMPORTED-Beleg, Dateisignatur,
+Paperless-Eigentümer/ACL, Lock, Archivjournal, Rename-Race-/Crash-Recovery
+und ein isolierter Live-Canary überprüft sein. Ein bloßer erfolgreicher
+Transportstatus `SENT` reicht nicht.
+
+Die Bezeichnung „30-Tage-Archiv“ bedeutet zunächst **mindestens** 30 Tage
+Aufbewahrung. Es gibt keinen freigegebenen automatischen Purge; nach Ablauf
+von 30 Tagen bleibt die PDF erhalten, bis der eigene, strengere
+Lösch-/Backup-/Restore-Freigabeprozess nachweislich bestanden ist.
 
 ## Was für die produktive Archivierung zwingend noch fehlt
 
@@ -117,9 +127,11 @@ abzunehmen:
   `unlink`-Abstand ist für eine unkontrollierte parallele
   Umgebung nicht ausreichend; positive und negative Tests
   müssen dies beweisen oder durch eine gesperrte Inbox beheben.
-- **Wirklich wiederherstellbares Backup** von Papierlos-Daten,
-  NAS-Journal und Quarantänebestand, kein alleiniger Tasklog-
-  oder `tar -tf`-Nachweis.
+- **Wirklich wiederherstellbares Backup** von Paperless-Daten,
+  NAS-Journal und Originalarchiv ist für den **späteren endgültigen Purge**
+  ein hartes Gate, **nicht** für den zuvor unabhängig geprüften atomaren
+  Ortswechsel in das geschützte NAS-Archiv. Backups sind dennoch weiterhin
+  operativ dringend erforderlich.
 - **Mindestens 30 volle Tage Archivaufbewahrung** ab einem
   unveränderlichen, dauerhaft aufgezeichneten ARCHIVED-Zeitstempel.
   Für die erste Betriebsfreigabe bleibt eine automatische
@@ -132,8 +144,11 @@ abzunehmen:
   Bis zur manuellen Klärung: fail closed, nie blind wiederholen.
 - **Isolierter Live-Test mit eigens erzeugter Test-PDF**:
   Scanner-Inbox → authenticated `SENT` → Paperless `IMPORTED`
-  → Quarantäne/Journal/Backup → genaues Unlink → Restore,
-  einschließlich Absturz- und negativer ACL-Prüfungen.
+  → geschützter same-subvolume-Move/Archivjournal → Nachweis, dass
+  Original sicher im Archiv liegt → Recovery-Test, einschließlich
+  Absturz- und negativer ACL-Prüfungen. Separat, erst für den
+  Lösch-Release: Backup/Restore → Mindestaufbewahrung → kontrollierter
+  Purge-Test. Die /tmp-Copy-Unlink-Fixtures bleiben davon getrennt.
 
 Der Testknopf `offline_restore_test_confirmed=True` ist
 **keine** technische Bestätigung eines realen Backups, und
