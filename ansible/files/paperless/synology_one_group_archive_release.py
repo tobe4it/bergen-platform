@@ -159,7 +159,7 @@ def execute(parent, only, proof, *, call=None, now=None):
         demand(created.st_uid == 0 and created.st_gid == 0 and
                stat.S_IMODE(created.st_mode) == 0o600 and
                created.st_nlink == 1, "INVALID_CREATED_GATE")
-        os.write(fd, raw)
+        demand(os.write(fd, raw) == len(raw), "ARCHIVE_GATE_SHORT_WRITE")
         os.fsync(fd)
         os.close(fd)
         fd = -1
@@ -177,7 +177,11 @@ def execute(parent, only, proof, *, call=None, now=None):
              str(parent), "--only", only, "--commit"],
             input=json.dumps(proof, separators=(",", ":"), ensure_ascii=True),
             capture_output=True, text=True, check=False, timeout=480,
-            preexec_fn=drop,
+            preexec_fn=drop, env={
+                "PATH": "/usr/bin:/bin",
+                "LANG": "C",
+                "PYTHONNOUSERSITE": "1",
+            },
         )
         demand(result.returncode == 0 and not result.stderr,
                "ARCHIVE_WORKER_COMMIT_FAILED")
