@@ -394,10 +394,16 @@ class SameVolumeArchiveTests(unittest.TestCase):
 
     def check_gate(self, gate, *, site="paperless-scan", scope=SCOPE,
                    source=NAME, proof=None):
-        return self.with_fake_root_gate(
-            gate, lambda: move._require_site_commit_gate(
-                self.base, site, scope, source,
-                self.proof if proof is None else proof))
+        def check_delegated_fd():
+            release_fd = os.open(gate, os.O_RDONLY | os.O_NOFOLLOW)
+            try:
+                return move._require_site_commit_gate(
+                    self.base, site, scope, source,
+                    self.proof if proof is None else proof,
+                    release_fd=release_fd)
+            finally:
+                os.close(release_fd)
+        return self.with_fake_root_gate(gate, check_delegated_fd)
 
     def test_site_commit_gates_absent_by_default(self):
         for site, scope in (("homes", "Privat/thomas"),
@@ -441,6 +447,41 @@ class SameVolumeArchiveTests(unittest.TestCase):
     def test_valid_exact_source_release_is_accepted(self):
         gate = self.add_gate(self.make_release())
         self.assertTrue(self.check_gate(gate))
+
+    def test_valid_gate_without_root_delegated_fd_is_denied(self):
+        gate = self.add_gate(self.make_release())
+        with self.assertRaisesRegex(
+                RuntimeError, "ARCHIVE_RELEASE_DESCRIPTOR_REQUIRED"):
+            self.with_fake_root_gate(
+                gate, lambda: move._require_site_commit_gate(
+                    self.base, "paperless-scan", SCOPE, NAME, self.proof))
+
+    def test_unrelated_file_descriptor_cannot_authorize_commit(self):
+        gate = self.add_gate(self.make_release())
+        unrelated = self.base / "unrelated-gate.json"
+        unrelated.write_bytes(gate.read_bytes())
+        unrelated.chmod(0o600)
+        fd = os.open(unrelated, os.O_RDONLY | os.O_NOFOLLOW)
+        try:
+            with self.assertRaisesRegex(
+                    RuntimeError, "ARCHIVE_RELEASE_DESCRIPTOR_MISMATCH"):
+                self.with_fake_root_gate(
+                    gate, lambda: move._require_site_commit_gate(
+                        self.base, "paperless-scan", SCOPE, NAME, self.proof,
+                        release_fd=fd))
+        finally:
+            os.close(fd)
+
+    def test_closed_release_descriptor_is_denied(self):
+        gate = self.add_gate(self.make_release())
+        fd = os.open(gate, os.O_RDONLY | os.O_NOFOLLOW)
+        os.close(fd)
+        with self.assertRaisesRegex(
+                RuntimeError, "ARCHIVE_RELEASE_DESCRIPTOR_UNREADABLE"):
+            self.with_fake_root_gate(
+                gate, lambda: move._require_site_commit_gate(
+                    self.base, "paperless-scan", SCOPE, NAME, self.proof,
+                    release_fd=fd))
 
     def test_release_is_bound_to_exact_filename_and_scope(self):
         gate = self.add_gate(self.make_release())
