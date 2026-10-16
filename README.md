@@ -11,6 +11,11 @@ The project focuses on repeatability, documentation and modular automation.
 
 ---
 
+> **Site privacy:** Do not commit real DNS names, internal/public IP addresses,
+> machine names, account identifiers or credentials. Keep deployment identities
+> in ignored local inventory, site variables and Vault files. See
+> [Site-local configuration](docs/SITE-LOCAL-CONFIGURATION.md).
+
 ## Features
 
 Current capabilities include:
