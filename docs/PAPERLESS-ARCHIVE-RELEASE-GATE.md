@@ -635,3 +635,59 @@ ACL or directory-entry rename/delete protection for the active
 protected archive. Align the read-only auditor with the deployed
 protected-path contract and test it before reuse.
 
+## 2026-10-16 protected archive native ACL auditor path correction — pending operator acceptance
+
+The previously available `audit-paperless-synology-archive-entry-protection.yml`
+wrongly inspected `source/.paperless-archive`. This **does not represent**
+the production same-Btrfs-subvolume archive used for the first group canary.
+The existing live archive and import receipts were not changed.
+
+The corrected read-only
+`audit_synology_archive_entry_protection.py` uses the deployed root-owned
+archive worker's `_validated_protected_scope` resolver and derives the
+exact `paperless-scan/.bergen-paperless-archive` and
+`homes/.bergen-paperless-archive` hierarchies. It audits the native DSM
+ACL grants of each relevant *entry parent*:
+both site roots, protected archive roots, scope directories,
+the `Privat` intermediate directory for homes, and every existing
+`YYYY-MM` archive directory. It rejects unexpected scope entries,
+path/device mismatches, symlink/wrong-ownership/mode parents and
+unparseable/missing native ACL listings rather than accepting a
+legacy scanner-writable path. The audit only opens directories,
+queries `synoacltool -get`, and lists existing month names. It does
+**not** create, modify, delete, rename or copy a PDF.
+
+The resulting markers must include:
+`ACTIVE_PROTECTED_ARCHIVE_PARENTS_AUDITED N`,
+`ARCHIVE_ENTRY_PROTECTION_NEEDS_EFFECTIVE_TEST`,
+`DSM_SMB_EFFECTIVE_RENAME_NOT_TESTED`,
+`ARCHIVE_COMMIT_NOT_AUTHORIZED`,
+`NO_FILES_CHANGED`. The static grant classifier reports potential
+`BLOCKER` lines for non-admin delete/write+traverse ACEs.
+An `ARCHIVE_ENTRY_PROTECTION_NEEDS_EFFECTIVE_TEST` marker explicitly
+does **not** mean actual DSM/SMB rename/delete permissions were
+negatively tested. Nor is any static ACL finding an archive-move
+or irreversible purge approval.
+
+**Acceptance pending:** Pull this branch on `bp-controller`, run
+`python3 -m unittest discover -s tests -p
+'test_paperless_synology_archive_entry_protection.py' -v`,
+and run `ansible/playbooks/audit-paperless-synology-archive-entry-protection.yml`
+first with `--syntax-check`, then read-only with standard ignored
+inventory/Vault and site-local vars. Review its actual output;
+if DSM reports no native ACEs for a protected 0700 directory,
+treat it as an explicit audit limitation/fail-closed condition,
+not as permission to skip the protected path.
+
+**Separate isolated recovery exercise — not yet executed:**
+derive the one archived original only from a freshly validated
+`ARCHIVED` journal and live lifecycle; read its PDF through the
+least-privileged read-only NAS account into a disposable,
+access-restricted scratch copy separate from the original; verify
+full SHA-256, expected byte count and PDF structure; independently
+verify the original NAS inode/journal/lifecycle unchanged afterward;
+discard the scratch. Do not overwrite, rename or remove the
+original NAS archive. This demonstrates a single-file read/copy
+recovery path only, **not** recoverability from a separately stored
+backup, nor permission to enable the 30-day destructive purge.
+
