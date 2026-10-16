@@ -25,7 +25,7 @@ class BergenAiProxyContracts(unittest.TestCase):
         self.assertEqual(play["hosts"], "reverse_proxy_nodes")
         source = ACTIVATE.read_text()
         self.assertIn("ai_proxy_deployment_approved | default(false) | bool", source)
-        self.assertIn("inventory_hostname == 'bergen-proxy'", source)
+        self.assertIn("inventory_hostname == ai_proxy_expected_inventory_hostname", source)
         self.assertIn("internal-proxy-site.conf.j2", source)
         self.assertIn("ai_proxy_paperless_before.stat.checksum", source)
         self.assertIn("ai_proxy_dns.results[0].stdout == ai_proxy_dns.results[1].stdout", source)
