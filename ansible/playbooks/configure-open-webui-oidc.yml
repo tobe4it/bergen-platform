@@ -6,6 +6,14 @@
     oidc_env_path: /etc/bergen-platform/open-webui-oidc.env
     oidc_dropin_dir: /etc/containers/systemd/open-webui.container.d
   tasks:
+    - name: Require reviewed deployment and existing account recovery
+      ansible.builtin.assert:
+        that:
+          - open_webui_oidc_deployment_approved | default(false) | bool
+          - open_webui_oidc_backup_confirmed | default(false) | bool
+          - open_webui_oidc_local_admin_confirmed | default(false) | bool
+        fail_msg: Confirm a current data backup and working local administrator before activation.
+
     - name: Refuse ambiguous AI inventory and missing site identity
       ansible.builtin.assert:
         that:
@@ -14,14 +22,6 @@
         fail_msg: >-
           Define exactly one AI inventory node and the local backend identity
           before changing the OIDC configuration.
-
-    - name: Require reviewed deployment and existing account recovery
-      ansible.builtin.assert:
-        that:
-          - open_webui_oidc_deployment_approved | default(false) | bool
-          - open_webui_oidc_backup_confirmed | default(false) | bool
-          - open_webui_oidc_local_admin_confirmed | default(false) | bool
-        fail_msg: Confirm a current data backup and working local administrator before activation.
 
     - name: Validate OIDC values without exposing secrets
       ansible.builtin.assert:
