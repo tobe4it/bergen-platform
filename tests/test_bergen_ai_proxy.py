@@ -16,7 +16,9 @@ class BergenAiProxyContracts(unittest.TestCase):
         self.assertEqual(play["hosts"], "proxmox_hosts")
         guard = play["tasks"][0]["ansible.builtin.assert"]["that"]
         self.assertIn("site_pve_inventory_host is defined", guard)
-        self.assertIn("inventory_hostname == site_pve_inventory_host", guard)
+        self.assertIn("site_pve_inventory_host in groups.get('proxmox_hosts', [])", guard)
+        self.assertEqual(play["tasks"][1]["ansible.builtin.meta"], "end_host")
+        self.assertEqual(play["tasks"][1]["when"], "inventory_hostname != site_pve_inventory_host")
         self.assertIn("pct", str(play))
         for task in play["tasks"]:
             self.assertNotIn("ansible.builtin.template", task)
@@ -29,7 +31,9 @@ class BergenAiProxyContracts(unittest.TestCase):
         self.assertEqual(play["hosts"], "proxmox_hosts")
         guard = play["tasks"][0]["ansible.builtin.assert"]["that"]
         self.assertIn("site_pve_inventory_host is defined", guard)
-        self.assertIn("inventory_hostname == site_pve_inventory_host", guard)
+        self.assertIn("site_pve_inventory_host in groups.get('proxmox_hosts', [])", guard)
+        self.assertEqual(play["tasks"][1]["ansible.builtin.meta"], "end_host")
+        self.assertEqual(play["tasks"][1]["when"], "inventory_hostname != site_pve_inventory_host")
         self.assertIn("site_ai_backend_vmid is defined", guard)
         self.assertIn("site_ai_backend_hostname is defined", guard)
 
