@@ -1,0 +1,21 @@
+---
+# Example only. Copy to site.local.yml (ignored by Git).
+# Use actual DNS names, IP addresses, LXC IDs and machine names ONLY in the
+# ignored local file. Never copy deployment details back to tracked YAML.
+pve_api_host: 192.0.2.10
+pve_node: pve-node
+pve_inventory_host: pve-node
+remote_syslog_server: 192.0.2.164
+pihole_upstreams:
+  - 192.0.2.11
+site_ldap_host: ldap.example.net
+site_ldap_base_dn: dc=example,dc=net
+site_ldap_search_base: cn=users,dc=example,dc=net
+ai_proxy_expected_inventory_hostname: proxy-node
+ai_proxy_hostname: ai.example.net
+paperless_proxy_hostname: paperless.example.net
+site_pve_inventory_host: pve-node
+site_ai_proxy_vmid: 999
+site_ai_proxy_hostname: proxy-node
+site_ai_backend_vmid: 998
+site_ai_backend_hostname: ai-node
