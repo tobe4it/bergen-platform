@@ -109,7 +109,7 @@ def verify_journals(data):
     return records
 
 
-def compare(nas_lines, paperless_lines, journal_stream, nas_deleted_15, nas_deleted_26):
+def compare(nas_lines, paperless_lines, journal_stream, nas_deleted_15, nas_deleted_26, archived_lines=''):
     data = {"journal": journal_stream, "nas_deleted_15": nas_deleted_15,
             "nas_deleted_26": nas_deleted_26}
     journals = verify_journals(data)
@@ -157,6 +157,7 @@ def compare(nas_lines, paperless_lines, journal_stream, nas_deleted_15, nas_dele
     if deleted_seen != set(DELETIONS):
         raise RuntimeError("REQUIRE_EXACTLY_TWO_JOURNALED_DELETIONS")
     seen = set()
+    archived_seen = set()
     counts = {scope: [0, 0] for scope in SCOPES}
     deleted_receivers = {journal["receiver_source"] for journal in journals.values()}
     for item in nas:
@@ -184,16 +185,72 @@ def compare(nas_lines, paperless_lines, journal_stream, nas_deleted_15, nas_dele
         counts[scope][1] += 1
         print("LIVE_IMPORTED", scope, "document", proof["document_id"],
               "bridge", proof["bridge_receipt"], "sender", item["sender_receipt"])
-    if set(by_receiver) != seen | deleted_receivers:
+    archived_rows = []
+    if archived_lines:
+        raw_lines = archived_lines.splitlines()
+        if len(raw_lines) == 0 or raw_lines[-1] != "NO_FILES_CHANGED":
+            raise RuntimeError("INCOMPLETE_ARCHIVE_AUDIT")
+        if sum(line == "NO_FILES_CHANGED" for line in raw_lines) != 1:
+            raise RuntimeError("INVALID_ARCHIVE_AUDIT_MARKER")
+        archived_rows = json_lines("\n".join(raw_lines[:-1]), "ARCHIVED")
+    for item in archived_rows:
+        required = {"schema_version", "sender_receipt", "scope", "source",
+                    "receiver_source", "sha256", "bridge_receipt",
+                    "document_id", "archive_site", "archive_month",
+                    "archive_name", "signature"}
+        if set(item) != required:
+            raise RuntimeError("INVALID_ARCHIVED_PROOF")
+        scope, source, receiver = (item["scope"], item["source"],
+                                   item["receiver_source"])
+        if (scope not in SCOPES or not isinstance(source, str)
+                or not source.lower().endswith(".pdf")
+                or "/" in source or "\\" in source or source.startswith(".")
+                or not isinstance(receiver, str)
+                or not receiver.startswith(scope + "/")
+                or receiver in seen or receiver in archived_seen
+                or receiver in deleted_receivers
+                or not isinstance(item["sender_receipt"], str)
+                or not SENDER.fullmatch(item["sender_receipt"])
+                or item["sender_receipt"] != hashlib.sha256(
+                    (scope + "\0" + source).encode("utf-8")).hexdigest() + ".json"
+                or not isinstance(item["sha256"], str)
+                or not DIGEST.fullmatch(item["sha256"])
+                or not isinstance(item["bridge_receipt"], str)
+                or not BRIDGE.fullmatch(item["bridge_receipt"])
+                or type(item["document_id"]) is not int
+                or item["document_id"] <= 0
+                or type(item["schema_version"]) is not int
+                or item["schema_version"] != 1
+                or item["archive_site"] != ("homes" if scope.startswith("Privat/") else "paperless-scan")
+                or not isinstance(item["archive_month"], str)
+                or not re.fullmatch(r"20[0-9]{2}-(0[1-9]|1[0-2])", item["archive_month"])
+                or item["archive_name"] != item["sender_receipt"][:-5] + ".pdf"
+                or not isinstance(item["signature"], list)
+                or len(item["signature"]) != 5
+                or any(type(x) is not int or x < 0 for x in item["signature"])):
+            raise RuntimeError("INVALID_ARCHIVED_IDENTITY")
+        live = by_receiver.get(receiver)
+        if (live is None or live["status"] != "IMPORTED"
+                or live["sha256"] != item["sha256"]
+                or live["bridge_receipt"] != item["bridge_receipt"]
+                or live["document_id"] != item["document_id"]):
+            raise RuntimeError("ARCHIVE_IMPORT_PROOF_MISMATCH")
+        archived_seen.add(receiver)
+        print("ARCHIVED_LIVE_IMPORTED", scope, "document", live["document_id"],
+              "bridge", live["bridge_receipt"], "sender", item["sender_receipt"])
+
+    if set(by_receiver) != seen | archived_seen | deleted_receivers:
         raise RuntimeError("UNMATCHED_OR_MISSING_LIFECYCLE_RECEIPT")
-    if not nas:
-        raise RuntimeError("NO_VERIFIED_LIVE_NAS_SOURCES")
+    if not nas and not archived_rows:
+        raise RuntimeError("NO_VERIFIED_LIVE_NAS_SOURCES_OR_ARCHIVES")
     for docid, journal in sorted(journals.items()):
         print("DELETED_BY_USER_CONFIRMED", docid,
               "bridge", journal["bridge_receipt"], "sender", journal["sender_receipt"])
         print("NAS_ORIGINAL_ABSENT_AND_JOURNALED", journal["scope"] + "/" + journal["source"])
     print("PAPERLESS_LIVE_IMPORTED", len(imported) - len(DELETIONS))
     print("NAS_SENT_VERIFIED", len(nas))
+    print("NAS_ARCHIVED_VERIFIED", len(archived_rows))
+    print("NAS_CURRENT_ORIGINALS_VERIFIED", len(nas) + len(archived_rows))
     for scope, (sent, matched) in counts.items():
         print("SCOPE_COUNTS", scope, "SENT", sent, "LIVE_IMPORTED", matched)
     print("DELETED_BY_USER", len(DELETIONS))
@@ -206,7 +263,8 @@ def compare(nas_lines, paperless_lines, journal_stream, nas_deleted_15, nas_dele
 if __name__ == "__main__":
     data = json.load(sys.stdin)
     if not isinstance(data, dict) or set(data) != {
-            "nas", "paperless", "journal", "nas_deleted_15", "nas_deleted_26"}:
+            "nas", "paperless", "journal", "nas_deleted_15", "nas_deleted_26",
+            "archived"}:
         raise RuntimeError("INVALID_DUAL_LIFECYCLE_COMPARISON_REQUEST")
     compare(data["nas"], data["paperless"], data["journal"],
-            data["nas_deleted_15"], data["nas_deleted_26"])
+            data["nas_deleted_15"], data["nas_deleted_26"], data["archived"])
