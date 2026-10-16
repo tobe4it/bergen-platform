@@ -1,7 +1,10 @@
-"""Unit tests: hidden archive entry protection risk in Synology DSM source ACEs."""
+"""Unit tests: ACL risks and correct active same-device archive path audit."""
 import importlib.util
+import tempfile
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
+from unittest.mock import patch
 
 FILE = (Path(__file__).resolve().parents[1] /
         "ansible/files/paperless/audit_synology_archive_entry_protection.py")
@@ -17,11 +20,12 @@ def sample(ace):
 
 
 class EntryProtectionTests(unittest.TestCase):
-    def test_source_parent_admin_and_service_not_blocked(self):
+    def test_protected_parent_admin_root_and_service_not_blocked(self):
         listing = sample(
             "[0] group:administrators:allow:rwxpdDaARWc--:fd-- (level:0)\n"
             "[1] group:administrators@bergen.intern:allow:rwxpdDaARWc--:fd-- (level:0)\n"
-            "[2] user:paperless-sync:allow:rwxpdDaARWc--:fd-- (level:0)")
+            "[2] user:paperless-sync:allow:rwxpdDaARWc--:fd-- (level:0)\\n"
+            "[3] user:root:allow:rwxpdDaARWc--:fd-- (level:0)")
         self.assertEqual(m.unsafe_parent_grants(m.parse_aces(listing), "paperless-sync"), [])
 
     def test_family_group_delete_child_blocks(self):
@@ -72,6 +76,105 @@ class EntryProtectionTests(unittest.TestCase):
             m.unsafe_parent_grants(m.parse_aces(listing), "paperless-sync"),
             [("group", "test")])
 
+
+    def test_only_deployed_sibling_archive_parents_are_selected(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            group_root = base / "paperless-scan"
+            private_root = base / "homes"
+            group_root.mkdir()
+            private_root.mkdir()
+            sources = [
+                (group_root / "scan-Eltern", "Eltern"),
+                (group_root / "scan-Familie", "Familie"),
+                (private_root / "scan-thomas", "Privat/thomas"),
+                (private_root / "scan-nadja", "Privat/nadja"),
+            ]
+            for source, _ in sources:
+                source.mkdir()
+            mapping = {"Eltern": "paperless-scan",
+                       "Familie": "paperless-scan",
+                       "Privat/thomas": "homes",
+                       "Privat/nadja": "homes"}
+            worker = SimpleNamespace(
+                SITE_BY_SCOPE=mapping,
+                PROTECTED_ARCHIVE_DIR=".bergen-paperless-archive",
+                _validated_protected_scope=lambda source, scope, uid:
+                    (group_root if mapping[scope] == "paperless-scan"
+                     else private_root) / ".bergen-paperless-archive" /
+                    Path(*scope.split("/")))
+            with patch.object(Path, "lstat", autospec=True) as mocked:
+                # stat shape: only directory mode and stable same-device matter
+                mocked.return_value = SimpleNamespace(st_mode=0o40700, st_dev=17)
+                targets = m.protected_entry_targets(sources, 1024, worker)
+            group_archive = group_root / ".bergen-paperless-archive"
+            private_archive = private_root / ".bergen-paperless-archive"
+            self.assertEqual(targets[group_root][1], "SITE_ROOT")
+            self.assertEqual(targets[group_archive][1], "PROTECTED_ROOT")
+            self.assertEqual(
+                targets[group_archive / "Familie"][1], "PROTECTED_SCOPE")
+            self.assertEqual(targets[private_root][1], "SITE_ROOT")
+            self.assertEqual(
+                targets[private_archive / "Privat"][1],
+                "PROTECTED_INTERMEDIATE")
+            self.assertEqual(
+                targets[private_archive / "Privat/thomas"][1],
+                "PROTECTED_SCOPE")
+            self.assertEqual(len(targets), 9)
+            self.assertFalse(any(".paperless-archive" == part
+                                 for path in targets for part in path.parts))
+
+    def test_archive_inside_scan_inbox_fails_closed(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            group_root = base / "paperless-scan"
+            private_root = base / "homes"
+            group_root.mkdir()
+            private_root.mkdir()
+            sources = [
+                (group_root / "Eltern", "Eltern"),
+                (group_root / "Familie", "Familie"),
+                (private_root / "thomas", "Privat/thomas"),
+                (private_root / "nadja", "Privat/nadja"),
+            ]
+            for source, _ in sources:
+                source.mkdir()
+            worker = SimpleNamespace(
+                SITE_BY_SCOPE={"Eltern": "paperless-scan",
+                               "Familie": "paperless-scan",
+                               "Privat/thomas": "homes",
+                               "Privat/nadja": "homes"},
+                PROTECTED_ARCHIVE_DIR=".bergen-paperless-archive",
+                _validated_protected_scope=lambda source, scope, uid:
+                    source / ".bergen-paperless-archive" / scope)
+            with self.assertRaisesRegex(
+                    RuntimeError, "WRONG_ACTIVE_ARCHIVE_LOCATION"):
+                m.protected_entry_targets(sources, 1024, worker)
+
+    def test_existing_months_checked_and_unknown_entries_block(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            folder = Path(tmp)
+            (folder / "2026-10").mkdir(mode=0o700)
+            def check(path, uid):
+                return __import__("os").open(path, __import__("os").O_RDONLY |
+                                            __import__("os").O_DIRECTORY)
+            move = SimpleNamespace(_check_dir=check)
+            device = folder.stat().st_dev
+            self.assertEqual(
+                m.existing_month_targets(folder, device, 1024, move),
+                [folder / "2026-10"])
+            (folder / "oops.pdf").write_text("synthetic")
+            with self.assertRaisesRegex(
+                    RuntimeError, "UNEXPECTED_PROTECTED_SCOPE_ENTRY"):
+                m.existing_month_targets(folder, device, 1024, move)
+
+    def test_audit_reports_effective_smb_not_tested(self):
+        script = FILE.read_text()
+        self.assertIn("DSM_SMB_EFFECTIVE_RENAME_NOT_TESTED", script)
+        self.assertIn("ARCHIVE_COMMIT_NOT_AUTHORIZED", script)
+        self.assertIn("existing_month_targets(", script)
+        self.assertIn("get_aces(tool, path)", script)
+        self.assertNotIn('source / ".paperless-archive"', script)
     def test_readonly_probe_contains_no_archive_mutations(self):
         code = FILE.read_text()
         for token in ("os.rename(", "os.replace(", "os.unlink(", ".unlink(",
