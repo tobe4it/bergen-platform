@@ -74,6 +74,38 @@ def test_read_only_then_guarded_apply_and_retained_backup(monkeypatch, tmp_path,
     assert "ALREADY_CLEAN:" in capsys.readouterr().out
 
 
+@pytest.mark.parametrize("slot", ["1", "2"])
+def test_single_abandoned_reservation_can_be_reconciled(monkeypatch, tmp_path, capsys, slot):
+    prepped(monkeypatch)
+    original = {slot: reservations()[slot]}
+    state_path = make_state(tmp_path, original)
+
+    recover.reconcile(cfg(), apply=False, state_dir=tmp_path)
+    assert "READY: 1 abandoned reservation(s)" in capsys.readouterr().out
+    assert json.loads(state_path.read_text()) == original
+    assert not list(tmp_path.glob("reconciled-*.json"))
+
+    recover.reconcile(cfg(), apply=True, state_dir=tmp_path)
+    assert "RECONCILED: 1 orphaned reservation(s)" in capsys.readouterr().out
+    assert json.loads(state_path.read_text()) == {}
+    backups = list(tmp_path.glob("reconciled-*.json"))
+    assert len(backups) == 1
+    assert json.loads(backups[0].read_text()) == original
+    assert backups[0].stat().st_mode & 0o077 == 0
+
+
+def test_refuses_single_reservation_if_dns_token_still_visible(monkeypatch, tmp_path):
+    prepped(monkeypatch)
+    original = {"1": reservations()["1"]}
+    state_path = make_state(tmp_path, original)
+    monkeypatch.setattr(hook, "authoritative_txt",
+                        lambda server, name: trusted_dns(server, name) | {"A" * 43})
+    with pytest.raises(hook.HookError, match="Old validation token"):
+        recover.reconcile(cfg(), apply=True, state_dir=tmp_path)
+    assert json.loads(state_path.read_text()) == original
+    assert not list(tmp_path.glob("reconciled-*.json"))
+
+
 def test_fails_closed_when_one_dns_slot_not_idle(monkeypatch, tmp_path):
     prepped(monkeypatch)
     state_path = make_state(tmp_path, reservations())
@@ -100,6 +132,10 @@ def test_refuses_any_challenge_still_visible_in_dns(monkeypatch, tmp_path):
      "2": {"identifier": "*.example.invalid", "validation": "B" * 43,
            "status": "reserved"}},
     {"1": {"identifier": "example.invalid", "validation": "A" * 43,
+           "status": "cleaning"}},
+    {"3": {"identifier": "example.invalid", "validation": "A" * 43,
+           "status": "reserved"}},
+    {"1": {"identifier": "unexpected.invalid", "validation": "A" * 43,
            "status": "reserved"}},
     {"1": {"identifier": "example.invalid", "validation": "A" * 43,
            "status": "reserved"},
