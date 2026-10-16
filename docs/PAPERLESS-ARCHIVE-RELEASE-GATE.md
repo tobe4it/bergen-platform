@@ -534,3 +534,43 @@ source-loop has been released yet; do not run blind for-loops of
 allow bypassing security/preflight/roll-forward checks, enabling
 permanent site flags, deleting archive originals, or applying this
 GROUP-only code to private user folders.
+
+
+## 2026-10-16 first group-only commit blocked before archived journal
+
+Operator authorized exactly `Familie/Bergen-Platform-fuer-Dummies.pdf` after
+the 714-test offline suite, read-only 22/0 lifecycle, disabled runner staging,
+candidate inventory, one-PDF dry run, and commit syntax checks. The first live
+commit returned a nonzero status in the `no_log` one-shot task. **DO NOT
+RETRY** without a new review and explicit authorization.
+
+Independent post-failure checks found all three release gates absent and the
+read-only lifecycle fully reconciled with 22 remaining NAS SENT originals,
+0 archived originals, 22 live Paperless imports, and 2 journaled user
+deletions. No `PREPARED` or `ARCHIVED` journal was reported. These checks
+demonstrate no completed or partly journaled move in the audited state; they
+do not identify the exact swallowed command error.
+
+A concrete release-path defect was found in code review: the root runner
+created a root:root `0600` site manifest but launched the archive worker
+after dropping privileges to `paperless-sync`; the worker attempted to
+`os.open` the manifest by pathname, ordinarily resulting in permission
+denied. The defect was not caught by the synthetic wrapper tests, which
+mocked the subprocess and did not check the root-to-service-user read boundary.
+
+**Follow-up branch fix, pending operator tests and staging:** root opens the
+exact release manifest read-only, passes that file descriptor through
+`subprocess.run(pass_fds=...)` across privilege drop, and the restricted
+worker uses `os.pread` only after confirming the descriptor matches the
+actual root-owned, `0600` pathname inode/size/mode/ownership and the
+fresh proof. Missing, closed or unrelated descriptors fail closed.
+The old unprivileged path-open is removed. No `chmod`, broad gate, manual
+receipt edit, or purge workaround is permitted.
+
+Before any reauthorization: pull the updated PR branch, run all offline
+Paperless tests, syntax-check the two disabled-only staging playbooks,
+stage the **worker and release runner** (code only, gates absent), independently
+verify staged SHA-256, repeat the live read-only lifecycle and one-document
+preview, and review potential remaining causes. Any new productive commit
+requires a new explicit one-document authorization. Do not run it from
+this note.
