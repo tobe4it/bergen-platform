@@ -2,8 +2,8 @@
 """Conservatively reconcile abandoned selfHOST DNS-01 reservations.
 
 This is an operator-only recovery tool. It never writes to the selfHOST API,
-and it refuses to modify local state unless the *two exact* reserved slots are
-confirmed idle on *all* configured authoritative DNS servers.
+and it refuses to modify local state unless *one or two* known reserved slots
+are confirmed idle on *all* configured authoritative DNS servers.
 """
 import argparse
 import json
@@ -39,10 +39,10 @@ def assert_no_running_certbot():
 
 
 def check_exact_orphans(cfg, state):
-    """Permit exactly two known 'reserved' entries, never presented/cleaning."""
+    """Permit one or two known 'reserved' entries, never presented/cleaning."""
     ids = {str(i) for i in cfg["record_ids"]}
-    if set(state) != ids:
-        raise hook.HookError("Reservations differ from the exact two configured slots")
+    if not 1 <= len(state) <= 2 or not set(state).issubset(ids):
+        raise hook.HookError("Reservations must use one or two configured slots")
     for slot, entry in state.items():
         if not isinstance(entry, dict) or entry.get("status") != "reserved":
             raise hook.HookError("Non-reserved reservation found; manual review required")
@@ -50,8 +50,8 @@ def check_exact_orphans(cfg, state):
             raise hook.HookError("Unexpected reservation identifier")
         if not isinstance(entry.get("validation"), str) or not hook.DNS01.fullmatch(entry["validation"]):
             raise hook.HookError("Invalid reserved validation token")
-    if len({item["validation"] for item in state.values()}) != 2:
-        raise hook.HookError("Two independent validation values required")
+    if len({item["validation"] for item in state.values()}) != len(state):
+        raise hook.HookError("Reservation validation values must be distinct")
 
 
 def assert_remote_slots_idle(cfg, state):
@@ -95,11 +95,12 @@ def reconcile(cfg, *, apply=False, state_dir=hook.DEFAULT_STATE_DIR):
         assert_remote_slots_idle(cfg, state)
         assert_no_running_certbot()
         if not apply:
-            print("READY: Exactly two abandoned reservations; both DNS slots idle")
+            print(f"READY: {len(state)} abandoned reservation(s); both DNS slots idle")
             return
+        count = len(state)
         create_private_backup(path, state)
         hook.save_state(path, {})
-        print("RECONCILED: Two orphaned reservations cleared; private backup retained")
+        print(f"RECONCILED: {count} orphaned reservation(s) cleared; private backup retained")
 
 
 def main(argv=None):
