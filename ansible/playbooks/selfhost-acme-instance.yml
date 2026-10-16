@@ -212,6 +212,10 @@
           - "{{ acme_staging }}/log"
           - --cert-name
           - "{{ acme_staging_name }}"
+          - --key-type
+          - ecdsa
+          - --elliptic-curve
+          - secp256r1
           - --manual
           - --preferred-challenges
           - dns
@@ -289,6 +293,10 @@
           - "{{ selfhost_acme_contact_email }}"
           - --cert-name
           - "{{ acme_cert_name }}"
+          - --key-type
+          - ecdsa
+          - --elliptic-curve
+          - secp256r1
           - --manual
           - --preferred-challenges
           - dns
