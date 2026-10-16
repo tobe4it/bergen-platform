@@ -41,7 +41,9 @@
         argv: [pct, status, '126']
       register: archive_guest_status
       changed_when: false
-      failed_when: archive_guest_status.rc != 0 or (archive_guest_status.stdout | trim) != 'status: running'
+      failed_when: >-
+        archive_guest_status.rc != 0 or
+        (archive_guest_status.stdout | trim) != 'status: running'
 
     - name: Export freshly verified Paperless IMPORTED documents and ACLs
       ansible.builtin.command:
