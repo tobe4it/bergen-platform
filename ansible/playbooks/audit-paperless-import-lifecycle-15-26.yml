@@ -144,6 +144,28 @@
       changed_when: false
       no_log: "{{ paperless_lifecycle_quiet | default(false) | bool }}"
 
+    - name: Audit all completed NAS archive journals and PDF inodes under sender lock
+      ansible.builtin.command:
+        argv:
+          - ssh
+          - -T
+          - -o
+          - BatchMode=yes
+          - -o
+          - StrictHostKeyChecking=yes
+          - -o
+          - ConnectTimeout=15
+          - "{{ synology_admin }}"
+          - >-
+            sudo -n -u {{ synology_config.sync_user | quote }}
+            /usr/bin/python3 - {{ synology_config.state_parent | quote }}
+        stdin: "{{ lookup('ansible.builtin.file', playbook_dir + '/../files/paperless/audit_synology_completed_archive_moves.py', rstrip=False) }}"
+      delegate_to: localhost
+      become: false
+      register: lifecycle_archived_live
+      changed_when: false
+      no_log: "{{ paperless_lifecycle_quiet | default(false) | bool }}"
+
     - name: Reverify every Paperless import and independently recheck deleted document absence
       ansible.builtin.command:
         argv:
@@ -154,7 +176,7 @@
           - python3
           - -c
           - "{{ lookup('ansible.builtin.file', playbook_dir + '/../files/paperless/export_import_lifecycle_15_26.py', rstrip=False) }}"
-        stdin: "{{ {'journal': lifecycle_journal.stdout, 'deleted_15': lifecycle_deleted_paperless_15.stdout, 'deleted_26': lifecycle_deleted_paperless.stdout, 'nas_deleted_15': lifecycle_deleted_nas_15.stdout, 'nas_deleted_26': lifecycle_deleted_nas.stdout} | to_json }}"
+        stdin: "{{ {'journal': lifecycle_journal.stdout, 'deleted_15': lifecycle_deleted_paperless_15.stdout, 'deleted_26': lifecycle_deleted_paperless.stdout, 'nas_deleted_15': lifecycle_deleted_nas_15.stdout, 'nas_deleted_26': lifecycle_deleted_nas.stdout, 'archived': lifecycle_archived_live.stdout} | to_json }}"
       register: lifecycle_paperless_live
       changed_when: false
       no_log: "{{ paperless_lifecycle_quiet | default(false) | bool }}"
@@ -176,6 +198,33 @@
         that:
           - "'IMPORT_LIFECYCLE_RECONCILED' in lifecycle_report.stdout_lines"
           - "'DELETED_BY_USER 2' in lifecycle_report.stdout_lines"
+          - lifecycle_archived_live.stdout_lines[-1] == 'NO_FILES_CHANGED'
+          - (lifecycle_report.stdout_lines | select('match', '^NAS_ARCHIVED_VERIFIED [0-9]+
+          - "(lifecycle_report.stdout_lines | select('match', '^DELETED_BY_USER_CONFIRMED 15 ') | list | length) == 1"
+          - "(lifecycle_report.stdout_lines | select('match', '^DELETED_BY_USER_CONFIRMED 26 ') | list | length) == 1"
+          - "'ARCHIVE_NOT_AUTHORIZED' in lifecycle_report.stdout_lines"
+          - "'NO_RECEIPTS_CHANGED' in lifecycle_report.stdout_lines"
+          - "'NO_FILES_CHANGED' in lifecycle_report.stdout_lines"
+          - "'ARCHIVE_MATCH_READY' not in lifecycle_report.stdout_lines"
+
+    - name: Display reconciled imports and two confirmed user deletions
+      ansible.builtin.debug:
+        var: lifecycle_report.stdout_lines
+      when: not (paperless_lifecycle_quiet | default(false) | bool)
+) | list | length) == 1
+          - (lifecycle_report.stdout_lines | select('match', '^NAS_CURRENT_ORIGINALS_VERIFIED [0-9]+
+          - "(lifecycle_report.stdout_lines | select('match', '^DELETED_BY_USER_CONFIRMED 15 ') | list | length) == 1"
+          - "(lifecycle_report.stdout_lines | select('match', '^DELETED_BY_USER_CONFIRMED 26 ') | list | length) == 1"
+          - "'ARCHIVE_NOT_AUTHORIZED' in lifecycle_report.stdout_lines"
+          - "'NO_RECEIPTS_CHANGED' in lifecycle_report.stdout_lines"
+          - "'NO_FILES_CHANGED' in lifecycle_report.stdout_lines"
+          - "'ARCHIVE_MATCH_READY' not in lifecycle_report.stdout_lines"
+
+    - name: Display reconciled imports and two confirmed user deletions
+      ansible.builtin.debug:
+        var: lifecycle_report.stdout_lines
+      when: not (paperless_lifecycle_quiet | default(false) | bool)
+) | list | length) == 1
           - "(lifecycle_report.stdout_lines | select('match', '^DELETED_BY_USER_CONFIRMED 15 ') | list | length) == 1"
           - "(lifecycle_report.stdout_lines | select('match', '^DELETED_BY_USER_CONFIRMED 26 ') | list | length) == 1"
           - "'ARCHIVE_NOT_AUTHORIZED' in lifecycle_report.stdout_lines"
