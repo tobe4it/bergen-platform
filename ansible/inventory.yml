@@ -1,46 +1,21 @@
 ---
+# Site-neutral inventory skeleton. Configure real hosts exclusively in
+# ansible/inventory.local.yml (ignored by Git).
 all:
   children:
-
     controllers:
-      hosts:
-        ansible-old:
-          ansible_connection: local
-
-        bp-controller:
-          ansible_host: 192.168.20.250
-          ansible_user: root
-          ansible_python_interpreter: /usr/bin/python3
-
+      hosts: {}
     proxmox_hosts:
-      hosts:
-        venombox:
-          ansible_host: 192.168.20.133
-          ansible_user: root
-          ansible_python_interpreter: /usr/bin/python3
-
-        bergen-ai:
-          ansible_host: 192.168.20.225
-          ansible_user: root
-          ansible_python_interpreter: /usr/bin/python3
-
+      hosts: {}
     ai_nodes:
-      hosts:
-        bergen-ai:
-
+      hosts: {}
     mqtt_nodes:
       hosts: {}
-
     mail_backend_nodes:
       hosts: {}
-
     evcc_nodes:
       hosts: {}
-
     evcc_legacy_nodes:
       hosts: {}
-
     linux_lxcs:
-      hosts:
-        bp-controller:
-        bergen-ai:
+      hosts: {}
