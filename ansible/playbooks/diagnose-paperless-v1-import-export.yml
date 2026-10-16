@@ -1,0 +1,62 @@
+---
+# Isolate why the v1 live IMPORTED exporter fails without printing any private
+# receipt, original filename, checksum or Paperless/Django exception text.
+# LXC-only, read-only; never contacts/mutates NAS or authorizes archive moves.
+- name: Diagnose Paperless v1 live export failure using allowlisted status only
+  hosts: venombox
+  gather_facts: false
+  become: true
+  tasks:
+    - name: Verify the expected unprivileged Paperless guest
+      ansible.builtin.command:
+        argv: [pct, config, '126']
+      register: v1_diagnostic_guest
+      changed_when: false
+
+    - name: Reject unexpected or unconfined receiver LXC
+      ansible.builtin.assert:
+        that:
+          - "'hostname: bergen-paperless' in v1_diagnostic_guest.stdout_lines"
+          - "'unprivileged: 1' in v1_diagnostic_guest.stdout_lines"
+          - "'lxc.apparmor.profile: unconfined' not in v1_diagnostic_guest.stdout"
+
+    - name: Require running guest
+      ansible.builtin.command:
+        argv: [pct, status, '126']
+      register: v1_diagnostic_guest_status
+      changed_when: false
+      failed_when: >-
+        v1_diagnostic_guest_status.rc != 0 or
+        (v1_diagnostic_guest_status.stdout | trim) != 'status: running'
+
+    - name: Diagnose importer by streaming read-only code via Proxmox
+      ansible.builtin.command:
+        argv: [pct, exec, '126', --, python3, '-']
+        stdin: "{{ lookup('ansible.builtin.file', playbook_dir + '/../files/paperless/diagnose_v1_import_export_readonly.py', rstrip=False) }}"
+      register: v1_diagnostic_raw
+      changed_when: false
+      failed_when: false
+      no_log: true
+
+    - name: Check all result rows match exact safe allowlist before showing them
+      ansible.builtin.assert:
+        that:
+          - v1_diagnostic_raw.rc == 0
+          - (v1_diagnostic_raw.stderr | trim) == ''
+          - v1_diagnostic_raw.stdout_lines | length >= 4
+          - v1_diagnostic_raw.stdout_lines | length <= 8
+          - >-
+            v1_diagnostic_raw.stdout_lines |
+            reject('match', '^(V1_(BRIDGE_RECEIPTS|IMPORTED_RECEIPTS|NAS_V1_RECEIPTS|VERIFIED_V1_IMPORTS) [0-9]{1,5}|V1_EXPORT_DIAGNOSTIC_OK|V1_EXPORT_DIAGNOSTIC_BLOCKED [A-Z_]+|NO_FILES_CHANGED|ARCHIVE_NOT_AUTHORIZED|PURGE_NOT_AUTHORIZED)$') |
+            list | length == 0
+          - "'NO_FILES_CHANGED' in v1_diagnostic_raw.stdout_lines"
+          - "'ARCHIVE_NOT_AUTHORIZED' in v1_diagnostic_raw.stdout_lines"
+          - "'PURGE_NOT_AUTHORIZED' in v1_diagnostic_raw.stdout_lines"
+          - >-
+            ('V1_EXPORT_DIAGNOSTIC_OK' in v1_diagnostic_raw.stdout_lines)
+            != (v1_diagnostic_raw.stdout is search('(?m)^V1_EXPORT_DIAGNOSTIC_BLOCKED '))
+        fail_msg: "Exporter diagnosis incomplete; no raw receipts or exception details will be shown"
+
+    - name: Display sanitized verification phase only
+      ansible.builtin.debug:
+        var: v1_diagnostic_raw.stdout_lines
