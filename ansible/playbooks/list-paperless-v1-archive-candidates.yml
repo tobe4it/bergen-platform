@@ -1,0 +1,102 @@
+---
+# Dedicated read-only selection for existing *v1* NAS PDF originals with a
+# CURRENT live Paperless IMPORTED + owner/ACL proof.
+# Never installs a worker, creates a gate, renames a PDF or writes a receipt.
+# Do not treat this list as authorization to perform a commit.
+- name: Inventory only matched v1 NAS archive dry-run candidates
+  hosts: venombox
+  gather_facts: false
+  become: true
+  tasks:
+    - name: Require pinned Synology runtime configuration
+      ansible.builtin.assert:
+        that:
+          - inventory_hostname == 'venombox'
+          - not ansible_check_mode
+          - synology_admin is defined
+          - synology_admin is match('^[A-Za-z_][A-Za-z0-9_.-]*@[A-Za-z0-9][A-Za-z0-9.-]+$')
+          - synology_config is defined
+          - synology_config.schema_version == 1
+          - synology_config.sync_user == 'paperless-sync'
+          - synology_config.state_parent is match('^/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$')
+        fail_msg: "Trusted NAS configuration is required for read-only candidate collection"
+
+    - name: Inspect pinned unprivileged Paperless LXC
+      ansible.builtin.command:
+        argv: [pct, config, '126']
+      register: archive_candidates_guest
+      changed_when: false
+
+    - name: Reject unexpected LXC identity or unconfined AppArmor
+      ansible.builtin.assert:
+        that:
+          - "'hostname: bergen-paperless' in archive_candidates_guest.stdout_lines"
+          - "'unprivileged: 1' in archive_candidates_guest.stdout_lines"
+          - "'lxc.apparmor.profile: unconfined' not in archive_candidates_guest.stdout"
+
+    - name: Require Paperless guest to be running
+      ansible.builtin.command:
+        argv: [pct, status, '126']
+      register: archive_candidates_status
+      changed_when: false
+      failed_when: >-
+        archive_candidates_status.rc != 0 or
+        (archive_candidates_status.stdout | trim) != 'status: running'
+
+    - name: Collect live Paperless IMPORTED owner/ACL-verified records
+      ansible.builtin.command:
+        argv: [pct, exec, '126', --, python3, '-']
+        stdin: "{{ lookup('ansible.builtin.file', playbook_dir + '/../files/paperless/export_imported_scans.py', rstrip=False) }}"
+      register: archive_candidates_imported
+      changed_when: false
+      no_log: true
+
+    - name: Collect independently verified NAS source SHA and locked v1 SENT receipts
+      ansible.builtin.command:
+        argv:
+          - ssh
+          - -T
+          - -o
+          - BatchMode=yes
+          - -o
+          - StrictHostKeyChecking=yes
+          - -o
+          - ConnectTimeout=15
+          - "{{ synology_admin }}"
+          - >-
+            sudo -n -u {{ synology_config.sync_user | quote }}
+            /usr/bin/python3 - {{ synology_config.state_parent | quote }}
+        stdin: "{{ lookup('ansible.builtin.file', playbook_dir + '/../files/paperless/audit_synology_archive_candidates.py', rstrip=False) }}"
+      delegate_to: localhost
+      become: false
+      register: archive_candidates_sender
+      changed_when: false
+      no_log: true
+
+    - name: Join current NAS originals with live Paperless imports without altering either
+      ansible.builtin.command:
+        argv:
+          - /usr/bin/python3
+          - "{{ playbook_dir }}/../files/paperless/list_verified_archive_candidates.py"
+        stdin: >-
+          {{ {'nas': archive_candidates_sender.stdout,
+              'paperless': archive_candidates_imported.stdout} | to_json }}
+      delegate_to: localhost
+      become: false
+      register: archive_candidates_report
+      changed_when: false
+      no_log: true
+
+    - name: Require explicit non-authorizing read-only report
+      ansible.builtin.assert:
+        that:
+          - archive_candidates_report.stdout_lines[0] is match('^V1_VERIFIED_ARCHIVE_DRY_RUN_CANDIDATES [0-9]+$')
+          - "'CANDIDATE_AUDIT_COMPLETE' in archive_candidates_report.stdout_lines"
+          - "'NO_FILES_CHANGED' in archive_candidates_report.stdout_lines"
+          - "'ARCHIVE_NOT_AUTHORIZED' in archive_candidates_report.stdout_lines"
+          - "'PURGE_NOT_AUTHORIZED' in archive_candidates_report.stdout_lines"
+        fail_msg: "Candidate report incomplete: no archive operations authorized"
+
+    - name: Show selectable scope/filename only, no hashes or receipt metadata
+      ansible.builtin.debug:
+        var: archive_candidates_report.stdout_lines
