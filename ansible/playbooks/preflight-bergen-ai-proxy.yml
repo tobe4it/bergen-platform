@@ -2,10 +2,23 @@
 # Read-only preflight. Uses the already established Proxmox transport.
 # No service changes, certificate copies, SSH connections or DNS writes.
 - name: Inspect existing HTTPS proxy before adding Bergen-AI
-  hosts: "{{ site_pve_inventory_host | mandatory }}"
+  hosts: proxmox_hosts
   become: true
   gather_facts: false
   tasks:
+    - name: Require exact reviewed Proxmox target before inspecting proxy
+      ansible.builtin.assert:
+        that:
+          - site_pve_inventory_host is defined
+          - inventory_hostname == site_pve_inventory_host
+          - site_ai_proxy_vmid is defined
+          - site_ai_proxy_hostname is defined
+          - paperless_proxy_hostname is defined
+          - ai_proxy_hostname is defined
+        fail_msg: >-
+          The reviewed local Proxmox host or required site variables are missing;
+          refusing to inspect any unrelated node.
+
     - name: Verify existing proxy LXC identity
       ansible.builtin.command:
         argv: [pct, exec, "{{ site_ai_proxy_vmid | mandatory }}", --, hostname, -s]
