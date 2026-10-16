@@ -9,7 +9,8 @@ ambiguous crash STOP: manual reconciliation is required.
 The proof must be freshly gathered through the separately reviewed controller
 audit (NAS + LXC 126) and handed to this command over a trusted SSH session.
 This script verifies proof identity, but CANNOT authenticate its live origin.
-Do not activate production commit before independent ACL/backup/writer tests.
+Do not activate production commit before independently reviewed native DSM ACL,
+writer quiescence, exact-source time-limited release manifest and recovery tests.
 """
 import argparse
 import ctypes
@@ -127,13 +128,17 @@ def _validate_archive_scope_path(archive_scope_dir, source_dir, scope):
             "ARCHIVE_NOT_IN_PROTECTED_SITE")
 
 
-def _require_site_commit_gate(state_parent, site):
-    """Only a per-site root-owned 0600 release authorizes live rename.
+def _require_site_commit_gate(state_parent, site, scope, filename, proof):
+    """Require a short-lived, root-owned, *exact-one-PDF* release manifest.
 
-    Never accept the former archive-move.enabled global flag. No gate is
-    generated in the repository or deployed by archive worker staging.
+    A legacy empty 0600 site gate MUST NOT authorize all files at a site.
+    The admin-created release binds the particular source, v1 sender+bridge
+    receipt, SHA-256 and Paperless document ID, with <= 15 minute validity.
+    The gate remains absent during all preview/staging tasks. It is not
+    created here, and the caller must revoke it after the one-shot attempt.
     """
-    require(site in frozenset(SITE_BY_SCOPE.values()), "INVALID_ARCHIVE_SITE")
+    require(site in frozenset(SITE_BY_SCOPE.values()) and
+            SITE_BY_SCOPE.get(scope) == site, "INVALID_ARCHIVE_SITE")
     legacy = state_parent / "archive-move.enabled"
     require(not legacy.exists() and not legacy.is_symlink(),
             "LEGACY_ARCHIVE_GATE_MUST_BE_ABSENT")
@@ -142,9 +147,60 @@ def _require_site_commit_gate(state_parent, site):
         st = gate.lstat()
     except FileNotFoundError:
         raise RuntimeError("ARCHIVE_SITE_GATE_NOT_APPROVED") from None
-    require(stat.S_ISREG(st.st_mode) and st.st_uid == 0 and st.st_nlink == 1
-            and stat.S_IMODE(st.st_mode) == 0o600,
-            "ARCHIVE_SITE_GATE_NOT_APPROVED")
+    require(stat.S_ISREG(st.st_mode) and st.st_uid == 0 and st.st_gid == 0
+            and st.st_nlink == 1 and stat.S_IMODE(st.st_mode) == 0o600
+            and 0 < st.st_size <= 4096, "ARCHIVE_SITE_GATE_NOT_APPROVED")
+    fd = os.open(gate, os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC)
+    try:
+        opened = os.fstat(fd)
+        require((st.st_dev, st.st_ino, st.st_size, st.st_uid, st.st_gid,
+                 st.st_mode, st.st_nlink) ==
+                (opened.st_dev, opened.st_ino, opened.st_size, opened.st_uid,
+                 opened.st_gid, opened.st_mode, opened.st_nlink),
+                "ARCHIVE_GATE_CHANGED")
+        with os.fdopen(fd, "rb", closefd=False) as stream:
+            raw = stream.read(4097)
+        require(len(raw) == st.st_size, "ARCHIVE_GATE_CHANGED")
+    finally:
+        os.close(fd)
+    def unique(pairs):
+        result = {}
+        for key, value in pairs:
+            require(key not in result, "DUPLICATE_ARCHIVE_GATE_FIELD")
+            result[key] = value
+        return result
+    try:
+        manifest = json.loads(raw, object_pairs_hook=unique)
+        require(isinstance(manifest, dict), "ARCHIVE_GATE_INVALID_SCHEMA")
+        canonical = (json.dumps(manifest, sort_keys=True, separators=(",", ":"),
+                                ensure_ascii=True, allow_nan=False) + "\n").encode("ascii")
+        require(raw == canonical, "ARCHIVE_GATE_NOT_CANONICAL")
+    except (UnicodeError, ValueError, TypeError) as exc:
+        raise RuntimeError("ARCHIVE_GATE_INVALID_JSON") from None
+
+    expected = {
+        "schema_version": 1,
+        "release": "one_original_pdf",
+        "site": site,
+        "scope": scope,
+        "source": filename,
+        "sender_receipt": proof.get("sender_receipt"),
+        "bridge_receipt": proof.get("bridge_receipt"),
+        "sha256": proof.get("sha256"),
+        "document_id": proof.get("document_id"),
+    }
+    require(set(manifest) == set(expected) | {"issued_at", "expires_at"} and
+            all(type(manifest[k]) is type(v) and manifest[k] == v
+                for k, v in expected.items() if v is not None) and
+            all(v is not None for v in expected.values()),
+            "ARCHIVE_GATE_WRONG_SOURCE_OR_PROOF")
+    issued, expires = manifest["issued_at"], manifest["expires_at"]
+    now = int(time.time())
+    require(type(issued) is int and type(expires) is int
+            and now - 900 <= issued <= now
+            and issued < expires <= issued + 900 and now < expires,
+            "ARCHIVE_GATE_EXPIRED_OR_INVALID")
+    return True
 
 
 def _read_source(dirfd, name, limit, *, expected_signature, expected_sha,
@@ -484,9 +540,9 @@ def main():
     global_gate = parent / "archive-move.enabled"
     require(not global_gate.exists() and not global_gate.is_symlink(),
             "LEGACY_ARCHIVE_GATE_MUST_BE_ABSENT")
-    if args.commit:
-        _require_site_commit_gate(parent, site)
     proof = _read_json_stdin()
+    if args.commit:
+        _require_site_commit_gate(parent, site, scope, filename, proof)
     result = archive_one(source_dir, SETTINGS["state"], scope, filename, proof,
                          archive_scope_dir=archive_scope_dir,
                          commit=args.commit,
