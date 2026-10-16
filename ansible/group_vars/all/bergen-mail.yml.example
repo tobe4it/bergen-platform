@@ -32,8 +32,8 @@ lxc_ssh_public_key: >-
   {{ lookup('file', lookup('env', 'HOME') + '/.ssh/id_ed25519.pub') }}
 lxc_root_password: "{{ vault_lxc_root_password }}"
 
-pve_node: venombox
-pve_inventory_host: venombox
+pve_node: pve-node
+pve_inventory_host: pve-node
 
 # Runtime discovery writes the effective LXC address only to this ignored,
 # site-local inventory. Keep the public inventory free of local topology.
@@ -67,7 +67,7 @@ mail_backend_postmaster_address: postmaster@example.net
 
 # Forward Postfix, Dovecot and system logs to the Bergen Syslog collector.
 remote_syslog_enabled: true
-remote_syslog_server: 192.168.20.164
+remote_syslog_server: 192.0.2.164
 remote_syslog_port: 514
 remote_syslog_protocol: tcp
 remote_syslog_send_test: true

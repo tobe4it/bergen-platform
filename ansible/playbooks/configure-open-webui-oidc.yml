@@ -1,6 +1,6 @@
 ---
 - name: Add OIDC to the existing Open WebUI container
-  hosts: bergen-ai
+  hosts: ai_nodes
   gather_facts: false
   vars:
     oidc_env_path: /etc/bergen-platform/open-webui-oidc.env
@@ -13,6 +13,15 @@
           - open_webui_oidc_backup_confirmed | default(false) | bool
           - open_webui_oidc_local_admin_confirmed | default(false) | bool
         fail_msg: Confirm a current data backup and working local administrator before activation.
+
+    - name: Refuse ambiguous AI inventory and missing site identity
+      ansible.builtin.assert:
+        that:
+          - groups.get('ai_nodes', []) | length == 1
+          - site_ai_backend_hostname is defined
+        fail_msg: >-
+          Define exactly one AI inventory node and the local backend identity
+          before changing the OIDC configuration.
 
     - name: Validate OIDC values without exposing secrets
       ansible.builtin.assert:

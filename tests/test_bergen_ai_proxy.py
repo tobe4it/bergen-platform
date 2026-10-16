@@ -13,19 +13,60 @@ TUNNEL = ROOT / "ansible/roles/nginx_reverse_proxy/templates/internal-ssh-backen
 class BergenAiProxyContracts(unittest.TestCase):
     def test_read_only_preflight_uses_existing_proxmox_guest(self):
         play = yaml.safe_load(PREFLIGHT.read_text())[0]
-        self.assertEqual(play["hosts"], "venombox")
+        self.assertEqual(play["hosts"], "proxmox_hosts")
+        guard = play["tasks"][0]["ansible.builtin.assert"]["that"]
+        self.assertIn("site_pve_inventory_host is defined", guard)
+        self.assertIn("site_pve_inventory_host in groups.get('proxmox_hosts', [])", guard)
+        self.assertEqual(play["tasks"][1]["ansible.builtin.meta"], "end_host")
+        self.assertEqual(play["tasks"][1]["when"], "inventory_hostname != site_pve_inventory_host")
         self.assertIn("pct", str(play))
         for task in play["tasks"]:
             self.assertNotIn("ansible.builtin.template", task)
             self.assertNotIn("ansible.builtin.systemd_service", task)
         self.assertIn("changed_when", str(play))
 
+    def test_backend_preflight_scopes_existing_proxmox_host(self):
+        path = ROOT / "ansible/playbooks/preflight-bergen-ai-ssh-target.yml"
+        play = yaml.safe_load(path.read_text())[0]
+        self.assertEqual(play["hosts"], "proxmox_hosts")
+        guard = play["tasks"][0]["ansible.builtin.assert"]["that"]
+        self.assertIn("site_pve_inventory_host is defined", guard)
+        self.assertIn("site_pve_inventory_host in groups.get('proxmox_hosts', [])", guard)
+        self.assertEqual(play["tasks"][1]["ansible.builtin.meta"], "end_host")
+        self.assertEqual(play["tasks"][1]["when"], "inventory_hostname != site_pve_inventory_host")
+        self.assertIn("site_ai_backend_vmid is defined", guard)
+        self.assertIn("site_ai_backend_hostname is defined", guard)
+
+    def test_ai_lxc_hostname_comes_from_site_local_settings(self):
+        path = ROOT / "ansible/group_vars/all/bergen-ai.yml"
+        config = yaml.safe_load(path.read_text())
+        self.assertEqual(
+            config["lxc_hostname"],
+            "{{ site_ai_backend_hostname | mandatory }}",
+        )
+        self.assertEqual(
+            config["lxc_vmid"],
+            "{{ site_ai_backend_vmid | mandatory }}",
+        )
+
+    def test_oidc_targets_unambiguous_logical_ai_group(self):
+        path = ROOT / "ansible/playbooks/configure-open-webui-oidc.yml"
+        play = yaml.safe_load(path.read_text())[0]
+        self.assertEqual(play["hosts"], "ai_nodes")
+        guard = next(
+            task for task in play["tasks"]
+            if task["name"] == "Refuse ambiguous AI inventory and missing site identity"
+        )
+        conditions = guard["ansible.builtin.assert"]["that"]
+        self.assertIn("groups.get('ai_nodes', []) | length == 1", conditions)
+        self.assertIn("site_ai_backend_hostname is defined", conditions)
+
     def test_activation_requires_approval_and_reuses_site_template(self):
         play = yaml.safe_load(ACTIVATE.read_text())[0]
         self.assertEqual(play["hosts"], "reverse_proxy_nodes")
         source = ACTIVATE.read_text()
         self.assertIn("ai_proxy_deployment_approved | default(false) | bool", source)
-        self.assertIn("inventory_hostname == 'bergen-proxy'", source)
+        self.assertIn("inventory_hostname == ai_proxy_expected_inventory_hostname", source)
         self.assertIn("internal-proxy-site.conf.j2", source)
         self.assertIn("ai_proxy_paperless_before.stat.checksum", source)
         self.assertIn("ai_proxy_dns.results[0].stdout == ai_proxy_dns.results[1].stdout", source)

@@ -8,19 +8,19 @@ certificate.
 
 ## Verified baseline
 
-- The existing `bergen-proxy` LXC runs Nginx on TCP 443 and has no TCP 80
+- The existing reverse-proxy LXC runs Nginx on TCP 443 and has no TCP 80
   listener.
-- `paperless.thebergens.net` uses the existing
-  `50-internal-paperless.thebergens.net.conf` vhost and the loopback upstream
+- `paperless.example.net` uses the existing
+  `50-internal-paperless.example.net.conf` vhost and the loopback upstream
   `http://127.0.0.1:18000`.
 - Paperless reaches its backend through a dedicated, non-root SSH local
   forward. Its identity is not reused for Bergen-AI.
 - The proxy uses the existing certificate files
   `/etc/nginx/tls/fullchain.pem` and `/etc/nginx/tls/privkey.pem`.
-- Open WebUI listens on loopback TCP 3000 in the Bergen-AI guest.
-- Internal DNS resolves `ai.thebergens.net` and
-  `paperless.thebergens.net` to the same proxy address.
-- The existing certificate covers `ai.thebergens.net`, and `nginx -t`
+- Open WebUI listens on loopback TCP 3000 in the AI backend guest.
+- Internal DNS resolves `ai.example.net` and
+  `paperless.example.net` to the same proxy address.
+- The existing certificate covers `ai.example.net`, and `nginx -t`
   succeeds.
 
 The automatic wildcard-certificate distribution and the corresponding Nginx
@@ -29,11 +29,11 @@ reload after a real renewal remain to be proven separately.
 ## Architecture and scope
 
 ```text
-https://ai.thebergens.net
+https://ai.example.net
   -> existing Nginx in the dedicated proxy LXC
   -> http://127.0.0.1:13000 on the proxy
   -> dedicated SSH local forward
-  -> 127.0.0.1:3000 in the Bergen-AI guest
+  -> 127.0.0.1:3000 in the AI backend guest
 ```
 
 The additional backend listener binds only to proxy loopback. The playbook does
@@ -91,7 +91,7 @@ isolation remain separate controls.
 
 The activation preflight verifies:
 
-- exact certificate coverage for `ai.thebergens.net`;
+- exact certificate coverage for `ai.example.net`;
 - at least 14 days of remaining certificate validity;
 - identical internal IPv4 resolution for AI and Paperless;
 - a valid existing Nginx configuration;

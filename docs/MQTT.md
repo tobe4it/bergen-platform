@@ -136,7 +136,7 @@ It authenticates with the dedicated `go-echarger` account and has write access t
 The Homey MQTT Client connects directly to Mosquitto with its dedicated account. Current settings are:
 
 ```text
-Broker: 192.168.20.138
+Broker: 192.0.2.138
 Port: 1883
 Username: homey
 Client ID: homey

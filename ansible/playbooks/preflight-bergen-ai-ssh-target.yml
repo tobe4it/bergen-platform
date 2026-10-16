@@ -1,23 +1,38 @@
 ---
 # Read-only backend readiness. Does not read secrets or modify SSH services.
 - name: Inspect Bergen-AI backend for existing-proxy SSH tunnel
-  hosts: venombox
+  hosts: proxmox_hosts
   become: true
   gather_facts: false
   tasks:
+    - name: Require exact reviewed Proxmox target before inspecting backend
+      ansible.builtin.assert:
+        that:
+          - site_pve_inventory_host is defined
+          - site_pve_inventory_host in groups.get('proxmox_hosts', [])
+          - site_ai_backend_vmid is defined
+          - site_ai_backend_hostname is defined
+        fail_msg: >-
+          The reviewed local Proxmox host or required site variables are missing;
+          refusing to inspect any unrelated node.
+
+    - name: Skip Proxmox hosts other than the locally selected target
+      ansible.builtin.meta: end_host
+      when: inventory_hostname != site_pve_inventory_host
+
     - name: Require exact AI LXC identity
       ansible.builtin.command:
-        argv: [pct, exec, '110', --, hostname, -s]
+        argv: [pct, exec, "{{ site_ai_backend_vmid | mandatory }}", --, hostname, -s]
       register: ai_guest_name
       changed_when: false
-      failed_when: ai_guest_name.stdout | trim != 'bergen-ai'
+      failed_when: ai_guest_name.stdout | trim != (site_ai_backend_hostname | mandatory)
 
     - name: Collect sanitized IPv4 SSH and Open WebUI listeners
       ansible.builtin.command:
         argv:
           - pct
           - exec
-          - '110'
+          - "{{ site_ai_backend_vmid | mandatory }}"
           - --
           - python3
           - -c

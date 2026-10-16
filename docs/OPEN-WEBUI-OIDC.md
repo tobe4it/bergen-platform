@@ -39,11 +39,11 @@ or create replacement accounts to work around this; chats remain owned by user I
 
 ## Network validation on 2026-10-15
 
-The deployed application is reachable via `https://ai.thebergens.net`.
+The deployed application is reachable via `https://ai.example.net`.
 Synology discovery at
-`https://sehnde.tbergen.de:5001/webman/sso/.well-known/openid-configuration`
-returned HTTP 200 with certificate validation on 192.168.6.11. The other DNS answer,
-192.168.2.145, timed out from bergen-ai. Discovery also succeeded inside Open WebUI,
+`https://nas.example.org:5001/webman/sso/.well-known/openid-configuration`
+returned HTTP 200 with certificate validation on 192.0.2.11. The other DNS answer,
+192.0.2.145, timed out from the AI backend container. Discovery also succeeded inside Open WebUI,
 but mixed reachable/unreachable answers can cause delay or intermittent failures.
 Resolve this through scoped DNS/network configuration; retain the HTTPS hostname
 and issuer rather than replacing them with an IP. No DNS or firewall changes are

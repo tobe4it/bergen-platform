@@ -1,38 +1,58 @@
 ---
-###############################################################################
-# Site-local inventory example
-#
-# Copy to inventory.local.yml. The destination is ignored by Git. Runtime
-# discovery or an administrator replaces ansible_host with the effective,
-# stable address of each site-local service.
-###############################################################################
-
+# EXAMPLE ONLY: copy to inventory.local.yml (ignored by Git).
+# Documentation addresses use RFC 5737 and cannot reach real infrastructure.
+# Merge real hosts with your existing local inventory; never overwrite it.
 all:
   children:
+    controllers:
+      hosts:
+        controller-node:
+          ansible_host: 192.0.2.20
+          ansible_user: root
+          ansible_python_interpreter: /usr/bin/python3
+    proxmox_hosts:
+      hosts:
+        pve-node:
+          ansible_host: 192.0.2.10
+          ansible_user: root
+          ansible_python_interpreter: /usr/bin/python3
+    reverse_proxy_nodes:
+      hosts:
+        proxy-node:
+          ansible_host: 192.0.2.50
+          ansible_user: root
+          ansible_python_interpreter: /usr/bin/python3
+    ai_nodes:
+      hosts:
+        ai-node:
+          ansible_host: 192.0.2.30
+          ansible_user: root
+          ansible_python_interpreter: /usr/bin/python3
+    linux_lxcs:
+      hosts:
+        controller-node:
+        ai-node:
     mail_backend_nodes:
       hosts:
-        bergen-mail:
-          ansible_host: bergen-mail
+        mail-node:
+          ansible_host: 192.0.2.40
           ansible_user: root
           ansible_python_interpreter: /usr/bin/python3
-
     pihole_nodes:
       hosts:
-        bergen-pihole:
-          ansible_host: 192.168.20.CHANGE_ME
+        dns-node:
+          ansible_host: 192.0.2.41
           ansible_user: root
           ansible_python_interpreter: /usr/bin/python3
-
     evcc_nodes:
       hosts:
-        bergen-evcc:
-          ansible_host: NEW_EVCC_IP
+        charger-node:
+          ansible_host: 192.0.2.42
           ansible_user: root
           ansible_python_interpreter: /usr/bin/python3
-
     evcc_legacy_nodes:
       hosts:
-        evcc-old:
-          ansible_host: OLD_EVCC_IP
+        old-charger-node:
+          ansible_host: 192.0.2.43
           ansible_user: root
           ansible_python_interpreter: /usr/bin/python3

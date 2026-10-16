@@ -44,7 +44,7 @@ remain outside Git.
 The Bergen-AI path is:
 
 ```text
-https://ai.thebergens.net
+https://ai.example.net
   -> existing Nginx proxy on TCP 443
   -> http://127.0.0.1:13000
   -> dedicated SSH local forward

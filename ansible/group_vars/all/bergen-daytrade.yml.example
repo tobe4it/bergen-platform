@@ -22,8 +22,8 @@ lxc_firewall: 1
 lxc_ssh_public_key: >-
   {{ lookup('file', lookup('env', 'HOME') + '/.ssh/id_ed25519.pub') }}
 lxc_root_password: "{{ vault_lxc_root_password }}"
-pve_node: venombox
-pve_inventory_host: venombox
+pve_node: pve-node
+pve_inventory_host: pve-node
 lxc_inventory_file: "{{ playbook_dir }}/../inventory.local.yml"
 lxc_inventory_group: market_collectors
 
@@ -71,7 +71,7 @@ daytrading_ibkr_instruments: []
 ###############################################################################
 
 daytrading_email_results_enabled: true
-daytrading_smtp_host: mail.thebergens.net
+daytrading_smtp_host: mail.example.net
 daytrading_smtp_port: 587
 daytrading_smtp_starttls: true
 daytrading_smtp_username: CHANGE_ME

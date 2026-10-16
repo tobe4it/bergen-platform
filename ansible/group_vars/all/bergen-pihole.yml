@@ -36,15 +36,14 @@ lxc_ssh_public_key: >-
   {{ lookup('file', lookup('env', 'HOME') + '/.ssh/id_ed25519.pub') }}
 lxc_root_password: "{{ vault_lxc_root_password }}"
 
-pve_node: venombox
-pve_inventory_host: venombox
+# pve_node and pve_inventory_host must be defined in ignored site.local.yml.
 
 ###############################################################################
 # Central logging
 ###############################################################################
 
 remote_syslog_enabled: true
-remote_syslog_server: 192.168.20.164
+# remote_syslog_server must be defined in ignored site.local.yml.
 remote_syslog_port: 514
 remote_syslog_protocol: tcp
 remote_syslog_send_test: true
@@ -61,8 +60,7 @@ pihole_timezone: Europe/Berlin
 # Preserve the existing internal DNS authority and split-DNS behavior.
 # Do not point Synology DNS back to Pi-hole or to a resolver that forwards to
 # Pi-hole, otherwise a DNS forwarding loop is created.
-pihole_upstreams:
-  - 192.168.6.11
+pihole_upstreams: []  # Populate via ignored site.local.yml.
 
 # The LXC has one routed service interface. SINGLE accepts queries from routed
 # VLANs on that interface while avoiding listeners on unrelated interfaces.

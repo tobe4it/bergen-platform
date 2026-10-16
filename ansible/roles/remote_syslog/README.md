@@ -7,7 +7,7 @@ central Bergen Syslog collector.
 
 ```yaml
 remote_syslog_enabled: true
-remote_syslog_server: 192.168.20.164
+remote_syslog_server: 192.0.2.164
 remote_syslog_port: 514
 remote_syslog_protocol: tcp
 remote_syslog_config_path: /etc/rsyslog.d/90-bergen-remote.conf
