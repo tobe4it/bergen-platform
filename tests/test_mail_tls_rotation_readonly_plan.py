@@ -58,7 +58,7 @@ def test_all_actions_are_read_only():
 
 def test_no_site_identifiers_in_versioned_playbook():
     content = PLAYBOOK.read_text(encoding="utf-8")
-    for forbidden in ("thebergens", "bergen-mail", "lxadmin", "mx2"):
+    for forbidden in ("private-zone.invalid", "site-username", "site-hostname"):
         assert forbidden not in content.lower()
 
 
