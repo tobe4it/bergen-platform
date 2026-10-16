@@ -1,5 +1,5 @@
 lxc_vmid: 110
-lxc_hostname: bergen-ai
+lxc_hostname: "{{ site_ai_backend_hostname | mandatory }}"
 
 lxc_template: local:vztmpl/debian-13-standard_13.6-1_amd64.tar.zst
 
