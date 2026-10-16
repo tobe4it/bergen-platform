@@ -82,6 +82,16 @@ class DiagnosticTests(unittest.TestCase):
         with self.assertRaisesRegex(m.DiagnosticFailure, "^PAPERLESS_LIVE_VERIFICATION_FAILED$"):
             m.diagnose(fake(fail_verify=True))
 
+    def test_deleted_or_missing_paperless_document_is_distinct(self):
+        with self.assertRaisesRegex(m.DiagnosticFailure, "^PAPERLESS_DOCUMENT_NOT_FOUND$"):
+            m.diagnose(fake(doc_id=None))
+
+    def test_invalid_live_verifier_result_is_rejected(self):
+        for value in (True, 0, "44", -1):
+            with self.subTest(value=value), self.assertRaisesRegex(
+                    m.DiagnosticFailure, "^PAPERLESS_VERIFIER_INVALID_RESULT$"):
+                m.diagnose(fake(doc_id=value))
+
     def test_live_document_id_mismatch(self):
         with self.assertRaisesRegex(m.DiagnosticFailure, "^PAPERLESS_DOCUMENT_ID_MISMATCH$"):
             m.diagnose(fake(doc_id=45))
