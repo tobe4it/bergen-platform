@@ -1,10 +1,8 @@
 # Paperless archive preflight and main promotion gate
 
-Status, 2026-10-15: READ-ONLY ONLY. No archive worker, inbox deletion or
-quarantine purge is enabled by this change. Paperless stays outside main
-until authenticated import, safe archive copy, verified inbox-source
-removal and independent restore are proven. Automatic archive expiration
-after 30 days is explicitly deferred.
+Status, 2026-10-16: **protected same-Btrfs-subvolume NAS archive worker staged but disabled**. No production archive-move gate, inbox source deletion, or 30-day purge is active. Paperless remains outside `main` until the authorized import -> journal -> archival location change and the separately gated safe deletion after proven recoverability have passed live tests.
+
+An **atomic protected archive location change** is not conditional on an immediately preceding backup. The original PDF continues to exist on NAS. **Irreversible expiry/purge** requires a tested, recoverable backup of Paperless + NAS archives + journals as an independent gate. No `archive-move.<site>.enabled` flags are to be created by any audit.
 
 ## Verified topology and evidence
 
@@ -56,15 +54,15 @@ sender versioning and source/quarantine handling.
 2. Filename reuse, successive identical names, rsync destination
    collisions and repeated/partial receipts have collision-free versioned
    identities with replay protection and exhaustive regression tests.
-3. Private NAS quarantine receives a durable checksum-verified copy
-   across subvolumes with a crash-recoverable journal and explicit
-   verified-import acknowledgement. No cross-device atomic rename
-   is assumed.
-4. Only then may the still-identical scan original be removed from the
-   inbox (this is already a destructive filesystem operation, even though
-   the archived copy survives for at least 30 days). Crash injection at
-   every copy, publish, fsync, receipt and removal boundary must
-   recover safely; mismatches must fail closed.
+3. Private, root-controlled same-site NAS archives receive the original
+   PDF through durable `renameat2(RENAME_NOREPLACE)` on the exact same Btrfs
+   subvolume, following a freshly verified Paperless import and under
+   the configured shared sender lock. No cross-device rename or copy-unlink
+   fallback. The distinct /tmp-only v2 copy-unlink fixture is not a live path.
+4. The scan source entry vanishes through the atomic rename **but the
+   original file is preserved in the protected archive**. A crash at the
+   prepared/rename/archived journal boundary must be detectable and safely
+   reconciled; mismatches block further attempts. No silent replay.
 5. Initial release scope (2026-10-15): the archived NAS original
    is retained for **at least 30 full days**, and indefinitely until a
    separately reviewed expiry worker is explicitly enabled. No automatic
@@ -73,12 +71,39 @@ sender versioning and source/quarantine handling.
    scan time, file mtime or Paperless import date. A later expiry worker
    must independently verify backup/restore health and exact eligible
    journal states at purge time; this is a separate release gate.
-6. Four configured privacy scopes pass negative effective DSM and
-   Paperless ACL tests; operational backup/restore is independently
-   checked. Live positive and negative end-to-end tests are approved.
+6. Four privacy scopes pass effective DSM and Paperless ACL tests. A
+   controlled live PDF canary, nonce-bound sender/import proof and recovery
+   tests must pass before a single protected archive move is released.
+   Independent **backup/restore** is a mandatory gate for the later
+   destructive 30-day expiry worker (and for full eventual promotion).
 7. Merge the Paperless feature stack (PR #60 or successor) into main
    only after these criteria pass. Read-only checks do not bypass them.
 
 This historical two-journal verifier is intentionally pinned to
 documents 15 and 26; it does not discover new journals and must not
 serve as the future general backup gate for retention purges.
+
+## v2 live readiness audit (16.10.2026, not an archive gate)
+
+`ansible/playbooks/audit-paperless-v2-live-readiness.yml` reads the NAS
+v1/v2 sender history via the existing restricted SSH + `sync.lock` path and
+executes the live Paperless v2 import/owner/ACL exporter through `pct exec 126`.
+`summarize_paperless_v2_live_readiness.py` verifies the output framing,
+rejects malformed/inconsistent event inventories and prints **anonymous
+counts only**, even if v2 identity fields are present. It **does not** match
+a specific NAS SENT receipt to a specific imported PDF and **never** grants
+archival, source deletion or purge. There is no deployment/activation step.
+
+Controller checks on the exact PR branch:
+
+    python3 -m unittest discover -s tests -p 'test_paperless_v2_live_readiness.py' -v
+    ansible-playbook -i ansible/inventory.yml -i ansible/inventory.local.yml \\
+      ansible/playbooks/audit-paperless-v2-live-readiness.yml \\
+      --vault-id paperless@prompt \\
+      -e @ansible/vars/paperless.vault.yml \\
+      -e @ansible/vars/paperless-synology.local.yml --syntax-check
+
+After those pass, omit `--syntax-check` for the live **read-only** evidence
+collection. No candidate selection or NAS worker enablement occurs. If the
+NAS has no live v2 SENT events, this is an expected development blocker,
+not a reason to fabricate a receipt or downgrade the authorization contract.
