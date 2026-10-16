@@ -148,6 +148,7 @@ def execute(parent, only, proof, *, call=None, now=None):
     raw = manifest(only, proof, issued)
     gate = parent / GATE
     fd = -1
+    release_fd = -1
     created = None
     dir_fd = os.open(parent, os.O_RDONLY | os.O_DIRECTORY |
                      os.O_NOFOLLOW | os.O_CLOEXEC)
@@ -164,6 +165,15 @@ def execute(parent, only, proof, *, call=None, now=None):
         os.close(fd)
         fd = -1
         os.fsync(dir_fd)
+        release_fd = os.open(
+            GATE, os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC,
+            dir_fd=dir_fd)
+        opened = os.fstat(release_fd)
+        demand((opened.st_dev, opened.st_ino, opened.st_uid, opened.st_gid,
+                opened.st_mode, opened.st_nlink, opened.st_size) ==
+               (created.st_dev, created.st_ino, created.st_uid,
+                created.st_gid, created.st_mode, created.st_nlink,
+                len(raw)), "RELEASE_GATE_CHANGED_BEFORE_DELEGATION")
 
         def drop():
             os.initgroups(user.pw_name, user.pw_gid)
@@ -174,8 +184,10 @@ def execute(parent, only, proof, *, call=None, now=None):
         # The private proof is passed by stdin, never by argv or logs.
         result = subprocess_run(
             ["/usr/bin/python3", str(worker), "--state-parent",
-             str(parent), "--only", only, "--commit"],
+             str(parent), "--only", only, "--commit",
+             "--release-fd", str(release_fd)],
             input=json.dumps(proof, separators=(",", ":"), ensure_ascii=True),
+            pass_fds=(release_fd,),
             capture_output=True, text=True, check=False, timeout=480,
             preexec_fn=drop, env={
                 "PATH": "/usr/bin:/bin",
@@ -194,6 +206,8 @@ def execute(parent, only, proof, *, call=None, now=None):
                lines[1] == "ARCHIVE_PURGE_DISABLED",
                "UNEXPECTED_ARCHIVE_WORKER_RESULT")
     finally:
+        if release_fd >= 0:
+            os.close(release_fd)
         if fd >= 0:
             os.close(fd)
         if created is not None:
