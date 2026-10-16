@@ -121,7 +121,7 @@ Before changing DHCP DNS for any VLAN:
 
 ```bash
 nslookup example.org 192.0.2.218
-nslookup bergen.intern 192.0.2.218
+nslookup ldap.example.net 192.0.2.218
 ```
 
 Open:
