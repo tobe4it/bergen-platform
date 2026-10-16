@@ -9,6 +9,7 @@ import argparse
 import json
 import os
 from pathlib import Path
+import re
 import sys
 import tempfile
 
@@ -108,12 +109,25 @@ def main(argv=None):
     group = parser.add_mutually_exclusive_group(required=True)
     group.add_argument("--check", action="store_true")
     group.add_argument("--apply", action="store_true")
+    parser.add_argument("--instance", help="Optional isolated ACME instance slug; omit for legacy")
     args = parser.parse_args(argv)
     if os.geteuid() != 0:
         raise hook.HookError("Recovery must run as root")
     os.umask(0o077)
-    cfg = hook.load_config()
-    reconcile(cfg, apply=args.apply)
+    if args.instance is None:
+        cfg = hook.load_config()
+        state_dir = hook.DEFAULT_STATE_DIR
+        if cfg.get("state_dir", state_dir) != state_dir:
+            raise hook.HookError("Legacy recovery requires legacy state directory")
+    else:
+        if not re.fullmatch(r"[a-z0-9][a-z0-9_-]{0,31}", args.instance):
+            raise hook.HookError("Invalid isolated ACME instance slug")
+        state_dir = "/var/lib/selfhost-acme/instances/" + args.instance
+        cfg_path = "/etc/letsencrypt/selfhost-acme.d/" + args.instance + ".json"
+        cfg = hook.load_config(cfg_path)
+        if cfg.get("state_dir") != state_dir:
+            raise hook.HookError("Isolated instance state path does not match its configuration")
+    reconcile(cfg, apply=args.apply, state_dir=state_dir)
 
 
 if __name__ == "__main__":
