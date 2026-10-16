@@ -28,6 +28,51 @@ class EntryProtectionTests(unittest.TestCase):
             "[3] user:root:allow:rwxpdDaARWc--:fd-- (level:0)")
         self.assertEqual(m.unsafe_parent_grants(m.parse_aces(listing), "paperless-sync"), [])
 
+
+    def test_special_principals_and_spaced_level_supported(self):
+        listing = sample(
+            "[0] everyone::allow:--x----------:fd-- (level: 0)\n"
+            "[1] owner::allow:rwxpdDaARWcCo:fd-- (level: 1)\n"
+            "[2] system::allow:r-x---a-R-c--:fd-- (level:0)")
+        parsed = m.parse_aces(listing)
+        self.assertEqual([row[0] for row in parsed],
+                         ["everyone", "owner", "system"])
+        self.assertEqual(m.unsafe_parent_grants(parsed, "paperless-sync"), [])
+
+    def test_everyone_delete_child_must_block(self):
+        listing = sample(
+            "[0] everyone::allow:rwxpdDaARWcCo:fd-- (level:0)")
+        self.assertEqual(
+            m.unsafe_parent_grants(m.parse_aces(listing), "paperless-sync"),
+            [("everyone", "<special>")])
+
+    def test_system_delete_child_must_block(self):
+        listing = sample(
+            "[0] system::allow:rwxpdDaARWc--:fd-- (level: 0)")
+        self.assertEqual(
+            m.unsafe_parent_grants(m.parse_aces(listing), "paperless-sync"),
+            [("system", "<special>")])
+
+    def test_unknown_special_or_injected_ace_denied(self):
+        for line in (
+            "[0] mystery::allow:rwxpdDaARWcCo:fd-- (level:0)",
+            "[0] everyone:fake:allow:rwxpdDaARWcCo:fd-- (level:0)",
+            "[0] user::allow:rwxpdDaARWcCo:fd-- (level:0)",
+            "[0] user:alice:allow:rwxpdDaARWcCo:fd-- (level:0) junk",
+            "[0] everyone::allow:rwxpdDaARWcCo:fd-- (level:0)\n"
+            "[1] everyone::allow:UNKNOWN:fd-- (level:0)",
+        ):
+            with self.subTest(line=line), self.assertRaises(RuntimeError):
+                m.parse_aces(sample(line))
+
+    def test_special_deny_is_not_a_delete_allow(self):
+        listing = sample(
+            "[0] everyone::deny:rwxpdDaARWcCo:fd-- (level: 0)\n"
+            "[1] system::allow:r-x---a-R-c--:fd-- (level:0)")
+        self.assertEqual(
+            m.unsafe_parent_grants(m.parse_aces(listing), "paperless-sync"),
+            [])
+
     def test_family_group_delete_child_blocks(self):
         listing = sample(
             "? [1] group:Familie@bergen.intern:allow:rwxpdDaARWc--:fd-- (level:0)")
