@@ -1,0 +1,373 @@
+---
+# Additional independent selfHOST DNS-01 certificate source on an existing host.
+# Existing /etc/letsencrypt/selfhost-acme.json and its state remain untouched.
+# No DNS writes or certificate requests unless explicitly opted in.
+- name: Validate the explicitly selected ACME instance on the controller
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  tasks:
+    - name: Require an isolated instance and locally supplied credentials
+      ansible.builtin.assert:
+        that:
+          - mail_tls_source_address is defined
+          - mail_tls_source_ssh_user is defined
+          - selfhost_acme_instance is defined
+          - selfhost_acme_instance is match('^[a-z0-9][a-z0-9_-]{0,31}$')
+          - selfhost_acme_zone is defined
+          - selfhost_acme_zone is match('^[a-z0-9-]+(\\.[a-z0-9-]+)+$')
+          - selfhost_acme_contact_email is defined
+          - selfhost_acme_contact_email is match('^[^ @]+@[^ @]+$')
+          - selfhost_acme_api_key is defined
+          - selfhost_acme_api_key is match('^[A-Za-z0-9_-]+\\.[A-Za-z0-9_-]+$')
+          - selfhost_acme_record_ids is defined
+          - selfhost_acme_record_ids | length == 2
+          - selfhost_acme_record_ids | unique | length == 2
+          - selfhost_acme_record_ids | select('integer') | list | length == 2
+          - selfhost_acme_nameservers is defined
+          - selfhost_acme_nameservers | length >= 2
+          - selfhost_acme_nameservers | select('match', '^[a-z0-9.-]+$') | list | length == selfhost_acme_nameservers | length
+          - selfhost_acme_tls_rsa2048_compat is not defined or selfhost_acme_tls_rsa2048_compat is boolean
+          - not ansible_check_mode
+          - not ((selfhost_acme_run_staging | default(false) | bool) and (selfhost_acme_issue_production | default(false) | bool))
+        fail_msg: Instance configuration invalid; no remote changes performed
+      no_log: true
+
+    - name: Add only the configured certificate source
+      ansible.builtin.add_host:
+        name: selfhost-acme-instance-source
+        groups: selfhost_acme_instance_sources
+        ansible_host: "{{ mail_tls_source_address }}"
+        ansible_user: "{{ mail_tls_source_ssh_user }}"
+        ansible_python_interpreter: /usr/bin/python3
+      changed_when: false
+
+- name: Install and optionally issue an isolated wildcard certificate
+  hosts: selfhost_acme_instance_sources
+  become: true
+  gather_facts: false
+  any_errors_fatal: true
+  vars:
+    acme_hook: /usr/local/libexec/selfhost_acme_hook.py
+    acme_config: "/etc/letsencrypt/selfhost-acme.d/{{ selfhost_acme_instance }}.json"
+    acme_state: "/var/lib/selfhost-acme/instances/{{ selfhost_acme_instance }}"
+    acme_staging: "/var/lib/acme-staging/instances/{{ selfhost_acme_instance }}"
+    acme_staging_name: "selfhost-dns-{{ selfhost_acme_instance }}-staging"
+    acme_cert_name: "selfhost-dns-{{ selfhost_acme_instance }}"
+    acme_auth_hook: "/usr/bin/env SELFHOST_ACME_CONFIG={{ acme_config }} /usr/bin/python3 {{ acme_hook }} auth"
+    acme_cleanup_hook: "/usr/bin/env SELFHOST_ACME_CONFIG={{ acme_config }} /usr/bin/python3 {{ acme_hook }} cleanup"
+  tasks:
+    - name: Require Certbot Python and dig
+      ansible.builtin.command:
+        argv:
+          - /usr/bin/python3
+          - -c
+          - "import shutil,sys; sys.exit(any(shutil.which(x) is None for x in ('certbot','dig','python3')))"
+      changed_when: false
+
+    - name: Refuse concurrent Certbot issuance
+      ansible.builtin.shell: |
+        set -eu
+        ! pgrep -af '(^|/| )certbot( |$)' | grep -v -E '(pgrep|grep)' | grep -q .
+      args:
+        executable: /bin/bash
+      changed_when: false
+      when: (selfhost_acme_run_staging | default(false) | bool) or (selfhost_acme_issue_production | default(false) | bool)
+
+    - name: Install the shared reviewed Python hook
+      ansible.builtin.copy:
+        src: "{{ playbook_dir }}/../../scripts/selfhost_acme_hook.py"
+        dest: "{{ acme_hook }}"
+        owner: root
+        group: root
+        mode: '0755'
+
+    - name: Create private configuration directory
+      ansible.builtin.file:
+        path: /etc/letsencrypt/selfhost-acme.d
+        state: directory
+        owner: root
+        group: root
+        mode: '0700'
+
+    - name: Refuse accidental reuse of a slug for a different DNS zone or TXT slots
+      ansible.builtin.command:
+        argv:
+          - /usr/bin/python3
+          - -c
+          - |
+            import json, pathlib, sys
+            path = pathlib.Path(sys.argv[1])
+            if not path.exists() and not path.is_symlink():
+                sys.exit(0)
+            if path.is_symlink() or not path.is_file():
+                sys.exit(2)
+            existing = json.loads(path.read_text())
+            if existing.get("zone") != sys.argv[2]:
+                sys.exit(3)
+            if existing.get("record_ids") != [int(sys.argv[3]), int(sys.argv[4])]:
+                sys.exit(4)
+          - "{{ acme_config }}"
+          - "{{ selfhost_acme_zone }}"
+          - "{{ selfhost_acme_record_ids[0] | string }}"
+          - "{{ selfhost_acme_record_ids[1] | string }}"
+      changed_when: false
+      no_log: true
+
+    - name: Write only this instance configuration, never log credentials
+      ansible.builtin.copy:
+        content: "{{ {'api_key': selfhost_acme_api_key, 'zone': selfhost_acme_zone, 'record_ids': selfhost_acme_record_ids, 'nameservers': selfhost_acme_nameservers, 'state_dir': acme_state, 'tls_rsa2048_compat': selfhost_acme_tls_rsa2048_compat | default(false)} | to_nice_json }}\n"
+        dest: "{{ acme_config }}"
+        owner: root
+        group: root
+        mode: '0600'
+      no_log: true
+
+    - name: Validate the private config without contacting the API
+      ansible.builtin.command:
+        argv:
+          - /usr/bin/python3
+          - -c
+          - "import runpy,sys; runpy.run_path('/usr/local/libexec/selfhost_acme_hook.py')['load_config'](sys.argv[1])"
+          - "{{ acme_config }}"
+      changed_when: false
+      no_log: true
+
+    - name: Check idle TXT slots at authoritative nameservers
+      ansible.builtin.command:
+        argv:
+          - dig
+          - +short
+          - +norecurse
+          - +time=3
+          - +tries=1
+          - TXT
+          - "_acme-challenge.{{ selfhost_acme_zone }}"
+          - "@{{ item }}"
+      loop: "{{ selfhost_acme_nameservers }}"
+      register: acme_idle_dns
+      changed_when: false
+
+    - name: Refuse an occupied or inconsistent TXT state
+      ansible.builtin.assert:
+        that:
+          - "('selfhost-api-idle-' ~ (selfhost_acme_record_ids[0] | string)) in item.stdout"
+          - "('selfhost-api-idle-' ~ (selfhost_acme_record_ids[1] | string)) in item.stdout"
+        fail_msg: TXT records not idle; no issuance permitted
+      loop: "{{ acme_idle_dns.results }}"
+      loop_control:
+        label: "{{ item.item }}"
+
+    - name: Check private instance state without modifying it
+      ansible.builtin.stat:
+        path: "{{ acme_state }}/active.json"
+      register: acme_active_state
+      when: (selfhost_acme_run_staging | default(false) | bool) or (selfhost_acme_issue_production | default(false) | bool)
+
+    - name: Read existing instance reservations without logging values
+      ansible.builtin.slurp:
+        src: "{{ acme_state }}/active.json"
+      register: acme_active_state_raw
+      no_log: true
+      when:
+        - (selfhost_acme_run_staging | default(false) | bool) or (selfhost_acme_issue_production | default(false) | bool)
+        - acme_active_state.stat.exists
+
+    - name: Refuse issuance when this instance has active reservations
+      ansible.builtin.assert:
+        that:
+          - not acme_active_state.stat.exists or (acme_active_state_raw.content | b64decode | from_json) == {}
+        fail_msg: Reserved state exists; inspect and reconcile this instance separately
+      when: (selfhost_acme_run_staging | default(false) | bool) or (selfhost_acme_issue_production | default(false) | bool)
+      no_log: true
+
+    - name: Create isolated staging workspace when requested
+      ansible.builtin.file:
+        path: "{{ item }}"
+        owner: root
+        group: root
+        mode: '0700'
+        state: directory
+      loop:
+        - "{{ acme_staging }}/config"
+        - "{{ acme_staging }}/work"
+        - "{{ acme_staging }}/log"
+      when: selfhost_acme_run_staging | default(false) | bool
+
+    - name: Issue separate untrusted Let's Encrypt staging certificate
+      ansible.builtin.command:
+        argv:
+          - certbot
+          - certonly
+          - --staging
+          - --non-interactive
+          - --agree-tos
+          - --email
+          - "{{ selfhost_acme_contact_email }}"
+          - --config-dir
+          - "{{ acme_staging }}/config"
+          - --work-dir
+          - "{{ acme_staging }}/work"
+          - --logs-dir
+          - "{{ acme_staging }}/log"
+          - --cert-name
+          - "{{ acme_staging_name }}"
+          - --key-type
+          - ecdsa
+          - --elliptic-curve
+          - secp256r1
+          - --manual
+          - --preferred-challenges
+          - dns
+          - --manual-auth-hook
+          - "{{ acme_auth_hook }}"
+          - --manual-cleanup-hook
+          - "{{ acme_cleanup_hook }}"
+          - -d
+          - "{{ selfhost_acme_zone }}"
+          - -d
+          - "*.{{ selfhost_acme_zone }}"
+        creates: "{{ acme_staging }}/config/live/{{ acme_staging_name }}/fullchain.pem"
+      async: 1200
+      poll: 15
+      no_log: true
+      when: selfhost_acme_run_staging | default(false) | bool
+
+    - name: Verify staging certificate exists before production request
+      ansible.builtin.stat:
+        path: "{{ acme_staging }}/config/live/{{ acme_staging_name }}/fullchain.pem"
+        follow: true
+      register: acme_staging_cert
+      when: (selfhost_acme_run_staging | default(false) | bool) or (selfhost_acme_issue_production | default(false) | bool)
+
+    - name: Read staging SAN names
+      ansible.builtin.command:
+        argv:
+          - openssl
+          - x509
+          - -in
+          - "{{ acme_staging }}/config/live/{{ acme_staging_name }}/fullchain.pem"
+          - -noout
+          - -ext
+          - subjectAltName
+      register: acme_staging_sans
+      changed_when: false
+      when: (selfhost_acme_run_staging | default(false) | bool) or (selfhost_acme_issue_production | default(false) | bool)
+
+    - name: Inspect staging certificate key algorithm
+      ansible.builtin.command:
+        argv:
+          - openssl
+          - x509
+          - -in
+          - "{{ acme_staging }}/config/live/{{ acme_staging_name }}/fullchain.pem"
+          - -noout
+          - -text
+      register: acme_staging_algorithm
+      changed_when: false
+      when: (selfhost_acme_run_staging | default(false) | bool) or (selfhost_acme_issue_production | default(false) | bool)
+
+    - name: Require this zone apex and wildcard in staging certificate
+      ansible.builtin.assert:
+        that:
+          - acme_staging_cert.stat.isreg | default(false)
+          - "('DNS:' ~ selfhost_acme_zone) in acme_staging_sans.stdout"
+          - "('DNS:*.' ~ selfhost_acme_zone) in acme_staging_sans.stdout"
+          - "'Public Key Algorithm: id-ecPublicKey' in acme_staging_algorithm.stdout"
+      when: (selfhost_acme_run_staging | default(false) | bool) or (selfhost_acme_issue_production | default(false) | bool)
+
+    - name: Refuse to replace or adopt an existing production lineage
+      ansible.builtin.stat:
+        path: "/etc/letsencrypt/renewal/{{ acme_cert_name }}.conf"
+      register: acme_existing_lineage
+      when: selfhost_acme_issue_production | default(false) | bool
+
+    - name: Detect an existing certificate directory for this name
+      ansible.builtin.stat:
+        path: "/etc/letsencrypt/live/{{ acme_cert_name }}"
+      register: acme_existing_live
+      when: selfhost_acme_issue_production | default(false) | bool
+
+    - name: Require a completely unused production certificate name
+      ansible.builtin.assert:
+        that:
+          - not acme_existing_lineage.stat.exists
+          - not acme_existing_live.stat.exists
+        fail_msg: Existing lineage or live path must be handled separately; refusing replacement
+      when: selfhost_acme_issue_production | default(false) | bool
+
+    - name: Explicitly issue a new independent production certificate
+      ansible.builtin.command:
+        argv:
+          - certbot
+          - certonly
+          - --non-interactive
+          - --agree-tos
+          - --email
+          - "{{ selfhost_acme_contact_email }}"
+          - --cert-name
+          - "{{ acme_cert_name }}"
+          - --key-type
+          - ecdsa
+          - --elliptic-curve
+          - secp256r1
+          - --manual
+          - --preferred-challenges
+          - dns
+          - --manual-auth-hook
+          - "{{ acme_auth_hook }}"
+          - --manual-cleanup-hook
+          - "{{ acme_cleanup_hook }}"
+          - -d
+          - "{{ selfhost_acme_zone }}"
+          - -d
+          - "*.{{ selfhost_acme_zone }}"
+      async: 1200
+      poll: 15
+      no_log: true
+      when: selfhost_acme_issue_production | default(false) | bool
+
+    - name: Verify new production SAN names
+      ansible.builtin.command:
+        argv:
+          - openssl
+          - x509
+          - -in
+          - "/etc/letsencrypt/live/{{ acme_cert_name }}/fullchain.pem"
+          - -noout
+          - -ext
+          - subjectAltName
+      register: acme_prod_sans
+      changed_when: false
+      when: selfhost_acme_issue_production | default(false) | bool
+
+    - name: Inspect production certificate key algorithm
+      ansible.builtin.command:
+        argv:
+          - openssl
+          - x509
+          - -in
+          - "/etc/letsencrypt/live/{{ acme_cert_name }}/fullchain.pem"
+          - -noout
+          - -text
+      register: acme_prod_algorithm
+      changed_when: false
+      when: selfhost_acme_issue_production | default(false) | bool
+
+    - name: Enforce production certificate scope
+      ansible.builtin.assert:
+        that:
+          - "('DNS:' ~ selfhost_acme_zone) in acme_prod_sans.stdout"
+          - "('DNS:*.' ~ selfhost_acme_zone) in acme_prod_sans.stdout"
+          - "'Public Key Algorithm: id-ecPublicKey' in acme_prod_algorithm.stdout"
+      when: selfhost_acme_issue_production | default(false) | bool
+
+    - name: Report narrowly scoped result
+      ansible.builtin.debug:
+        msg:
+          instance: "{{ selfhost_acme_instance }}"
+          state: isolated
+          legacy_configuration_changed: false
+          production_lineage_requested: "{{ selfhost_acme_issue_production | default(false) | bool }}"
+          staging_requested: "{{ selfhost_acme_run_staging | default(false) | bool }}"
+          nginx_changed: false

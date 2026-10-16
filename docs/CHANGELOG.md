@@ -17,6 +17,51 @@ The project follows **Semantic Versioning (SemVer)** and the changelog format is
 
 ---
 
+## [0.12.0] - 2026-10-16
+
+Independent selfHOST DNS-01 wildcard certificate instances. This release
+extends the existing mail-gateway ACME integration without migrating or
+rewriting the legacy `thebergens.net` certificate lineage.
+
+### Added
+
+- Optional, separately configured per-zone selfHOST instances using independent
+  API credentials, authoritative nameservers, exactly two TXT slots and an
+  isolated reservation state directory; default legacy paths stay unchanged.
+- Guarded Ansible playbook for installation-only, opt-in staging and opt-in
+  production wildcard issuance with ECDSA P-256 keys, separate Certbot names
+  and SAN/algorithm validation.
+- Strictly scoped per-instance recovery of abandoned DNS-01 reservations,
+  with authoritative-idle verification, Certbot concurrency checks and a
+  protected state backup before explicitly approved reconciliation.
+- Git-ignored per-instance Ansible input and encrypted Vault examples, an
+  operator runbook and offline state-isolation and recovery tests.
+
+### Verified
+
+- 47 relevant offline tests passed, and the isolated recovery playbook passed
+  Ansible syntax validation.
+- `tbergen.de` staging and production issuance succeeded on the certificate
+  source, covering both the zone apex and wildcard with ECDSA P-256.
+- Independent `certbot renew --dry-run` tests passed for the existing
+  `thebergens.net-wildcard` and the new `selfhost-dns-tbergen` lineages.
+  Both local reservation stores and authoritative DNS TXT slots were confirmed
+  clean after their respective tests.
+- The source's enabled and active `certbot-renew.timer` runs the generic
+  Certbot renewal service; provider credentials remain local to the source
+  and do not require the Ansible controller during renewal.
+
+### Operational follow-up
+
+- No new `selfhost-dns-tbergen` Nginx consumer or deploy-reload hook is
+  installed by this release. Connect the prepared `cloud.tbergen.de` vhost
+  on the destination during the separate Nextcloud migration; verify Nginx
+  configuration, reload behavior and served certificate before cutover.
+- A simulated renewal does not prove a future scheduled production renewal;
+  observe one and its downstream deploy hooks independently.
+
+---
+
 ## [0.11.0] - 2026-10-15
 
 Open WebUI OIDC integration with Synology SSO.

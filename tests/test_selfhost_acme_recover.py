@@ -74,6 +74,38 @@ def test_read_only_then_guarded_apply_and_retained_backup(monkeypatch, tmp_path,
     assert "ALREADY_CLEAN:" in capsys.readouterr().out
 
 
+@pytest.mark.parametrize("slot", ["1", "2"])
+def test_single_abandoned_reservation_can_be_reconciled(monkeypatch, tmp_path, capsys, slot):
+    prepped(monkeypatch)
+    original = {slot: reservations()[slot]}
+    state_path = make_state(tmp_path, original)
+
+    recover.reconcile(cfg(), apply=False, state_dir=tmp_path)
+    assert "READY: 1 abandoned reservation(s)" in capsys.readouterr().out
+    assert json.loads(state_path.read_text()) == original
+    assert not list(tmp_path.glob("reconciled-*.json"))
+
+    recover.reconcile(cfg(), apply=True, state_dir=tmp_path)
+    assert "RECONCILED: 1 orphaned reservation(s)" in capsys.readouterr().out
+    assert json.loads(state_path.read_text()) == {}
+    backups = list(tmp_path.glob("reconciled-*.json"))
+    assert len(backups) == 1
+    assert json.loads(backups[0].read_text()) == original
+    assert backups[0].stat().st_mode & 0o077 == 0
+
+
+def test_refuses_single_reservation_if_dns_token_still_visible(monkeypatch, tmp_path):
+    prepped(monkeypatch)
+    original = {"1": reservations()["1"]}
+    state_path = make_state(tmp_path, original)
+    monkeypatch.setattr(hook, "authoritative_txt",
+                        lambda server, name: trusted_dns(server, name) | {"A" * 43})
+    with pytest.raises(hook.HookError, match="Old validation token"):
+        recover.reconcile(cfg(), apply=True, state_dir=tmp_path)
+    assert json.loads(state_path.read_text()) == original
+    assert not list(tmp_path.glob("reconciled-*.json"))
+
+
 def test_fails_closed_when_one_dns_slot_not_idle(monkeypatch, tmp_path):
     prepped(monkeypatch)
     state_path = make_state(tmp_path, reservations())
@@ -100,6 +132,10 @@ def test_refuses_any_challenge_still_visible_in_dns(monkeypatch, tmp_path):
      "2": {"identifier": "*.example.invalid", "validation": "B" * 43,
            "status": "reserved"}},
     {"1": {"identifier": "example.invalid", "validation": "A" * 43,
+           "status": "cleaning"}},
+    {"3": {"identifier": "example.invalid", "validation": "A" * 43,
+           "status": "reserved"}},
+    {"1": {"identifier": "unexpected.invalid", "validation": "A" * 43,
            "status": "reserved"}},
     {"1": {"identifier": "example.invalid", "validation": "A" * 43,
            "status": "reserved"},
@@ -125,6 +161,76 @@ def test_refuses_active_certbot_process(monkeypatch, tmp_path):
     with pytest.raises(hook.HookError, match="Certbot process"):
         recover.reconcile(cfg(), apply=True, state_dir=tmp_path)
     assert json.loads(state_path.read_text()) == reservations()
+
+
+def test_isolated_instance_cli_selects_only_its_private_paths(monkeypatch):
+    called = {}
+    cfg_instance = {
+        **cfg(),
+        "state_dir": "/var/lib/selfhost-acme/instances/secondary-zone",
+    }
+    monkeypatch.setattr(recover.os, "geteuid", lambda: 0)
+
+    def load(path=hook.DEFAULT_CONFIG):
+        called["config"] = path
+        return cfg_instance
+
+    def reconcile_stub(loaded, *, apply=False, state_dir):
+        called["state_dir"] = state_dir
+        called["apply"] = apply
+        assert loaded is cfg_instance
+
+    monkeypatch.setattr(hook, "load_config", load)
+    monkeypatch.setattr(recover, "reconcile", reconcile_stub)
+    recover.main(["--check", "--instance", "secondary-zone"])
+    assert called == {
+        "config": "/etc/letsencrypt/selfhost-acme.d/secondary-zone.json",
+        "state_dir": "/var/lib/selfhost-acme/instances/secondary-zone",
+        "apply": False,
+    }
+
+
+def test_legacy_cli_keeps_default_paths(monkeypatch):
+    called = {}
+    monkeypatch.setattr(recover.os, "geteuid", lambda: 0)
+    monkeypatch.setattr(hook, "load_config", lambda path=hook.DEFAULT_CONFIG: cfg())
+    monkeypatch.setattr(recover, "reconcile",
+                        lambda loaded, *, apply, state_dir: called.update(
+                            state_dir=state_dir, apply=apply))
+    recover.main(["--check"])
+    assert called == {"state_dir": hook.DEFAULT_STATE_DIR, "apply": False}
+
+
+@pytest.mark.parametrize("instance", ["../legacy", "zone.other", "", "a/b", "UpperCase"])
+def test_isolated_recovery_rejects_unsafe_instance_names(monkeypatch, instance):
+    monkeypatch.setattr(recover.os, "geteuid", lambda: 0)
+    monkeypatch.setattr(hook, "load_config",
+                        lambda *args: pytest.fail("No config access for invalid slug"))
+    with pytest.raises(hook.HookError, match="Invalid isolated ACME instance slug"):
+        recover.main(["--check", "--instance", instance])
+
+
+def test_isolated_recovery_rejects_mismatched_state_path(monkeypatch):
+    monkeypatch.setattr(recover.os, "geteuid", lambda: 0)
+    monkeypatch.setattr(hook, "load_config",
+                        lambda *args: {**cfg(), "state_dir": "/var/lib/selfhost-acme"})
+    monkeypatch.setattr(recover, "reconcile",
+                        lambda *args, **kwargs: pytest.fail("No reconciliation with wrong state"))
+    with pytest.raises(hook.HookError, match="does not match"):
+        recover.main(["--apply", "--instance", "secondary-zone"])
+
+
+def test_recovery_playbook_requires_explicit_instance_selector():
+    import yaml
+    path = ROOT / "ansible/playbooks/selfhost-acme-reconcile.yml"
+    plays = yaml.safe_load(path.read_text())
+    controller = repr(plays[0]["tasks"])
+    remote = repr(plays[1]["tasks"])
+    assert "selfhost_acme_reconcile_instance" in controller
+    assert "selfhost_acme_instance" in controller
+    assert "--instance" in remote
+    assert "selfhost_acme_reconcile_instance is defined" in remote
+    assert "selfhost_acme_reconcile_apply | default(false) | bool" in remote
 
 
 def test_no_site_identifiers_or_api_credentials_in_recovery_source():
