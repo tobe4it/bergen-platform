@@ -108,8 +108,24 @@ class GroupExactReleaseTests(unittest.TestCase):
                             " 2026-10 " + p["sender_receipt"][:-5] +
                             ".pdf\nARCHIVE_PURGE_DISABLED\n"),
                     stderr="")
-            # Do NOT touch production paths or real user identity.
+            # Emulate a root-owned temp gate without requiring tests to run
+            # as root. All filesystem writes remain inside the synthetic tmp.
+            real_fstat = os.fstat
+            real_stat = os.stat
+            def as_root(st):
+                details = {key: getattr(st, key) for key in (
+                    "st_dev", "st_ino", "st_uid", "st_gid", "st_mode",
+                    "st_nlink", "st_size")}
+                details["st_uid"] = details["st_gid"] = 0
+                return SimpleNamespace(**details)
+            def synthetic_fstat(fd):
+                return as_root(real_fstat(fd))
+            def synthetic_stat(path, *args, **kwargs):
+                result = real_stat(path, *args, **kwargs)
+                return as_root(result) if kwargs.get("dir_fd") is not None else result
             with patch.object(m.os, "geteuid", return_value=0), \
+                 patch.object(m.os, "fstat", side_effect=synthetic_fstat), \
+                 patch.object(m.os, "stat", side_effect=synthetic_stat), \
                  patch.object(m, "verify_dir"), \
                  patch.object(m, "safe_file"), \
                  patch.object(m.pwd, "getpwnam",
