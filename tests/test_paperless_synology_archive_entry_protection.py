@@ -24,7 +24,7 @@ class EntryProtectionTests(unittest.TestCase):
         listing = sample(
             "[0] group:administrators:allow:rwxpdDaARWc--:fd-- (level:0)\n"
             "[1] group:administrators@bergen.intern:allow:rwxpdDaARWc--:fd-- (level:0)\n"
-            "[2] user:paperless-sync:allow:rwxpdDaARWc--:fd-- (level:0)\\n"
+            "[2] user:paperless-sync:allow:rwxpdDaARWc--:fd-- (level:0)\n"
             "[3] user:root:allow:rwxpdDaARWc--:fd-- (level:0)")
         self.assertEqual(m.unsafe_parent_grants(m.parse_aces(listing), "paperless-sync"), [])
 
@@ -175,6 +175,7 @@ class EntryProtectionTests(unittest.TestCase):
         self.assertIn("existing_month_targets(", script)
         self.assertIn("get_aces(tool, path)", script)
         self.assertNotIn('source / ".paperless-archive"', script)
+
     def test_readonly_probe_contains_no_archive_mutations(self):
         code = FILE.read_text()
         for token in ("os.rename(", "os.replace(", "os.unlink(", ".unlink(",
