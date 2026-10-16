@@ -115,7 +115,9 @@ def test_playbook_preserves_legacy_paths_and_limits_issuance():
     assert plays[1]["hosts"] == "selfhost_acme_instance_sources"
     assert plays[1]["become"] is True
     tasks = plays[1]["tasks"]
-    rendered = repr(tasks)
+    # Paths and hook commands are deliberately defined as play-level vars.
+    # Inspect the whole play, not just its task list.
+    rendered = repr(plays[1])
     assert "selfhost-acme.d/" in rendered
     assert "/var/lib/selfhost-acme/instances/" in rendered
     assert "/var/lib/acme-staging/instances/" in rendered
