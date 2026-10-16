@@ -43,7 +43,7 @@
         group: root
         mode: '0755'
 
-    - name: Confirm both reserved slots and both authoritative DNS idle values
+    - name: Confirm only known reserved slots and both authoritative DNS idle values
       ansible.builtin.command:
         argv:
           - /usr/bin/python3
