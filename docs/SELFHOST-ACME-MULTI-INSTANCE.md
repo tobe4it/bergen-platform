@@ -13,6 +13,19 @@ This does **not** create a multi-zone SAN certificate. Each instance issues
 exactly `zone` and `*.zone`. Wildcards do not cover the apex unless the apex
 is also explicitly requested, and do not cover multiple DNS levels.
 
+Additional wildcard certificates intended for web/application TLS are
+**ECDSA-only**, explicitly issued by Certbot with `--key-type ecdsa` and
+`--elliptic-curve secp256r1` (P-256). The playbook checks the issued
+certificate's public-key algorithm in both staging and production. RSA
+certificates are maintained separately where legacy SMTP interoperability
+requires them; this playbook never issues an RSA companion certificate.
+
+The optional `selfhost_acme_tls_rsa2048_compat` setting is unrelated to the
+new certificate's key algorithm. It only relaxes the OpenSSL security level
+for the outbound HTTPS connection to the selfHOST DNS API if that provider's
+RSA-2048 TLS certificate is incompatible with the host's FUTURE crypto policy.
+It does not create an RSA certificate or weaken unrelated services.
+
 ## Separation from existing installations
 
 Legacy single-zone deployments still use:
