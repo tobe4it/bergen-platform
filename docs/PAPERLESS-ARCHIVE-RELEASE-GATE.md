@@ -1,6 +1,6 @@
 # Paperless archive preflight and main promotion gate
 
-Status, 2026-10-16: **protected same-Btrfs-subvolume NAS archive worker staged but disabled**. No production archive-move gate, inbox source deletion, or 30-day purge is active. Paperless remains outside `main` until the authorized import -> journal -> archival location change and the separately gated safe deletion after proven recoverability have passed live tests.
+Status, 2026-10-16: **one approved exact-file group-only production archive relocation completed and independently reconciled**; the reviewed worker and root release runner remain staged, with all temporary commit gates absent. No production archive-move gate, inbox source deletion, or 30-day purge is active. Paperless remains outside `main` until the authorized import -> journal -> archival location change and the separately gated safe deletion after proven recoverability have passed live tests.
 
 An **atomic protected archive location change** is not conditional on an immediately preceding backup. The original PDF continues to exist on NAS. **Irreversible expiry/purge** requires a tested, recoverable backup of Paperless + NAS archives + journals as an independent gate. No `archive-move.<site>.enabled` flags are to be created by any audit.
 
@@ -574,3 +574,64 @@ verify staged SHA-256, repeat the live read-only lifecycle and one-document
 preview, and review potential remaining causes. Any new productive commit
 requires a new explicit one-document authorization. Do not run it from
 this note.
+
+
+## 2026-10-16 independently reconciled first completed group-only archive
+
+**Canary:** `Familie/Bergen-Platform-fuer-Dummies.pdf`, the one
+explicitly reauthorized group original. After the read-only
+post-failure 22-source/0-archive audit, the root-to-`paperless-sync`
+protected manifest descriptor fix was staged on NAS for both worker and
+runner, always with all three release gates absent.
+
+Operator verified 717/717 `test_paperless_*.py` offline tests; the
+archive worker, one-group runner and one-group commit Ansible syntax
+checks; disabled-only worker staging (`localhost ok=13 changed=3 failed=0`)
+and runner staging (`localhost ok=13 changed=3 failed=0`);
+a fresh 22-source/0-archive live read-only lifecycle; and a successful
+exact-one-PDF no-write preview (`venombox ok=27 changed=0 failed=0`,
+`ARCHIVE_DRY_RUN_VERIFIED`, `ARCHIVE_NOT_AUTHORIZED`,
+`PURGE_NOT_AUTHORIZED`). A **new explicit one-file authorization**
+was obtained prior to the live commit.
+
+The one-shot production `commit-paperless-one-group-v1-archive.yml`
+completed successfully: `venombox ok=54 changed=1 failed=0 skipped=2`
+with `ONE_GROUP_PDF_ARCHIVE_COMPLETED`,
+`POST_MOVE_LIFECYCLE_RECONCILED`, `ALL_RELEASE_GATES_ABSENT`, and
+`ARCHIVE_PURGE_DISABLED`. The committed `renameat2(RENAME_NOREPLACE)`
+is backed by one complete protected archive journal and unchanged
+live Paperless visibility.
+
+A **separate subsequent read-only** execution of
+`audit-paperless-import-lifecycle-15-26.yml` passed:
+`venombox ok=19 changed=0 failed=0`;
+`NAS_SENT_VERIFIED 21`, `NAS_ARCHIVED_VERIFIED 1`,
+`NAS_CURRENT_ORIGINALS_VERIFIED 22`,
+`PAPERLESS_LIVE_IMPORTED 22`,
+`ARCHIVED_LIVE_IMPORTED Familie document 8`,
+`DELETED_BY_USER 2`,
+`IMPORT_LIFECYCLE_RECONCILED`, `ARCHIVE_NOT_AUTHORIZED`,
+`NO_RECEIPTS_CHANGED`, `NO_FILES_CHANGED`.
+The 21 originals still in source plus one archived original reconcile
+to the same 22 existing Paperless documents. This independently
+detects incomplete archive journals, missing inodes and mismatched
+hashes; it is not an independent off-NAS restore test.
+
+**Remaining gates:** No authority to move the other 15 remaining
+group-scope candidates, to activate permanent site archive flags,
+to touch either private home scope, to automate batches, or to
+remove/purge any archived PDF after 30 days. No authority to merge
+Paperless into `main` until all separately required recovery,
+DSM/SMB rights and irreversible-retention gates have been met.
+Do not imply full DSM/SMB effective deletion/rename-denial from the
+successful POSIX/NSS and lifecycle evidence alone.
+
+**Audit script caution:** The historical
+`audit_synology_archive_entry_protection.py` currently inspects
+`source/.paperless-archive`, whereas the active protected group
+archive uses the sibling `.bergen-paperless-archive` directory.
+Its findings must not be presented as proof of effective native
+ACL or directory-entry rename/delete protection for the active
+protected archive. Align the read-only auditor with the deployed
+protected-path contract and test it before reuse.
+
