@@ -254,12 +254,26 @@
       changed_when: false
       when: (selfhost_acme_run_staging | default(false) | bool) or (selfhost_acme_issue_production | default(false) | bool)
 
+    - name: Inspect staging certificate key algorithm
+      ansible.builtin.command:
+        argv:
+          - openssl
+          - x509
+          - -in
+          - "{{ acme_staging }}/config/live/{{ acme_staging_name }}/fullchain.pem"
+          - -noout
+          - -text
+      register: acme_staging_algorithm
+      changed_when: false
+      when: (selfhost_acme_run_staging | default(false) | bool) or (selfhost_acme_issue_production | default(false) | bool)
+
     - name: Require this zone apex and wildcard in staging certificate
       ansible.builtin.assert:
         that:
           - acme_staging_cert.stat.isreg | default(false)
           - "('DNS:' ~ selfhost_acme_zone) in acme_staging_sans.stdout"
           - "('DNS:*.' ~ selfhost_acme_zone) in acme_staging_sans.stdout"
+          - "'Public Key Algorithm: id-ecPublicKey' in acme_staging_algorithm.stdout"
       when: (selfhost_acme_run_staging | default(false) | bool) or (selfhost_acme_issue_production | default(false) | bool)
 
     - name: Refuse to replace or adopt an existing production lineage
@@ -327,11 +341,25 @@
       changed_when: false
       when: selfhost_acme_issue_production | default(false) | bool
 
+    - name: Inspect production certificate key algorithm
+      ansible.builtin.command:
+        argv:
+          - openssl
+          - x509
+          - -in
+          - "/etc/letsencrypt/live/{{ acme_cert_name }}/fullchain.pem"
+          - -noout
+          - -text
+      register: acme_prod_algorithm
+      changed_when: false
+      when: selfhost_acme_issue_production | default(false) | bool
+
     - name: Enforce production certificate scope
       ansible.builtin.assert:
         that:
           - "('DNS:' ~ selfhost_acme_zone) in acme_prod_sans.stdout"
           - "('DNS:*.' ~ selfhost_acme_zone) in acme_prod_sans.stdout"
+          - "'Public Key Algorithm: id-ecPublicKey' in acme_prod_algorithm.stdout"
       when: selfhost_acme_issue_production | default(false) | bool
 
     - name: Report narrowly scoped result
