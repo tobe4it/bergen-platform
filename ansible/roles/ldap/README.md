@@ -15,7 +15,7 @@ Responsibilities
 
 Current LDAP tree
 
-    dc=bergen,dc=intern
+    dc=example,dc=net
     ├── cn=users
     │   ├── uid=admin
     │   ├── uid=thomas
@@ -27,11 +27,11 @@ Variables
 
   Variable                  Description                 Default
   ------------------------- --------------------------- ------------------------------
-  ldap_host                 LDAP server hostname        bergen.intern
+  ldap_host                 LDAP server hostname        ldap.example.net
   ldap_port                 LDAP port                   389
   ldap_protocol             LDAP protocol               ldap
-  ldap_base_dn              Directory base DN           dc=bergen,dc=intern
-  ldap_search_base          User search base            cn=users,dc=bergen,dc=intern
+  ldap_base_dn              Directory base DN           dc=example,dc=net
+  ldap_search_base          User search base            cn=users,dc=example,dc=net
   ldap_username_attribute   Login attribute             uid
   ldap_mail_attribute       Mail attribute              mail
   ldap_bind_dn              Application Bind DN         anonymous
@@ -75,13 +75,13 @@ Required infrastructure:
 Example
 
     Server:
-        ldap://bergen.intern:389
+        ldap://ldap.example.net:389
 
     Base DN:
-        dc=bergen,dc=intern
+        dc=example,dc=net
 
     Search base:
-        cn=users,dc=bergen,dc=intern
+        cn=users,dc=example,dc=net
 
     Username attribute:
         uid
