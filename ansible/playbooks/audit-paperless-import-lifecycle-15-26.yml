@@ -178,3 +178,4 @@
     - name: Display reconciled imports and two confirmed user deletions
       ansible.builtin.debug:
         var: lifecycle_report.stdout_lines
+      when: not (paperless_lifecycle_quiet | default(false) | bool)
