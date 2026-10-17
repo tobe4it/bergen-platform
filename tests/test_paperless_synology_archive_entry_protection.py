@@ -330,6 +330,32 @@ class EntryProtectionTests(unittest.TestCase):
         self.assertIn('NATIVE_SITE_ROOT_ACLS_VERIFIED 2', playbook)
         self.assertIn('ARCHIVE_COMMIT_NOT_AUTHORIZED', playbook)
 
+    def test_playbook_yaml_parses_and_posix_count_assertion_is_complete(self):
+        import yaml
+        file = (FILE.parents[2] / "playbooks" /
+                "audit-paperless-synology-archive-entry-protection.yml")
+        plays = yaml.safe_load(file.read_text())
+        self.assertEqual(len(plays), 1)
+        tasks = plays[0]["tasks"]
+        self.assertEqual(len(tasks), 4)
+        conditions = tasks[-1]["ansible.builtin.assert"]["that"]
+        exact = ("(archive_entry_audit.stdout_lines | select('match', "
+                 "'^POSIX_0700_ARCHIVE_PARENTS_VERIFIED [0-9]+
+        code = FILE.read_text()
+        for token in ("os.rename(", "os.replace(", "os.unlink(", ".unlink(",
+                      "shutil.move(", "os.mkdir(", "subprocess.Popen("):
+            self.assertNotIn(token, code)
+
+
+if __name__ == "__main__":
+    unittest.main()
+) | list | "
+                 "length) == 1")
+        self.assertIn(exact, conditions)
+        self.assertIn(
+            "'NATIVE_SITE_ROOT_ACLS_VERIFIED 2' in "
+            "archive_entry_audit.stdout_lines", conditions)
+
     def test_readonly_probe_contains_no_archive_mutations(self):
         code = FILE.read_text()
         for token in ("os.rename(", "os.replace(", "os.unlink(", ".unlink(",
