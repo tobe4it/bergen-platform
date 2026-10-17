@@ -1113,3 +1113,53 @@ markers, not passwords, raw SMB errors or secrets.
 No NAS/ACL mutation, new archival move, release flag, purge or
 merge into main is authorized by this troubleshooting.
 
+
+### 2026-10-17 SMB CONNECT validation fail: passwordless transport and negotiation preflights
+
+After the previous sanitized diagnostics change, the operator completed
+the full **759/759** synthetic Paperless tests and the local API
+preflight (`SMBPROTOCOL_LOCAL_API_CHECK_OK`,
+`NO_SMB_CONNECTION_ATTEMPTED`). The next explicitly selected
+normal-user SMB2 test produced only:
+
+```text
+SMB_PROBE_DIAGNOSTIC CONNECT VALIDATION NO_STATUS
+SMB_NEGATIVE_ACCESS_PROBE_BLOCKED
+```
+
+It stopped BEFORE any SMB user session or protected archive
+rights probe. **No credential, authorization or effective SMB
+DELETE verdict was established.** The existing code placed both
+`Connection(...)` and `connection.connect()` in the same CONNECT
+phase; the reported `RuntimeError`/`ValueError` could have
+been raised in either construction or SMB negotiation.
+It should not prompt for yet another password until this is
+disambiguated. The NAS archival and recovery evidence is unaffected.
+
+The next branch update adds two separate **credential-free** options
+to the same strictly read-only script:
+
+- `--tcp-preflight --server <verified-Synology-endpoint>`: tests
+  only that TCP 445 can be opened, with a five-second socket timeout.
+  It does **not** authenticate or send any SMB request.
+- `--negotiate-preflight --server <verified-Synology-endpoint>`:
+  invokes the validated `smbprotocol==1.17.0` transport and SMB2/3
+  negotiate handshake, then disconnects. It creates NO
+  `smbprotocol.Session`, enters NO share and asks for NO password.
+  Only `SMB_DIALECT_NEGOTIATED` with
+  `NO_SMB_AUTHENTICATION_ATTEMPTED` counts as success.
+
+Phases are now separated into `CONNECT_OBJECT` and
+`SMB_NEGOTIATE`; sanitized diagnostics include an allowlisted
+exception **type**, numeric NTSTATUS (if available) and
+phase, never raw exception text, tokens, identities or paths.
+Unknown or failed cases remain blocked. Three extra synthetic
+preflight tests cover no-credential execution, fail-closed
+errors and teardown. The operator must validate the full
+Paperless suite locally **before** invoking either
+preflight. Only after the failure is understood should another
+authenticated SMB2 rights test be considered.
+
+These are development/diagnosis probes, not a grant of archive
+relocation, purge, NAS ACL changes or a merge to `main`.
+
