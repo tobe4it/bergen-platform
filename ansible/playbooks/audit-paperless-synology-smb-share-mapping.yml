@@ -1,0 +1,62 @@
+---
+# READ-ONLY mapping preflight for subsequent SMB2 access-intent checks.
+# A share name alone does not prove SMB path or identity semantics.
+- name: Verify exact active protected archive SMB site-root share mappings
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  tasks:
+    - name: Require configured NAS and expected administrative SSH identity
+      ansible.builtin.assert:
+        that:
+          - synology_admin is defined
+          - synology_admin is match('^[A-Za-z_][A-Za-z0-9_.-]*@[A-Za-z0-9][A-Za-z0-9.-]+$')
+          - synology_config is defined
+          - synology_config.schema_version == 1
+          - synology_config.sync_user == 'paperless-sync'
+          - synology_config.state_parent is match('^/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$')
+
+    - name: Verify DSM SMB share paths without changing shares or ACLs
+      ansible.builtin.command:
+        argv:
+          - ssh
+          - -T
+          - -o
+          - BatchMode=yes
+          - -o
+          - StrictHostKeyChecking=yes
+          - -o
+          - ConnectTimeout=15
+          - "{{ synology_admin }}"
+          - sudo -n /usr/bin/python3 -
+        stdin: "{{ lookup('ansible.builtin.file', playbook_dir + '/../files/paperless/audit_synology_smb_share_mapping.py', rstrip=False) }}"
+      register: smb_share_mapping
+      changed_when: false
+
+    - name: Require exact two SMB-to-site mappings
+      ansible.builtin.assert:
+        that:
+          - smb_share_mapping.rc == 0
+          - smb_share_mapping.stdout_lines == ['NAS_SMB_SHARE_REAL_ROOT_VERIFIED homes', 'NAS_SMB_SHARE_REAL_ROOT_VERIFIED paperless-scan', 'NAS_SMB_SHARE_MAPPING_VERIFIED 2', 'SMB_NEGATIVE_RIGHTS_NOT_TESTED', 'NO_FILES_CHANGED']
+          - (smb_share_mapping.stderr | trim) == ''
+        fail_msg: "Neither SMB user access nor archive delete protection can be inferred from an unverified Synology share path"
+
+    - name: Report static SMB share mapping only
+      ansible.builtin.debug:
+        msg:
+          - NAS_SMB_SHARE_MAPPING_VERIFIED 2
+          - SMB_NEGATIVE_RIGHTS_NOT_TESTED
+          - NO_FILES_CHANGED
+
+    - name: Check local optional smbprotocol dependency without installing packages
+      ansible.builtin.command:
+        argv:
+          - python3
+          - -c
+          - "import importlib.util; print('SMBPROTOCOL_PRESENT' if importlib.util.find_spec('smbprotocol') else 'SMBPROTOCOL_NOT_INSTALLED')"
+      register: smbprotocol_presence
+      changed_when: false
+
+    - name: Show optional SMB2 probe dependency status
+      ansible.builtin.debug:
+        var: smbprotocol_presence.stdout_lines

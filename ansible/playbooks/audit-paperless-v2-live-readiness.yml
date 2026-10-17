@@ -1,0 +1,73 @@
+---
+# READ ONLY: sender history and fresh Paperless v2 imported-document evidence.
+# Never archives, renames, deletes, sends a PDF, activates gates or mutates receipts.
+# These two inventories are not yet an exact same-incarnation join or authorization.
+- import_playbook: audit-paperless-receipt-history.yml
+
+- name: Read-only live Paperless v2 import audit
+  hosts: venombox
+  gather_facts: false
+  become: true
+  tasks:
+    - name: Verify unprivileged Paperless LXC configuration
+      ansible.builtin.command:
+        argv: [pct, config, '126']
+      register: v2_guest_config
+      changed_when: false
+
+    - name: Reject unexpected guest or AppArmor relaxation
+      ansible.builtin.assert:
+        that:
+          - "'hostname: bergen-paperless' in v2_guest_config.stdout_lines"
+          - "'unprivileged: 1' in v2_guest_config.stdout_lines"
+          - "'lxc.apparmor.profile: unconfined' not in v2_guest_config.stdout"
+        fail_msg: "Not the expected confined unprivileged Paperless LXC"
+
+    - name: Require Paperless guest running
+      ansible.builtin.command:
+        argv: [pct, status, '126']
+      register: v2_guest_status
+      changed_when: false
+      failed_when: >-
+        v2_guest_status.rc != 0 or
+        (v2_guest_status.stdout | trim) != 'status: running'
+
+    - name: Export fresh live and ACL-verified v2 IMPORTED receipts only
+      ansible.builtin.command:
+        argv: [pct, exec, '126', --, python3, '-']
+        stdin: "{{ lookup('ansible.builtin.file', playbook_dir + '/../files/paperless/export_imported_scans_v2.py', rstrip=False) }}"
+      register: paperless_v2_live_import_audit
+      changed_when: false
+      no_log: true
+
+- name: Anonymous synthesis of two read-only audits without exposing identifiers
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  tasks:
+    - name: Validate independent NAS and Paperless audit envelopes
+      ansible.builtin.command:
+        argv:
+          - /usr/bin/python3
+          - "{{ playbook_dir }}/../files/paperless/summarize_paperless_v2_live_readiness.py"
+        stdin: >-
+          {{ {'nas': paperless_receipt_history_audit.stdout,
+              'paperless': hostvars['venombox'].paperless_v2_live_import_audit.stdout} | to_json }}
+      register: paperless_v2_readiness_summary
+      changed_when: false
+      no_log: true
+
+    - name: Require explicitly non-authorizing outcome
+      ansible.builtin.assert:
+        that:
+          - "'V2_READONLY_PREFLIGHT_COMPLETE' in paperless_v2_readiness_summary.stdout_lines"
+          - "'V2_EXACT_RECEIPT_JOIN_NOT_YET_VERIFIED' in paperless_v2_readiness_summary.stdout_lines"
+          - "'NO_FILES_CHANGED' in paperless_v2_readiness_summary.stdout_lines"
+          - "'ARCHIVE_NOT_AUTHORIZED' in paperless_v2_readiness_summary.stdout_lines"
+          - "'SOURCE_DELETE_NOT_AUTHORIZED' in paperless_v2_readiness_summary.stdout_lines"
+          - "'PURGE_NOT_AUTHORIZED' in paperless_v2_readiness_summary.stdout_lines"
+        fail_msg: "Live v2 audit incomplete: no archive release permitted"
+
+    - name: Report only verified aggregate counts and withheld release
+      ansible.builtin.debug:
+        var: paperless_v2_readiness_summary.stdout_lines

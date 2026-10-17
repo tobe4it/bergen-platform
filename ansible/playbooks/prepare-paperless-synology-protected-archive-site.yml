@@ -1,0 +1,59 @@
+---
+# Stage EMPTY protected archive location for only one independently audited site.
+# Default read-only. No PDF/receipt modification; never activate archive move.
+- name: Independently prepare one protected same-device Synology archive site
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  tasks:
+    - name: Require explicit site, typed opt-in and local NAS configuration
+      ansible.builtin.assert:
+        that:
+          - synology_admin is defined
+          - synology_admin is match('^[A-Za-z_][A-Za-z0-9_.-]*@[A-Za-z0-9][A-Za-z0-9.-]+$')
+          - synology_config is defined
+          - synology_config.schema_version == 1
+          - synology_config.sync_user == 'paperless-sync'
+          - synology_config.state_parent is match('^/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$')
+          - paperless_archive_site is defined
+          - paperless_archive_site in ['homes', 'paperless-scan']
+          - (paperless_protected_archive_prepare | default(false)) is boolean
+        fail_msg: "Choose one explicit NAS site and use JSON true for empty-only provisioning"
+
+    - name: Audit or explicitly provision empty site without source file changes
+      ansible.builtin.command:
+        argv:
+          - ssh
+          - -T
+          - -o
+          - BatchMode=yes
+          - -o
+          - StrictHostKeyChecking=yes
+          - -o
+          - ConnectTimeout=15
+          - "{{ synology_admin }}"
+          - >-
+            sudo -n /usr/bin/python3 -
+            {{ synology_config.state_parent | quote }}
+            --site {{ paperless_archive_site | quote }}
+            {{ '--prepare' if (paperless_protected_archive_prepare | default(false) | bool) else '--audit' }}
+        stdin: "{{ lookup('ansible.builtin.file', playbook_dir + '/../files/paperless/prepare_synology_protected_archive_site.py', rstrip=False) }}"
+      register: protected_archive_stage
+      changed_when: "'PROTECTED_ARCHIVE_CREATED ' in protected_archive_stage.stdout"
+
+    - name: Require no PDF movement and no activation
+      ansible.builtin.assert:
+        that:
+          - "'ARCHIVE_COMMIT_NOT_AUTHORIZED' in protected_archive_stage.stdout_lines"
+          - >-
+            ('ARCHIVE_GATE_ABSENT' in protected_archive_stage.stdout_lines and
+            'NO_SCAN_OR_RECEIPT_FILES_CHANGED' in protected_archive_stage.stdout_lines and
+            'PROTECTED_SITE_PREPARED ' ~ paperless_archive_site in protected_archive_stage.stdout_lines)
+            if (paperless_protected_archive_prepare | default(false) | bool) else
+            ('PREPARE_DISABLED' in protected_archive_stage.stdout_lines and
+            'NO_FILES_CHANGED' in protected_archive_stage.stdout_lines)
+        fail_msg: "Protected archive staging incomplete; no PDF move authorized"
+
+    - name: Display selected site and created directories
+      ansible.builtin.debug:
+        var: protected_archive_stage.stdout_lines

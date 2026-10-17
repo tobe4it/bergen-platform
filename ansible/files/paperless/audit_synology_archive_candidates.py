@@ -49,9 +49,19 @@ def main(parent):
                 receipt = read_receipt(receipt_file)
                 if receipt is None or receipt.get("status") != "SENT":
                     raise RuntimeError("SOURCE_NOT_CONFIRMED_SENT " + scope + "/" + path.name)
+                actual_signature = signature(before)
+                prior_signature = receipt.get("signature")
                 if (receipt.get("scope") != scope or receipt.get("source") != path.name
-                        or receipt.get("signature") != signature(before)):
+                        or not isinstance(prior_signature, list)
+                        or len(prior_signature) != 5
+                        or any(type(n) is not int or n < 0 for n in prior_signature)
+                        or (prior_signature != actual_signature and not (
+                            scope in ("Familie", "Eltern")
+                            and prior_signature[:3] == actual_signature[:3]))):
                     raise RuntimeError("SOURCE_RECEIPT_MISMATCH " + scope + "/" + path.name)
+                # The original receipt is immutable: metadata drift is only
+                # accepted if exact inode+size and full SHA remain identical.
+                # Hashing below still checks a stable source under sync.lock.
                 digest = receipt.get("sha256")
                 destination = receipt.get("destination")
                 if (not isinstance(digest, str) or not re.fullmatch(r"[a-f0-9]{64}", digest)

@@ -1,0 +1,91 @@
+---
+# One previously archived PDF is READ ONLY streamed from NAS to a private
+# /dev/shm tmpfs copy on bp-controller, hashed twice, and removed. No NAS
+# write, move, re-import, journal mutation, gate or purge is permitted.
+# The complete NAS+Paperless lifecycle is audited both before AND after.
+- import_playbook: audit-paperless-import-lifecycle-15-26.yml
+  vars:
+    paperless_lifecycle_quiet: true
+
+- name: Verify the original canary state before isolated PDF recovery
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  tasks:
+    - name: Require exact unchanged production canary baseline
+      ansible.builtin.assert:
+        that:
+          - not ansible_check_mode
+          - synology_admin is defined
+          - synology_config is defined
+          - synology_config.schema_version == 1
+          - synology_config.sync_user == 'paperless-sync'
+          - synology_config.state_parent is match('^/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$')
+          - "'PAPERLESS_LIVE_IMPORTED 22' in hostvars['venombox'].lifecycle_report.stdout_lines"
+          - "'NAS_SENT_VERIFIED 21' in hostvars['venombox'].lifecycle_report.stdout_lines"
+          - "'NAS_ARCHIVED_VERIFIED 1' in hostvars['venombox'].lifecycle_report.stdout_lines"
+          - "'NAS_CURRENT_ORIGINALS_VERIFIED 22' in hostvars['venombox'].lifecycle_report.stdout_lines"
+          - "'DELETED_BY_USER 2' in hostvars['venombox'].lifecycle_report.stdout_lines"
+          - "'ARCHIVED_LIVE_IMPORTED Familie document 8 bridge ' in hostvars['venombox'].lifecycle_report.stdout"
+          - "'IMPORT_LIFECYCLE_RECONCILED' in hostvars['venombox'].lifecycle_report.stdout_lines"
+        fail_msg: "Recovery is refused unless the exact 21+1 / 22 live / 2 deleted canary baseline reconciles"
+
+    - name: Read-only stream original PDF to volatile tmpfs, hash, reopen and discard
+      ansible.builtin.command:
+        argv:
+          - python3
+          - "{{ playbook_dir }}/../files/paperless/verify_isolated_archive_recovery.py"
+          - --ssh-host
+          - "{{ synology_admin }}"
+          - --state-parent
+          - "{{ synology_config.state_parent }}"
+          - --only
+          - Familie/Bergen-Platform-fuer-Dummies.pdf
+          - --remote-script
+          - "{{ playbook_dir }}/../files/paperless/readonly_archive_recovery_stream.py"
+      register: isolated_recovery
+      changed_when: false
+      no_log: true
+
+    - name: Require exact non-mutating volatile recovery proof
+      ansible.builtin.assert:
+        that:
+          - isolated_recovery.rc == 0
+          - isolated_recovery.stdout_lines == ['ISOLATED_RECOVERY_COPY_REHASH_VERIFIED', 'VOLATILE_RECOVERY_COPY_REMOVED', 'NAS_RECOVERY_STREAM_READ_ONLY', 'NO_NAS_FILES_CHANGED']
+          - (isolated_recovery.stderr | trim) == ''
+        fail_msg: "Isolated read-only recovery proof failed; do not authorize additional archival or purge"
+
+    - name: Display safe isolated recovery verdict
+      ansible.builtin.debug:
+        var: isolated_recovery.stdout_lines
+
+- import_playbook: audit-paperless-import-lifecycle-15-26.yml
+  vars:
+    paperless_lifecycle_quiet: true
+
+- name: Independently reconfirm original NAS and Paperless lifecycle after recovery
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  tasks:
+    - name: Require unchanged 21+1 archive state and no external purge permissions
+      ansible.builtin.assert:
+        that:
+          - "'PAPERLESS_LIVE_IMPORTED 22' in hostvars['venombox'].lifecycle_report.stdout_lines"
+          - "'NAS_SENT_VERIFIED 21' in hostvars['venombox'].lifecycle_report.stdout_lines"
+          - "'NAS_ARCHIVED_VERIFIED 1' in hostvars['venombox'].lifecycle_report.stdout_lines"
+          - "'NAS_CURRENT_ORIGINALS_VERIFIED 22' in hostvars['venombox'].lifecycle_report.stdout_lines"
+          - "'DELETED_BY_USER 2' in hostvars['venombox'].lifecycle_report.stdout_lines"
+          - "'ARCHIVED_LIVE_IMPORTED Familie document 8 bridge ' in hostvars['venombox'].lifecycle_report.stdout"
+          - "'IMPORT_LIFECYCLE_RECONCILED' in hostvars['venombox'].lifecycle_report.stdout_lines"
+          - "'ARCHIVE_NOT_AUTHORIZED' in hostvars['venombox'].lifecycle_report.stdout_lines"
+          - "'NO_FILES_CHANGED' in hostvars['venombox'].lifecycle_report.stdout_lines"
+        fail_msg: "Independent lifecycle was not reconciled after isolated restore"
+
+    - name: Report isolated recovery and post-readonly-audit completion
+      ansible.builtin.debug:
+        msg:
+          - ISOLATED_GROUP_ARCHIVE_RESTORE_VERIFIED
+          - POST_RESTORE_LIFECYCLE_RECONCILED
+          - VOLATILE_SCRATCH_REMOVED
+          - ARCHIVE_PURGE_NOT_AUTHORIZED

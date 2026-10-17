@@ -39,6 +39,12 @@ class ProcessPreflightTests(unittest.TestCase):
         self.known = self.tmp / "known_hosts"
         self.known.write_text("venombox ssh-ed25519 AAAAfixture")
         self.known.chmod(0o600)
+        # A checked-out Git worktree can inherit a group-writable umask.
+        # Test the strict production mode guard using a controlled 0600
+        # verifier fixture rather than relaxing the guard itself.
+        self.verifier = self.tmp / "verify_receiver_v2_staging.py"
+        self.verifier.write_bytes((SRC / "verify_receiver_v2_staging.py").read_bytes())
+        self.verifier.chmod(0o600)
         self.called = []
 
     def plan(self, **kw):
@@ -85,11 +91,14 @@ class ProcessPreflightTests(unittest.TestCase):
         return run
 
     def check_remote(self, **kw):
-        return stage.run_readonly_receiver(
-            kw.get("prepared", self.prepared),
-            kw.get("target", "ansible@venombox"),
-            kw.get("identity", self.identity),
-            kw.get("known_hosts", self.known))
+        # Patch only the module location, not its file-validation logic.
+        # The read-only SSH calls still use the same audited verifier bytes.
+        with patch.object(stage, "__file__", str(self.tmp / "v2_process_preflight.py")):
+            return stage.run_readonly_receiver(
+                kw.get("prepared", self.prepared),
+                kw.get("target", "ansible@venombox"),
+                kw.get("identity", self.identity),
+                kw.get("known_hosts", self.known))
 
     def test_rsync_argv_immutable_and_not_executed(self):
         with patch.object(stage.subprocess, "run",
@@ -204,6 +213,23 @@ class ProcessPreflightTests(unittest.TestCase):
         self.assertFalse(result["sender_attempt_authenticated"])
         self.assertFalse(result["sent_authorized"])
         self.assertFalse(result["source_delete_authorized"])
+
+    def test_verifier_group_writable_is_rejected_before_any_ssh(self):
+        self.verifier.chmod(0o664)
+        with patch.object(stage.subprocess, "run",
+                          side_effect=AssertionError("unsafe verifier must not run SSH")):
+            with self.assertRaisesRegex(RuntimeError, "UNSAFE_TRUSTED_FILE"):
+                self.check_remote()
+        self.assertEqual(self.called, [])
+
+    def test_verifier_symlink_is_rejected_before_any_ssh(self):
+        safe = self.tmp / "legitimate"
+        self.verifier.rename(safe)
+        self.verifier.symlink_to(safe)
+        with patch.object(stage.subprocess, "run",
+                          side_effect=AssertionError("symlink verifier must not run SSH")):
+            with self.assertRaisesRegex(RuntimeError, "UNSAFE_TRUSTED_FILE"):
+                self.check_remote()
 
     def test_wrong_guest_blocks_before_status(self):
         with patch.object(stage.subprocess, "run", side_effect=self.mock_remote([

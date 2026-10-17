@@ -1,0 +1,162 @@
+---
+# Explicit operator opt-in only. Trigger EXACTLY one already root-gated regular
+# Synology sender pass, as paperless-sync. No archive, no deletion or purge.
+# The sender can still report error due to the one unresolved mtime-only drift.
+# Suppress all source/receiver names, SSH stdout/stderr and private PDFs.
+- name: Trigger one gated Synology sender check after reviewed group-collision staging
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  tasks:
+    - name: Require explicit sender run authorization and site credentials
+      ansible.builtin.assert:
+        that:
+          - (paperless_group_collision_sender_once | default(false)) is sameas true
+          - not ansible_check_mode
+          - synology_admin is defined
+          - synology_admin is match('^[A-Za-z_][A-Za-z0-9_.-]*@[A-Za-z0-9][A-Za-z0-9.-]+$')
+          - synology_config is defined
+          - synology_config.schema_version == 1
+          - synology_config.sync_user == 'paperless-sync'
+          - synology_config.state_parent is match('^/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$')
+        fail_msg: "SENDER_ONESHOT_NOT_AUTHORIZED"
+
+    - name: Confirm automatic controller archive timer remains inactive
+      ansible.builtin.command:
+        argv:
+          - systemctl
+          - is-active
+          - bergen-paperless-group-auto-v1.timer
+      register: sender_once_timer
+      changed_when: false
+      failed_when: false
+
+    - name: Prevent sender check when incompatible archive timer is running
+      ansible.builtin.assert:
+        that:
+          - (sender_once_timer.stdout | trim) != 'active'
+        fail_msg: "STOP_AUTOMATED_GROUP_ARCHIVER_FIRST"
+
+    - name: Verify exact root-owned staged NAS sender and helper digests
+      ansible.builtin.command:
+        argv:
+          - ssh
+          - -T
+          - -o
+          - BatchMode=yes
+          - -o
+          - StrictHostKeyChecking=yes
+          - -o
+          - ConnectTimeout=15
+          - "{{ synology_admin }}"
+          - sudo -n /bin/sh -s
+        stdin: |
+          set -eu
+          PARENT={{ synology_config.state_parent | quote }}
+          BIN="$PARENT/bin"
+          test ! -L "$PARENT" && test ! -L "$BIN"
+          test "$(stat -c '%u:%g:%a' "$BIN")" = "0:0:755"
+          for name in synology_scan_sync.py synology_group_collision_alias.py audit_synology_completed_archive_moves.py; do
+            test ! -L "$BIN/$name"
+            test "$(stat -c '%u:%g:%a' "$BIN/$name")" = "0:0:644"
+          done
+          test "$(sha256sum "$BIN/synology_scan_sync.py" | cut -d ' ' -f 1)" = {{ (lookup('ansible.builtin.file', playbook_dir + '/../files/paperless/synology_scan_sync.py', rstrip=False) | hash('sha256')) | quote }}
+          test "$(sha256sum "$BIN/synology_group_collision_alias.py" | cut -d ' ' -f 1)" = {{ (lookup('ansible.builtin.file', playbook_dir + '/../files/paperless/synology_group_collision_alias.py', rstrip=False) | hash('sha256')) | quote }}
+          test "$(sha256sum "$BIN/audit_synology_completed_archive_moves.py" | cut -d ' ' -f 1)" = {{ (lookup('ansible.builtin.file', playbook_dir + '/../files/paperless/audit_synology_completed_archive_moves.py', rstrip=False) | hash('sha256')) | quote }}
+          for gate in archive-move.enabled archive-move.homes.enabled archive-move.paperless-scan.enabled; do
+            test ! -e "$PARENT/$gate" && test ! -L "$PARENT/$gate"
+          done
+          echo VERIFIED_STAGED_SENDER_NO_ARCHIVE_GATE
+      register: sender_once_reviewed_code
+      changed_when: false
+      no_log: true
+
+    - name: Require unchanged reviewed sender and no archive site gates
+      ansible.builtin.assert:
+        that:
+          - sender_once_reviewed_code.rc == 0
+          - sender_once_reviewed_code.stdout_lines == ['VERIFIED_STAGED_SENDER_NO_ARCHIVE_GATE']
+        fail_msg: "SENDER_OR_GATE_NOT_REVIEWED"
+
+    - name: Run one real, root-gated NAS sender pass with existing sync.lock
+      ansible.builtin.command:
+        argv:
+          - ssh
+          - -T
+          - -o
+          - BatchMode=yes
+          - -o
+          - StrictHostKeyChecking=yes
+          - -o
+          - ConnectTimeout=15
+          - "{{ synology_admin }}"
+          - >-
+            sudo -n -u {{ synology_config.sync_user | quote }}
+            /usr/bin/python3
+            {{ (synology_config.state_parent + '/bin/synology_scan_sync.py') | quote }}
+            --scheduled --commit
+      delegate_to: localhost
+      register: sender_once_result
+      failed_when: false
+      changed_when: >-
+        ('GROUP_SAME_NAME_NEW_INSTANCE_RENAMED' in sender_once_result.stdout) or
+        (sender_once_result.stdout_lines |
+         select('match', '^SENT (Familie|Eltern)/') | list | length) > 0
+      no_log: true
+
+    - name: Reveal only aggregate group sender results, never private or source identities
+      ansible.builtin.debug:
+        msg:
+          - "GROUP_NEW_INSTANCES_RENAMED={{ sender_once_result.stdout_lines | select('match', '^GROUP_SAME_NAME_NEW_INSTANCE_RENAMED (Familie|Eltern) ') | list | length }}"
+          - "GROUP_DOCUMENTS_SENT={{ sender_once_result.stdout_lines | select('match', '^SENT (Familie|Eltern)/') | list | length }}"
+          - "GROUP_DOCUMENTS_WAITING={{ sender_once_result.stdout_lines | select('match', '^WAIT (Familie|Eltern)/') | list | length }}"
+          - "SENDER_RETURN_OK={{ sender_once_result.rc == 0 }}"
+          - "SENDER_REPORTED_BLOCKERS={{ sender_once_result.rc != 0 }}"
+          - "AUTO_GROUP_ARCHIVE_TIMER_NOT_RESTARTED=true"
+          - "NO_NAS_ARCHIVE_OR_PURGE_AUTHORIZED=true"
+
+    - name: Classify allowlisted NAS sender blockers without exposing scan names
+      ansible.builtin.set_fact:
+        sender_once_group_rejected_count: >-
+          {{ sender_once_result.stderr_lines |
+             select('match', '^REJECTED (Familie|Eltern)/') |
+             list | length }}
+        sender_once_private_rejected_count: >-
+          {{ sender_once_result.stderr_lines |
+             select('match', '^REJECTED Privat/(thomas|nadja)/') |
+             list | length }}
+        sender_once_group_error_codes: >-
+          {{ sender_once_result.stderr |
+             regex_findall('(?im)^REJECTED (?:Familie|Eltern)/.*[.]pdf[ ]+(UNREVIEWED_COLLISION_HELPER|GROUP_COLLISION_SCOPE_OR_USER_INVALID|INVALID_PREVIOUS_SOURCE_SIGNATURE|NO_SOURCE_COLLISION_TO_RESOLVE|OLD_INODE_STILL_ACTIVE_REQUIRES_REVIEW|PRIOR_RECEIPT_NOT_SENT|NAME_REUSED_BEFORE_VERIFIED_ARCHIVE|PRIOR_ARCHIVE_RECEIPT_MISMATCH|PRIOR_RECEIVER_RECEIPT_MISMATCH|PRIOR_ARCHIVE_SCOPE_MISMATCH|UNSAFE_ARCHIVE_DIRECTORY|UNEXPECTED_ARCHIVE_JOURNAL_ENTRY|INCOMPLETE_ARCHIVE_JOURNAL|SENDER_RECEIPT_MISMATCH|ARCHIVED_INODE_OR_SIGNATURE_MISMATCH|COLLISION_SOURCE_CHANGED_DURING_RENAME|COLLISION_RENAMED_INODE_CHANGED|COLLISION_RENAMED_PDF_CHANGED|COLLISION_ALIAS_HAS_RECEIPT|COLLISION_ALIAS_ALREADY_TRACKED|MANUAL_REVIEW_SOURCE_CHANGED|SCHEDULE_GATE_UNSAFE|RSYNC_NOT_CONFIRMED_NEW_FILE|UNSAFE_SOURCE_DIR|UNSAFE_SOURCE)(?:[ ]|$)') |
+             unique | list | sort }}
+        sender_once_traceback_classes: >-
+          {{ sender_once_result.stderr |
+             regex_findall('(?m)^(ImportError|ModuleNotFoundError|PermissionError|FileNotFoundError|RuntimeError|ValueError|TypeError|NameError|SyntaxError|OSError|TimeoutError):') |
+             unique | list | sort }}
+        sender_once_errno: >-
+          {{ sender_once_result.stderr |
+             regex_findall('\[Errno (1|2|5|11|13|17|18|22|30|95)\]') |
+             unique | list | sort }}
+        sender_once_any_traceback: >-
+          {{ 'Traceback (most recent call last):' in sender_once_result.stderr }}
+      no_log: true
+
+    - name: Publish count-only NAS block classifications without filenames or hashes
+      ansible.builtin.debug:
+        msg:
+          - "GROUP_REJECTED_COUNT={{ sender_once_group_rejected_count }}"
+          - "PRIVATE_REJECTED_COUNT={{ sender_once_private_rejected_count }}"
+          - "GROUP_KNOWN_BLOCK_CODES={{ sender_once_group_error_codes }}"
+          - "PYTHON_TRACEBACK_CLASSES={{ sender_once_traceback_classes }}"
+          - "PYTHON_TRACEBACK_DETECTED={{ sender_once_any_traceback }}"
+          - "OS_ERRNO_ALLOWLIST={{ sender_once_errno }}"
+          - "EXACT_ERROR_DETAILS_WITHHELD=true"
+
+    - name: Explicitly distinguish partial progress from successful sender pass
+      ansible.builtin.debug:
+        msg: >-
+          {{
+            'SENDER_PASS_SUCCESS'
+            if sender_once_result.rc == 0
+            else 'SENDER_PARTIAL_OR_BLOCKED; inspect read-only receipt categories; historical receipts MUST remain unchanged'
+          }}

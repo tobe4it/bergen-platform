@@ -1,0 +1,69 @@
+---
+# One site at a time; read-only by default. Explicit typed opt-in for a
+# disposable filesystem fixture outside every Paperless source/archive path.
+# Uses installed disabled worker's renameat2 helper as paperless-sync.
+- name: Audit Synology Btrfs renameat2 on disposable site fixture
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  tasks:
+    - name: Validate site, NAS administration and explicit typed fixture opt-in
+      ansible.builtin.assert:
+        that:
+          - inventory_hostname == 'localhost'
+          - not ansible_check_mode
+          - synology_admin is defined
+          - synology_admin is match('^[A-Za-z_][A-Za-z0-9_.-]*@[A-Za-z0-9][A-Za-z0-9.-]+$')
+          - synology_config is defined
+          - synology_config.schema_version == 1
+          - synology_config.sync_user == 'paperless-sync'
+          - synology_config.state_parent is match('^/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$')
+          - paperless_renameat2_site is defined
+          - paperless_renameat2_site in ['homes', 'paperless-scan']
+          - (paperless_renameat2_probe | default(false)) is boolean
+        fail_msg: "Select homes or paperless-scan; use typed JSON true only for synthetic fixture"
+
+    - name: Audit or explicitly exercise disposable Btrfs fixture as paperless-sync
+      ansible.builtin.command:
+        argv:
+          - ssh
+          - -T
+          - -o
+          - BatchMode=yes
+          - -o
+          - StrictHostKeyChecking=yes
+          - -o
+          - ConnectTimeout=15
+          - "{{ synology_admin }}"
+          - >-
+            sudo -n /usr/bin/python3 -
+            {{ synology_config.state_parent | quote }}
+            --site {{ paperless_renameat2_site | quote }}
+            {{ '--probe' if (paperless_renameat2_probe | default(false) | bool) else '--audit' }}
+        stdin: "{{ lookup('ansible.builtin.file', playbook_dir + '/../files/paperless/probe_synology_archive_renameat2.py', rstrip=False) }}"
+      register: synology_rename_probe
+      changed_when: paperless_renameat2_probe | default(false) | bool
+
+    - name: Require exact site result, opt-in isolation and no archive enablement
+      ansible.builtin.assert:
+        that:
+          - "('SELECTED_SITE ' ~ paperless_renameat2_site) in synology_rename_probe.stdout_lines"
+          - "'PROTECTED_SOURCE_SCOPES_VERIFIED 2' in synology_rename_probe.stdout_lines"
+          - "'ARCHIVE_COMMIT_NOT_AUTHORIZED' in synology_rename_probe.stdout_lines"
+          - >-
+            (('SYNODB_RENAME_COLLISION_PROTECTED ' ~ paperless_renameat2_site)
+             in synology_rename_probe.stdout_lines and
+             ('SYNODB_RENAME_NOREPLACE_OK ' ~ paperless_renameat2_site)
+             in synology_rename_probe.stdout_lines and
+             ('ISOLATED_RENAME_FIXTURE_CLEANED ' ~ paperless_renameat2_site)
+             in synology_rename_probe.stdout_lines and
+             'PROTECTED_ARCHIVE_UNCHANGED' in synology_rename_probe.stdout_lines and
+             'SCAN_AND_RECEIPTS_UNCHANGED' in synology_rename_probe.stdout_lines)
+            if (paperless_renameat2_probe | default(false) | bool) else
+            ('PROBE_DISABLED' in synology_rename_probe.stdout_lines and
+             'NO_FILES_CHANGED' in synology_rename_probe.stdout_lines)
+        fail_msg: "Synology kernel rename probe incomplete; do not enable archive moves"
+
+    - name: Show isolated synthetic probe markers only
+      ansible.builtin.debug:
+        var: synology_rename_probe.stdout_lines

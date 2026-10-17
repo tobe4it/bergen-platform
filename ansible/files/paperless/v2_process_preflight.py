@@ -148,6 +148,9 @@ def run_readonly_receiver(prepared, venombox_target, identity, known_hosts):
     """
     item = _expected(prepared)
     ssh = _ssh_parts(venombox_target, identity, known_hosts)
+    # Validate and pin the local verifier before contacting any remote host.
+    script = Path(__file__).with_name("verify_receiver_v2_staging.py")
+    program = _file(script, (0o444, 0o644, 0o600), MAX_SCRIPT)
     base = ["sudo", "-n", "/usr/sbin/pct"]
     cfg = _run_ssh(ssh, [*base, "config", "126"])
     if ("hostname: bergen-paperless" not in cfg.splitlines()
@@ -157,8 +160,6 @@ def run_readonly_receiver(prepared, venombox_target, identity, known_hosts):
     status = _run_ssh(ssh, [*base, "status", "126"])
     if status.strip() != "status: running":
         raise RuntimeError("RECEIVER_GUEST_NOT_RUNNING")
-    script = Path(__file__).with_name("verify_receiver_v2_staging.py")
-    program = _file(script, (0o444, 0o644, 0o600), MAX_SCRIPT)
     scope, filename = item["destination"].rsplit("/", 1)
     command = [
         *base, "exec", "126", "--", "/usr/sbin/runuser", "-u",

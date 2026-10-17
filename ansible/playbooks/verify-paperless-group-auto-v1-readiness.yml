@@ -1,0 +1,100 @@
+---
+# Read-only acceptance immediately AFTER an automatic group systemd one-shot.
+# The 16 earlier independently verified protected originals are the baseline:
+# at least 17 now establishes progress. No manual PDF selection, no write.
+- import_playbook: audit-paperless-import-lifecycle-15-26.yml
+  vars:
+    paperless_lifecycle_quiet: true
+
+- name: Verify fully automatic group archive acceptance without private data
+  hosts: venombox
+  gather_facts: false
+  become: true
+  tasks:
+    - name: Require latest independent live NAS and Paperless audit
+      ansible.builtin.assert:
+        that:
+          - inventory_hostname == 'venombox'
+          - lifecycle_report is defined
+          - "'IMPORT_LIFECYCLE_RECONCILED' in lifecycle_report.stdout_lines"
+          - "'DELETED_BY_USER 2' in lifecycle_report.stdout_lines"
+          - "'NO_FILES_CHANGED' in lifecycle_report.stdout_lines"
+          - "'ARCHIVE_NOT_AUTHORIZED' in lifecycle_report.stdout_lines"
+          - lifecycle_archived_live is defined
+          - lifecycle_archived_live.stdout_lines[-1] == 'NO_FILES_CHANGED'
+        fail_msg: "GROUP_AUTOMATIC_ARCHIVE_POST_AUDIT_MISSING"
+
+    - name: Compute only aggregate independently reverified source and archive counts
+      ansible.builtin.set_fact:
+        group_accept_imported: >-
+          {{ (lifecycle_report.stdout_lines |
+              select('match', '^PAPERLESS_LIVE_IMPORTED [0-9]+$') |
+              first).split(' ')[1] | int }}
+        group_accept_remaining: >-
+          {{ (lifecycle_report.stdout_lines |
+              select('match', '^NAS_SENT_VERIFIED [0-9]+$') |
+              first).split(' ')[1] | int }}
+        group_accept_archived: >-
+          {{ (lifecycle_report.stdout_lines |
+              select('match', '^NAS_ARCHIVED_VERIFIED [0-9]+$') |
+              first).split(' ')[1] | int }}
+        group_accept_group_archived: >-
+          {{ lifecycle_archived_live.stdout_lines[:-1] |
+             map('from_json') | selectattr('scope', 'in', ['Familie', 'Eltern']) |
+             list | length }}
+      no_log: true
+
+    - name: Require archival progress beyond original sixteen archived PDFs
+      ansible.builtin.assert:
+        that:
+          - group_accept_imported | int >= 30
+          - group_accept_archived | int >= 17
+          - group_accept_remaining | int >= 0
+          - group_accept_remaining | int + group_accept_archived | int == group_accept_imported | int
+          - group_accept_group_archived | int >= 1
+          - "'DELETED_BY_USER 2' in lifecycle_report.stdout_lines"
+        fail_msg: "GROUP_AUTO_ARCHIVE_NO_VERIFIED_NEW_MOVE_OR_LIFECYCLE_INCOMPLETE"
+
+    - name: Verify no leftover site-wide or one-PDF release gate
+      ansible.builtin.command:
+        argv:
+          - ssh
+          - -T
+          - -o
+          - BatchMode=yes
+          - -o
+          - StrictHostKeyChecking=yes
+          - "{{ synology_admin }}"
+          - sudo -n /bin/sh -s
+        stdin: |
+          set -eu
+          PARENT={{ synology_config.state_parent | quote }}
+          for gate in archive-move.enabled archive-move.homes.enabled archive-move.paperless-scan.enabled; do
+            test ! -e "$PARENT/$gate" && test ! -L "$PARENT/$gate"
+          done
+          echo ALL_ARCHIVE_RELEASE_GATES_ABSENT
+      delegate_to: localhost
+      become: false
+      register: group_accept_gates
+      changed_when: false
+      no_log: true
+
+    - name: Require exact release cleanup after automatic single-PDF archiving
+      ansible.builtin.assert:
+        that:
+          - group_accept_gates.rc == 0
+          - group_accept_gates.stdout_lines == ['ALL_ARCHIVE_RELEASE_GATES_ABSENT']
+          - (group_accept_gates.stderr | trim) == ''
+        fail_msg: "GROUP_AUTO_RELEASE_GATE_NOT_REVOKED"
+      no_log: true
+
+    - name: Print only reconciled independent counts and authorization boundary
+      ansible.builtin.debug:
+        msg:
+          - "PAPERLESS_LIVE_IMPORTED={{ group_accept_imported }}"
+          - "NAS_CURRENT_ORIGINALS={{ group_accept_remaining }}"
+          - "NAS_PROTECTED_ARCHIVED={{ group_accept_archived }}"
+          - "GROUP_PROTECTED_ARCHIVED={{ group_accept_group_archived }}"
+          - "AUTO_ARCHIVE_NEW_MOVE_VERIFIED=true"
+          - "RELEASE_GATES_ABSENT=true"
+          - "NO_PURGE_AUTHORIZED=true"

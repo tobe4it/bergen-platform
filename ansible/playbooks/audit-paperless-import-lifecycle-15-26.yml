@@ -58,6 +58,7 @@
         stdin: "{{ lookup('ansible.builtin.file', playbook_dir + '/../files/paperless/export_verified_user_deletion_journals_15_26.py', rstrip=False) }}"
       register: lifecycle_journal
       changed_when: false
+      no_log: "{{ paperless_lifecycle_quiet | default(false) | bool }}"
 
     - name: Verify live Paperless absence of exactly document 26
       ansible.builtin.command:
@@ -65,6 +66,7 @@
         stdin: "{{ lookup('ansible.builtin.file', playbook_dir + '/../files/paperless/export_deleted_import_candidate.py', rstrip=False) }}"
       register: lifecycle_deleted_paperless
       changed_when: false
+      no_log: "{{ paperless_lifecycle_quiet | default(false) | bool }}"
 
     - name: Recheck absent NAS source and historical SENT receipt under sender lock
       ansible.builtin.command:
@@ -86,6 +88,7 @@
       become: false
       register: lifecycle_deleted_nas
       changed_when: false
+      no_log: "{{ paperless_lifecycle_quiet | default(false) | bool }}"
 
     - name: Verify live Paperless absence of exactly document 15
       ansible.builtin.command:
@@ -93,6 +96,7 @@
         stdin: "{{ lookup('ansible.builtin.file', playbook_dir + '/../files/paperless/export_deleted_import_candidate.py', rstrip=False) }}"
       register: lifecycle_deleted_paperless_15
       changed_when: false
+      no_log: "{{ paperless_lifecycle_quiet | default(false) | bool }}"
 
     - name: Verify absent NAS source and historical SENT receipt for document 15 under sender lock
       ansible.builtin.command:
@@ -116,6 +120,7 @@
       become: false
       register: lifecycle_deleted_nas_15
       changed_when: false
+      no_log: "{{ paperless_lifecycle_quiet | default(false) | bool }}"
 
     - name: Verify all remaining NAS originals against SENT receipts and file digests
       ansible.builtin.command:
@@ -137,6 +142,82 @@
       become: false
       register: lifecycle_nas_live
       changed_when: false
+      no_log: "{{ paperless_lifecycle_quiet | default(false) | bool }}"
+
+    - name: Hash local reviewed NAS archive worker without changes
+      ansible.builtin.stat:
+        path: "{{ playbook_dir }}/../files/paperless/synology_same_volume_archive_move.py"
+        checksum_algorithm: sha256
+      delegate_to: localhost
+      become: false
+      register: lifecycle_worker_local
+      changed_when: false
+
+    - name: Require reviewed regular worker for trustworthy archived audit
+      ansible.builtin.assert:
+        that:
+          - lifecycle_worker_local.stat.exists
+          - lifecycle_worker_local.stat.isreg
+          - not lifecycle_worker_local.stat.islnk
+
+    - name: Verify staged NAS worker SHA and root-controlled code parent
+      ansible.builtin.command:
+        argv:
+          - ssh
+          - -T
+          - -o
+          - BatchMode=yes
+          - -o
+          - StrictHostKeyChecking=yes
+          - -o
+          - ConnectTimeout=15
+          - "{{ synology_admin }}"
+          - sudo -n /bin/sh -s
+        stdin: |
+          set -eu
+          PARENT={{ synology_config.state_parent | quote }}
+          BIN="$PARENT/bin"
+          TARGET="$BIN/synology_same_volume_archive_move.py"
+          test ! -L "$BIN" && test ! -L "$TARGET"
+          test "$(stat -c '%u:%a' "$BIN")" = "0:755"
+          test "$(stat -c '%u:%g:%a' "$TARGET")" = "0:0:644"
+          test "$(sha256sum "$TARGET" | cut -d ' ' -f 1)" = {{ lifecycle_worker_local.stat.checksum | quote }}
+          echo VERIFIED_REVIEWED_ARCHIVE_CODE
+      delegate_to: localhost
+      become: false
+      register: lifecycle_worker_integrity
+      changed_when: false
+      no_log: "{{ paperless_lifecycle_quiet | default(false) | bool }}"
+
+    - name: Require exact staged and reviewed NAS archive code
+      ansible.builtin.assert:
+        that:
+          - lifecycle_worker_integrity.rc == 0
+          - lifecycle_worker_integrity.stdout_lines == ['VERIFIED_REVIEWED_ARCHIVE_CODE']
+          - (lifecycle_worker_integrity.stderr | trim) == ''
+        fail_msg: "NAS archive code differs from reviewed repository; no reconciliation allowed"
+
+    - name: Audit all completed NAS archive journals and PDF inodes under sender lock
+      ansible.builtin.command:
+        argv:
+          - ssh
+          - -T
+          - -o
+          - BatchMode=yes
+          - -o
+          - StrictHostKeyChecking=yes
+          - -o
+          - ConnectTimeout=15
+          - "{{ synology_admin }}"
+          - >-
+            sudo -n -u {{ synology_config.sync_user | quote }}
+            /usr/bin/python3 - {{ synology_config.state_parent | quote }}
+        stdin: "{{ lookup('ansible.builtin.file', playbook_dir + '/../files/paperless/audit_synology_completed_archive_moves.py', rstrip=False) }}"
+      delegate_to: localhost
+      become: false
+      register: lifecycle_archived_live
+      changed_when: false
+      no_log: "{{ paperless_lifecycle_quiet | default(false) | bool }}"
 
     - name: Reverify every Paperless import and independently recheck deleted document absence
       ansible.builtin.command:
@@ -151,23 +232,28 @@
         stdin: "{{ {'journal': lifecycle_journal.stdout, 'deleted_15': lifecycle_deleted_paperless_15.stdout, 'deleted_26': lifecycle_deleted_paperless.stdout, 'nas_deleted_15': lifecycle_deleted_nas_15.stdout, 'nas_deleted_26': lifecycle_deleted_nas.stdout} | to_json }}"
       register: lifecycle_paperless_live
       changed_when: false
+      no_log: "{{ paperless_lifecycle_quiet | default(false) | bool }}"
 
     - name: Match every NAS original to live import or exactly two verified deletions
       ansible.builtin.command:
         argv:
           - python3
           - "{{ playbook_dir }}/../files/paperless/match_paperless_import_lifecycle_15_26.py"
-        stdin: "{{ {'nas': lifecycle_nas_live.stdout, 'paperless': lifecycle_paperless_live.stdout, 'journal': lifecycle_journal.stdout, 'nas_deleted_15': lifecycle_deleted_nas_15.stdout, 'nas_deleted_26': lifecycle_deleted_nas.stdout} | to_json }}"
+        stdin: "{{ {'nas': lifecycle_nas_live.stdout, 'paperless': lifecycle_paperless_live.stdout, 'journal': lifecycle_journal.stdout, 'nas_deleted_15': lifecycle_deleted_nas_15.stdout, 'nas_deleted_26': lifecycle_deleted_nas.stdout, 'archived': lifecycle_archived_live.stdout} | to_json }}"
       delegate_to: localhost
       become: false
       register: lifecycle_report
       changed_when: false
+      no_log: "{{ paperless_lifecycle_quiet | default(false) | bool }}"
 
     - name: Require complete lifecycle report without archive permission
       ansible.builtin.assert:
         that:
           - "'IMPORT_LIFECYCLE_RECONCILED' in lifecycle_report.stdout_lines"
           - "'DELETED_BY_USER 2' in lifecycle_report.stdout_lines"
+          - lifecycle_archived_live.stdout_lines[-1] == 'NO_FILES_CHANGED'
+          - (lifecycle_report.stdout_lines | select('match', '^NAS_ARCHIVED_VERIFIED [0-9]+$') | list | length) == 1
+          - (lifecycle_report.stdout_lines | select('match', '^NAS_CURRENT_ORIGINALS_VERIFIED [0-9]+$') | list | length) == 1
           - "(lifecycle_report.stdout_lines | select('match', '^DELETED_BY_USER_CONFIRMED 15 ') | list | length) == 1"
           - "(lifecycle_report.stdout_lines | select('match', '^DELETED_BY_USER_CONFIRMED 26 ') | list | length) == 1"
           - "'ARCHIVE_NOT_AUTHORIZED' in lifecycle_report.stdout_lines"
@@ -178,3 +264,4 @@
     - name: Display reconciled imports and two confirmed user deletions
       ansible.builtin.debug:
         var: lifecycle_report.stdout_lines
+      when: not (paperless_lifecycle_quiet | default(false) | bool)
