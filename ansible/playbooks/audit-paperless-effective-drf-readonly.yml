@@ -1,0 +1,146 @@
+---
+# Non-mutating in-process Django REST Framework authorization audit.
+# Input identities/document IDs come ONLY from ignored site-local vars.
+# No usernames, group names, filenames or response bodies appear in output.
+- name: Independently audit effective Paperless API access for site-reviewed cases
+  hosts: venombox
+  gather_facts: false
+  become: true
+  tasks:
+    - name: Require explicit complete twelve-case site evidence matrix
+      ansible.builtin.assert:
+        that:
+          - paperless_acl_expected_cases is defined
+          - paperless_acl_expected_cases is sequence
+          - paperless_acl_expected_cases | length == 12
+          - not ansible_check_mode
+        fail_msg: "PAPERLESS_DRF_POLICY_MATRIX_MISSING_OR_INCOMPLETE"
+      no_log: true
+
+    - name: Verify confined Paperless LXC hostname read-only
+      ansible.builtin.command:
+        argv: [pct, exec, '126', --, /bin/hostname, -s]
+      register: acl_target
+      changed_when: false
+      failed_when: acl_target.rc != 0 or (acl_target.stdout | trim) != 'bergen-paperless'
+
+    - name: Run authorization matrix using isolated, read-only DRF APIClient
+      ansible.builtin.command:
+        argv:
+          - pct
+          - exec
+          - '126'
+          - --
+          - podman
+          - exec
+          - bergen-paperless
+          - python
+          - /usr/src/paperless/src/manage.py
+          - shell
+          - -c
+          - |
+            import json
+            from django.contrib.auth.models import User
+            from documents.models import Document
+            from rest_framework.test import APIClient
+
+            # JSON-escape twice so Jinja cannot synthesize Python statements.
+            cases = json.loads({{ paperless_acl_expected_cases | to_json | to_json }})
+            if not isinstance(cases, list) or len(cases) != 12:
+                raise SystemExit('INVALID_CASE_COUNT')
+            for c in cases:
+                if (not isinstance(c, dict) or set(c) != {'username', 'document_id', 'allow'}
+                    or not isinstance(c['username'], str) or not 1 <= len(c['username']) <= 100
+                    or type(c['document_id']) is not int or c['document_id'] <= 0
+                    or type(c['allow']) is not bool):
+                    raise SystemExit('INVALID_CASE_SCHEMA')
+            names = {c['username'] for c in cases}
+            ids = {c['document_id'] for c in cases}
+            if (len(names) != 3 or len(ids) != 4
+                or len({(c['username'], c['document_id']) for c in cases}) != 12):
+                raise SystemExit('INCOMPLETE_CASE_MATRIX')
+            if any(sum(c['document_id'] == doc for c in cases) != 3 or
+                   not any(c['document_id'] == doc and c['allow'] for c in cases) or
+                   not any(c['document_id'] == doc and not c['allow'] for c in cases)
+                   for doc in ids):
+                raise SystemExit('INVALID_ALLOW_DENY_MATRIX')
+
+            try:
+                users = {name: User.objects.get(username=name, is_active=True, is_superuser=False)
+                         for name in names}
+                docs = {doc: Document.objects.get(pk=doc) for doc in ids}
+            except Exception:
+                raise SystemExit('MISSING_REQUIRED_IDENTITY_OR_DOCUMENT')
+
+            fails = 0
+            total = 0
+            for c in cases:
+                client = APIClient()
+                client.force_authenticate(user=users[c['username']])
+                for operation in ('detail', 'download'):
+                    path = '/api/documents/%s/' % c['document_id']
+                    if operation == 'download':
+                        path += 'download/'
+                    try:
+                        response = client.get(path, HTTP_HOST='127.0.0.1')
+                        status = response.status_code
+                        response.close()
+                        ok = status == 200 if c['allow'] else status in (403, 404)
+                    except Exception:
+                        ok = False
+                    total += 1
+                    if not ok:
+                        fails += 1
+
+            for name in names:
+                client = APIClient()
+                client.force_authenticate(user=users[name])
+                subset = [c for c in cases if c['username'] == name]
+                try:
+                    response = client.get('/api/documents/?page_size=1000', HTTP_HOST='127.0.0.1')
+                    status = response.status_code
+                    data = getattr(response, 'data', None)
+                    response.close()
+                    if status in (403, 404) and all(not c['allow'] for c in subset):
+                        outcomes = [True] * len(subset)
+                    elif (status == 200 and isinstance(data, dict)
+                          and isinstance(data.get('results'), list)
+                          and not data.get('next')
+                          and data.get('count') == len(data['results'])):
+                        visible = {int(x['id']) for x in data['results']}
+                        outcomes = [(c['document_id'] in visible) == c['allow'] for c in subset]
+                    else:
+                        outcomes = [False] * len(subset)
+                except Exception:
+                    outcomes = [False] * len(subset)
+                for ok in outcomes:
+                    total += 1
+                    if not ok:
+                        fails += 1
+            if total != 36 or fails:
+                print('AUDIT_RESULT FAIL CHECKS', total, 'FAILURES', fails)
+                raise SystemExit(1)
+            print('AUDIT_RESULT PASS CHECKS 36 FAILURES 0')
+            print('NOT_COVERED OIDC_PROXY_CHILD_SEARCH_PREVIEW_AI')
+      register: acl_drf_result
+      changed_when: false
+      failed_when: false
+      no_log: true
+
+    - name: Fail closed unless all thirty-six checks passed
+      ansible.builtin.assert:
+        that:
+          - acl_drf_result.rc == 0
+          - "'AUDIT_RESULT PASS CHECKS 36 FAILURES 0' in acl_drf_result.stdout_lines"
+          - "'NOT_COVERED OIDC_PROXY_CHILD_SEARCH_PREVIEW_AI' in acl_drf_result.stdout_lines"
+        fail_msg: "PAPERLESS_DRF_ACL_AUDIT_FAILED_REDACTED"
+      no_log: true
+
+    - name: Publish non-sensitive, aggregate-only audit summary
+      ansible.builtin.debug:
+        msg:
+          - DRF_AUTHORIZATION_CHECKS=36
+          - DRF_AUTHORIZATION_FAILURES=0
+          - DRF_API_READ_ONLY=true
+          - OIDC_PROXY_SEARCH_AI_NOT_TESTED=true
+          - NO_DOCUMENT_CONTENT_EXPORTED=true

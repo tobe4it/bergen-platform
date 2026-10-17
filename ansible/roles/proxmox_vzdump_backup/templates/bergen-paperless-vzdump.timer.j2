@@ -1,0 +1,12 @@
+[Unit]
+Description=Bergen Paperless daily Proxmox backup at 03:00 Europe/Berlin
+
+[Timer]
+OnCalendar={{ paperless_backup_calendar }}
+Persistent=false
+RandomizedDelaySec=0
+AccuracySec=1min
+Unit={{ paperless_backup_unit }}.service
+
+[Install]
+WantedBy=timers.target
