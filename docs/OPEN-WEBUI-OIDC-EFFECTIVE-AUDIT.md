@@ -6,9 +6,9 @@ Original mutating group-setup PR #73: closed without merge.
 
 ## Why the current native group sync cannot be treated as revocation
 
-In Open WebUI v0.10.2, \`update_user_groups\` runs on successful OAuth
+In Open WebUI v0.10.2, `update_user_groups` runs on successful OAuth
 login only. In its removal/addition loops, it requires a nonempty
-\`user_oauth_groups\` list. Absent \`groups\`, \`groups: []\`, an empty
+`user_oauth_groups` list. Absent `groups`, `groups: []`, an empty
 string, and malformed non-list claims therefore leave previously assigned
 groups unchanged. Nonempty claims may remove **any unblocked current group**
 not in the provider claim, not just the approved family roles. Members may
@@ -18,26 +18,26 @@ session/token revocation or expiry is proven.
 Reviewed source:
 https://github.com/open-webui/open-webui/blob/v0.10.2/backend/open_webui/utils/oauth.py
 
-**Do not enable \`ENABLE_OAUTH_GROUP_MANAGEMENT\` for privileged parent/child
-authorization based only on the presence of a \`groups\` claim.**
+**Do not enable `ENABLE_OAUTH_GROUP_MANAGEMENT` for privileged parent/child
+authorization based only on the presence of a `groups` claim.**
 
 ## Which read-only audit to use
 
-The earlier \`audit-open-webui-oidc-group-env-readonly.yml\` audits the
+The earlier `audit-open-webui-oidc-group-env-readonly.yml` audits the
 container environment through Proxmox, **not effective running settings**.
 
-The new \`audit-open-webui-oidc-effective-readonly.yml\` queries the
+The new `audit-open-webui-oidc-effective-readonly.yml` queries the
 **running application's authenticated admin GET endpoints** on the
 existing guest's loopback:
-- GET \`/api/version\`
-- GET \`/api/v1/auths/admin/config/oauth\`
-- GET \`/api/v1/auths/admin/config\`
-- GET \`/api/v1/auths/admin/config/ldap\`
+- GET `/api/version`
+- GET `/api/v1/auths/admin/config/oauth`
+- GET `/api/v1/auths/admin/config`
+- GET `/api/v1/auths/admin/config/ldap`
 
-These use Open WebUI's \`Config.get\` runtime read path on v0.10.2,
+These use Open WebUI's `Config.get` runtime read path on v0.10.2,
 taking OAuth persistence behavior into account. The endpoints can return
 client secrets, URLs, group names or private admin settings. Hence
-**the raw responses and authorization header are always \`no_log: true\`**,
+**the raw responses and authorization header are always `no_log: true`**,
 including failures. Only eight predefined, bounded classifications and
 three safety/disclaimer flags are printed.
 
@@ -50,21 +50,21 @@ available for manual review.
 
 ## Controller procedure (no live service changes)
 
-From a current clean \`bergen-platform\` checkout on \`bp-controller\`,
+From a current clean `bergen-platform` checkout on `bp-controller`,
 review the encrypted credentials and site-local ignored variables.
 
-In \`ansible/vars/ai-oidc-effective-audit.local.yml\` (ignored by Git),
+In `ansible/vars/ai-oidc-effective-audit.local.yml` (ignored by Git),
 provide exactly these two values, selecting the single actual inventory
 host:
 
-\`\`\`yaml
+```yaml
 open_webui_oidc_effective_audit_host: YOUR_EXISTING_AI_INVENTORY_HOST
 open_webui_oidc_effective_audit_approved: true
-\`\`\`
+```
 
 Keep a **dedicated admin API bearer token** as
-\`vault_open_webui_admin_token\` in the ignored encrypted
-\`ansible/vars/ai-oidc.vault.yml\`; ensure it has only the required
+`vault_open_webui_admin_token` in the ignored encrypted
+`ansible/vars/ai-oidc.vault.yml`; ensure it has only the required
 permissions where the installed version supports scoped API keys.
 Never paste that token into chat, the CLI, Git or debug output.
 This admin token is not the OIDC client secret.
@@ -72,7 +72,7 @@ This admin token is not the OIDC client secret.
 Example commands (edit inventory paths if the controller uses different
 private inventory names):
 
-\`\`\`bash
+```bash
 ansible-playbook -i ansible/inventory.yml -i ansible/inventory.local.yml \
   ansible/playbooks/audit-open-webui-oidc-effective-readonly.yml \
   --vault-id ai@prompt \
@@ -85,24 +85,24 @@ ansible-playbook -i ansible/inventory.yml -i ansible/inventory.local.yml \
   --vault-id ai@prompt \
   -e @ansible/vars/ai-oidc-effective-audit.local.yml \
   -e @ansible/vars/ai-oidc.vault.yml
-\`\`\`
+```
 
-Expected \`changed=0\`. A failure is an **audit blocker**, not
+Expected `changed=0`. A failure is an **audit blocker**, not
 authorization to set any enable flag, restart Open WebUI, or relax
-endpoint authentication. A reported \`UNREVIEWED_VERSION\` requires
+endpoint authentication. A reported `UNREVIEWED_VERSION` requires
 version-specific code review first.
 
-The emitted \`OIDC_EFFECTIVE_*\` flags are **the effective OAuth settings
+The emitted `OIDC_EFFECTIVE_*` flags are **the effective OAuth settings
 as returned through the admin API**, not an external authorization
-decision. \`OIDC_EFFECTIVE_GROUP_MAPPING=DISABLED\` is the safe
-pre-activation state. A value of \`ENABLED\` calls for independent
+decision. `OIDC_EFFECTIVE_GROUP_MAPPING=DISABLED` is the safe
+pre-activation state. A value of `ENABLED` calls for independent
 read-only investigation, not automatic overwrite.
 
 ## Mandatory authorization acceptance after the audit
 
 Before any live group sync, use **synthetic identities and separate
 test groups**, with saved copies of admin/LDAP access and backups:
-1. Confirm the OIDC \`groups\` claim is issued to the correct subject;
+1. Confirm the OIDC `groups` claim is issued to the correct subject;
    only allowlisted groups are mapped, never admin role promotion.
 2. Test a valid changed claim, an empty/missing claim and malformed
    claims; child accounts must not inherit parent group privileges.
