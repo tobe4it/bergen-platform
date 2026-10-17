@@ -918,3 +918,74 @@ does **not** demonstrate restore from a separately stored backup or effective
 nonadministrator SMB rename/delete denial. Those are subsequent independent
 release gates for Paperless `main` promotion and any irreversible expiry.
 
+
+## 2026-10-17 isolated canary recovery accepted
+
+The operator executed
+`ansible/playbooks/verify-paperless-one-group-isolated-recovery.yml`.
+The live NAS+Paperless lifecycle was independently reconciled both before
+and after the controller-side volatile-memory copy test. Reported terminal
+proof:
+
+```text
+ISOLATED_GROUP_ARCHIVE_RESTORE_VERIFIED
+POST_RESTORE_LIFECYCLE_RECONCILED
+VOLATILE_SCRATCH_REMOVED
+ARCHIVE_PURGE_NOT_AUTHORIZED
+localhost ok=6 changed=0 unreachable=0 failed=0 skipped=0
+venombox  ok=36 changed=0 unreachable=0 failed=0 skipped=2
+```
+
+The recovery stream selected only the already archived
+`Familie/Bergen-Platform-fuer-Dummies.pdf` (Paperless document 8),
+validated its protected NAS journal/source/receipt/size/inode/SHA/PDF
+and produced an isolated mode-0600 `/dev/shm` copy on `bp-controller`.
+The copy was rehashed and removed. The NAS journal/archive and the
+22 live Paperless imports (21 source originals plus one ARCHIVED)
+remain unchanged, and exactly two deliberate user deletions remain
+reconciled. **This is a valid archived-original recovery exercise, but
+not yet an independent external backup restore.** No live expiry or
+purge authorization follows from it.
+
+### Subsequent no-write SMB2 effective permission probe (development)
+
+The feature branch now contains
+`ansible/files/paperless/probe_synology_smb_delete_access.py` and
+`tests/test_paperless_smb_delete_intent.py`. Using an explicitly
+designated nonadministrative DSM SMB identity, the utility requests
+**only SMB2 FILE_OPEN handles** (no create-on-missing, write, rename,
+set-info, or delete-on-close). It tests:
+
+- `DELETE` desired access to the existing
+  `.bergen-paperless-archive` directory entry at a verified site-root
+  share;
+- `FILE_DELETE_CHILD` desired access at that site's share root;
+- directory-list access to the protected archive root.
+
+A success in **any** dangerous request fails the negative-access gate;
+only the exact `STATUS_ACCESS_DENIED` error counts as denied.
+Unknown SMB errors, incorrect share mapping, authentication failures,
+unreachable shares, or ambiguous credentials are INCONCLUSIVE and
+**never considered a passed protection test**. It requires the operator
+to confirm that each target SMB share maps directly to
+`/volume1/homes` or `/volume1/paperless-scan` and that the user
+is actually nonadministrative, before relying on results. SMB password
+is entered interactively (not in Ansible or command history).
+Each passed run is evidence for **one authenticated identity and one
+exposed share** only; broader identities, non-SMB protocols and a
+controlled disposable rename/delete test are still separate checks.
+
+The probe requires the optional Python `smbprotocol` package in
+the operator's local virtual environment; the optional dependency is
+not installed or invoked by the PR itself. Run synthetic tests first.
+**Do not run any mutating SMB commands on actual protected archives**.
+No automatic NAS authorization, ACL edits, archive move or purge
+is part of the probe.
+
+Further mandatory release gates: independently verified recoverable
+backup of the post-canary Paperless + NAS protected archive and
+journals (the 2026-10-15 vzdump precedes the canary); effective
+permissions for all relevant private/group identities, and deliberate
+separate approval of any expiring-purge implementation. PR #81 remains
+a draft until all required criteria are proven.
+
