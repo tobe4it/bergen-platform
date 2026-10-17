@@ -30,7 +30,7 @@
       register: backend_lxc_status
       changed_when: false
       check_mode: false
-      failed_when: backend_lxc_status.rc != 0 or (backend_lxc_status.stdout | trim) != 'status: running'
+      failed_when: "backend_lxc_status.rc != 0 or (backend_lxc_status.stdout | trim) != 'status: running'"
     - name: Confirm actual guest hostname
       ansible.builtin.command:
         argv: [pct, exec, '126', --, hostname, -s]
