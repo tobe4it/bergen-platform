@@ -165,7 +165,7 @@
           module = types.ModuleType("audit_synology_completed_archive_moves")
           exec(compile(base64.b64decode("{{ lookup('ansible.builtin.file', playbook_dir + '/../files/paperless/audit_synology_completed_archive_moves.py', rstrip=False) | b64encode }}"), "<reviewed-auditor>", "exec"), module.__dict__)
           sys.modules[module.__name__] = module
-          {{ lookup('ansible.builtin.file', playbook_dir + '/../files/paperless/diagnose_synology_group_collision_archive_proof.py', rstrip=False) | indent(10, false) }}
+          {{ lookup('ansible.builtin.file', playbook_dir + '/../files/paperless/diagnose_synology_group_collision_archive_proof.py', rstrip=False) }}
       delegate_to: localhost
       become: false
       register: collision_archive_proof_diagnostic
