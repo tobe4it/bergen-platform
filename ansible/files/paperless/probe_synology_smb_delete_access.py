@@ -152,6 +152,35 @@ def tcp_preflight(server):
     print("NO_SMB_MUTATING_REQUESTS_SENT")
 
 
+def negotiate_preflight(server, connection_factory=None):
+    """SMB2/3 dialect negotiation only; no password, SMB Session or Tree."""
+    demand(isinstance(server, str) and SERVER.fullmatch(server))
+    local_api_preflight()
+    if connection_factory is None:
+        from smbprotocol.connection import Connection
+        connection_factory = Connection
+    phase = "CONNECT_OBJECT"
+    connection = None
+    try:
+        connection = connection_factory(uuid.uuid4(), server, 445)
+        phase = "SMB_NEGOTIATE"
+        connection.connect(timeout=15)
+    except Exception as error:
+        print(*safe_diagnostic(phase, error), file=sys.stderr, flush=True)
+        raise RuntimeError("SMB_NEGOTIATION_PREFLIGHT_BLOCKED") from None
+    finally:
+        if connection is not None:
+            try:
+                connection.disconnect(True)
+            except Exception as error:
+                print(*safe_diagnostic("TEARDOWN", error),
+                      file=sys.stderr, flush=True)
+                raise RuntimeError("SMB_NEGOTIATION_PREFLIGHT_BLOCKED") from None
+    print("SMB_DIALECT_NEGOTIATED")
+    print("NO_SMB_AUTHENTICATION_ATTEMPTED")
+    print("NO_SMB_MUTATING_REQUESTS_SENT")
+
+
 def local_api_preflight():
     """Only inspect the installed library; no network or credentials."""
     verify_smbprotocol_version()
@@ -288,21 +317,26 @@ def main(argv=None):
     parser = argparse.ArgumentParser()
     parser.add_argument("--local-api-check", action="store_true")
     parser.add_argument("--tcp-preflight", action="store_true")
+    parser.add_argument("--negotiate-preflight", action="store_true")
     parser.add_argument("--server")
     parser.add_argument("--site-share", choices=sorted(SITE_SHARES))
     parser.add_argument("--username")
     opts = parser.parse_args(argv)
     if opts.local_api_check:
-        demand(not opts.tcp_preflight and
+        demand(not opts.tcp_preflight and not opts.negotiate_preflight and
                not any((opts.server, opts.site_share, opts.username)))
         local_api_preflight()
         print("SMBPROTOCOL_LOCAL_API_CHECK_OK")
         print("NO_SMB_CONNECTION_ATTEMPTED")
         return
-    if opts.tcp_preflight:
+    if opts.tcp_preflight or opts.negotiate_preflight:
         demand(not opts.local_api_check and
+               not (opts.tcp_preflight and opts.negotiate_preflight) and
                opts.server and not opts.site_share and not opts.username)
-        tcp_preflight(opts.server)
+        if opts.tcp_preflight:
+            tcp_preflight(opts.server)
+        else:
+            negotiate_preflight(opts.server)
         return
     demand(all((opts.server, opts.site_share, opts.username)))
     execute(opts.server, opts.site_share, opts.username)
