@@ -142,3 +142,81 @@ enumeration under the lock, a robust persistent incarnation identity,
 receiver no-overwrite/remote digest verification, explicit IMPORTED
 acknowledgement, cross-subvolume archive journal, and crash recovery.
 These are required before any `--commit` integration.
+
+
+## Read-only full history audit (2026-10-15, staged)
+
+The new `audit-paperless-receipt-history.yml` streams
+`audit_synology_receipt_history.py` through the **existing** secure SSH
+route to Synology, executed as `paperless-sync`. Nothing is deployed.
+It reads the existing private state under the same nonblocking exclusive
+`sync.lock` used by the active NAS sender.
+
+Safety checks: correct sync identity and private 0700 state, existing 0600
+lock, secure no-follow reads of every recognized v1/v2 journal event,
+ownership/mode/link count, v1 basename key and original rsync destination,
+v2 canonical payload, v2 identity and immutable PREPARED/SENT correspondence.
+Unknown `.json` files and orphan `.receipt-*` or `.v2-receipt-*` files
+block the audit. Source document bytes and receipt contents are **not**
+printed. Only counts per scope and summary gate markers are emitted.
+
+The audit returns `HISTORY_AUDIT_COMPLETE`, `TOTAL_V1_SENT`,
+`UNRESOLVED_JOURNAL_EVENTS`, `ARCHIVE_NOT_AUTHORIZED` and
+`NO_FILES_CHANGED` on a complete readable history. A valid history **does
+not** authorize archiving: the script deliberately reports
+`ARCHIVE_NOT_AUTHORIZED` regardless of status. Any malformed, missing
+paired, unsafe or ambiguous event must fail closed.
+
+Run offline code validation from the branch checkout:
+
+```bash
+python3 -m unittest discover -s tests -p 'test_paperless_receipt_history_audit.py' -v
+```
+
+The following commands run on `bp-controller` and use local ignored
+site settings; `--syntax-check` first:
+
+```bash
+ansible-playbook \
+  -i ansible/inventory.yml -i ansible/inventory.local.yml \
+  ansible/playbooks/audit-paperless-receipt-history.yml \
+  --vault-id paperless@prompt \
+  -e @ansible/vars/paperless.vault.yml \
+  -e @ansible/vars/paperless-synology.local.yml \
+  -e paperless_history_expected_v1_sent=17 \
+  --syntax-check
+```
+
+Remove `--syntax-check` only to execute the **read-only** live check.
+The expected count 17 is a historical checkpoint from the 2026-10-15
+sender preflight; a later import can legitimately change it, so do not
+assume a static count in the reusable code. A mismatch is a review trigger.
+
+This is a **historical inventory**, not a permanent anti-replay
+guarantee or a complete live-import proof. The sender's v2 nonce is
+still not bound to the receiver identity, and an independently verified
+ARCHIVED transition remains unimplemented. No change is made to
+`synology_scan_sync.py`, any running service, source PDFs, or existing
+v1 receipts. `main` merge remains blocked.
+
+
+### Follow-up: repaired legacy receipts (2026-10-15)
+
+The first live read-only history run stopped at
+`HISTORY_AUDIT_FAILED INVALID_LEGACY_RECEIPT_SCHEMA`
+(`changed=0`). The previously published
+`repair_synology_prepared_receipt.py` creates a valid v1 SENT
+receipt with extra `document_id` and
+`recovery_reason=verified_paperless_import` fields after independent
+live IMPORTED proof. These two fields were omitted from the audit's
+allowlist. The reader now accepts exactly that known repair form,
+requiring SENT status, positive integer document ID, matching recovery
+reason, `manually_confirmed_imported=true`, valid bridge ID and
+numeric sent/reconciled timestamps. Partial or unrecognized variants
+still fail closed.
+
+A regression test recreates the repair-writer payload and checks
+negative cases. **The patched branch still requires a fresh offline
+test, Ansible syntax check and repeat of the read-only live audit.**
+Do not treat the original failure as damaged evidence or authorization
+to change NAS receipts.
