@@ -1,0 +1,105 @@
+---
+# Safe inventory of a running Open WebUI container's OIDC environment flags.
+# DOES NOT inspect DB-persisted effective configuration, user claims, groups or tokens.
+- name: Audit Open WebUI OIDC group toggles without mutations or secret exposure
+  hosts: "{{ open_webui_oidc_audit_pve_host | default('__no_approved_pve_host__') }}"
+  gather_facts: false
+  become: true
+  tasks:
+    - name: Require explicit target identity for one existing unprivileged LXC
+      ansible.builtin.assert:
+        that:
+          - open_webui_oidc_audit_pve_host is defined
+          - inventory_hostname == open_webui_oidc_audit_pve_host
+          - open_webui_oidc_audit_vmid is defined
+          - open_webui_oidc_audit_vmid | int >= 100
+          - open_webui_oidc_audit_vmid | int <= 999999
+          - open_webui_oidc_audit_guest is defined
+          - open_webui_oidc_audit_guest is match('^[a-z][a-z0-9-]+$')
+        fail_msg: "Define the precise approved PVE host, guest and VMID in ignored local vars."
+
+    - name: Read guest configuration
+      ansible.builtin.command:
+        argv: [pct, config, "{{ open_webui_oidc_audit_vmid | string }}"]
+      register: oidc_audit_guest_config
+      changed_when: false
+      check_mode: false
+
+    - name: Verify exact existing guest and unprivileged mode
+      ansible.builtin.assert:
+        that:
+          - "('hostname: ' ~ open_webui_oidc_audit_guest) in oidc_audit_guest_config.stdout_lines"
+          - "'unprivileged: 1' in oidc_audit_guest_config.stdout_lines"
+        fail_msg: "Target identity mismatch; refusing container introspection."
+
+    - name: Require running guest
+      ansible.builtin.command:
+        argv: [pct, status, "{{ open_webui_oidc_audit_vmid | string }}"]
+      register: oidc_audit_guest_status
+      changed_when: false
+      check_mode: false
+      failed_when: "oidc_audit_guest_status.rc != 0 or (oidc_audit_guest_status.stdout | trim) != 'status: running'"
+
+    - name: Require active Open WebUI service
+      ansible.builtin.command:
+        argv: [pct, exec, "{{ open_webui_oidc_audit_vmid | string }}", --, systemctl, is-active, open-webui.service]
+      register: oidc_audit_webui_service
+      changed_when: false
+      check_mode: false
+      failed_when: oidc_audit_webui_service.rc != 0 or (oidc_audit_webui_service.stdout | trim) != 'active'
+
+    - name: Read only explicitly allowed OIDC environment flag classifications
+      ansible.builtin.command:
+        argv:
+          - pct
+          - exec
+          - "{{ open_webui_oidc_audit_vmid | string }}"
+          - --
+          - podman
+          - exec
+          - open-webui
+          - python3
+          - -c
+          - |
+            import os
+            names = (
+                "ENABLE_OAUTH_GROUP_MANAGEMENT",
+                "ENABLE_OAUTH_GROUP_CREATION",
+                "ENABLE_OAUTH_ROLE_MANAGEMENT",
+                "ENABLE_OAUTH_PERSISTENT_CONFIG",
+                "DEFAULT_USER_ROLE",
+                "OAUTH_GROUPS_CLAIM",
+            )
+            for key in names:
+                raw = os.environ.get(key)
+                if key.startswith("ENABLE_"):
+                    kind = "TRUE" if raw is not None and raw.lower() == "true" else (
+                        "FALSE" if raw is not None and raw.lower() == "false" else
+                        "UNSET" if raw is None else "OTHER"
+                    )
+                elif key == "DEFAULT_USER_ROLE":
+                    kind = "PENDING" if raw == "pending" else "OTHER_OR_UNSET"
+                else:
+                    kind = "GROUPS" if raw == "groups" else "OTHER_OR_UNSET"
+                print("OIDC_ENV_" + key + "=" + kind)
+            print("EFFECTIVE_PERSISTED_CONFIG_NOT_VERIFIED=true")
+      register: oidc_audit_flags
+      changed_when: false
+      check_mode: false
+      no_log: true
+
+    - name: Require six sanitized flag classifications and disclaimer
+      ansible.builtin.assert:
+        that:
+          - oidc_audit_flags.rc == 0
+          - oidc_audit_flags.stdout_lines | length == 7
+          - "'EFFECTIVE_PERSISTED_CONFIG_NOT_VERIFIED=true' in oidc_audit_flags.stdout_lines"
+          - oidc_audit_flags.stdout_lines | select('match', '^OIDC_ENV_(ENABLE_OAUTH_GROUP_MANAGEMENT|ENABLE_OAUTH_GROUP_CREATION|ENABLE_OAUTH_ROLE_MANAGEMENT|ENABLE_OAUTH_PERSISTENT_CONFIG)=(TRUE|FALSE|UNSET|OTHER)$') | list | length == 4
+          - oidc_audit_flags.stdout_lines | select('match', '^OIDC_ENV_DEFAULT_USER_ROLE=(PENDING|OTHER_OR_UNSET)$') | list | length == 1
+          - oidc_audit_flags.stdout_lines | select('match', '^OIDC_ENV_OAUTH_GROUPS_CLAIM=(GROUPS|OTHER_OR_UNSET)$') | list | length == 1
+        fail_msg: "OIDC_GROUP_ENV_AUDIT_FAILED"
+      no_log: true
+
+    - name: Report bounded environment-only observations
+      ansible.builtin.debug:
+        msg: "{{ oidc_audit_flags.stdout_lines + ['READ_ONLY_NO_USERS_GROUPS_OR_TOKENS=true', 'NO_SERVICE_RESTART_OR_SETTINGS_CHANGE=true', 'GROUP_REVOCATION_NOT_VERIFIED=true'] }}"
