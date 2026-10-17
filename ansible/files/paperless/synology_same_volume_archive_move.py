@@ -259,7 +259,7 @@ def _fsync_existing_pdf(dirfd, name, expected_signature):
         os.close(fd)
 
 
-def _read_receipt(path, scope, source, signature, expected_sha):
+def _read_receipt(path, scope, source, signature, expected_sha, *, allow_group_metadata_drift=False):
     before = path.lstat()
     require(stat.S_ISREG(before.st_mode) and before.st_nlink == 1
             and before.st_uid == os.geteuid()
@@ -280,10 +280,20 @@ def _read_receipt(path, scope, source, signature, expected_sha):
             obj[k] = v
         return obj
     record = json.loads(raw, object_pairs_hook=unique)
+    stored = record.get("signature") if isinstance(record, dict) else None
+    identity_matches = stored == signature
+    # Never rewrite historical SENT receipts. For a GROUP scan with a
+    # proven identical inode, size and SHA, only timestamps may differ.
+    # Actual file bytes are rehashed by archive_one under sync.lock BEFORE
+    # its durable journal or rename. Default remains strict for all callers.
+    if allow_group_metadata_drift and scope in ("Familie", "Eltern"):
+        identity_matches = identity_matches or (
+            isinstance(stored, list) and len(stored) == 5
+            and all(type(n) is int and n >= 0 for n in stored)
+            and stored[:3] == signature[:3])
     require(isinstance(record, dict) and record.get("status") == "SENT"
             and record.get("scope") == scope and record.get("source") == source
-            and record.get("sha256") == expected_sha
-            and record.get("signature") == signature,
+            and record.get("sha256") == expected_sha and identity_matches,
             "SENDER_RECEIPT_MISMATCH")
     stem = re.sub(r"[^\w. -]", "_", Path(source).stem,
                   flags=re.UNICODE).strip(" ._-")[:120] or "scan"
@@ -421,8 +431,10 @@ def archive_one(source_dir, state_dir, scope, filename, proof, *,
                 sender_id = hashlib.sha256(
                     (scope + "\0" + filename).encode("utf-8")).hexdigest()
                 receipt_name = sender_id + ".json"
-                receipt = _read_receipt(state_dir / receipt_name, scope,
-                                        filename, signature, proof.get("sha256"))
+                receipt = _read_receipt(
+                    state_dir / receipt_name, scope, filename, signature,
+                    proof.get("sha256"),
+                    allow_group_metadata_drift=(scope in ("Familie", "Eltern")))
                 _validate_import(proof, receipt, receipt_name)
                 _read_source(sourcefd, filename, max_size,
                              expected_signature=signature,
@@ -452,6 +464,11 @@ def archive_one(source_dir, state_dir, scope, filename, proof, *,
                             "archive_scope_dir": str(archive_scope_dir),
                             "archive_month": month, "archive_name": final,
                         }
+                        # Immutable PREPARED+ARCHIVED events bind the original
+                        # receipt's metadata to the actual archived inode. The
+                        # historical SENT receipt is never changed.
+                        if receipt["signature"] != signature:
+                            plan["sender_signature"] = receipt["signature"]
                         if not commit:
                             return dict(status="ARCHIVE_DRY_RUN", **plan)
                         # Only month subdirectories are created; never auto-
