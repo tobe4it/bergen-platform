@@ -82,3 +82,8 @@ Private Papierdokumente bleiben durch gesonderte Paperless-Berechtigungen und pr
 Am 17.10.2026 vom Betreiber gemeldete Abnahmen: 840 Offline-Tests im Entwicklungsbranch `OK`; Installation der aktualisierten vier NAS-Komponenten `ok=25 changed=4 failed=0`; Read-only-Lifecycle-Audit `ok=18 changed=0 failed=0`; systemd-OneShot `Result=success ExecMainStatus=0`; Timer `enabled`/`active`; mindestens **ein automatisch archiviertes** weiteres Gruppenoriginal vom Betreiber bestätigt. Dies ist eine **begrenzte Freigabe**, kein Beleg, dass jeder künftige Timer-Lauf erfolgreich sein wird.
 
 Die v2-Lösch-/Quarantäne-Arbeit verbleibt in der Entwicklungs-PR. Der Merge dieses v1-Referenzreleases autorisiert weder Löschungen noch die Freigabe des v2-Zweigs.
+
+## Ergänzende Verwaltung und Ablösung historischer PRs
+
+- [Gruppenadministration: inotify, Tags, ACLs und Benutzeraufnahme](PAPERLESS-GROUP-ADMINISTRATION.md)
+- [Abgleich und Abschluss der alten Paperless-PRs #59, #60, #68](PAPERLESS-PR-CLOSEOUT-2026-10-17.md)
