@@ -40,6 +40,14 @@ def demand(condition):
         raise RuntimeError("SMB_NEGATIVE_ACCESS_GATE_BLOCKED")
 
 
+def validate_endpoint(server, port):
+    """Only NAS SMB/445 or an explicitly local SSH-forwarded 1445."""
+    demand(isinstance(server, str) and SERVER.fullmatch(server) and
+           type(port) is int and
+           (port == 445 or (server == "127.0.0.1" and port == 1445)))
+    return port
+
+
 def request_plan(site):
     """Pure, immutable plan to audit the protected root and its parent."""
     demand(site in SITE_SHARES)
@@ -133,15 +141,15 @@ def safe_diagnostic(phase, error):
             label, status, safe_exception_type(error))
 
 
-def tcp_preflight(server):
+def tcp_preflight(server, port=445):
     """Check TCP/445 without SMB messages, credentials or filesystem writes.
 
     Success means TCP connectivity only, NEVER authentication or permission.
     Socket errors are safely categorized without exposing local addresses.
     """
-    demand(isinstance(server, str) and SERVER.fullmatch(server))
+    validate_endpoint(server, port)
     try:
-        with socket.create_connection((server, 445), timeout=5):
+        with socket.create_connection((server, port), timeout=5):
             pass
     except Exception as error:
         print(*safe_diagnostic("CONNECT_OBJECT", error),
@@ -152,9 +160,9 @@ def tcp_preflight(server):
     print("NO_SMB_MUTATING_REQUESTS_SENT")
 
 
-def negotiate_preflight(server, connection_factory=None):
+def negotiate_preflight(server, connection_factory=None, port=445):
     """SMB2/3 dialect negotiation only; no password, SMB Session or Tree."""
-    demand(isinstance(server, str) and SERVER.fullmatch(server))
+    validate_endpoint(server, port)
     local_api_preflight()
     if connection_factory is None:
         from smbprotocol.connection import Connection
@@ -162,7 +170,7 @@ def negotiate_preflight(server, connection_factory=None):
     phase = "CONNECT_OBJECT"
     connection = None
     try:
-        connection = connection_factory(uuid.uuid4(), server, 445)
+        connection = connection_factory(uuid.uuid4(), server, port)
         phase = "SMB_NEGOTIATE"
         connection.connect(timeout=15)
     except Exception as error:
@@ -217,12 +225,13 @@ def local_api_preflight():
     return True
 
 
-def execute(server, site, username):
+def execute(server, site, username, port=445):
     phase = "PRECHECK"
     connection = None
     password = None
     try:
         plan = validate_site(server, site, username)
+        validate_endpoint(server, port)
         phase = "IMPORTS"
         local_api_preflight()
         from smbprotocol.connection import Connection
@@ -239,7 +248,7 @@ def execute(server, site, username):
         password = getpass.getpass("SMB password (not logged): ")
         demand(bool(password))
         phase = "CONNECT_OBJECT"
-        connection = Connection(uuid.uuid4(), server, 445)
+        connection = Connection(uuid.uuid4(), server, port)
         phase = "SMB_NEGOTIATE"
         connection.connect(timeout=15)
         phase = "SESSION_SETUP"
@@ -319,11 +328,13 @@ def main(argv=None):
     parser.add_argument("--tcp-preflight", action="store_true")
     parser.add_argument("--negotiate-preflight", action="store_true")
     parser.add_argument("--server")
+    parser.add_argument("--port", type=int, default=445)
     parser.add_argument("--site-share", choices=sorted(SITE_SHARES))
     parser.add_argument("--username")
     opts = parser.parse_args(argv)
     if opts.local_api_check:
         demand(not opts.tcp_preflight and not opts.negotiate_preflight and
+               opts.port == 445 and
                not any((opts.server, opts.site_share, opts.username)))
         local_api_preflight()
         print("SMBPROTOCOL_LOCAL_API_CHECK_OK")
@@ -334,12 +345,12 @@ def main(argv=None):
                not (opts.tcp_preflight and opts.negotiate_preflight) and
                opts.server and not opts.site_share and not opts.username)
         if opts.tcp_preflight:
-            tcp_preflight(opts.server)
+            tcp_preflight(opts.server, opts.port)
         else:
-            negotiate_preflight(opts.server)
+            negotiate_preflight(opts.server, port=opts.port)
         return
     demand(all((opts.server, opts.site_share, opts.username)))
-    execute(opts.server, opts.site_share, opts.username)
+    execute(opts.server, opts.site_share, opts.username, opts.port)
 
 
 if __name__ == "__main__":
