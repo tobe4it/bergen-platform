@@ -47,3 +47,5 @@ ansible/files/paperless/synology-paperless.json
 # Site-local reviewed Paperless VZDump schedule and NFS export
 ansible/vars/paperless-backup.local.yml
 ansible/vars/paperless-backup.local.yml~
+ansible/vars/paperless.local.yml
+ansible/group_vars/all/bergen-paperless.yml
