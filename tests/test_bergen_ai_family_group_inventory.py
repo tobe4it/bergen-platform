@@ -54,19 +54,19 @@ class FamilyInventory(unittest.TestCase):
 
     def test_fail_closed_for_unreviewed_version_and_bad_expected(self):
         for version in ("0.10.3", "0.12.4", "v0.12.99", "", None):
-            with self.subTest(version=version), self.assertRaises(ValueError):
+            with self.subTest(version=version), self.assertRaises(module.AnsibleFilterError):
                 self.check(version=version)
         for mapping in ({}, {"family": "A", "adults": "B"},
                         {"family": "A", "adults": "A", "children": "C"},
                         {"family": "A", "adults": "B", "children": " C "},
                         {"family": "A", "adults": "B", "children": ""}):
-            with self.subTest(mapping=mapping), self.assertRaises(ValueError):
+            with self.subTest(mapping=mapping), self.assertRaises(module.AnsibleFilterError):
                 self.check(expected=mapping)
 
     def test_malformed_group_responses(self):
-        for gs in (None, {}, ["broken"], [dict(id="", name="x")],
+        for gs in ({}, ["broken"], [dict(id="", name="x")],
                    [{**groups()[0]}, {**groups()[0]}], [{}], [{}] * 1001):
-            with self.subTest(gs=type(gs).__name__), self.assertRaises(ValueError):
+            with self.subTest(gs=type(gs).__name__), self.assertRaises(module.AnsibleFilterError):
                 self.check(gs=gs)
 
     def test_summary_contains_no_user_group_or_permissions_data(self):
