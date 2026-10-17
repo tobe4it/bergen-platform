@@ -44,3 +44,6 @@ ansible/vars/paperless-synology.local.yml~
 ansible/vars/paperless-synology.local.yml.*~
 ansible/vars/paperless*.local.yml
 ansible/files/paperless/synology-paperless.json
+# Paperless backend site inventory and sensitive local deployment input
+ansible/vars/paperless.local.yml
+ansible/group_vars/all/bergen-paperless.yml

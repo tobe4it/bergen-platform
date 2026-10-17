@@ -1,0 +1,67 @@
+---
+# Exact existing Paperless guest state, read-only through approved Proxmox host.
+# Not a deployer, does not inspect credential contents or print user/document data.
+- name: Inspect already running Paperless backend without changing any service
+  hosts: venombox
+  gather_facts: false
+  become: true
+  tasks:
+    - name: Verify expected Proxmox inventory identity
+      ansible.builtin.assert:
+        that:
+          - inventory_hostname == 'venombox'
+    - name: Read LXC configuration
+      ansible.builtin.command:
+        argv: [pct, config, '126']
+      register: backend_lxc_config
+      changed_when: false
+      check_mode: false
+    - name: Require confined guest with both backed up ZFS filesystems
+      ansible.builtin.assert:
+        that:
+          - "'hostname: bergen-paperless' in backend_lxc_config.stdout_lines"
+          - "'unprivileged: 1' in backend_lxc_config.stdout_lines"
+          - "backend_lxc_config.stdout_lines | select('match', '^rootfs: local-zfs:') | list | length == 1"
+          - "backend_lxc_config.stdout_lines | select('match', '^mp0: local-zfs:.*mp=/srv/bergen-paperless,backup=1(,|$)') | list | length == 1"
+        fail_msg: "PAPERLESS_BACKEND_GUEST_OR_BACKUP_MOUNT_NOT_VERIFIED"
+    - name: Verify guest is running
+      ansible.builtin.command:
+        argv: [pct, status, '126']
+      register: backend_lxc_status
+      changed_when: false
+      check_mode: false
+      failed_when: backend_lxc_status.rc != 0 or (backend_lxc_status.stdout | trim) != 'status: running'
+    - name: Confirm actual guest hostname
+      ansible.builtin.command:
+        argv: [pct, exec, '126', --, hostname, -s]
+      register: backend_lxc_identity
+      changed_when: false
+      check_mode: false
+      failed_when: backend_lxc_identity.rc != 0 or (backend_lxc_identity.stdout | trim) != 'bergen-paperless'
+    - name: Query active application services in guest
+      ansible.builtin.command:
+        argv: [pct, exec, '126', --, systemctl, is-active, "{{ item }}"]
+      loop:
+        - bergen-paperless-db.service
+        - bergen-paperless-redis.service
+        - bergen-paperless.service
+      register: backend_service_state
+      changed_when: false
+      check_mode: false
+      failed_when: false
+      no_log: true
+    - name: Require three active container services
+      ansible.builtin.assert:
+        that:
+          - backend_service_state.results | length == 3
+          - backend_service_state.results | selectattr('stdout', 'equalto', 'active') | list | length == 3
+          - backend_service_state.results | selectattr('rc', 'equalto', 0) | list | length == 3
+        fail_msg: "PAPERLESS_BACKEND_SERVICE_STATE_FAILED"
+      no_log: true
+    - name: Display only safe aggregate status
+      ansible.builtin.debug:
+        msg:
+          - PAPERLESS_EXISTING_BACKEND_READONLY_OK
+          - PAPERLESS_SERVICES_ACTIVE=3
+          - PAPERLESS_ROOT_AND_DATA_MOUNT_BACKUP_INCLUDED=true
+          - NO_FILES_OR_SERVICES_CHANGED=true

@@ -1,0 +1,16 @@
+---
+# This role is an opt-in deployment only. No site-specific credentials in Git.
+paperless_deployment_approved: false
+paperless_first_install_approved: false
+paperless_start_approved: false
+paperless_service_root: /srv/bergen-paperless
+paperless_config_dir: /etc/bergen-paperless
+paperless_quadlet_dir: /etc/containers/systemd
+paperless_listen_address: 127.0.0.1
+paperless_listen_port: 8000
+paperless_timezone: Europe/Berlin
+paperless_ocr_language: deu+eng
+paperless_uid: 1000
+paperless_gid: 1000
+paperless_postgres_uid: 999
+paperless_redis_uid: 999

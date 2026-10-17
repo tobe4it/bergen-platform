@@ -1,0 +1,25 @@
+[Unit]
+Description=Bergen Paperless-ngx document management
+Wants=network-online.target
+After=network-online.target bergen-paperless-db.service bergen-paperless-redis.service
+Requires=bergen-paperless-db.service bergen-paperless-redis.service
+
+[Container]
+Image={{ paperless_image }}
+ContainerName=bergen-paperless
+Network=bergen-paperless.network
+PublishPort={{ paperless_listen_address }}:{{ paperless_listen_port }}:8000
+EnvironmentFile={{ paperless_config_dir }}/paperless.env
+Volume={{ paperless_service_root }}/data:/usr/src/paperless/data
+Volume={{ paperless_service_root }}/media:/usr/src/paperless/media
+Volume={{ paperless_service_root }}/consume:/usr/src/paperless/consume
+Volume={{ paperless_service_root }}/export:/usr/src/paperless/export
+NoNewPrivileges=true
+
+[Service]
+Restart=always
+TimeoutStartSec=900
+
+{% if paperless_start_approved | bool %}[Install]
+WantedBy=multi-user.target
+{% endif %}
