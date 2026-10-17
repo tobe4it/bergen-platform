@@ -1204,3 +1204,34 @@ recovery and independent 21+1 lifecycle reconciliation remain
 accepted. No new archive moves, destructive purge, gate activation,
 or main merge are authorized by the networking observation.
 
+
+### 2026-10-17 NAS listener discovery before direct IP SMB TCP probes
+
+The operator ran the passwordless read-only NAS listener and interface
+diagnostic over the known working administrative SSH transport. It
+reported `NAS_SMB_445_LISTENERS 2` and two relevant non-Docker IPv4
+interfaces: `eth0 = 192.168.2.145` and `eth1 = 192.168.6.11`.
+The command terminated with `NO_FILES_CHANGED`. This proves that
+the NAS network namespace has TCP listeners on port 445, but **does
+not** prove that either interface accepts connections from
+`bp-controller` or which listener is bound to each interface.
+The other reported IPv4 addresses were Docker bridges and are not
+the NAS interface choices for this test.
+
+No matching controller-side `getent ahostsv4/ahostsv6` output was
+provided. Therefore do not yet equate the previous failing
+`ldap.thebergens.net:445` endpoint with either of these LAN/VLAN
+interfaces or infer a firewall rule.
+
+Next operator read-only acceptance: run separate `--tcp-preflight`
+invocations for `192.168.2.145` and `192.168.6.11`, not linked by
+`&&`, plus controller DNS inspection. For any directly reachable
+address, run the credential-free `--negotiate-preflight` with the
+same address before considering any password-authenticated SMB2
+access-intent test. Do NOT expose TCP/445 on the public Internet,
+change Synology ACLs, rename protected paths, or activate a release
+gate. Retain the successful 765/765 synthetic baseline and earlier
+static ACL, isolated archived canary recovery and full lifecycle
+evidence. This is a connectivity diagnosis only and grants no
+additional archive, purge or merge permission.
+
