@@ -1031,3 +1031,45 @@ user is not universal proof), independent post-canary NAS+LXC
 backup/restore, and any later destructive expiry/purge. There is
 no new archive move, merge or purge authorization.
 
+
+### 2026-10-17 real Synology SMB share-root preflight accepted
+
+Operator confirmed `754/754` Paperless synthetic tests, successful
+`audit-paperless-synology-smb-share-mapping.yml --syntax-check` and
+read-only DSM SMB mapping live audit with
+`localhost ok=6 changed=0 failed=0`. The exact NAS share mapping
+was accepted for `homes` and `paperless-scan`, `NO_FILES_CHANGED`.
+The optional dependency check reported `SMBPROTOCOL_NOT_INSTALLED`.
+This is a **mapping-only** acceptance, NOT any SMB identity's deletion
+rights evidence.
+
+The low-level no-write SMB2 probe was then hardened before first use:
+`Open.close()` sends real SMB CLOSE requests for successful FILE_OPEN
+handles. Passing `False` would suppress sending the close and was
+removed. Probe now refuses to prompt for a credential unless
+`smbprotocol==1.17.0` is installed, the exact Python API version
+reviewed for this script. PyPI published 1.17.0 on 2026-07-07 and
+requires Python >=3.10. It supports SMB2/SMB3 and session encryption.
+Seven offline SMB-specific tests now cover close, encryption,
+dependency version gates and no-mutating-method invariants; all are
+**pending operator verification** as part of full Paperless suite.
+
+To install only in the activated `bp-controller` `.venv` after
+local acceptance and explicit operator decision:
+`python3 -m pip install 'smbprotocol==1.17.0'`.
+Verify `python3 -m pip show smbprotocol` before any SMB credentials
+are supplied. Do not place SMB passwords in shell history, Git,
+Ansible extra-vars, process arguments or logs.
+
+The standalone probe
+`ansible/files/paperless/probe_synology_smb_delete_access.py`
+must be run only with a confirmed nonadministrative **actual SMB
+account** and the verified exact NAS SMB server and share. The
+controller should not infer an identity, authorize privileged
+accounts, or blindly try a home-redirection path.
+Denied FILE_OPEN desired-access flags give negative evidence for one
+SMB identity/share, but are NOT a physical rename/delete test. Unknown
+results fail closed. No actual archive file or entry may be mutated
+to test access. Future off-NAS backup/restore proof remains mandatory
+for irreversible purge and main promotion.
+
