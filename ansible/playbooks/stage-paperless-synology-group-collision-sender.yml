@@ -1,0 +1,150 @@
+---
+# Controlled update of existing GROUP-only scheduled sender.
+# No archive gates, no files moved, no receipts changed by this playbook.
+# Stage independent proof helpers FIRST and active sender LAST.
+# Only after operator has disabled the failing controller archive timer,
+# reviewed the mismatch categories, and explicitly opted in.
+- name: Stage conservative Synology same-filename group scanner support
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  vars:
+    collision_sender_code:
+      - audit_synology_completed_archive_moves.py
+      - synology_group_collision_alias.py
+      - synology_scan_sync.py
+  tasks:
+    - name: Require explicit code deployment and restricted site settings
+      ansible.builtin.assert:
+        that:
+          - (paperless_group_collision_stage | default(false)) is sameas true
+          - not ansible_check_mode
+          - synology_admin is defined
+          - synology_admin is match('^[A-Za-z_][A-Za-z0-9_.-]*@[A-Za-z0-9][A-Za-z0-9.-]+$')
+          - synology_config is defined
+          - synology_config.schema_version == 1
+          - synology_config.sync_user == 'paperless-sync'
+          - synology_config.state_parent is match('^/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$')
+        fail_msg: "GROUP_COLLISION_SENDER_STAGING_NOT_AUTHORIZED"
+
+    - name: Require failed controller auto-archive timer inactive before sender update
+      ansible.builtin.command:
+        argv:
+          - systemctl
+          - is-active
+          - bergen-paperless-group-auto-v1.timer
+      register: collision_archive_timer_state
+      changed_when: false
+      failed_when: false
+
+    - name: Prevent sender deployment while controller archive timer is active
+      ansible.builtin.assert:
+        that:
+          - (collision_archive_timer_state.stdout | trim) != 'active'
+        fail_msg: "STOP_CONTROLLER_ARCHIVE_TIMER_BEFORE_SENDER_UPDATE"
+
+    - name: Verify exact local reviewed Python source set
+      ansible.builtin.command:
+        argv:
+          - /usr/bin/python3
+          - -c
+          - "import ast, pathlib, sys; ast.parse(pathlib.Path(sys.argv[1]).read_text(encoding='utf-8'))"
+          - "{{ playbook_dir }}/../files/paperless/{{ item }}"
+      loop: "{{ collision_sender_code }}"
+      changed_when: false
+
+    - name: Verify root-owned trusted NAS code directory
+      ansible.builtin.command:
+        argv:
+          - ssh
+          - -T
+          - -o
+          - BatchMode=yes
+          - -o
+          - StrictHostKeyChecking=yes
+          - -o
+          - ConnectTimeout=15
+          - "{{ synology_admin }}"
+          - sudo -n /bin/sh -s
+        stdin: |
+          set -eu
+          PARENT={{ synology_config.state_parent | quote }}
+          BIN="$PARENT/bin"
+          test ! -L "$PARENT" && test ! -L "$BIN"
+          test "$(stat -c '%u:%g:%a' "$PARENT")" = '0:0:755'
+          test "$(stat -c '%u:%g:%a' "$BIN")" = '0:0:755'
+          for gate in archive-move.enabled archive-move.homes.enabled archive-move.paperless-scan.enabled; do
+            test ! -e "$PARENT/$gate" && test ! -L "$PARENT/$gate"
+          done
+          test -f "$BIN/synology_same_volume_archive_move.py"
+          test ! -L "$BIN/synology_same_volume_archive_move.py"
+          test "$(stat -c '%u:%g:%a' "$BIN/synology_same_volume_archive_move.py")" = '0:0:644'
+          echo TRUSTED_COLLISION_SENDER_CODE_PARENT
+      register: collision_source_guard
+      changed_when: false
+
+    - name: Require verified protected code directory before any install
+      ansible.builtin.assert:
+        that:
+          - collision_source_guard.stdout_lines == ['TRUSTED_COLLISION_SENDER_CODE_PARENT']
+
+    - name: Atomically install reviewed helpers first and sender last
+      ansible.builtin.command:
+        argv:
+          - ssh
+          - -T
+          - -o
+          - BatchMode=yes
+          - -o
+          - StrictHostKeyChecking=yes
+          - -o
+          - ConnectTimeout=15
+          - "{{ synology_admin }}"
+          - sudo -n /bin/sh -s
+        stdin: |
+          set -eu
+          PARENT={{ synology_config.state_parent | quote }}
+          BIN="$PARENT/bin"
+          NAME={{ item | quote }}
+          SHA={{ (lookup('ansible.builtin.file', playbook_dir + '/../files/paperless/' + item, rstrip=False) | hash('sha256')) | quote }}
+          TARGET="$BIN/$NAME"
+          test ! -L "$BIN" && test ! -L "$TARGET"
+          test "$(stat -c '%u:%g:%a' "$BIN")" = '0:0:755'
+          if test -e "$TARGET"; then
+            test -f "$TARGET"
+            test "$(stat -c '%u:%g:%a' "$TARGET")" = '0:0:644'
+          fi
+          for gate in archive-move.enabled archive-move.homes.enabled archive-move.paperless-scan.enabled; do
+            test ! -e "$PARENT/$gate" && test ! -L "$PARENT/$gate"
+          done
+          TMP=$(mktemp "$BIN/.collision-code.XXXXXXXX")
+          trap 'rm -f "$TMP"' EXIT
+          base64 -d > "$TMP" <<'BERGEN_REVIEWED_PY'
+          {{ lookup('ansible.builtin.file', playbook_dir + '/../files/paperless/' + item, rstrip=False) | b64encode }}
+          BERGEN_REVIEWED_PY
+          test "$(sha256sum "$TMP" | cut -d ' ' -f 1)" = "$SHA"
+          python3 -c 'import ast,sys;ast.parse(open(sys.argv[1],encoding="utf-8").read())' "$TMP"
+          chown root:root "$TMP"
+          chmod 0644 "$TMP"
+          mv -f -- "$TMP" "$TARGET"
+          trap - EXIT
+          test "$(stat -c '%u:%g:%a' "$TARGET")" = '0:0:644'
+          test "$(sha256sum "$TARGET" | cut -d ' ' -f 1)" = "$SHA"
+          echo COLLISION_SENDER_COMPONENT_INSTALLED "$NAME"
+      loop: "{{ collision_sender_code }}"
+      register: collision_staged_result
+      changed_when: true
+
+    - name: Verify exact staged components without showing any document data
+      ansible.builtin.assert:
+        that:
+          - collision_staged_result.results | length == collision_sender_code | length
+          - (collision_staged_result.results | map(attribute='rc') | list | unique) == [0]
+        fail_msg: "COLLISION_SENDER_PARTIAL_DEPLOYMENT_REQUIRES_REVIEW"
+
+    - name: Confirm only source code was staged, not archives or receipts
+      ansible.builtin.debug:
+        msg: >-
+          GROUP_COLLISION_SENDER_STAGED; code root-owned and checksum-verified;
+          no scan content or receipt changed by staging; controller archive
+          timer not enabled by this playbook.
