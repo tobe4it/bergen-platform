@@ -1,0 +1,135 @@
+---
+- name: Require explicit approval and a private proxy policy
+  ansible.builtin.assert:
+    that:
+      - reverse_proxy_deployment_approved | bool
+      - reverse_proxy_internal_only | bool
+      - ansible_os_family == 'Debian'
+      - reverse_proxy_sites is sequence
+      - reverse_proxy_sites is not string
+      - reverse_proxy_sites | length > 0
+      - reverse_proxy_allow_cidrs is sequence
+      - reverse_proxy_allow_cidrs is not string
+      - reverse_proxy_allow_cidrs | length > 0
+      - "'0.0.0.0/0' not in reverse_proxy_allow_cidrs"
+      - "'::/0' not in reverse_proxy_allow_cidrs"
+      - reverse_proxy_client_max_body_size is match('^[1-9][0-9]*[kKmMgG]$')
+      - reverse_proxy_read_timeout is match('^[1-9][0-9]*s$')
+      - reverse_proxy_tls_cert_path is match('^/[a-zA-Z0-9_./-]+[.]pem$')
+      - reverse_proxy_tls_key_path is match('^/[a-zA-Z0-9_./-]+[.]pem$')
+      - reverse_proxy_tls_cert_path != reverse_proxy_tls_key_path
+    fail_msg: >-
+      Refusing a mutable deployment: require explicit approval, Debian,
+      nonempty private client allowlist, HTTPS sites and TLS paths.
+
+- name: Require a valid and unique site list
+  ansible.builtin.assert:
+    that:
+      - reverse_proxy_sites | map(attribute='hostname') | list | unique | length == reverse_proxy_sites | length
+      - item.hostname is match('^[a-zA-Z0-9-]+([.][a-zA-Z0-9-]+)+$')
+      - item.backend_url is match('^https?://[a-zA-Z0-9.-]+(:[0-9]{1,5})?/?$')
+    fail_msg: 'Each site needs a unique DNS hostname and a safe absolute HTTP(S) backend URL.'
+  loop: '{{ reverse_proxy_sites }}'
+  loop_control:
+    label: '{{ item.hostname | default("invalid") }}'
+
+- name: Refuse malformed client allowlist entries
+  ansible.builtin.assert:
+    that:
+      - item is match('^[0-9a-fA-F:.]+/[0-9]{1,3}$')
+    fail_msg: 'Each client allowlist entry must be an IP CIDR.'
+  loop: '{{ reverse_proxy_allow_cidrs }}'
+
+- name: Require an existing fullchain certificate
+  ansible.builtin.stat:
+    path: '{{ reverse_proxy_tls_cert_path }}'
+    follow: true
+  register: reverse_proxy_tls_cert_stat
+
+- name: Require an existing private key
+  ansible.builtin.stat:
+    path: '{{ reverse_proxy_tls_key_path }}'
+    follow: true
+  register: reverse_proxy_tls_key_stat
+  no_log: true
+
+- name: Reject missing, inappropriate or unprotected TLS material
+  ansible.builtin.assert:
+    that:
+      - reverse_proxy_tls_cert_stat.stat.isreg | default(false)
+      - reverse_proxy_tls_key_stat.stat.isreg | default(false)
+      - reverse_proxy_tls_key_stat.stat.pw_name | default('') == 'root'
+      - reverse_proxy_tls_key_stat.stat.mode | default('') in ['0600', '0400']
+    fail_msg: >-
+      Supply a certificate/fullchain and a root-owned private key (0400/0600)
+      using a separately reviewed TLS deployment before enabling the proxy.
+  no_log: true
+
+- name: Validate minimum TLS certificate lifetime
+  ansible.builtin.command:
+    argv:
+      - openssl
+      - x509
+      - -in
+      - '{{ reverse_proxy_tls_cert_path }}'
+      - -noout
+      - -checkend
+      - '{{ reverse_proxy_tls_minimum_remaining_seconds | string }}'
+  changed_when: false
+
+- name: Verify certificate hostname coverage for every configured site
+  ansible.builtin.command:
+    argv:
+      - openssl
+      - x509
+      - -in
+      - '{{ reverse_proxy_tls_cert_path }}'
+      - -noout
+      - -checkhost
+      - '{{ item.hostname }}'
+  register: reverse_proxy_tls_names
+  changed_when: false
+  loop: '{{ reverse_proxy_sites }}'
+  loop_control:
+    label: '{{ item.hostname }}'
+
+- name: Refuse TLS certificates that do not match a site
+  ansible.builtin.assert:
+    that:
+      - "'does match certificate' in item.stdout"
+    fail_msg: 'TLS certificate does not cover a configured virtual host.'
+  loop: '{{ reverse_proxy_tls_names.results }}'
+  loop_control:
+    label: '{{ item.item.hostname }}'
+
+- name: Extract certificate public key for pair validation
+  ansible.builtin.command:
+    argv:
+      - openssl
+      - x509
+      - -pubkey
+      - -noout
+      - -in
+      - '{{ reverse_proxy_tls_cert_path }}'
+  changed_when: false
+  register: reverse_proxy_cert_pubkey
+  no_log: true
+
+- name: Extract private key public component for pair validation
+  ansible.builtin.command:
+    argv:
+      - openssl
+      - pkey
+      - -pubout
+      - -in
+      - '{{ reverse_proxy_tls_key_path }}'
+  changed_when: false
+  register: reverse_proxy_private_pubkey
+  no_log: true
+
+- name: Refuse a certificate and key mismatch
+  ansible.builtin.assert:
+    that:
+      - reverse_proxy_cert_pubkey.stdout | trim == reverse_proxy_private_pubkey.stdout | trim
+    fail_msg: 'Certificate and private key do not form the same keypair.'
+  no_log: true

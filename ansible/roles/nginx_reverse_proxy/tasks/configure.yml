@@ -1,0 +1,57 @@
+---
+- name: Remove the distribution HTTP default site on the dedicated proxy
+  ansible.builtin.file:
+    path: /etc/nginx/sites-enabled/default
+    state: absent
+  notify: Reload internal Nginx safely
+
+- name: Configure HTTP Upgrade mapping for WebSocket applications
+  ansible.builtin.template:
+    src: internal-websocket-map.conf.j2
+    dest: /etc/nginx/conf.d/10-internal-websocket-map.conf
+    owner: root
+    group: root
+    mode: '0644'
+  notify: Reload internal Nginx safely
+
+- name: Configure TLS rejection for unrecognized server names
+  ansible.builtin.template:
+    src: internal-tls-default.conf.j2
+    dest: /etc/nginx/sites-available/00-internal-tls-default.conf
+    owner: root
+    group: root
+    mode: '0644'
+  notify: Reload internal Nginx safely
+
+- name: Enable the TLS rejecting default vhost
+  ansible.builtin.file:
+    src: /etc/nginx/sites-available/00-internal-tls-default.conf
+    dest: /etc/nginx/sites-enabled/00-internal-tls-default.conf
+    state: link
+    owner: root
+    group: root
+  notify: Reload internal Nginx safely
+
+- name: Configure each explicitly approved HTTPS virtual host
+  ansible.builtin.template:
+    src: internal-proxy-site.conf.j2
+    dest: '/etc/nginx/sites-available/50-internal-{{ item.hostname }}.conf'
+    owner: root
+    group: root
+    mode: '0644'
+  loop: '{{ reverse_proxy_sites }}'
+  loop_control:
+    label: '{{ item.hostname }}'
+  notify: Reload internal Nginx safely
+
+- name: Enable each explicitly approved HTTPS virtual host
+  ansible.builtin.file:
+    src: '/etc/nginx/sites-available/50-internal-{{ item.hostname }}.conf'
+    dest: '/etc/nginx/sites-enabled/50-internal-{{ item.hostname }}.conf'
+    state: link
+    owner: root
+    group: root
+  loop: '{{ reverse_proxy_sites }}'
+  loop_control:
+    label: '{{ item.hostname }}'
+  notify: Reload internal Nginx safely

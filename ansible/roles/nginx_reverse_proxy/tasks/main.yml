@@ -1,0 +1,12 @@
+---
+- name: Validate internal reverse proxy and existing TLS material
+  ansible.builtin.import_tasks: preflight.yml
+
+- name: Install the Nginx runtime
+  ansible.builtin.import_tasks: install.yml
+
+- name: Reconcile managed HTTPS configurations
+  ansible.builtin.import_tasks: configure.yml
+
+- name: Validate Nginx and start service
+  ansible.builtin.import_tasks: validate.yml

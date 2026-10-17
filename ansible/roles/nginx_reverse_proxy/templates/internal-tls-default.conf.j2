@@ -1,0 +1,5 @@
+# Managed by Ansible: reject TLS handshakes for unknown server names.
+server {
+    listen 443 ssl default_server;
+    ssl_reject_handshake on;
+}

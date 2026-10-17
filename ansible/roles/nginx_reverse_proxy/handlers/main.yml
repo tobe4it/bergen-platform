@@ -1,0 +1,11 @@
+---
+- name: Reload internal Nginx safely
+  ansible.builtin.command:
+    argv: [nginx, -t]
+  changed_when: false
+  notify: Apply validated internal Nginx reload
+
+- name: Apply validated internal Nginx reload
+  ansible.builtin.service:
+    name: nginx
+    state: reloaded

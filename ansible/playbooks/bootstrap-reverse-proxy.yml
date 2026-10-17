@@ -1,0 +1,22 @@
+---
+# Applies Nginx to an EXISTING dedicated LXC only.
+# It never creates guests, configures networking, modifies DNS or retrieves keys.
+- name: Bootstrap dedicated internal Nginx reverse proxy
+  hosts: '{{ reverse_proxy_target | default("reverse_proxy_nodes") }}'
+  become: true
+  gather_facts: true
+  tasks:
+    - name: Require existing dedicated proxy group and deployment approval
+      ansible.builtin.assert:
+        that:
+          - reverse_proxy_deployment_approved | default(false) | bool
+          - inventory_hostname != 'localhost'
+          - "inventory_hostname in groups.get('reverse_proxy_nodes', [])"
+          - (ansible_virtualization_type | default('unknown')) in ['lxc', 'container']
+        fail_msg: >-
+          This playbook requires explicit approval and a container member
+          of reverse_proxy_nodes. Refusing unreviewed deployment targets.
+
+    - name: Reconcile managed Nginx configuration
+      ansible.builtin.import_role:
+        name: nginx_reverse_proxy
