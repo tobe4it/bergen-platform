@@ -33,6 +33,10 @@ class CollisionAliasTests(unittest.TestCase):
         self.assertLessEqual(len(value.encode("utf-8")), 255)
         self.assertTrue(value.endswith("--scan-" + "f" * 32 + ".pdf"))
         self.assertTrue(value.startswith("Überweisung"))
+        other = alias.alias_basename(old, "e" * 32)
+        # The v1 sender truncates the receiver basename at 120 characters:
+        # distinct nonces must remain distinct BEFORE that truncation.
+        self.assertNotEqual(value[:120], other[:120])
 
     def test_refuse_unsafe_source_and_bad_nonce(self):
         for n in ("../scan.pdf", ".private.pdf", "sub/scan.pdf",
