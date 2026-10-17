@@ -1,0 +1,32 @@
+name: Open WebUI OIDC group audit regression
+
+on:
+  pull_request:
+    paths:
+      - 'ansible/playbooks/audit-open-webui-oidc-group-env-readonly.yml'
+      - 'tests/test_open_webui_oidc_group_env_audit.py'
+      - '.github/workflows/open-webui-oidc-group-audit.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'ansible/playbooks/audit-open-webui-oidc-group-env-readonly.yml'
+      - 'tests/test_open_webui_oidc_group_env_audit.py'
+      - '.github/workflows/open-webui-oidc-group-audit.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  offline-checks:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install test prerequisites
+        run: python -m pip install pyyaml ansible-core
+      - name: Verify read-only contracts
+        run: python -m unittest discover -s tests -p 'test_open_webui_oidc_group_env_audit.py' -v
+      - name: Check Ansible syntax without site secrets
+        run: ansible-playbook -i localhost, --syntax-check ansible/playbooks/audit-open-webui-oidc-group-env-readonly.yml
