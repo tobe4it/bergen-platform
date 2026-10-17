@@ -160,19 +160,32 @@ def resolve_under_sender_lock(folder, scope, source, receipt, *, state,
         raise RuntimeError("COLLISION_ALIAS_HAS_RECEIPT")
     dirfd = os.open(folder, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC)
     try:
+        before = os.stat(source.name, dir_fd=dirfd, follow_symlinks=False)
+        if sync.signature(before) != old_current_sig:
+            return None
+        (rename or move._noreplace_rename)(dirfd, source.name, dirfd, alias)
+        # A crash after successful rename but before receipt creation is
+        # recoverable: the alias remains in the intake folder for v1 sender.
+        os.fsync(dirfd)
+        new_stat = sync.metadata(target)
+        if (new_stat.st_dev, new_stat.st_ino, new_stat.st_size,
+                new_stat.st_mtime_ns) != (
+                old.st_dev, old.st_ino, old.st_size, old.st_mtime_ns):
+            raise RuntimeError("COLLISION_SOURCE_CHANGED_DURING_RENAME")
+        fd = os.open(target, os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC)
         try:
-            before = os.stat(source.name, dir_fd=dirfd, follow_symlinks=False)
-            if sync.signature(before) != old_current_sig:
-                return None
-            (rename or move._noreplace_rename)(dirfd, source.name, dirfd, alias)
-            os.fsync(dirfd)
-            new_stat = sync.metadata(target)
-            if (new_stat.st_dev, new_stat.st_ino, new_stat.st_size,
-                    new_stat.st_mtime_ns) != (
-                    old.st_dev, old.st_ino, old.st_size, old.st_mtime_ns):
-                raise RuntimeError("COLLISION_SOURCE_CHANGED_DURING_RENAME")
+            if sync.signature(os.fstat(fd))[:4] != old_current_sig[:4]:
+                raise RuntimeError("COLLISION_RENAMED_INODE_CHANGED")
+            hasher = hashlib.sha256()
+            with os.fdopen(fd, "rb", closefd=False) as pdf:
+                for part in iter(lambda: pdf.read(1024 * 1024), b""):
+                    hasher.update(part)
+            if (hasher.hexdigest() != digest or
+                    sync.signature(os.fstat(fd))[:4] != old_current_sig[:4] or
+                    sync.signature(sync.metadata(target))[:4] != old_current_sig[:4]):
+                raise RuntimeError("COLLISION_RENAMED_PDF_CHANGED")
         finally:
-            pass
+            os.close(fd)
     finally:
         os.close(dirfd)
     print("GROUP_SAME_NAME_NEW_INSTANCE_RENAMED", scope, "(private name omitted)",
