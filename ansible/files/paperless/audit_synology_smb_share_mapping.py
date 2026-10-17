@@ -15,7 +15,7 @@ SHARES = {
     "homes": "/volume1/homes",
     "paperless-scan": "/volume1/paperless-scan",
 }
-PATH_FIELD = re.compile(r"^\s*Path\s*\.*\s*\[([^\]\r\n]+)\]\s*$")
+PATH_FIELD = re.compile(r"^\s*Path\s*\.+\s*\[([^\]\r\n]+)\]\s*$")
 
 
 def require(ok, why):
