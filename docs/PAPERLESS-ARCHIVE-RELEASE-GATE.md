@@ -743,3 +743,50 @@ audit. Record the sanitized diagnostic markers and `PLAY RECAP`.
 Do not change Synology ACLs, source/archives, release gates,
 journals or 30-day expiry permissions on this basis.
 
+### 2026-10-17 confirmed Linux-mode-only protected archive root
+
+Operator ran an additional root-only read-only diagnostic on Synology
+and obtained **exactly**:
+`TARGET homes PROTECTED_ROOT`,
+`POSIX_OWNER_AND_MODE_VERIFIED`,
+`NATIVE_ACL_RC 255`,
+`STDOUT_CLASS LINUX_MODE`,
+`STDERR_CLASS EMPTY`,
+`NO_FILES_CHANGED`.
+This explains the preceding
+`NATIVE_ACL_READ_BLOCKED homes PROTECTED_ROOT
+ACTIVE_ARCHIVE_NATIVE_ACL_QUERY_FAILED_RC_255_UNCLASSIFIED_NATIVE_ACL_ERROR`
+without evidence of a dangerous ACL grant. **It is not yet a complete
+archive protection verdict.**
+
+The follow-up branch implementation recognizes a Linux-mode-only directory
+*solely* when `synoacltool -get` returns **rc=255**, **empty stderr**,
+and the **full** exact single-line
+`(synoacltool.c, <number>)It's Linux mode` message (with trailing
+whitespace permitted). Generic `No ACL`, `permission denied`,
+unknown return codes, multiple message lines, unexpected output,
+tool timeouts and all other parse failures still block. Only
+validated protected child directories with the expected
+`paperless-sync` UID, regular directory type and **POSIX 0700**
+can be classified as `POSIX_0700_LINUX_MODE`. No ACL is added
+or permissions modified.
+
+**Both `homes` and `paperless-scan` site roots must STILL have
+independently parsed native DSM ACLs**, protecting their child archive
+directory entries from nonadministrator delete-child/rename grants;
+a Linux-mode-only site root remains a blocker. The resulting output
+reports `NATIVE_SITE_ROOT_ACLS_VERIFIED 2`,
+`POSIX_0700_ARCHIVE_PARENTS_VERIFIED N`,
+`POTENTIAL_NATIVE_DELETE_GRANTS N` and
+`DSM_SMB_EFFECTIVE_RENAME_NOT_TESTED`. Neither a successful static ACL
+audit nor POSIX 0700 proves effective SMB rename/delete prevention.
+
+**Next safe operator acceptance:** Pull the feature branch to the isolated
+worktree; run the complete offline `test_paperless_*.py` suite and
+`audit-paperless-synology-archive-entry-protection.yml --syntax-check`.
+Only after those pass, rerun the same read-only live audit. If the auditor
+finds a different Linux-mode message, site-root mode, ACL or risky grant,
+it must remain fail-closed; do not modify NAS ACLs or repeat commits.
+No additional PDF move, automatic purge or `main` merge is authorized
+by this change.
+
