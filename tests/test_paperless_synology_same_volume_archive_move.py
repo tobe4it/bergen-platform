@@ -13,6 +13,7 @@ from unittest.mock import patch
 CODE = Path(__file__).resolve().parents[1] / "ansible/files/paperless"
 sys.path.insert(0, str(CODE))
 import synology_same_volume_archive_move as move
+import audit_synology_completed_archive_moves as auditor
 
 PDF = b"%PDF-1.4\nsame-subvolume archive fixture\n%%EOF\n"
 SHA = hashlib.sha256(PDF).hexdigest()
@@ -102,6 +103,86 @@ class SameVolumeArchiveTests(unittest.TestCase):
         self.assertEqual(journal["archive_site"], "paperless-scan")
         self.assertEqual(journal["archive_scope_dir"], str(self.archive))
         self.assertTrue(journal["archived_at"].endswith("+00:00"))
+
+    def test_group_metadata_drift_archive_records_original_and_current_signature(self):
+        historical = json.loads((self.state / (self.rid + ".json")).read_text())
+        old_signature = list(self.signature)
+        os.utime(self.source, ns=(old_signature[3] + 1_000_000_000,
+                                   old_signature[3] + 1_000_000_000))
+        actual = move.source_signature(self.source.stat())
+        self.assertEqual(actual[:3], old_signature[:3])
+        self.assertNotEqual(actual, old_signature)
+        self.execute(commit=True)
+        self.assertFalse(self.source.exists())
+        self.assertEqual(self.target.read_bytes(), PDF)
+        self.assertEqual(
+            json.loads((self.state / (self.rid + ".json")).read_text()),
+            historical)
+        prepared = json.loads(self.event("prepared").read_text())
+        archived = json.loads(self.event("archived").read_text())
+        self.assertEqual(prepared["signature"], actual)
+        self.assertEqual(prepared["sender_signature"], old_signature)
+        events = auditor.inspect_events(
+            [self.event("prepared").name, self.event("archived").name],
+            lambda name: prepared if name.endswith(".prepared.json") else archived)
+        self.assertEqual(len(events), 1)
+        fd = os.open(self.target.parent, os.O_RDONLY | os.O_DIRECTORY)
+        try:
+            auditor.inspect_pdf(fd, self.target.name, actual, SHA, 1024 * 1024)
+        finally:
+            os.close(fd)
+        self.assertEqual(move._read_receipt(
+            self.state / (self.rid + ".json"), SCOPE, NAME, old_signature, SHA),
+            historical)
+
+    def test_group_drift_without_commit_has_no_archive_events(self):
+        os.utime(self.source, ns=(self.signature[3] + 1_000_000_000,
+                                   self.signature[3] + 1_000_000_000))
+        dry = self.execute()
+        self.assertEqual(dry["status"], "ARCHIVE_DRY_RUN")
+        self.assertIn("sender_signature", dry)
+        self.assertTrue(self.source.exists())
+        self.assertFalse(self.event("prepared").exists())
+
+    def test_group_drift_same_inode_modified_bytes_is_blocked_before_journal(self):
+        data = bytearray(PDF)
+        data[data.index(b"fixture")] = ord("X")
+        self.source.write_bytes(bytes(data))
+        with self.assertRaisesRegex(RuntimeError, "SOURCE_SHA_MISMATCH"):
+            self.execute(commit=True)
+        self.assertTrue(self.source.exists())
+        self.assertFalse(self.event("prepared").exists())
+
+    def test_group_drift_different_inode_cannot_reuse_old_receipt(self):
+        self.source.unlink()
+        self.source.write_bytes(PDF)
+        with self.assertRaisesRegex(RuntimeError, "SENDER_RECEIPT_MISMATCH"):
+            self.execute(commit=True)
+        self.assertTrue(self.source.exists())
+        self.assertFalse(self.event("prepared").exists())
+
+    def test_private_scope_cannot_use_group_metadata_exception(self):
+        prior = self.record
+        altered = list(prior["signature"])
+        altered[3] += 1
+        private_name = self.state / ("f" * 64 + ".json")
+        item = dict(prior, scope="Privat/thomas")
+        private_name.write_text(json.dumps(item))
+        private_name.chmod(0o600)
+        with self.assertRaisesRegex(RuntimeError, "SENDER_RECEIPT_MISMATCH"):
+            move._read_receipt(private_name, "Privat/thomas", NAME,
+                               altered, SHA, allow_group_metadata_drift=True)
+
+    def test_legacy_archives_have_no_sender_signature_field(self):
+        self.execute(commit=True)
+        prepared = json.loads(self.event("prepared").read_text())
+        archived = json.loads(self.event("archived").read_text())
+        self.assertNotIn("sender_signature", prepared)
+        self.assertNotIn("sender_signature", archived)
+        events = auditor.inspect_events(
+            [self.event("prepared").name, self.event("archived").name],
+            lambda name: prepared if name.endswith(".prepared.json") else archived)
+        self.assertEqual(len(events), 1)
 
     def test_kernel_rename_noreplace_refuses_existing_target(self):
         month = self.archive / "2026-10"
