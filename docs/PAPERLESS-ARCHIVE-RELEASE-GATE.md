@@ -1280,3 +1280,50 @@ archived PDF, static site ACLs and isolated recovery are unchanged.
 There is NO authorization to activate archive gates, enable expiry,
 purge NAS originals or merge the Paperless stack.
 
+
+### 2026-10-17 on-NAS port 445 local socket acceptance (767 tests)
+
+Operator fast-forwarded PR #81 to `f3e8d08`, ran the full
+`test_paperless_*.py` suite: **767 tests, OK**. An independent
+read-only root-SSH diagnostic ran `socket.create_connection` on
+the NAS itself, resulting in:
+
+```text
+NAS_LOCAL_SMB_445 127.0.0.1 REACHABLE
+NAS_LOCAL_SMB_445 192.168.2.145 REACHABLE
+NAS_LOCAL_SMB_445 192.168.6.11 REACHABLE
+NO_FILES_CHANGED
+```
+
+This verifies successful local TCP handshakes to port 445 on NAS
+loopback and both physical network interfaces, while the controller's
+routed attempts from `192.168.20.250` to both LAN/VLAN IPs
+timed out. **Do not attribute the latter specifically to UniFi
+firewall without checking the actual firewall policy**: routing,
+DSM firewall or other network controls can cause the same timeout.
+
+Next operator action: establish a temporary, loopback-bound
+`ssh -L 127.0.0.1:1445:127.0.0.1:445` through the known pinned
+administrative SSH transport with `ExitOnForwardFailure=yes`.
+Use a distinct temporary SSH multiplex control socket and always
+request `-O exit` on shell exit, so no unrelated SSH session is
+closed and the forward does not persist.
+
+Run credentialless
+`probe_synology_smb_delete_access.py --server 127.0.0.1 --port 1445
+--tcp-preflight`, then `--negotiate-preflight` over the same
+forward. Only on both successes and operator-selected verified
+nonadministrator principal, request a single authenticated
+`--site-share paperless-scan --username <operator-chosen-account>`
+read-only desired-access check. The password must be entered
+interactively, never stored in environment/history. An SMB server's
+`STATUS_ACCESS_DENIED` to each reviewed `FILE_OPEN` is a
+narrow per-principal/per-share denial proof, **not a physical
+rename/delete test** or network isolation policy evidence.
+
+No SMB session or credentials were exercised by the on-NAS socket
+test. No NAS files, gates, ACLs, source PDFs, archived PDFs or
+journals were touched. The external backup restore gate and other
+effective privacy identities remain open, and automatic expiry,
+purge, new archives, and merging into `main` remain prohibited.
+
