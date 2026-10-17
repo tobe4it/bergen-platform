@@ -91,8 +91,9 @@ def run(parent):
                {"Familie", "Eltern", "Privat/thomas", "Privat/nadja"}):
         raise RuntimeError("UNAUTHORIZED_PROBE")
     archive_code = parent / "bin" / "synology_same_volume_archive_move.py"
-    archived_code = parent / "bin" / "audit_synology_completed_archive_moves.py"
-    for code in (archive_code, archived_code):
+    # The independent auditor is injected in-memory by the read-only
+    # controller playbook; no NAS deployment is required for diagnosis.
+    for code in (archive_code,):
         st = code.lstat()
         if (not stat.S_ISREG(st.st_mode) or st.st_uid != 0 or st.st_gid != 0
                 or st.st_nlink != 1 or stat.S_IMODE(st.st_mode) != 0o644):
