@@ -8,6 +8,13 @@ The project follows **Semantic Versioning (SemVer)** and the changelog format is
 
 ## [Unreleased]
 
+### Added
+
+- Opt-in OIDC group synchronization with explicit API provisioning for the
+  reviewed family, parent and child LDAP group names. Pending roles and disabled
+  automatic group creation are retained. Documented v0.10.2 empty-claim revocation
+  limitation; live group validation remains outstanding.
+
 ### Changed
 
 - Moved the IBM MQ evaluation lab, REST-administration prototype, topology,

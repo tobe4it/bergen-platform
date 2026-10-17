@@ -2,3 +2,11 @@
 open_webui_oidc_public_url: https://ai.example.net
 open_webui_oidc_client_id: CHANGE_ME
 open_webui_oidc_discovery_url: https://sso.example.net:5001/webman/sso/.well-known/openid-configuration
+
+# Enable after reviewing the v0.10.2 revocation limitation in the OIDC guide.
+# Store vault_open_webui_admin_token separately in the ai Vault.
+open_webui_oidc_group_management: false
+open_webui_oidc_groups:
+  - Familie@bergen.intern
+  - Eltern@bergen.intern
+  - Kinder@bergen.intern
