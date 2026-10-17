@@ -111,15 +111,44 @@ def native_acl_failure_class(returncode, stdout, stderr):
     return "RC_" + str(returncode) + "_" + label
 
 
+# Deliberately narrow exception: observed DSM "It's Linux mode" readout.
+# All other native-tool failures remain hard blockers, including generic
+# missing-ACL messages, arbitrary exit 255, mixed errors, and timeouts.
+LINUX_MODE_OUTPUT = re.compile(
+    r"\\(synoacltool[.]c,\\s*[0-9]+\\)\\s*It's Linux mode\\Z")
+
+
+def exact_linux_mode_readout(result):
+    return (
+        result.returncode == 255 and result.stderr == "" and
+        isinstance(result.stdout, str) and
+        LINUX_MODE_OUTPUT.fullmatch(result.stdout.strip()) is not None
+    )
+
+
 def get_aces(tool, directory):
     r = subprocess.run([tool, "-get", str(directory)], capture_output=True,
                        text=True, encoding="utf-8", errors="replace",
                        timeout=20, check=False)
     if r.returncode != 0:
+        if exact_linux_mode_readout(r):
+            return None  # Explicit POSIX-only marker, NEVER an empty ACL list.
         raise RuntimeError(
             "ACTIVE_ARCHIVE_NATIVE_ACL_QUERY_FAILED_" +
             native_acl_failure_class(r.returncode, r.stdout, r.stderr))
     return parse_aces(r.stdout)
+
+
+def require_posix_only_archive_parent(kind, info, uid):
+    """A native-less archive child is safe only with independently checked 0700.
+
+    Site roots must be inspected as DSM ACLs to protect the archive *entry*.
+    """
+    if (kind not in ("PROTECTED_ROOT", "PROTECTED_INTERMEDIATE",
+                     "PROTECTED_SCOPE", "ARCHIVE_MONTH") or
+            not stat.S_ISDIR(info.st_mode) or info.st_uid != uid or
+            stat.S_IMODE(info.st_mode) != 0o700):
+        raise RuntimeError("POSIX_ARCHIVE_PARENT_NOT_VERIFIED")
 
 
 MONTH = re.compile(r"20[0-9]{2}-(0[1-9]|1[0-2])\Z")
@@ -222,6 +251,8 @@ def audit(parent):
             targets[month] = (site, "ARCHIVE_MONTH", device)
 
     risks = 0
+    posix_only = 0
+    native_site_roots = set()
     for path, (site, kind, source_dev) in sorted(
             targets.items(), key=lambda kv: str(kv[0])):
         entry = path.lstat()
@@ -254,13 +285,32 @@ def audit(parent):
                 raise RuntimeError("NATIVE_ACL_READ_BLOCKED") from None
         finally:
             os.close(fd)
+        if aces is None:
+            # The precise native tool's Linux-mode response means POSIX
+            # semantics, not a passed DSM ACL. Site root still requires
+            # a positive native ACL audit for delete-child protections.
+            require_posix_only_archive_parent(kind, entry, service.pw_uid)
+            if site not in native_site_roots:
+                raise RuntimeError("SITE_ROOT_NATIVE_ACL_NOT_YET_VERIFIED")
+            posix_only += 1
+            print("AUDITED_ACTIVE_ARCHIVE_PARENT", site, kind,
+                  "POSIX_0700_LINUX_MODE")
+            continue
         grants = unsafe_parent_grants(aces, SETTINGS["sync_user"])
+        if kind == "SITE_ROOT":
+            if site in native_site_roots:
+                raise RuntimeError("DUPLICATE_NATIVE_SITE_ROOT")
+            native_site_roots.add(site)
         print("AUDITED_ACTIVE_ARCHIVE_PARENT", site, kind,
               "ACE_COUNT", len(aces))
         if grants:
             print("BLOCKER", site, kind,
                   "NONADMIN_POTENTIAL_DELETE_GRANTS", len(grants))
             risks += len(grants)
+    if native_site_roots != {"homes", "paperless-scan"}:
+        raise RuntimeError("SITE_ROOT_NATIVE_ACL_NOT_VERIFIED")
+    print("NATIVE_SITE_ROOT_ACLS_VERIFIED", len(native_site_roots))
+    print("POSIX_0700_ARCHIVE_PARENTS_VERIFIED", posix_only)
     print("ACTIVE_PROTECTED_ARCHIVE_PARENTS_AUDITED", len(targets))
     print("POTENTIAL_NATIVE_DELETE_GRANTS", risks)
     print("ARCHIVE_ENTRY_PROTECTION_BLOCKED" if risks else
