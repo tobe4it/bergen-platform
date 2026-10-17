@@ -1,0 +1,63 @@
+---
+# Read-only follow-up: inspect existing ingest state and backup evidence.
+# Does not create a journal directory or modify any backup configuration.
+- name: Audit deletion journal parent and recent LXC backup evidence
+  hosts: venombox
+  gather_facts: false
+  become: true
+  tasks:
+    - name: Inspect existing private ingest state directory
+      ansible.builtin.command:
+        argv:
+          - pct
+          - exec
+          - '126'
+          - --
+          - /bin/sh
+          - -c
+          - |
+            set -eu
+            printf '%s\n' '=== INGEST ACCOUNT ==='
+            getent passwd paperless-ingest
+            printf '%s\n' '=== CANDIDATE PATHS ==='
+            for p in /var/lib/paperless-ingest /var/lib/paperless-ingest/deletion-decisions; do
+              if [ -L "$p" ]; then
+                printf 'SYMLINK_REJECTED %s\n' "$p"
+              elif [ -e "$p" ]; then
+                stat -c 'PATH %n MODE %a UID %u GID %g TYPE %F' "$p"
+                findmnt -T "$p" -n -o TARGET,SOURCE,FSTYPE
+              else
+                printf 'ABSENT %s\n' "$p"
+              fi
+            done
+            printf '%s\n' 'NO_FILES_CHANGED'
+      register: deletion_parent_audit
+      changed_when: false
+
+    - name: Inspect recent backup task metadata without reading private files
+      ansible.builtin.command:
+        argv:
+          - pvesh
+          - get
+          - /nodes/venombox/tasks
+          - --typefilter
+          - vzdump
+          - --limit
+          - '20'
+          - --output-format
+          - json
+      register: deletion_backup_tasks
+      changed_when: false
+
+    - name: Show ingest parent audit
+      ansible.builtin.debug:
+        var: deletion_parent_audit.stdout_lines
+
+    - name: Show backup task metadata
+      ansible.builtin.debug:
+        var: deletion_backup_tasks.stdout
+
+    - name: Confirm read-only completion
+      ansible.builtin.assert:
+        that:
+          - "'NO_FILES_CHANGED' in deletion_parent_audit.stdout_lines"

@@ -1,0 +1,56 @@
+---
+# Read-only complete v1/v2 sender receipt history audit.
+# Uses existing Synology SSH access and streams script through stdin.
+# Does not install code, create dirs, transmit PDFs or change sender state.
+- name: Audit Synology Paperless receipt history under sender lock
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  tasks:
+    - name: Require explicit site-local Synology configuration
+      ansible.builtin.assert:
+        that:
+          - not ansible_check_mode
+          - synology_admin is defined
+          - synology_admin is match('^[A-Za-z_][A-Za-z0-9_.-]*@[A-Za-z0-9][A-Za-z0-9.-]+$')
+          - synology_config is defined
+          - synology_config.schema_version == 1
+          - synology_config.state_parent is match('^/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$')
+          - synology_config.sync_user is match('^[a-z_][a-z0-9_-]{0,31}$')
+          - paperless_history_expected_v1_sent is not defined or
+            (paperless_history_expected_v1_sent | int >= 0 and
+             (paperless_history_expected_v1_sent | string) is match('^[0-9]{1,5}$'))
+        fail_msg: "Site-local NAS settings and optional nonnegative expected count required"
+
+    - name: Inspect every v1/v2 journal event as the restricted sync user
+      ansible.builtin.command:
+        argv:
+          - ssh
+          - -T
+          - -o
+          - BatchMode=yes
+          - -o
+          - StrictHostKeyChecking=yes
+          - -o
+          - ConnectTimeout=15
+          - "{{ synology_admin }}"
+          - >-
+            sudo -n -u {{ synology_config.sync_user | quote }}
+            /usr/bin/python3 - {{ synology_config.state_parent | quote }}
+        stdin: "{{ lookup('ansible.builtin.file', playbook_dir + '/../files/paperless/audit_synology_receipt_history.py', rstrip=False) }}"
+      register: paperless_receipt_history_audit
+      changed_when: false
+
+    - name: Require full read-only report and continued archive block
+      ansible.builtin.assert:
+        that:
+          - "'HISTORY_AUDIT_COMPLETE' in paperless_receipt_history_audit.stdout_lines"
+          - "'ARCHIVE_NOT_AUTHORIZED' in paperless_receipt_history_audit.stdout_lines"
+          - "'NO_FILES_CHANGED' in paperless_receipt_history_audit.stdout_lines"
+          - paperless_history_expected_v1_sent is not defined or
+            ('TOTAL_V1_SENT ' ~ (paperless_history_expected_v1_sent | string)) in paperless_receipt_history_audit.stdout_lines
+        fail_msg: "Incomplete or unexpected Synology sender receipt history; fail closed"
+
+    - name: Show scope counts only, without filenames or journal contents
+      ansible.builtin.debug:
+        var: paperless_receipt_history_audit.stdout_lines

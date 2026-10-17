@@ -1,0 +1,11 @@
+[Unit]
+Description=Verify Bergen Paperless import receipts every two minutes
+
+[Timer]
+OnCalendar=*-*-* *:01/2:00
+AccuracySec=15s
+Persistent=false
+Unit=bergen-paperless-ingest-reconcile.service
+
+[Install]
+WantedBy=timers.target

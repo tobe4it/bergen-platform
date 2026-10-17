@@ -1,0 +1,37 @@
+---
+# Read-only preflight. Does not create any directories or journal entries.
+- name: Plan private Paperless deletion journal directory
+  hosts: venombox
+  gather_facts: false
+  become: true
+  tasks:
+    - name: Verify Paperless LXC identity
+      ansible.builtin.command:
+        argv: [pct, config, '126']
+      register: deletion_directory_guest
+      changed_when: false
+
+    - name: Require expected guest
+      ansible.builtin.assert:
+        that:
+          - "'hostname: bergen-paperless' in deletion_directory_guest.stdout_lines"
+          - "'unprivileged: 1' in deletion_directory_guest.stdout_lines"
+          - "'lxc.apparmor.profile: unconfined' not in deletion_directory_guest.stdout"
+
+    - name: Inspect directory without modifying it
+      ansible.builtin.command:
+        argv: [pct, exec, '126', --, python3, '-', plan]
+        stdin: "{{ lookup('ansible.builtin.file', playbook_dir + '/../files/paperless/prepare_deletion_journal_directory.py', rstrip=False) }}"
+      register: deletion_directory_plan
+      changed_when: false
+
+    - name: Show expected owner, mode and plan
+      ansible.builtin.debug:
+        var: deletion_directory_plan.stdout_lines
+
+    - name: Assert read-only and safe plan
+      ansible.builtin.assert:
+        that:
+          - "'NO_FILES_CHANGED' in deletion_directory_plan.stdout_lines"
+          - "'ROOTFS_DEVICE_VERIFIED' in deletion_directory_plan.stdout_lines"
+          - "('READY_TO_CREATE' in deletion_directory_plan.stdout_lines) or ('ALREADY_SECURE' in deletion_directory_plan.stdout_lines)"

@@ -1,0 +1,97 @@
+---
+# Default read-only. Grant only delete_tag, subject to strict owner-only safety audit.
+- name: Audit Paperless 3.3 user rights and enable owner-only tag deletion
+  hosts: venombox
+  become: true
+  gather_facts: false
+  vars:
+    paperless_rights_script: "{{ playbook_dir }}/../files/paperless/provision_user_rights.py"
+    paperless_rights_commit: "{{ paperless_user_rights_apply | default(false) | bool }}"
+  tasks:
+    - name: Require intended Proxmox target
+      ansible.builtin.assert:
+        that:
+          - inventory_hostname == "venombox"
+          - not ansible_check_mode
+
+    - name: Verify Paperless guest identity
+      ansible.builtin.command:
+        argv: [pct, config, '126']
+      register: paperless_rights_guest
+      changed_when: false
+
+    - name: Require confined guest
+      ansible.builtin.assert:
+        that:
+          - "'hostname: bergen-paperless' in paperless_rights_guest.stdout_lines"
+          - "'unprivileged: 1' in paperless_rights_guest.stdout_lines"
+          - "'lxc.apparmor.profile: unconfined' not in paperless_rights_guest.stdout"
+
+    - name: Read-only audit of active users and all tag deletion ACLs
+      ansible.builtin.command:
+        argv:
+          - pct
+          - exec
+          - '126'
+          - --
+          - podman
+          - exec
+          - -e
+          - BP_USER_RIGHTS_APPLY=0
+          - bergen-paperless
+          - python
+          - /usr/src/paperless/src/manage.py
+          - shell
+          - -c
+          - "{{ lookup('ansible.builtin.file', paperless_rights_script, rstrip=False) }}"
+      register: paperless_rights_preview
+      changed_when: false
+
+    - name: Require read-only audit completion
+      ansible.builtin.assert:
+        that:
+          - "'DRY_RUN_NO_CHANGES' in paperless_rights_preview.stdout"
+          - "'OBJECT_ACLS_AND_DOCUMENTS_UNCHANGED' in paperless_rights_preview.stdout"
+
+    - name: Show detailed rights and tag deletion blockers
+      ansible.builtin.debug:
+        var: paperless_rights_preview.stdout_lines
+
+    - name: Require no unsafe tag deletion paths before any apply
+      ansible.builtin.assert:
+        that:
+          - "paperless_rights_preview.stdout_lines | select('match', '^BLOCKER ') | list | length == 0"
+        fail_msg: "Existing unowned tags or foreign tag delete permissions require explicit remediation first."
+      when: paperless_rights_commit
+
+    - name: Grant only model delete_tag to regular users with explicit approval
+      ansible.builtin.command:
+        argv:
+          - pct
+          - exec
+          - '126'
+          - --
+          - podman
+          - exec
+          - -e
+          - BP_USER_RIGHTS_APPLY=1
+          - bergen-paperless
+          - python
+          - /usr/src/paperless/src/manage.py
+          - shell
+          - -c
+          - "{{ lookup('ansible.builtin.file', paperless_rights_script, rstrip=False) }}"
+      when: paperless_rights_commit
+      register: paperless_rights_applied
+      changed_when: "'new_model_grants=0' not in paperless_rights_applied.stdout"
+
+    - name: Verify owner-only tag deletion grant
+      ansible.builtin.assert:
+        that:
+          - "'OWN_TAG_DELETE_COMMITTED_AND_VERIFIED' in paperless_rights_applied.stdout"
+      when: paperless_rights_commit
+
+    - name: Show commit summary
+      ansible.builtin.debug:
+        var: paperless_rights_applied.stdout_lines
+      when: paperless_rights_commit

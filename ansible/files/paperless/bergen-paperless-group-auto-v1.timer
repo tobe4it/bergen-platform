@@ -1,0 +1,11 @@
+[Unit]
+Description=Check for verified Paperless group imports every 5 minutes
+
+[Timer]
+OnBootSec=5min
+OnUnitInactiveSec=5min
+AccuracySec=30s
+Unit=bergen-paperless-group-auto-v1.service
+
+[Install]
+WantedBy=timers.target

@@ -1,0 +1,95 @@
+---
+# Strictly read-only proof for explicit deletion of Paperless document 15.
+# No journaling, import, receipt changes, archive, restore or source deletion.
+- name: Preview confirmed Paperless and Synology deletion of document 15
+  hosts: venombox
+  gather_facts: false
+  become: true
+  tasks:
+    - name: Require expected guest and NAS configuration
+      ansible.builtin.assert:
+        that:
+          - inventory_hostname == 'venombox'
+          - not ansible_check_mode
+          - synology_admin is defined
+          - synology_config is defined
+          - synology_config.schema_version == 1
+          - synology_config.state_parent is match('^/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$')
+          - synology_config.sync_user is match('^[a-z_][a-z0-9_-]{0,31}$')
+
+    - name: Verify expected Paperless LXC configuration
+      ansible.builtin.command:
+        argv: [pct, config, '126']
+      register: deleted_15_lxc
+      changed_when: false
+
+    - name: Require unprivileged confined Paperless guest
+      ansible.builtin.assert:
+        that:
+          - "'hostname: bergen-paperless' in deleted_15_lxc.stdout_lines"
+          - "'unprivileged: 1' in deleted_15_lxc.stdout_lines"
+          - "'lxc.apparmor.profile: unconfined' not in deleted_15_lxc.stdout"
+
+    - name: Verify live Paperless absence and original filename absence for document 15
+      ansible.builtin.command:
+        argv:
+          - pct
+          - exec
+          - '126'
+          - --
+          - python3
+          - '-'
+          - 7a92b91deb7b2e8e35f9f710.json
+          - '15'
+        stdin: "{{ lookup('ansible.builtin.file', playbook_dir + '/../files/paperless/export_deleted_import_candidate.py', rstrip=False) }}"
+      register: deleted_15_paperless
+      changed_when: false
+
+    - name: Find matching historical NAS sender receipt under exclusive sender lock
+      ansible.builtin.command:
+        argv:
+          - ssh
+          - -T
+          - -o
+          - BatchMode=yes
+          - -o
+          - StrictHostKeyChecking=yes
+          - -o
+          - ConnectTimeout=15
+          - "{{ synology_admin }}"
+          - >-
+            sudo -n -u {{ synology_config.sync_user | quote }}
+            /usr/bin/python3 - {{ synology_config.state_parent | quote }}
+            {{ (deleted_15_paperless.stdout | from_json).receiver_source | quote }}
+            {{ (deleted_15_paperless.stdout | from_json).sha256 | quote }}
+        stdin: "{{ lookup('ansible.builtin.file', playbook_dir + '/../files/paperless/diagnose_deleted_import_15_nas.py', rstrip=False) }}"
+      delegate_to: localhost
+      become: false
+      register: deleted_15_nas
+      changed_when: false
+
+    - name: Match historical sender and current Paperless absence without writing
+      ansible.builtin.command:
+        argv:
+          - python3
+          - "{{ playbook_dir }}/../files/paperless/preview_deleted_import_15.py"
+        stdin: "{{ {'paperless': deleted_15_paperless.stdout, 'nas': deleted_15_nas.stdout} | to_json }}"
+      delegate_to: localhost
+      become: false
+      register: deleted_15_preview
+      changed_when: false
+
+    - name: Require exact absence proofs and no mutation
+      ansible.builtin.assert:
+        that:
+          - "'PREVIEW_DELETED_BY_USER 15 bridge 7a92b91deb7b2e8e35f9f710.json' in deleted_15_preview.stdout_lines"
+          - "'NAS_ORIGINAL_CONFIRMED_ABSENT' in deleted_15_preview.stdout_lines"
+          - "'PAPERLESS_DOCUMENT_CONFIRMED_ABSENT' in deleted_15_preview.stdout_lines"
+          - "'NO_JOURNAL_WRITTEN' in deleted_15_preview.stdout_lines"
+          - "'NO_RECEIPTS_CHANGED' in deleted_15_preview.stdout_lines"
+          - "'ARCHIVE_NOT_AUTHORIZED' in deleted_15_preview.stdout_lines"
+          - "'NO_FILES_CHANGED' in deleted_15_preview.stdout_lines"
+
+    - name: Display read-only proof and original NAS filename
+      ansible.builtin.debug:
+        var: deleted_15_preview.stdout_lines

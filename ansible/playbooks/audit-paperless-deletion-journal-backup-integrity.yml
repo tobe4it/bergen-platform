@@ -1,0 +1,40 @@
+---
+# Operator-selected, read-only vzdump verification of the two pinned journals.
+- name: Verify Paperless deletion journal integrity in Proxmox backup
+  hosts: venombox
+  gather_facts: false
+  become: true
+  tasks:
+    - name: Require a selected archive in the trusted NFS storage
+      ansible.builtin.assert:
+        that:
+          - inventory_hostname == 'venombox'
+          - not ansible_check_mode
+          - paperless_backup_archive is defined
+          - paperless_backup_archive is match('^/mnt/pve/bergen-synology-backup/dump/vzdump-lxc-126-[0-9]{4}_[0-9]{2}_[0-9]{2}-[0-9]{2}_[0-9]{2}_[0-9]{2}\.tar\.zst$')
+        fail_msg: "Specify the exact dated LXC 126 archive; never auto-select an unverified file"
+
+    - name: Stream the two backed-up journals and compare pinned hashes
+      ansible.builtin.command:
+        argv:
+          - python3
+          - "-"
+          - --archive
+          - "{{ paperless_backup_archive }}"
+        stdin: "{{ lookup('ansible.builtin.file', playbook_dir + '/../files/paperless/verify_vzdump_deletion_journals.py', rstrip=False) }}"
+      register: paperless_backup_journal_audit
+      changed_when: false
+
+    - name: Require hash agreement and preserve release block
+      ansible.builtin.assert:
+        that:
+          - "'DOC 15 LIVE_AND_BACKUP_SHA256_IDENTICAL' in paperless_backup_journal_audit.stdout_lines"
+          - "'DOC 26 LIVE_AND_BACKUP_SHA256_IDENTICAL' in paperless_backup_journal_audit.stdout_lines"
+          - "'JOURNAL_HASHES_VERIFIED 2' in paperless_backup_journal_audit.stdout_lines"
+          - "'ARCHIVE_NOT_AUTHORIZED' in paperless_backup_journal_audit.stdout_lines"
+          - "'MAIN_MERGE_NOT_AUTHORIZED' in paperless_backup_journal_audit.stdout_lines"
+          - "'NO_FILES_CHANGED' in paperless_backup_journal_audit.stdout_lines"
+
+    - name: Display evidence without private journal contents
+      ansible.builtin.debug:
+        var: paperless_backup_journal_audit.stdout_lines

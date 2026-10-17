@@ -31,6 +31,7 @@ Current capabilities include:
 - Centralized remote Syslog forwarding
 - Provider-neutral daytrading market-data collection
 - Centralized configuration
+- Paperless-ngx Synology group scan transfer, verified import and protected original archival ([runbook](docs/PAPERLESS-GROUP-OPERATIONS.md))
 - Semantic Versioning
 - Complete project documentation
 

@@ -1,0 +1,159 @@
+---
+# Install four inert systemd unit files in Paperless LXC 126 via venombox.
+# Neither enable/start timers nor create the activation gate.
+- name: Prepare gated Paperless ingestion timers (inactive)
+  hosts: venombox
+  gather_facts: false
+  become: true
+  vars:
+    vmid: "126"
+    unit_names:
+      - bergen-paperless-ingest-bridge.service
+      - bergen-paperless-ingest-bridge.timer
+      - bergen-paperless-ingest-reconcile.service
+      - bergen-paperless-ingest-reconcile.timer
+  tasks:
+    - name: Inspect the expected guest
+      ansible.builtin.command:
+        argv: [pct, config, "{{ vmid }}"]
+      register: lxc_config
+      changed_when: false
+
+    - name: Require the known confined target
+      ansible.builtin.assert:
+        that:
+          - inventory_hostname == 'venombox'
+          - not ansible_check_mode
+          - "'hostname: bergen-paperless' in lxc_config.stdout_lines"
+          - "'unprivileged: 1' in lxc_config.stdout_lines"
+          - "'lxc.apparmor.profile: unconfined' not in lxc_config.stdout"
+
+    - name: Check guest identity
+      ansible.builtin.command:
+        argv: [pct, exec, "{{ vmid }}", --, hostname, -s]
+      register: hostname_check
+      changed_when: false
+      failed_when: hostname_check.rc != 0 or (hostname_check.stdout | trim) != 'bergen-paperless'
+
+    - name: Check deployment is truly inactive and destinations are safe
+      ansible.builtin.command:
+        argv:
+          - pct
+          - exec
+          - "{{ vmid }}"
+          - --
+          - python3
+          - -c
+          - |
+            from pathlib import Path
+            import stat, subprocess
+            base = Path('/etc/systemd/system')
+            s = base.lstat()
+            assert stat.S_ISDIR(s.st_mode) and s.st_uid == 0
+            names = (
+                'bergen-paperless-ingest-bridge.service',
+                'bergen-paperless-ingest-bridge.timer',
+                'bergen-paperless-ingest-reconcile.service',
+                'bergen-paperless-ingest-reconcile.timer',
+            )
+            assert not Path('/etc/bergen-paperless/ingest-automation.enabled').exists(), 'STOP: automation gate already exists'
+            for name in names:
+                p = base / name
+                if p.is_symlink():
+                    raise RuntimeError('STOP: symlink unit ' + name)
+                if p.exists():
+                    fs = p.lstat()
+                    assert stat.S_ISREG(fs.st_mode) and fs.st_uid == 0 and fs.st_nlink == 1, 'STOP: unsafe unit ' + name
+            for name in names:
+                p = subprocess.run(['systemctl', 'is-active', '--quiet', name], check=False)
+                assert p.returncode != 0, 'STOP: unit active ' + name
+            for name in names:
+                if name.endswith('.timer'):
+                    p = subprocess.run(['systemctl', 'is-enabled', name], capture_output=True, text=True, check=False)
+                    assert p.stdout.strip() in ('disabled', 'static', 'not-found'), 'STOP: timer enabled ' + name
+            for filename in ('bergen-paperless-ingest-bridge.py', 'bergen-paperless-reconcile-ingest.py'):
+                assert Path('/usr/local/libexec', filename).is_file(), 'STOP: missing reconciler or bridge'
+      changed_when: false
+
+    - name: Transfer units and validate only
+      block:
+        - name: Allocate Proxmox host temporary directory
+          ansible.builtin.tempfile:
+            state: directory
+            path: /var/tmp
+            prefix: bergen-paperless-systemd-
+          register: host_tmp
+
+        - name: Stage reviewed unit files on Proxmox
+          ansible.builtin.copy:
+            src: "../files/paperless/systemd/{{ item }}"
+            dest: "{{ host_tmp.path }}/{{ item }}"
+            owner: root
+            group: root
+            mode: '0600'
+          loop: "{{ unit_names }}"
+
+        - name: Allocate guest temporary directory
+          ansible.builtin.command:
+            argv: [pct, exec, "{{ vmid }}", --, mktemp, -d, /var/tmp/bergen-paperless-systemd.XXXXXXXX]
+          register: guest_tmp
+          changed_when: true
+
+        - name: Validate guest temporary path
+          ansible.builtin.assert:
+            that:
+              - guest_tmp.stdout | trim is match('^/var/tmp/bergen-paperless-systemd\\.[A-Za-z0-9]{8}$')
+
+        - name: Transfer unit definitions via pct
+          ansible.builtin.command:
+            argv: [pct, push, "{{ vmid }}", "{{ host_tmp.path }}/{{ item }}", "{{ guest_tmp.stdout | trim }}/{{ item }}"]
+          loop: "{{ unit_names }}"
+
+        - name: Validate staged units without installing
+          ansible.builtin.command:
+            argv: [pct, exec, "{{ vmid }}", --, systemd-analyze, verify, "{{ guest_tmp.stdout | trim }}/{{ item }}"]
+          loop: "{{ unit_names }}"
+          changed_when: false
+
+        - name: Install inert units, without enabling or starting
+          ansible.builtin.command:
+            argv: [pct, exec, "{{ vmid }}", --, install, -o, root, -g, root, -m, "0644", "{{ guest_tmp.stdout | trim }}/{{ item }}", "/etc/systemd/system/{{ item }}"]
+          loop: "{{ unit_names }}"
+
+        - name: Reload systemd definitions only
+          ansible.builtin.command:
+            argv: [pct, exec, "{{ vmid }}", --, systemctl, daemon-reload]
+          changed_when: false
+
+        - name: Verify timer state after installation
+          ansible.builtin.command:
+            argv: [pct, exec, "{{ vmid }}", --, systemctl, is-enabled, "{{ item }}"]
+          loop:
+            - bergen-paperless-ingest-bridge.timer
+            - bergen-paperless-ingest-reconcile.timer
+          register: timer_state
+          changed_when: false
+          failed_when: timer_state.rc == 0 or (timer_state.stdout | trim) != 'disabled'
+
+        - name: Report inactive timers
+          ansible.builtin.debug:
+            msg: "Both timers installed but disabled; activation gate is absent"
+      always:
+        - name: Delete temporary guest directory
+          ansible.builtin.command:
+            argv: [pct, exec, "{{ vmid }}", --, rm, -r, --, "{{ guest_tmp.stdout | trim }}"]
+          when:
+            - guest_tmp is defined
+            - guest_tmp.stdout is defined
+            - guest_tmp.stdout | trim is match('^/var/tmp/bergen-paperless-systemd\\.[A-Za-z0-9]{8}$')
+          changed_when: false
+
+        - name: Delete temporary Proxmox directory
+          ansible.builtin.file:
+            path: "{{ host_tmp.path }}"
+            state: absent
+          when:
+            - host_tmp is defined
+            - host_tmp.path is defined
+            - host_tmp.path is match('^/var/tmp/bergen-paperless-systemd-[^/]+$')
+          changed_when: false

@@ -1,0 +1,46 @@
+---
+# Read-only archive readiness audit. Does not deploy any archive worker.
+- name: Audit Synology archive safety without changing files
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  tasks:
+    - name: Require explicit site-local Synology settings
+      ansible.builtin.assert:
+        that:
+          - synology_admin is defined
+          - synology_admin is match('^[A-Za-z_][A-Za-z0-9_.-]*@[A-Za-z0-9][A-Za-z0-9.-]+$')
+          - synology_config is defined
+          - synology_config.schema_version == 1
+          - synology_config.sync_user is defined
+          - synology_config.sync_user is match('^[a-z_][a-z0-9_-]{0,31}$')
+          - synology_config.state_parent is match('^/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$')
+        fail_msg: "Use the existing ignored paperless-synology.local.yml"
+
+    - name: Run NAS archive preflight as restricted sync user
+      ansible.builtin.command:
+        argv:
+          - ssh
+          - -T
+          - -o
+          - BatchMode=yes
+          - -o
+          - StrictHostKeyChecking=yes
+          - -o
+          - ConnectTimeout=15
+          - "{{ synology_admin }}"
+          - "sudo -n -u {{ synology_config.sync_user | quote }} /usr/bin/python3 - {{ synology_config.state_parent | quote }}"
+        stdin: "{{ lookup('ansible.builtin.file', playbook_dir + '/../files/paperless/synology_archive_preflight.py', rstrip=False) }}"
+      register: paperless_nas_archive_preflight
+      changed_when: false
+
+    - name: Require a completed read-only report
+      ansible.builtin.assert:
+        that:
+          - "'NO_FILES_CHANGED' in paperless_nas_archive_preflight.stdout"
+          - "'ARCHIVE_PREFLIGHT_BLOCKED' in paperless_nas_archive_preflight.stdout"
+        fail_msg: "Archive preflight did not complete; do not enable archive"
+
+    - name: Display archive readiness blockers
+      ansible.builtin.debug:
+        var: paperless_nas_archive_preflight.stdout_lines

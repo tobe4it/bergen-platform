@@ -1,0 +1,104 @@
+---
+# Two-stage permissions rollout. By default: read-only preflight.
+# Set -e paperless_acl_apply=true explicitly to run the same preflight
+# and then commit one atomic Django transaction.
+- name: Prepare controlled Paperless rights migration
+  hosts: venombox
+  become: true
+  gather_facts: false
+
+  vars:
+    paperless_acl_vmid: "126"
+    paperless_acl_script: "{{ playbook_dir }}/../files/paperless/migrate_permissions.py"
+    paperless_acl_commit: "{{ paperless_acl_apply | default(false) | bool }}"
+
+  tasks:
+    - name: Require expected Proxmox host
+      ansible.builtin.assert:
+        that:
+          - inventory_hostname == "venombox"
+          - not ansible_check_mode
+
+    - name: Confirm expected Paperless guest configuration
+      ansible.builtin.command:
+        argv: [pct, config, "{{ paperless_acl_vmid }}"]
+      register: paperless_acl_config
+      changed_when: false
+
+    - name: Require correctly confined Paperless LXC
+      ansible.builtin.assert:
+        that:
+          - "'hostname: bergen-paperless' in paperless_acl_config.stdout_lines"
+          - "'unprivileged: 1' in paperless_acl_config.stdout_lines"
+          - "'lxc.apparmor.profile: unconfined' not in paperless_acl_config.stdout"
+
+    - name: Confirm Paperless guest is running
+      ansible.builtin.command:
+        argv: [pct, status, "{{ paperless_acl_vmid }}"]
+      register: paperless_acl_status
+      changed_when: false
+      failed_when: >-
+        paperless_acl_status.rc != 0 or
+        paperless_acl_status.stdout | trim != 'status: running'
+
+    - name: Run live ACL migration dry-run (no changes)
+      ansible.builtin.command:
+        argv:
+          - pct
+          - exec
+          - "{{ paperless_acl_vmid }}"
+          - --
+          - podman
+          - exec
+          - -e
+          - BP_PERMISSIONS_COMMIT=0
+          - bergen-paperless
+          - python
+          - /usr/src/paperless/src/manage.py
+          - shell
+          - -c
+          - "{{ lookup('ansible.builtin.file', paperless_acl_script, rstrip=False) }}"
+      register: paperless_acl_dry_run
+      changed_when: false
+
+    - name: Require complete, successful, read-only plan
+      ansible.builtin.assert:
+        that:
+          - "'DRY_RUN_NO_CHANGES' in paperless_acl_dry_run.stdout"
+          - "'MODE DRY_RUN WORKFLOWS 5' in paperless_acl_dry_run.stdout"
+
+    - name: Show rights migration preview
+      ansible.builtin.debug:
+        var: paperless_acl_dry_run.stdout_lines
+
+    - name: Apply and verify permissions only when explicitly authorised
+      ansible.builtin.command:
+        argv:
+          - pct
+          - exec
+          - "{{ paperless_acl_vmid }}"
+          - --
+          - podman
+          - exec
+          - -e
+          - BP_PERMISSIONS_COMMIT=1
+          - bergen-paperless
+          - python
+          - /usr/src/paperless/src/manage.py
+          - shell
+          - -c
+          - "{{ lookup('ansible.builtin.file', paperless_acl_script, rstrip=False) }}"
+      register: paperless_acl_applied
+      changed_when: true
+      when: paperless_acl_commit
+
+    - name: Require completed DB commit and invariant verification
+      ansible.builtin.assert:
+        that:
+          - "'PAPERLESS_ACL_MIGRATION_COMMITTED_AND_VERIFIED' in paperless_acl_applied.stdout"
+      when: paperless_acl_commit
+
+    - name: Show committed rights summary
+      ansible.builtin.debug:
+        var: paperless_acl_applied.stdout_lines
+      when: paperless_acl_commit

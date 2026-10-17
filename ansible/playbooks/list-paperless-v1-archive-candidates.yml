@@ -1,0 +1,66 @@
+---
+# A read-only v1 candidate list built EXCLUSIVELY after the full independent
+# 15/26 lifecycle audit (including pinned user-deletion journals, fresh
+# Paperless absence and NAS source checks). Raw identity material is suppressed.
+# Never installs workers, changes receipts, moves sources or enables purge.
+- import_playbook: audit-paperless-import-lifecycle-15-26.yml
+  vars:
+    paperless_lifecycle_quiet: true
+
+- name: Display only live-verified existing NAS v1 original PDF candidates
+  hosts: venombox
+  gather_facts: false
+  become: true
+  tasks:
+    - name: Require completed independent live lifecycle audit
+      ansible.builtin.assert:
+        that:
+          - inventory_hostname == 'venombox'
+          - lifecycle_report is defined
+          - "'IMPORT_LIFECYCLE_RECONCILED' in lifecycle_report.stdout_lines"
+          - "'DELETED_BY_USER 2' in lifecycle_report.stdout_lines"
+          - "'ARCHIVE_NOT_AUTHORIZED' in lifecycle_report.stdout_lines"
+          - "'NO_RECEIPTS_CHANGED' in lifecycle_report.stdout_lines"
+          - "'NO_FILES_CHANGED' in lifecycle_report.stdout_lines"
+          - lifecycle_nas_live is defined
+          - lifecycle_paperless_live is defined
+          - lifecycle_archived_live is defined
+        fail_msg: "Lifecycle evidence unavailable; source files cannot be selected"
+
+    - name: Select only currently imported NAS original names under exact v1 proof join
+      ansible.builtin.command:
+        argv:
+          - /usr/bin/python3
+          - "{{ playbook_dir }}/../files/paperless/list_verified_lifecycle_archive_candidates.py"
+        stdin: >-
+          {{ {'nas': lifecycle_nas_live.stdout,
+              'paperless_lifecycle': lifecycle_paperless_live.stdout,
+              'archived': lifecycle_archived_live.stdout,
+              'lifecycle_report': lifecycle_report.stdout} | to_json }}
+      delegate_to: localhost
+      become: false
+      register: archive_candidates_report
+      changed_when: false
+      no_log: true
+
+    - name: Confirm only safe names and non-authorizing markers can be printed
+      ansible.builtin.assert:
+        that:
+          - archive_candidates_report.rc == 0
+          - (archive_candidates_report.stderr | trim) == ''
+          - archive_candidates_report.stdout_lines[0] is match('^V1_VERIFIED_ARCHIVE_DRY_RUN_CANDIDATES [0-9]+$')
+          - archive_candidates_report.stdout_lines[1] == 'DELETED_BY_USER_EXCLUDED 2'
+          - (archive_candidates_report.stdout_lines | length) == ((archive_candidates_report.stdout_lines[0].split()[-1] | int) + 6)
+          - >-
+            archive_candidates_report.stdout_lines |
+            reject('match', '^(V1_VERIFIED_ARCHIVE_DRY_RUN_CANDIDATES [0-9]+|DELETED_BY_USER_EXCLUDED 2|CANDIDATE ".*"|CANDIDATE_AUDIT_COMPLETE|NO_FILES_CHANGED|ARCHIVE_NOT_AUTHORIZED|PURGE_NOT_AUTHORIZED)$') |
+            list | length == 0
+          - "'CANDIDATE_AUDIT_COMPLETE' in archive_candidates_report.stdout_lines"
+          - "'NO_FILES_CHANGED' in archive_candidates_report.stdout_lines"
+          - "'ARCHIVE_NOT_AUTHORIZED' in archive_candidates_report.stdout_lines"
+          - "'PURGE_NOT_AUTHORIZED' in archive_candidates_report.stdout_lines"
+        fail_msg: "Invalid candidate report; private evidence remains suppressed"
+
+    - name: Print only verified original scope and filename choices
+      ansible.builtin.debug:
+        var: archive_candidates_report.stdout_lines

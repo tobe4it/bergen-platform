@@ -1,0 +1,31 @@
+name: Paperless group v1 regression
+on:
+  pull_request:
+    paths:
+      - 'ansible/files/paperless/**'
+      - 'ansible/playbooks/*paperless*'
+      - 'tests/test_paperless_*'
+      - '.github/workflows/paperless-group-v1.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'ansible/files/paperless/**'
+      - 'ansible/playbooks/*paperless*'
+      - 'tests/test_paperless_*'
+      - '.github/workflows/paperless-group-v1.yml'
+jobs:
+  regression:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Python test prerequisites
+        run: python -m pip install pyyaml
+      - name: Paperless v1 offline regression tests
+        run: python -m unittest discover -s tests -p 'test_paperless_*.py'
+      - name: Python syntax for released Paperless scripts
+        run: python -m compileall -q ansible/files/paperless

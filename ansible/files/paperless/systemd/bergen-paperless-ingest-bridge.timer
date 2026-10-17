@@ -1,0 +1,11 @@
+[Unit]
+Description=Scan Bergen Paperless staging every two minutes
+
+[Timer]
+OnCalendar=*-*-* *:00/2:00
+AccuracySec=15s
+Persistent=false
+Unit=bergen-paperless-ingest-bridge.service
+
+[Install]
+WantedBy=timers.target

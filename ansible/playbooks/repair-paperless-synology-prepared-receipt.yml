@@ -1,0 +1,119 @@
+---
+# Exactly one journal repair, dry-run by default. Never move/delete/resend PDFs.
+- name: Verify Paperless import before NAS sender receipt repair
+  hosts: venombox
+  gather_facts: false
+  become: true
+  vars:
+    paperless_repair_vmid: "126"
+    paperless_repair_bridge_id: "f622de2cd7aa2829f6716f09"
+    paperless_repair_document_id: 23
+    paperless_repair_sha256: "f25b05e10b0ea956f8266571538eb2661b3d50017c7a050c580a7cf3addbc6b2"
+    paperless_repair_nas_id: "66f0963d8a6c97c910be44208ae637b3b5f5dc77ec062ae83dadaa7dd97282f6"
+
+  tasks:
+    - name: Require expected Proxmox target and NAS site settings
+      ansible.builtin.assert:
+        that:
+          - inventory_hostname == 'venombox'
+          - not ansible_check_mode
+          - synology_admin is defined
+          - synology_admin is match('^[A-Za-z_][A-Za-z0-9_.-]*@[A-Za-z0-9][A-Za-z0-9.-]+$')
+          - synology_config is defined
+          - synology_config.schema_version == 1
+          - synology_config.sync_user is match('^[a-z_][a-z0-9_-]{0,31}$')
+          - synology_config.state_parent is match('^/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$')
+          - (paperless_nas_receipt_repair_apply | default(false) | bool) in [true, false]
+
+    - name: Verify expected confined Paperless guest
+      ansible.builtin.command:
+        argv: [pct, config, "{{ paperless_repair_vmid }}"]
+      register: paperless_repair_guest_config
+      changed_when: false
+
+    - name: Require expected guest identity
+      ansible.builtin.assert:
+        that:
+          - "'hostname: bergen-paperless' in paperless_repair_guest_config.stdout_lines"
+          - "'unprivileged: 1' in paperless_repair_guest_config.stdout_lines"
+          - "'lxc.apparmor.profile: unconfined' not in paperless_repair_guest_config.stdout"
+
+    - name: Live audit all acknowledged Paperless imports (read-only)
+      ansible.builtin.command:
+        argv:
+          - pct
+          - exec
+          - "{{ paperless_repair_vmid }}"
+          - --
+          - python3
+          - /usr/local/libexec/bergen-paperless-reconcile-ingest.py
+          - --audit-imported
+      register: paperless_repair_audit
+      changed_when: false
+
+    - name: Require live-verified document 23
+      ansible.builtin.assert:
+        that:
+          - "'AUDITED_IMPORTED ' + paperless_repair_bridge_id + '.json ' + (paperless_repair_document_id | string) in paperless_repair_audit.stdout_lines"
+        fail_msg: "Paperless live import proof missing; NAS receipt must remain PREPARED"
+
+    - name: Require matching imported receipt digest, document and scope
+      ansible.builtin.command:
+        argv:
+          - pct
+          - exec
+          - "{{ paperless_repair_vmid }}"
+          - --
+          - python3
+          - -c
+          - |
+            import json
+            from pathlib import Path
+            p = Path('/srv/bergen-paperless/ingest-bridge-state/receipts/f622de2cd7aa2829f6716f09.json')
+            d = json.loads(p.read_text(encoding='utf-8'))
+            assert d.get('status') == 'IMPORTED'
+            assert d.get('sha256') == 'f25b05e10b0ea956f8266571538eb2661b3d50017c7a050c580a7cf3addbc6b2'
+            assert d.get('document_id') == 23
+            assert d.get('source', '').startswith('Familie/')
+            assert d['source'].endswith('--nas-' + d['sha256'] + '.pdf')
+            print('PAPERLESS_IMPORT_PROOF_VERIFIED')
+      register: paperless_repair_receipt
+      changed_when: false
+
+    - name: Require matching live receipt
+      ansible.builtin.assert:
+        that:
+          - "'PAPERLESS_IMPORT_PROOF_VERIFIED' in paperless_repair_receipt.stdout_lines"
+
+    - name: Audit or repair the one NAS sender receipt under sender lock
+      ansible.builtin.command:
+        argv:
+          - ssh
+          - -T
+          - -o
+          - BatchMode=yes
+          - -o
+          - StrictHostKeyChecking=yes
+          - -o
+          - ConnectTimeout=15
+          - "{{ synology_admin }}"
+          - >-
+            sudo -n -u {{ synology_config.sync_user | quote }}
+            /usr/bin/python3 - {{ synology_config.state_parent | quote }}
+            {{ '--commit' if (paperless_nas_receipt_repair_apply | default(false) | bool) else '' }}
+        stdin: "{{ lookup('ansible.builtin.file', playbook_dir + '/../files/paperless/repair_synology_prepared_receipt.py', rstrip=False) }}"
+      delegate_to: localhost
+      become: false
+      register: paperless_nas_repair
+      changed_when: "'REPAIRED_SENT ' in paperless_nas_repair.stdout"
+      failed_when: >-
+        paperless_nas_repair.rc != 0 or
+        not (
+          'DRY_RUN_REPAIR_READY ' in paperless_nas_repair.stdout or
+          'ALREADY_REPAIRED ' in paperless_nas_repair.stdout or
+          'REPAIRED_SENT ' in paperless_nas_repair.stdout
+        )
+
+    - name: Show result of one receipt only
+      ansible.builtin.debug:
+        var: paperless_nas_repair.stdout_lines

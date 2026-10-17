@@ -1,0 +1,116 @@
+---
+# ONE-TIME operator-approved first group-scope rollout.
+# This orchestrates the ALREADY reviewed single-document commit playbook.
+# Each imported play independently re-audits ALL originals, imported docs,
+# both user deletions and all existing archive journals, then commits exactly
+# one source under a short-lived exact-document gate, then audits again.
+# Fail closed and stop on ANY mismatch; no batch worker/loop, private files,
+# restore, automatic expiry, deletion or site/global release gate.
+#
+# Run ONLY after full offline tests and a read-only syntax check.
+# Requires explicit -e '{"paperless_group_batch_commit":true,
+#                      "paperless_archive_commit":true}'.
+# A backup outside the NAS failure domain is required for future PURGE,
+# but not for the existing NAS same-subvolume atomic archive location change.
+- import_playbook: list-paperless-v1-archive-candidates.yml
+  vars:
+    paperless_lifecycle_quiet: true
+
+- name: Gate a one-time exact 15-PDF first GROUP rollout
+  hosts: venombox
+  gather_facts: false
+  become: true
+  vars:
+    approved_group_files:
+      - "Eltern/122003-330602.pdf"
+      - "Eltern/INV160935444_A01943150_10132026.pdf"
+      - "Eltern/Informationsbogen_fuer_den_Einleger_20231011_1af61.pdf"
+      - "Eltern/Kassenbon_2026-04-01_20.48.pdf"
+      - "Eltern/Kassenbon_2026-10-12_20.41.pdf"
+      - "Eltern/R103414460.pdf"
+      - "Eltern/Rg_R26123843.pdf"
+      - "Familie/20261015-150626.pdf"
+      - "Familie/20261015-150826.pdf"
+      - "Familie/Druckversion - Dokumente mit KI verwalten- paperless-ngx mit einem Sprachmodell .pdf"
+      - "Familie/Druckversion - Papierloses Büro- Wie man mit paperless-ngx die Dokumentenverwalt(1).pdf"
+      - "Familie/Handelsblatt_2026-10-15.pdf"
+      - "Familie/Handelsblatt_2026-10-16.pdf"
+      - "Familie/Katherina Reiche- Handelt Katherina Reiche wie eine Klimaleugnerin? | DIE ZEIT.pdf"
+      - "Familie/SPIEGEL_2026_42.pdf"
+  tasks:
+    - name: Require explicit operator opt-in and complete unmodified 21-source inventory
+      ansible.builtin.assert:
+        that:
+          - (paperless_group_batch_commit | default(false)) is sameas true
+          - (paperless_archive_commit | default(false)) is sameas true
+          - not ansible_check_mode
+          - archive_candidates_report is defined
+          - archive_candidates_report.rc == 0
+          - "'V1_VERIFIED_ARCHIVE_DRY_RUN_CANDIDATES 21' in archive_candidates_report.stdout_lines"
+          - "'DELETED_BY_USER_EXCLUDED 2' in archive_candidates_report.stdout_lines"
+          - "'ARCHIVE_NOT_AUTHORIZED' in archive_candidates_report.stdout_lines"
+          - "'PURGE_NOT_AUTHORIZED' in archive_candidates_report.stdout_lines"
+          - "'CANDIDATE_AUDIT_COMPLETE' in archive_candidates_report.stdout_lines"
+          - (approved_group_files | length) == 15
+          - (approved_group_files | unique | list | length) == 15
+          - (archive_candidates_report.stdout_lines | select('match', '^CANDIDATE "(Eltern|Familie)/') | list | length) == 15
+        fail_msg: "Rollout denied: opt-in, exact inventory, or privacy scope mismatch"
+
+    - name: Require each of the EXACT previously reviewed group filenames in fresh candidate audit
+      ansible.builtin.assert:
+        that:
+          - "('CANDIDATE ' ~ (item | to_json)) in archive_candidates_report.stdout_lines"
+        fail_msg: "An expected group PDF no longer matches the audited imported original; no moves allowed"
+        quiet: true
+      loop: "{{ approved_group_files }}"
+      loop_control:
+        label: "verified group PDF"
+
+# Fifteen static sequential imports: each runs a fresh complete preaudit,
+# exactly one authorised rename and a complete post-move reconciliation.
+# A failure aborts remaining imports. This is NOT an unattended worker.
+- import_playbook: commit-paperless-one-group-v1-archive.yml
+  vars:
+    paperless_archive_only: "Eltern/122003-330602.pdf"
+- import_playbook: commit-paperless-one-group-v1-archive.yml
+  vars:
+    paperless_archive_only: "Eltern/INV160935444_A01943150_10132026.pdf"
+- import_playbook: commit-paperless-one-group-v1-archive.yml
+  vars:
+    paperless_archive_only: "Eltern/Informationsbogen_fuer_den_Einleger_20231011_1af61.pdf"
+- import_playbook: commit-paperless-one-group-v1-archive.yml
+  vars:
+    paperless_archive_only: "Eltern/Kassenbon_2026-04-01_20.48.pdf"
+- import_playbook: commit-paperless-one-group-v1-archive.yml
+  vars:
+    paperless_archive_only: "Eltern/Kassenbon_2026-10-12_20.41.pdf"
+- import_playbook: commit-paperless-one-group-v1-archive.yml
+  vars:
+    paperless_archive_only: "Eltern/R103414460.pdf"
+- import_playbook: commit-paperless-one-group-v1-archive.yml
+  vars:
+    paperless_archive_only: "Eltern/Rg_R26123843.pdf"
+- import_playbook: commit-paperless-one-group-v1-archive.yml
+  vars:
+    paperless_archive_only: "Familie/20261015-150626.pdf"
+- import_playbook: commit-paperless-one-group-v1-archive.yml
+  vars:
+    paperless_archive_only: "Familie/20261015-150826.pdf"
+- import_playbook: commit-paperless-one-group-v1-archive.yml
+  vars:
+    paperless_archive_only: "Familie/Druckversion - Dokumente mit KI verwalten- paperless-ngx mit einem Sprachmodell .pdf"
+- import_playbook: commit-paperless-one-group-v1-archive.yml
+  vars:
+    paperless_archive_only: "Familie/Druckversion - Papierloses Büro- Wie man mit paperless-ngx die Dokumentenverwalt(1).pdf"
+- import_playbook: commit-paperless-one-group-v1-archive.yml
+  vars:
+    paperless_archive_only: "Familie/Handelsblatt_2026-10-15.pdf"
+- import_playbook: commit-paperless-one-group-v1-archive.yml
+  vars:
+    paperless_archive_only: "Familie/Handelsblatt_2026-10-16.pdf"
+- import_playbook: commit-paperless-one-group-v1-archive.yml
+  vars:
+    paperless_archive_only: "Familie/Katherina Reiche- Handelt Katherina Reiche wie eine Klimaleugnerin? | DIE ZEIT.pdf"
+- import_playbook: commit-paperless-one-group-v1-archive.yml
+  vars:
+    paperless_archive_only: "Familie/SPIEGEL_2026_42.pdf"

@@ -1,0 +1,88 @@
+---
+# Read-only join of live NAS source hashes with live Paperless document proof.
+# No deployment, receipt update, archive operation, or deletion.
+- name: Match NAS SENT receipts to live Paperless IMPORTED documents
+  hosts: venombox
+  gather_facts: false
+  become: true
+  tasks:
+    - name: Require expected guest and site-local NAS configuration
+      ansible.builtin.assert:
+        that:
+          - inventory_hostname == 'venombox'
+          - not ansible_check_mode
+          - synology_admin is defined
+          - synology_config is defined
+          - synology_config.schema_version == 1
+          - synology_config.state_parent is match('^/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$')
+          - synology_config.sync_user is match('^[a-z_][a-z0-9_-]{0,31}$')
+
+    - name: Check Paperless LXC identity and confinement
+      ansible.builtin.command:
+        argv: [pct, config, '126']
+      register: archive_guest_config
+      changed_when: false
+
+    - name: Require expected Paperless LXC
+      ansible.builtin.assert:
+        that:
+          - "'hostname: bergen-paperless' in archive_guest_config.stdout_lines"
+          - "'unprivileged: 1' in archive_guest_config.stdout_lines"
+          - "'lxc.apparmor.profile: unconfined' not in archive_guest_config.stdout"
+
+    - name: Require Paperless guest running
+      ansible.builtin.command:
+        argv: [pct, status, '126']
+      register: archive_guest_status
+      changed_when: false
+      failed_when: "archive_guest_status.rc != 0 or (archive_guest_status.stdout | trim) != 'status: running'"
+
+    - name: Revalidate live imported Paperless document checksum and ACL
+      ansible.builtin.command:
+        argv: [pct, exec, '126', --, python3, '-']
+        stdin: "{{ lookup('ansible.builtin.file', playbook_dir + '/../files/paperless/export_imported_scans.py', rstrip=False) }}"
+      register: paperless_live_archive_proof
+      changed_when: false
+
+    - name: Verify original NAS PDFs against their SENT journal under sender lock
+      ansible.builtin.command:
+        argv:
+          - ssh
+          - -T
+          - -o
+          - BatchMode=yes
+          - -o
+          - StrictHostKeyChecking=yes
+          - -o
+          - ConnectTimeout=15
+          - "{{ synology_admin }}"
+          - >-
+            sudo -n -u {{ synology_config.sync_user | quote }}
+            /usr/bin/python3 - {{ synology_config.state_parent | quote }}
+        stdin: "{{ lookup('ansible.builtin.file', playbook_dir + '/../files/paperless/audit_synology_archive_candidates.py', rstrip=False) }}"
+      delegate_to: localhost
+      become: false
+      register: paperless_nas_archive_proof
+      changed_when: false
+
+    - name: Compare live import proofs to original NAS sender receipts
+      ansible.builtin.command:
+        argv:
+          - python3
+          - "{{ playbook_dir }}/../files/paperless/match_paperless_archive_evidence.py"
+        stdin: "{{ {'nas': paperless_nas_archive_proof.stdout, 'paperless': paperless_live_archive_proof.stdout} | to_json }}"
+      delegate_to: localhost
+      become: false
+      register: paperless_archive_match
+      changed_when: false
+
+    - name: Display per-document and per-scope match report
+      ansible.builtin.debug:
+        var: paperless_archive_match.stdout_lines
+
+    - name: Require every NAS source to have an independently live-verified import
+      ansible.builtin.assert:
+        that:
+          - "'ARCHIVE_MATCH_READY' in paperless_archive_match.stdout_lines"
+          - "'NO_FILES_CHANGED' in paperless_archive_match.stdout_lines"
+        fail_msg: "No archive permitted: source or live import proof is missing."
