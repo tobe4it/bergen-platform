@@ -32,13 +32,17 @@ def alias_basename(original, nonce):
     """Preserve source filename prefix, never exceed filesystem byte limit."""
     if (not isinstance(original, str) or not original.lower().endswith(".pdf")
             or original in (".", "..") or original.startswith(".")
-            or "/" in original or "\\" in original or "\x00" in original
+            or "/" in original or "\\" in original
+            or any(ord(c) < 32 or ord(c) == 127 for c in original)
             or not isinstance(nonce, str) or len(nonce) != 32
             or any(ch not in "0123456789abcdef" for ch in nonce)):
         raise ValueError("INVALID_COLLISION_SOURCE")
     suffix = COLLISION_TAG + nonce + ".pdf"
     allowed = MAX_SCAN_NAME_BYTES - len(suffix.encode("ascii"))
-    stem = original[:-4]
+    # Legacy v1 sender truncates its *receiver* stem at 120 code points.
+    # Keep the entire nonce inside those 120 to avoid same-digest collisions
+    # even for two source filenames with the same very long prefix.
+    stem = original[:-4][:75]
     while stem and len(stem.encode("utf-8")) > allowed:
         stem = stem[:-1]
     if not stem:
