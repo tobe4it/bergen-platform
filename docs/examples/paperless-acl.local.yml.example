@@ -1,0 +1,17 @@
+---
+# Demonstration ONLY. Put your REAL verified accounts/doc IDs in the git-ignored
+# ansible/vars/paperless-acl.local.yml; never commit the actual site matrix.
+# Four documents x three normal users = twelve exact cases.
+paperless_acl_expected_cases:
+  - {username: person_a, document_id: 1001, allow: true}
+  - {username: person_b, document_id: 1001, allow: false}
+  - {username: person_c, document_id: 1001, allow: false}
+  - {username: person_a, document_id: 1002, allow: true}
+  - {username: person_b, document_id: 1002, allow: false}
+  - {username: person_c, document_id: 1002, allow: false}
+  - {username: person_a, document_id: 1003, allow: true}
+  - {username: person_b, document_id: 1003, allow: true}
+  - {username: person_c, document_id: 1003, allow: false}
+  - {username: person_a, document_id: 1004, allow: true}
+  - {username: person_b, document_id: 1004, allow: true}
+  - {username: person_c, document_id: 1004, allow: false}
