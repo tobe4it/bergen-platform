@@ -1,4 +1,5 @@
 """Privacy-preserving opt-in real sender probe after archival-proof validation."""
+import re
 import unittest
 from pathlib import Path
 
@@ -81,6 +82,25 @@ class GroupCollisionSenderOnceTests(unittest.TestCase):
         self.assertIn("OS_ERRNO_ALLOWLIST=", printed)
         self.assertNotIn("sender_once_result.stderr }}", printed)
         self.assertNotIn("sender_once_result.stdout }}", printed)
+
+    def test_real_error_regex_matches_known_codes_not_names(self):
+        task = next(t for t in self.tasks
+                    if t.get("name", "").startswith(
+                        "Classify allowlisted NAS sender blockers"))
+        source = task["ansible.builtin.set_fact"]["sender_once_group_error_codes"]
+        # Execute the YAML-loaded regex, not a separately hand-copied one.
+        pattern = re.search(r"regex_findall\\('([^']+)'", source).group(1)
+        stderr = (
+            "REJECTED Familie/scan 123.pdf OLD_INODE_STILL_ACTIVE_REQUIRES_REVIEW\\n"
+            "REJECTED Eltern/familien scan.pdf PRIOR_ARCHIVE_RECEIPT_MISMATCH\\n"
+            "REJECTED Privat/thomas/private.pdf SCHEDULE_GATE_UNSAFE\\n"
+            "REJECTED Familie/OLD_INODE_STILL_ACTIVE_REQUIRES_REVIEW.pdf unknown_problem\\n"
+            "RuntimeError: SYNC_FAILED: names redacted by this test\\n"
+        )
+        self.assertEqual(re.findall(pattern, stderr), [
+            "OLD_INODE_STILL_ACTIVE_REQUIRES_REVIEW",
+            "PRIOR_ARCHIVE_RECEIPT_MISMATCH",
+        ])
 
     def test_no_archive_code_or_direct_receipt_writes(self):
         for bad in ("archive-next-verified", "commit-paperless-one-group",
