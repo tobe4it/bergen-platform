@@ -1729,3 +1729,54 @@ separat zu planen und zu genehmigen; eigenständige Sicherung
 und Restore sind Pflicht vor einer späteren irreversiblen
 Löschung und der vollständigen `main`-Freigabe.
 
+
+## 17.10.2026 — Wiederverwendbarer Gruppen-Archivierungsaufruf für neue v1-Scans
+
+Nach dem erfolgreichen Einmal-Rollout (16 ARCHIVED, 6 private
+SENT, 22 unveränderte Live-Imports und 2 bestätigte Benutzerlöschungen)
+bleibt der GROUP-FIRST-Rollout **OFFEN**: Automatik und neuer Live-Scan
+sind noch nicht aktiviert bzw. nachgewiesen.
+
+Hinzugefügt wurden
+`ansible/files/paperless/select_next_verified_group_archive.py` und
+`ansible/playbooks/archive-next-verified-paperless-group-v1.yml`
+mit 12 zusätzlichen Offline-Tests (8 Selector-, 4 Playbook-Tests).
+Die Auswahl kann aus einer **frischen** vollständigen
+`list-paperless-v1-archive-candidates.yml`-Abnahme
+`READY` (genau ein Gruppen-PDF) oder `IDLE` (kein Gruppen-PDF)
+melden. Sie prüft Vollständigkeitsmarker, Kandidatenanzahl,
+kanonische Dateinamen und Duplikate und schließt private
+Verzeichnisse aus. Das Wrapper-Playbook erfordert
+**zwei explizite Opt-ins**:
+`paperless_group_auto_archive=true` und
+`paperless_archive_commit=true`; ohne diese bleibt es
+gesperrt. Falls `READY`, importiert es **einmalig** den
+bewährten `commit-paperless-one-group-v1-archive.yml`:
+vollständiger frischer Lebenszyklus-Audit → kurzlebiges
+exaktes Freigabe-Gate → no-overwrite Rename + PREPARED/ARCHIVED
+Journaling → erneuter kompletter Audit → Gate entzogen.
+Bei `IDLE` wird kein Archiv-Move importiert.
+Für sich genommen installiert/aktiviert dieses Playbook
+**keinen** systemd-Timer, DSM-Task oder Vault-Automatismus.
+
+Diese v1-Beschränkung ist ausdrücklich zu beachten:
+Der alte Sender kann einen **erneut eingescannten gleichnamigen
+Dateinamen** wegen seines historisch vergebenen Receipts
+nicht kollisionsfrei übertragen. Unvollständig importierte
+oder noch nicht gesendete Dateien führen im bewusst strikten
+Gesamt-Audit gegebenenfalls zu einem nicht erfolgreichen
+Aufruf; sie dürfen nicht als importbestätigt angesehen werden.
+Die v2-Instanz-IDs samt v2-Archiv-Journalprüfung und
+unbeaufsichtigter Trigger/Timer sind daher noch offene
+notwendige Teile, bevor „automatische Archivierung aller
+neuen Scans“ abgenommen werden kann. Keine Live-Freigabe
+und kein `main`-Merge durch diesen Commit.
+
+**Controller-Validierung noch nötig:** komplette
+`test_paperless_*.py`-Suite (bisher 759 verifiziert,
+jetzt 12 weitere = **771 erwartet**) und
+`archive-next-verified-paperless-group-v1.yml --syntax-check`.
+Niemals den alten statischen 15-Dateien-Einmal-Rollout
+wiederholen.
+
+
