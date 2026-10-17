@@ -253,6 +253,36 @@ def scan(commit, only=None, scheduled=False):
                         continue
                     receipt_file = receipt_path(scope, path.name)
                     old = read_receipt(receipt_file)
+                    # A scanner can reuse a previously ARCHIVED group's
+                    # basename. The legacy receipt key is NOT reusable.
+                    # Only the scheduled sender may atomically rename a new
+                    # stable *group* incarnation to a unique NAS alias.
+                    # Historical receipt and previously archived PDF remain
+                    # unchanged. Same-inode / not-yet-archived reuse fails.
+                    if (old is not None and old["status"] == "SENT"
+                            and old.get("signature") != signature(st)
+                            and scope in ("Familie", "Eltern")
+                            and commit and scheduled and only is None):
+                        helper = Path(__file__).resolve().with_name(
+                            "synology_group_collision_alias.py")
+                        info = helper.lstat()
+                        if (not stat.S_ISREG(info.st_mode) or info.st_uid != 0
+                                or info.st_nlink != 1 or
+                                stat.S_IMODE(info.st_mode) != 0o644):
+                            raise RuntimeError("UNREVIEWED_COLLISION_HELPER")
+                        from synology_group_collision_alias import resolve_under_sender_lock
+                        renamed = resolve_under_sender_lock(
+                            folder, scope, path, old, state=STATE,
+                            quiet_seconds=QUIET_SECONDS)
+                        if renamed is None:
+                            print("WAIT_COLLISION", scope)
+                            continue
+                        path = renamed
+                        st = metadata(path)
+                        receipt_file = receipt_path(scope, path.name)
+                        old = read_receipt(receipt_file)
+                        if old is not None:
+                            raise RuntimeError("COLLISION_ALIAS_ALREADY_TRACKED")
                     if old is not None:
                         if old["status"] == "PREPARED":
                             raise RuntimeError("MANUAL_REVIEW_PREPARED " + scope + "/" + path.name)
