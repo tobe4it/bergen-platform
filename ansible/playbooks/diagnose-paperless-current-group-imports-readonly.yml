@@ -1,0 +1,110 @@
+---
+# Independent READ ONLY import proof: current group PDFs on Synology and
+# independently live-verified Paperless docs. One metadata-drift source is
+# reported, never treated as archive eligible or a reason to alter a receipt.
+# Raw source names, hashes, bridge IDs and document IDs stay in no_log.
+- name: Independently verify current NAS group sources against live Paperless imports
+  hosts: venombox
+  become: true
+  gather_facts: false
+  tasks:
+    - name: Require exact configured NAS sender and Paperless LXC
+      ansible.builtin.assert:
+        that:
+          - inventory_hostname == 'venombox'
+          - not ansible_check_mode
+          - synology_admin is defined
+          - synology_config is defined
+          - synology_config.schema_version == 1
+          - synology_config.sync_user == 'paperless-sync'
+          - synology_config.state_parent is match('^/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$')
+        fail_msg: "GROUP_IMPORT_AUDIT_CONTEXT_INVALID"
+
+    - name: Verify running unprivileged Paperless LXC
+      ansible.builtin.command:
+        argv: [pct, config, '126']
+      register: group_lxc_config
+      changed_when: false
+
+    - name: Require exact confined guest identity
+      ansible.builtin.assert:
+        that:
+          - "'hostname: bergen-paperless' in group_lxc_config.stdout_lines"
+          - "'unprivileged: 1' in group_lxc_config.stdout_lines"
+          - "'lxc.apparmor.profile: unconfined' not in group_lxc_config.stdout"
+        fail_msg: "GROUP_IMPORT_GUEST_IDENTITY_INVALID"
+
+    - name: Read current verified group sources and existing immutable SENT receipts
+      ansible.builtin.command:
+        argv:
+          - ssh
+          - -T
+          - -o
+          - BatchMode=yes
+          - -o
+          - StrictHostKeyChecking=yes
+          - -o
+          - ConnectTimeout=15
+          - "{{ synology_admin }}"
+          - >-
+            sudo -n -u {{ synology_config.sync_user | quote }}
+            /usr/bin/python3 - {{ synology_config.state_parent | quote }}
+        stdin: "{{ lookup('ansible.builtin.file', playbook_dir + '/../files/paperless/export_current_group_source_evidence_readonly.py', rstrip=False) }}"
+      delegate_to: localhost
+      become: false
+      register: group_nas_source_evidence
+      changed_when: false
+      no_log: true
+
+    - name: Verify independent live group Paperless document and ACL evidence
+      ansible.builtin.command:
+        argv: [pct, exec, '126', --, python3, '-']
+        stdin: "{{ lookup('ansible.builtin.file', playbook_dir + '/../files/paperless/export_live_group_imports_readonly.py', rstrip=False) }}"
+      register: group_paperless_live_evidence
+      changed_when: false
+      no_log: true
+
+    - name: Require both raw evidence streams end with verified read-only markers
+      ansible.builtin.assert:
+        that:
+          - group_nas_source_evidence.rc == 0
+          - group_paperless_live_evidence.rc == 0
+          - (group_nas_source_evidence.stderr | trim) == ''
+          - (group_paperless_live_evidence.stderr | trim) == ''
+          - group_nas_source_evidence.stdout_lines[-3:] == ['NAS_CURRENT_GROUP_EVIDENCE_COMPLETE', 'NO_FILES_CHANGED', 'ARCHIVE_NOT_AUTHORIZED']
+          - group_paperless_live_evidence.stdout_lines[-3:] == ['LIVE_GROUP_IMPORT_EVIDENCE_COMPLETE', 'NO_FILES_CHANGED', 'ARCHIVE_NOT_AUTHORIZED']
+        fail_msg: "GROUP_IMPORT_RAW_EVIDENCE_UNAVAILABLE"
+      no_log: true
+
+    - name: Join exact NAS source receiver SHA to independent live Paperless proof
+      ansible.builtin.command:
+        argv:
+          - python3
+          - "{{ playbook_dir }}/../files/paperless/join_current_group_import_evidence_readonly.py"
+        stdin: >-
+          {{ {'nas': group_nas_source_evidence.stdout,
+              'paperless': group_paperless_live_evidence.stdout} | to_json }}
+      delegate_to: localhost
+      become: false
+      register: group_current_import_summary
+      changed_when: false
+      no_log: true
+
+    - name: Enforce exact aggregate-only output and no archive authorization
+      ansible.builtin.assert:
+        that:
+          - group_current_import_summary.rc == 0
+          - (group_current_import_summary.stderr | trim) == ''
+          - group_current_import_summary.stdout_lines | length == 9
+          - group_current_import_summary.stdout_lines[0] is match('^GROUP_CURRENT_NAS_SENT [0-9]+$')
+          - group_current_import_summary.stdout_lines[1] is match('^GROUP_CURRENT_LIVE_IMPORTED [0-9]+$')
+          - group_current_import_summary.stdout_lines[2] is match('^GROUP_CURRENT_WAITING_FOR_IMPORT [0-9]+$')
+          - group_current_import_summary.stdout_lines[3] is match('^GROUP_SAME_INODE_METADATA_DRIFT [0-9]+$')
+          - group_current_import_summary.stdout_lines[4] is match('^GROUP_METADATA_DRIFT_LIVE_IMPORTED [0-9]+$')
+          - group_current_import_summary.stdout_lines[5:] == ['GROUP_IMPORT_PROOF_JOIN_COMPLETE', 'NO_FILES_CHANGED', 'ARCHIVE_NOT_AUTHORIZED', 'PURGE_NOT_AUTHORIZED']
+        fail_msg: "GROUP_IMPORT_AGGREGATE_AUDIT_BLOCKED"
+      no_log: true
+
+    - name: Display only verified group import totals and absent release
+      ansible.builtin.debug:
+        var: group_current_import_summary.stdout_lines
