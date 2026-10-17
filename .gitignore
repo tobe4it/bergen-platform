@@ -21,6 +21,8 @@ ansible/reports/
 __pycache__/
 *.pyc
 ansible/vars/mail-tls.local.yml
+# Private cloud TLS certificate consumer and deploy-hook scope
+ansible/vars/mail-cloud-tls.local.yml
 
 # selfHOST API credentials must never be versioned
 ansible/vars/selfhost-acme.local.vault.yml
