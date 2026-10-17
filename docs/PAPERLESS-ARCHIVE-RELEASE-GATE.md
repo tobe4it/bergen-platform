@@ -1163,3 +1163,44 @@ authenticated SMB2 rights test be considered.
 These are development/diagnosis probes, not a grant of archive
 relocation, purge, NAS ACL changes or a merge to `main`.
 
+
+### 2026-10-17 SMB network path blocker: TCP/445 timeout before SMB2
+
+Operator fast-forwarded to `730489b`, ran **765/765** full offline Paperless
+tests successfully, then ran the passwordless TCP/445 preflight against
+the configured Synology SSH hostname. The preflight returned:
+
+```text
+SMB_PROBE_DIAGNOSTIC CONNECT_OBJECT TRANSPORT NO_STATUS TimeoutError
+SMB_NEGATIVE_ACCESS_PROBE_BLOCKED
+```
+
+Because the operator used shell `&&`, the subsequent unauthenticated
+SMB dialect negotiation was **not executed**. The result demonstrates only
+a TCP/445 **connection timeout from bp-controller to the particular
+resolved host/address(es)** within the 5-second per-address timeout.
+It does **not** establish whether the SMB service on MountainCloud
+is stopped, whether the controller has a reachable route to a LAN-facing
+NAS address, whether a firewall blocks the route, whether the DNS name
+points to a publicly routed SSH endpoint, or which authenticated
+identities could delete protected entries. No SMB password retry is
+appropriate until a valid internal endpoint for TCP/445 is established.
+
+Next steps are separate, read-only endpoint diagnosis:
+(1) observe DNS A/AAAA resolution and TCP 445 outcome for the
+operator-specified SSH hostname on the controller;
+(2) inspect network interface addresses and TCP/445 listener status
+locally on the NAS through its already-verified SSH route;
+(3) choose only the actual NAS LAN/VPN address proven reachable from
+`bp-controller`, never guess an address or expose NAS port 445
+to the public Internet. If the relevant VLAN blocks 445, review
+a narrowly scoped LAN policy rather than modifying the archive,
+NAS ACLs or other release gates. After reachability is proven, run
+`--negotiate-preflight` without a password; only then attempt
+approved no-write SMB access-intent checks.
+
+The successful static archive ACL audit, isolated one-PDF read-only
+recovery and independent 21+1 lifecycle reconciliation remain
+accepted. No new archive moves, destructive purge, gate activation,
+or main merge are authorized by the networking observation.
+
