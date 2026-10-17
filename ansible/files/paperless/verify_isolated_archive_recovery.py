@@ -62,7 +62,9 @@ def copy_stream(stream, scratch, header):
     total = 0
     sha = hashlib.sha256()
     first, tail = b"", b""
-    with scratch.open("xb") as target:
+    flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW | os.O_CLOEXEC
+    file_fd = os.open(scratch, flags, 0o600)
+    with os.fdopen(file_fd, "wb") as target:
         while total < header["bytes"]:
             chunk = stream.read(min(1024 * 1024, header["bytes"] - total))
             require(chunk, "REMOTE_RECOVERY_TRUNCATED")
