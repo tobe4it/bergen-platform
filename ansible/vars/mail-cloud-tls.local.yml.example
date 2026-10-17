@@ -1,0 +1,14 @@
+---
+# EXAMPLE ONLY. Copy to mail-cloud-tls.local.yml and keep it Git-ignored.
+# Pass the existing ignored mail-tls.local.yml for source SSH identity.
+# No production hostname, lineage or filesystem path belongs in this template.
+
+mail_cloud_tls_hostname: cloud.example.invalid
+mail_cloud_tls_cert_lineage: CHANGE_ME_CERTBOT_LINEAGE
+mail_cloud_tls_vhost_path: /etc/nginx/sites-available/cloud.example.invalid.conf
+mail_cloud_tls_link_path: /etc/nginx/conf.d/cloud.example.invalid.conf
+mail_cloud_tls_hook_path: /etc/letsencrypt/renewal-hooks/deploy/70-cloud-nginx.sh
+
+# Read-only is the default. Only set true to CREATE a missing hook.
+# Existing hooks, even when mismatched, are never replaced.
+# mail_cloud_tls_hook_apply: false
