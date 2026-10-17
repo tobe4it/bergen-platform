@@ -161,6 +161,22 @@ class IsolatedArchiveRecoveryTests(unittest.TestCase):
         self.assertFalse(data[1]["tasks"][1]["changed_when"])
         self.assertIn("ARCHIVE_PURGE_NOT_AUTHORIZED", str(data[3]))
 
+    def test_new_python_modules_are_syntax_parseable(self):
+        import ast
+        for name in ("readonly_archive_recovery_stream.py",
+                     "verify_isolated_archive_recovery.py"):
+            with self.subTest(name=name):
+                ast.parse((BASE / name).read_text(), filename=name)
+
+    def test_invalid_pdf_with_matching_hash_is_refused(self):
+        invalid = b"%PDX-1.7\\nnot a PDF\\nEOF\\n"
+        head = self.header(invalid)
+        with tempfile.TemporaryDirectory() as tmp:
+            with self.assertRaisesRegex(
+                    RuntimeError, "REMOTE_RECOVERY_BYTES_INVALID"):
+                ctl.copy_stream(io.BytesIO(invalid),
+                                Path(tmp) / "invalid.pdf", head)
+
     def test_neither_script_contains_mutating_nas_operations(self):
         src = (BASE / "readonly_archive_recovery_stream.py").read_text()
         controller = (BASE / "verify_isolated_archive_recovery.py").read_text()
