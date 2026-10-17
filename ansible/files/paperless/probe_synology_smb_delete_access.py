@@ -18,6 +18,7 @@ import getpass
 import re
 import sys
 import uuid
+import inspect
 from importlib.metadata import PackageNotFoundError, version
 
 SITE_SHARES = frozenset(("homes", "paperless-scan"))
@@ -77,10 +78,90 @@ def verify_smbprotocol_version():
     return installed
 
 
-def execute(server, site, username):
-    plan = validate_site(server, site, username)
-    verify_smbprotocol_version()
+# Fixed phase labels only. Never report raw exceptions: SMB exceptions can
+# include names, paths, usernames, server details and authentication state.
+SAFE_PHASES = frozenset((
+    "PRECHECK", "IMPORTS", "PASSWORD_INPUT", "CONNECT",
+    "SESSION_SETUP", "TREE_CONNECT", "SHARE_ROOT_OPEN",
+    "SHARE_ROOT_CLOSE", "NEGATIVE_VERDICT", "TEARDOWN",
+    "PROTECTED_ENTRY_DELETE_OPEN", "PROTECTED_ENTRY_DELETE_CLOSE",
+    "SITE_ROOT_DELETE_CHILD_OPEN", "SITE_ROOT_DELETE_CHILD_CLOSE",
+    "PROTECTED_ROOT_ENUMERATION_OPEN", "PROTECTED_ROOT_ENUMERATION_CLOSE",
+))
+
+
+def safe_error_label(error):
+    """Return only an allowlisted exception class and numeric NTSTATUS."""
+    if type(error).__name__ == "SMBResponseException":
+        category = "SMB_STATUS"
+    elif isinstance(error, (OSError, ConnectionError, TimeoutError)):
+        category = "TRANSPORT"
+    elif isinstance(error, (AttributeError, ImportError, TypeError)):
+        category = "LIBRARY_API"
+    elif isinstance(error, (RuntimeError, ValueError)):
+        category = "VALIDATION"
+    else:
+        category = "OTHER"
     try:
+        status = getattr(error, "status", None)
+    except Exception:
+        status = None
+    code = (f"0x{status:08X}" if type(status) is int and
+            0 <= status <= 0xFFFFFFFF else "NO_STATUS")
+    return category, code
+
+
+def safe_diagnostic(phase, error):
+    label, status = safe_error_label(error)
+    return ("SMB_PROBE_DIAGNOSTIC",
+            phase if phase in SAFE_PHASES else "PRECHECK",
+            label, status)
+
+
+def local_api_preflight():
+    """Only inspect the installed library; no network or credentials."""
+    verify_smbprotocol_version()
+    from smbprotocol.connection import Connection
+    from smbprotocol.exceptions import SMBResponseException
+    from smbprotocol.header import NtStatus
+    from smbprotocol.open import (
+        CreateDisposition, CreateOptions, FileAttributes,
+        ImpersonationLevel, Open, ShareAccess,
+    )
+    from smbprotocol.session import Session
+    from smbprotocol.tree import TreeConnect
+
+    for owner, name in (
+        (Connection, "connect"), (Connection, "disconnect"),
+        (Session, "connect"), (TreeConnect, "connect"),
+        (Open, "create"), (Open, "close"),
+    ):
+        method = getattr(owner, name, None)
+        demand(callable(method))
+        inspect.signature(method)
+    for owner, name in (
+        (NtStatus, "STATUS_ACCESS_DENIED"),
+        (CreateDisposition, "FILE_OPEN"),
+        (CreateOptions, "FILE_DIRECTORY_FILE"),
+        (FileAttributes, "FILE_ATTRIBUTE_DIRECTORY"),
+        (ImpersonationLevel, "Impersonation"),
+        (ShareAccess, "FILE_SHARE_READ"),
+        (ShareAccess, "FILE_SHARE_WRITE"),
+        (ShareAccess, "FILE_SHARE_DELETE"),
+    ):
+        demand(getattr(owner, name, None) is not None)
+    demand(issubclass(SMBResponseException, Exception))
+    return True
+
+
+def execute(server, site, username):
+    phase = "PRECHECK"
+    connection = None
+    password = None
+    try:
+        plan = validate_site(server, site, username)
+        phase = "IMPORTS"
+        local_api_preflight()
         from smbprotocol.connection import Connection
         from smbprotocol.exceptions import SMBResponseException
         from smbprotocol.header import NtStatus
@@ -90,22 +171,23 @@ def execute(server, site, username):
         )
         from smbprotocol.session import Session
         from smbprotocol.tree import TreeConnect
-    except ImportError:
-        raise RuntimeError("SMBPROTOCOL_LIBRARY_UNAVAILABLE") from None
 
-    password = getpass.getpass("SMB password (not logged): ")
-    demand(bool(password))
-    connection = Connection(uuid.uuid4(), server, 445)
-    try:
+        phase = "PASSWORD_INPUT"
+        password = getpass.getpass("SMB password (not logged): ")
+        demand(bool(password))
+        phase = "CONNECT"
+        connection = Connection(uuid.uuid4(), server, 445)
         connection.connect(timeout=15)
+        phase = "SESSION_SETUP"
         session = Session(connection, username, password,
                           require_encryption=True)
         session.connect()
+        phase = "TREE_CONNECT"
         tree = TreeConnect(session, "\\\\" + server + "\\" + site)
         tree.connect()
-        # Verify the requested SMB share is actually accessible before
-        # interpreting denied protected child opens as authorization proof.
-        # READ_ATTRIBUTES request is a no-write FILE_OPEN on the share root.
+        # Verify this SMB identity can open the share root before
+        # treating denied accesses under it as a security control.
+        phase = "SHARE_ROOT_OPEN"
         root = Open(tree, "")
         root_opened = False
         try:
@@ -119,9 +201,12 @@ def execute(server, site, username):
             root_opened = True
         finally:
             if root_opened:
+                phase = "SHARE_ROOT_CLOSE"
                 root.close()
+
         outcomes = []
         for path, access, label in plan:
+            phase = label + "_OPEN"
             handle = Open(tree, path)
             error = None
             handle_opened = False
@@ -139,14 +224,25 @@ def execute(server, site, username):
                 error = exc
             finally:
                 if handle_opened:
+                    phase = label + "_CLOSE"
                     handle.close()
             verdict = classify_smb_result(error, NtStatus.STATUS_ACCESS_DENIED)
             outcomes.append((label, verdict))
             print("SMB2_ACCESS_INTENT", site, label, verdict, flush=True)
+        phase = "NEGATIVE_VERDICT"
         demand(all(outcome == "DENIED" for _, outcome in outcomes))
+    except Exception as exc:
+        print(*safe_diagnostic(phase, exc), file=sys.stderr, flush=True)
+        raise RuntimeError("SMB_NEGATIVE_ACCESS_PROBE_BLOCKED") from None
     finally:
         password = None
-        connection.disconnect(True)
+        if connection is not None:
+            try:
+                connection.disconnect(True)
+            except Exception as exc:
+                print(*safe_diagnostic("TEARDOWN", exc),
+                      file=sys.stderr, flush=True)
+                raise RuntimeError("SMB_NEGATIVE_ACCESS_PROBE_BLOCKED") from None
     print("ONE_AUTHENTICATED_SMB_IDENTITY_DENIED_ALL_CHECKED_INTENTS")
     print("NO_SMB_MUTATING_REQUESTS_SENT")
     print("NO_NAS_FILES_CHANGED")
@@ -155,11 +251,18 @@ def execute(server, site, username):
 
 def main(argv=None):
     parser = argparse.ArgumentParser()
-    parser.add_argument("--server", required=True)
-    parser.add_argument("--site-share", required=True,
-                        choices=sorted(SITE_SHARES))
-    parser.add_argument("--username", required=True)
+    parser.add_argument("--local-api-check", action="store_true")
+    parser.add_argument("--server")
+    parser.add_argument("--site-share", choices=sorted(SITE_SHARES))
+    parser.add_argument("--username")
     opts = parser.parse_args(argv)
+    if opts.local_api_check:
+        demand(not any((opts.server, opts.site_share, opts.username)))
+        local_api_preflight()
+        print("SMBPROTOCOL_LOCAL_API_CHECK_OK")
+        print("NO_SMB_CONNECTION_ATTEMPTED")
+        return
+    demand(all((opts.server, opts.site_share, opts.username)))
     execute(opts.server, opts.site_share, opts.username)
 
 
