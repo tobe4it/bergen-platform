@@ -70,9 +70,6 @@ class AutomaticGroupCandidateTests(unittest.TestCase):
         for name in ("Privat/thomas/subdir/x.pdf", "Familie/../x.pdf",
                      "Familie/.hidden.pdf", "Other/x.pdf",
                      "Familie/x.txt", "Familie/x\\evil.pdf"):
-            if name == "Familie/../x.pdf":
-                # This test intentionally has a directory traversal component.
-                pass
             with self.subTest(name=name):
                 with self.assertRaises(ValueError):
                     selector.choose(report([name]))
