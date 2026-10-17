@@ -814,3 +814,54 @@ Do not rerun the live ACL audit until all 733 tests and Ansible
 `--syntax-check` pass. Archive moves, purge and promotion to
 `main` remain unauthorized.
 
+### 2026-10-17 first successful full protected archive DSM/POSIX ACL audit
+
+Operator's full live execution of
+`ansible/playbooks/audit-paperless-synology-archive-entry-protection.yml`
+completed after the fixed Linux-mode parser and YAML acceptance
+(`733` offline Paperless tests passed; playbook syntax check passed):
+
+```text
+AUDITED_ACTIVE_ARCHIVE_PARENT homes SITE_ROOT ACE_COUNT 3
+AUDITED_ACTIVE_ARCHIVE_PARENT homes PROTECTED_ROOT POSIX_0700_LINUX_MODE
+AUDITED_ACTIVE_ARCHIVE_PARENT homes PROTECTED_INTERMEDIATE POSIX_0700_LINUX_MODE
+AUDITED_ACTIVE_ARCHIVE_PARENT homes PROTECTED_SCOPE POSIX_0700_LINUX_MODE
+AUDITED_ACTIVE_ARCHIVE_PARENT homes PROTECTED_SCOPE POSIX_0700_LINUX_MODE
+AUDITED_ACTIVE_ARCHIVE_PARENT paperless-scan SITE_ROOT ACE_COUNT 4
+AUDITED_ACTIVE_ARCHIVE_PARENT paperless-scan PROTECTED_ROOT POSIX_0700_LINUX_MODE
+AUDITED_ACTIVE_ARCHIVE_PARENT paperless-scan PROTECTED_SCOPE POSIX_0700_LINUX_MODE
+AUDITED_ACTIVE_ARCHIVE_PARENT paperless-scan PROTECTED_SCOPE POSIX_0700_LINUX_MODE
+AUDITED_ACTIVE_ARCHIVE_PARENT paperless-scan ARCHIVE_MONTH POSIX_0700_LINUX_MODE
+NATIVE_SITE_ROOT_ACLS_VERIFIED 2
+POSIX_0700_ARCHIVE_PARENTS_VERIFIED 8
+ACTIVE_PROTECTED_ARCHIVE_PARENTS_AUDITED 10
+POTENTIAL_NATIVE_DELETE_GRANTS 0
+ARCHIVE_ENTRY_PROTECTION_NEEDS_EFFECTIVE_TEST
+DSM_SMB_EFFECTIVE_RENAME_NOT_TESTED
+ARCHIVE_COMMIT_NOT_AUTHORIZED
+NO_FILES_CHANGED
+```
+
+Ansible: `localhost ok=4 changed=0 unreachable=0 failed=0 skipped=0`.
+Native DSM ACEs were parsed at both site roots; each of the eight
+protected inner archive directories, including the existing group
+archive month directory, was verified as owned by `paperless-sync`,
+POSIX mode `0700` and reporting the narrowly permitted native
+`It's Linux mode` response. No dangerous nonadministrator native
+delete grants were detected under the implemented static classification.
+
+**This is only a successful static ACL/POSIX audit.** It does not
+prove nonadministrative SMB sessions cannot rename/delete the protected
+archive directory entry or read archive PDFs. Effective Samba/DSM
+negative tests, isolated original recovery and independent off-NAS
+backup+restore evidence remain outstanding. Successful completion
+does not enable any additional original relocation, batch operation,
+expiry/purge or merging Paperless into `main`.
+
+The last independent archive lifecycle count prior to this audit was
+`NAS_SENT_VERIFIED 21`, `NAS_ARCHIVED_VERIFIED 1`,
+`NAS_CURRENT_ORIGINALS_VERIFIED 22`,
+`PAPERLESS_LIVE_IMPORTED 22`, and exactly two documented user
+deletions. This ACL-only run did not independently recalculate
+those lifecycle counts; retain that evidence as a separate audit.
+
