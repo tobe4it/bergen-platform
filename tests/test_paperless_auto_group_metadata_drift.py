@@ -95,6 +95,9 @@ class GroupSenderMetadataTests(unittest.TestCase):
         self.assertIn("verified_metadata_only_sender_drift", code)
         self.assertIn('print("TRACKED_METADATA_DRIFT", scope)', code)
         self.assertIn("scope in (\"Familie\", \"Eltern\")", code)
+        self.assertLess(
+            code.index("if verified_metadata_only_sender_drift(", code.index("def scan(")),
+            code.index("from synology_group_collision_alias import resolve_under_sender_lock"))
         self.assertNotIn("write_receipt(receipt_file, old)", code)
 
     def test_automation_still_requires_full_lifecycle_pre_and_post(self):
