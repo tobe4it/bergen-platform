@@ -1,6 +1,7 @@
 ---
-# Read-only Django permissions inventory for active Paperless users, groups,
-# and representative scanned documents. No ACL changes, no credentials printed.
+# Read-only Paperless permission inventory and in-process API authorization tests.
+# No mutations, secrets, document bodies or original filenames are printed.
+# APIClient.force_authenticate tests DRF authorization, NOT the OIDC/proxy boundary.
 - name: Audit effective Paperless permissions
   hosts: venombox
   become: true
@@ -14,7 +15,7 @@
       changed_when: false
       failed_when: paperless_audit_hostname.stdout | trim != 'bergen-paperless'
 
-    - name: Inspect model permissions, active users and object grants
+    - name: Inspect Paperless permissions and test in-process API access
       ansible.builtin.command:
         argv:
           - pct
@@ -32,6 +33,7 @@
             from django.contrib.auth.models import Group, User
             from documents.models import Document
             from guardian.shortcuts import get_groups_with_perms, get_users_with_perms
+            from rest_framework.test import APIClient
 
             relevant = {
                 "add_document", "change_document", "delete_document", "view_document",
@@ -58,21 +60,131 @@
                 )
                 print("GROUP", group.name, relevant_perms(perms))
 
-            print("=== REPRESENTATIVE DOCUMENT OBJECT GRANTS ===")
-            for doc in Document.objects.filter(pk__in=[10, 11, 12, 13]).order_by("pk"):
-                owner = doc.owner.username if doc.owner else "<none>"
-                print("DOC", doc.pk, "owner=", owner, "original=", doc.original_filename)
-                groups = get_groups_with_perms(doc, attach_perms=True)
-                users = get_users_with_perms(doc, attach_perms=True)
+            print("=== DOCUMENT OBJECT GRANTS (NO FILENAMES) ===")
+            documents = {doc.pk: doc for doc in Document.objects.filter(pk__in=[10, 11, 12, 13])}
+            for doc_id in [10, 11, 12, 13]:
+                doc = documents.get(doc_id)
+                if doc is None:
+                    print("MISSING DOCUMENT", doc_id)
+                    continue
+                print("DOC", doc.pk, "owner=", doc.owner.username if doc.owner else "<none>")
                 print("  OBJECT_GROUPS", {
-                    group.name: sorted(perms) for group, perms in groups.items()
+                    group.name: sorted(perms)
+                    for group, perms in get_groups_with_perms(doc, attach_perms=True).items()
                 })
                 print("  OBJECT_USERS", {
-                    user.username: sorted(perms) for user, perms in users.items()
+                    user.username: sorted(perms)
+                    for user, perms in get_users_with_perms(doc, attach_perms=True).items()
                 })
+
+            # Expected policy for the CURRENT four representative imported documents.
+            # Negative checks must never silently turn into SKIP/PASS.
+            cases = [
+                ("private_10_owner", "thomas", 10, True),
+                ("private_10_spouse", "nadja", 10, False),
+                ("private_10_unrelated", "thomas3", 10, False),
+                ("private_11_owner", "thomas", 11, True),
+                ("private_11_spouse", "nadja", 11, False),
+                ("private_11_unrelated", "thomas3", 11, False),
+                ("parents_12_thomas", "thomas", 12, True),
+                ("parents_12_nadja", "nadja", 12, True),
+                ("parents_12_unrelated", "thomas3", 12, False),
+                ("family_13_thomas", "thomas", 13, True),
+                ("family_13_nadja", "nadja", 13, True),
+                ("family_13_unrelated", "thomas3", 13, False),
+            ]
+            failures = 0
+            print("=== IN-PROCESS DRF API AUTHORIZATION: LIST / DETAIL / DOWNLOAD ===")
+            users = {}
+            for username in sorted({case[1] for case in cases}):
+                try:
+                    user = User.objects.get(username=username, is_active=True, is_superuser=False)
+                    users[username] = user
+                except (User.DoesNotExist, User.MultipleObjectsReturned):
+                    print("FAIL required active non-superuser identity:", username)
+                    failures += 1
+
+            for label, username, doc_id, should_allow in cases:
+                if username not in users or doc_id not in documents:
+                    print("FAIL", label, "missing identity or document")
+                    failures += 1
+                    continue
+                client = APIClient()
+                client.force_authenticate(user=users[username])
+                # An in-process request; never use or log API tokens.
+                common = {"HTTP_HOST": "127.0.0.1"}
+                for operation, path in [
+                    ("detail", "/api/documents/%d/" % doc_id),
+                    ("download", "/api/documents/%d/download/" % doc_id),
+                ]:
+                    try:
+                        response = client.get(path, **common)
+                        status = response.status_code
+                        response.close()
+                        actual_allow = status == 200
+                        valid_status = status == 200 if should_allow else status in (403, 404)
+                        passed = actual_allow == should_allow and valid_status
+                        print("PASS" if passed else "FAIL", label, operation, "HTTP", status)
+                        if not passed:
+                            failures += 1
+                    except Exception:
+                        print("FAIL", label, operation, "request exception (details suppressed)")
+                        failures += 1
+
+            for username, user in users.items():
+                client = APIClient()
+                client.force_authenticate(user=user)
+                try:
+                    response = client.get("/api/documents/?page_size=1000", HTTP_HOST="127.0.0.1")
+                    status = response.status_code
+                    data = getattr(response, "data", None)
+                    response.close()
+                    scoped_cases = [
+                        case for case in cases if case[1] == username
+                    ]
+                    # A user with no view_document permission may be denied
+                    # access to the entire collection. This is a valid
+                    # negative outcome ONLY if all expected cases are denied.
+                    if status in (403, 404) and all(not case[3] for case in scoped_cases):
+                        for label, _, _, _ in scoped_cases:
+                            print("PASS", label, "list", "HTTP", status, "collection denied")
+                        continue
+                    if status != 200 or not isinstance(data, dict) or not isinstance(data.get("results"), list):
+                        print("FAIL", username, "list", "HTTP", status, "unexpected response")
+                        failures += 1
+                        continue
+                    results = data["results"]
+                    if data.get("next") or data.get("count") != len(results):
+                        raise ValueError("incomplete list pagination")
+                    visible = {int(item["id"]) for item in results}
+                    for label, case_user, doc_id, should_allow in cases:
+                        if case_user != username:
+                            continue
+                        passed = (doc_id in visible) == should_allow
+                        print("PASS" if passed else "FAIL", label, "list", "visible=", doc_id in visible)
+                        if not passed:
+                            failures += 1
+                except Exception:
+                    print("FAIL", username, "list pagination/response error (details suppressed)")
+                    failures += 1
+
+            print("NOT_COVERED: real OIDC login, reverse proxy, child identity, search, previews, AI/RAG")
+            print("AUDIT_RESULT", "PASS" if failures == 0 else "FAIL", "failures=", failures)
+            if failures:
+                raise SystemExit(1)
       register: paperless_permission_audit
       changed_when: false
+      failed_when: false
 
     - name: Show Paperless access report
       ansible.builtin.debug:
         var: paperless_permission_audit.stdout_lines
+
+    - name: Fail closed on missing or unexpected effective access
+      ansible.builtin.assert:
+        that:
+          - paperless_permission_audit.rc == 0
+          - "'AUDIT_RESULT PASS failures= 0' in paperless_permission_audit.stdout"
+        fail_msg: >-
+          Paperless effective-access audit failed or was incomplete.
+          Inspect the redacted report above; do not enable AI document access.
