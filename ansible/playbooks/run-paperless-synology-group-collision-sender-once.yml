@@ -115,6 +115,43 @@
           - "AUTO_GROUP_ARCHIVE_TIMER_NOT_RESTARTED=true"
           - "NO_NAS_ARCHIVE_OR_PURGE_AUTHORIZED=true"
 
+    - name: Classify allowlisted NAS sender blockers without exposing scan names
+      ansible.builtin.set_fact:
+        sender_once_group_rejected_count: >-
+          {{ sender_once_result.stderr_lines |
+             select('match', '^REJECTED (Familie|Eltern)/') |
+             list | length }}
+        sender_once_private_rejected_count: >-
+          {{ sender_once_result.stderr_lines |
+             select('match', '^REJECTED Privat/(thomas|nadja)/') |
+             list | length }}
+        sender_once_group_error_codes: >-
+          {{ sender_once_result.stderr |
+             regex_findall('\b(UNREVIEWED_COLLISION_HELPER|GROUP_COLLISION_SCOPE_OR_USER_INVALID|INVALID_PREVIOUS_SOURCE_SIGNATURE|NO_SOURCE_COLLISION_TO_RESOLVE|OLD_INODE_STILL_ACTIVE_REQUIRES_REVIEW|PRIOR_RECEIPT_NOT_SENT|NAME_REUSED_BEFORE_VERIFIED_ARCHIVE|PRIOR_ARCHIVE_RECEIPT_MISMATCH|PRIOR_RECEIVER_RECEIPT_MISMATCH|PRIOR_ARCHIVE_SCOPE_MISMATCH|UNSAFE_ARCHIVE_DIRECTORY|UNEXPECTED_ARCHIVE_JOURNAL_ENTRY|INCOMPLETE_ARCHIVE_JOURNAL|SENDER_RECEIPT_MISMATCH|ARCHIVED_INODE_OR_SIGNATURE_MISMATCH|COLLISION_SOURCE_CHANGED_DURING_RENAME|COLLISION_RENAMED_INODE_CHANGED|COLLISION_RENAMED_PDF_CHANGED|COLLISION_ALIAS_HAS_RECEIPT|COLLISION_ALIAS_ALREADY_TRACKED|MANUAL_REVIEW_SOURCE_CHANGED|SCHEDULE_GATE_UNSAFE|RSYNC_NOT_CONFIRMED_NEW_FILE|UNSAFE_SOURCE_DIR|UNSAFE_SOURCE)\b') |
+             unique | list | sort }}
+        sender_once_traceback_classes: >-
+          {{ sender_once_result.stderr |
+             regex_findall('(?m)^(ImportError|ModuleNotFoundError|PermissionError|FileNotFoundError|RuntimeError|ValueError|TypeError|NameError|SyntaxError|OSError|TimeoutError):') |
+             unique | list | sort }}
+        sender_once_errno: >-
+          {{ sender_once_result.stderr |
+             regex_findall('\[Errno (1|2|5|11|13|17|18|22|30|95)\]') |
+             unique | list | sort }}
+        sender_once_any_traceback: >-
+          {{ 'Traceback (most recent call last):' in sender_once_result.stderr }}
+      no_log: true
+
+    - name: Publish count-only NAS block classifications without filenames or hashes
+      ansible.builtin.debug:
+        msg:
+          - "GROUP_REJECTED_COUNT={{ sender_once_group_rejected_count }}"
+          - "PRIVATE_REJECTED_COUNT={{ sender_once_private_rejected_count }}"
+          - "GROUP_KNOWN_BLOCK_CODES={{ sender_once_group_error_codes }}"
+          - "PYTHON_TRACEBACK_CLASSES={{ sender_once_traceback_classes }}"
+          - "PYTHON_TRACEBACK_DETECTED={{ sender_once_any_traceback }}"
+          - "OS_ERRNO_ALLOWLIST={{ sender_once_errno }}"
+          - "EXACT_ERROR_DETAILS_WITHHELD=true"
+
     - name: Explicitly distinguish partial progress from successful sender pass
       ansible.builtin.debug:
         msg: >-
