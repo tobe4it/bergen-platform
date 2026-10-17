@@ -55,7 +55,7 @@ def classify(sig, saved, hashed, expected):
         return "MATCH"
     if sig[:3] == saved[:3]:
         return "SAME_INODE_METADATA_DRIFT"
-    raise RuntimeError("SOURCE_INCARCERATION_MISMATCH")
+    raise RuntimeError("SOURCE_INCARNATION_MISMATCH")
 
 
 def collect(parent):
