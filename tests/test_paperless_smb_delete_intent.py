@@ -63,6 +63,30 @@ class SMBDeleteIntentTests(unittest.TestCase):
         self.assertIn('getpass.getpass(', code)
         self.assertIn("NO_SMB_MUTATING_REQUESTS_SENT", code)
 
+    def test_real_smb_close_sent_and_pin_checked_before_password_prompt(self):
+        code = MODULE.read_text()
+        self.assertIn("root.close()", code)
+        self.assertIn("handle.close()", code)
+        self.assertNotIn("close(False)", code)
+        self.assertIn('installed == "1.17.0"', code)
+        self.assertLess(code.index("verify_smbprotocol_version()", 
+                                   code.index("def execute(")),
+                        code.index("getpass.getpass(", code.index("def execute(")))
+        self.assertIn("require_encryption=True", code)
+
+    def test_version_gate_missing_and_wrong_version_fails_closed(self):
+        from importlib.metadata import PackageNotFoundError
+        from unittest.mock import patch
+        with patch.object(m, "version", return_value="1.17.0"):
+            self.assertEqual(m.verify_smbprotocol_version(), "1.17.0")
+        with patch.object(m, "version", return_value="1.16.1"):
+            with self.assertRaises(RuntimeError):
+                m.verify_smbprotocol_version()
+        with patch.object(m, "version", side_effect=PackageNotFoundError):
+            with self.assertRaisesRegex(
+                    RuntimeError, "SMBPROTOCOL_LIBRARY_UNAVAILABLE"):
+                m.verify_smbprotocol_version()
+
     def test_syntax_and_only_documented_probes(self):
         root = ast.parse(MODULE.read_text(), filename=str(MODULE))
         self.assertIsInstance(root, ast.Module)
