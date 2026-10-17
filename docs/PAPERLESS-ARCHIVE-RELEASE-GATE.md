@@ -989,3 +989,45 @@ permissions for all relevant private/group identities, and deliberate
 separate approval of any expiring-purge implementation. PR #81 remains
 a draft until all required criteria are proven.
 
+
+### 2026-10-17 SMB2 static share-to-archive-root preflight
+
+After the isolated archived PDF restore accepted and the first 748
+offline Paperless tests succeeded, a strict **read-only share mapping**
+audit was added before any SMB2 authorization probe:
+`ansible/playbooks/audit-paperless-synology-smb-share-mapping.yml`,
+`ansible/files/paperless/audit_synology_smb_share_mapping.py`,
+`tests/test_paperless_smb_share_mapping.py`.
+
+Under existing NAS root SSH transport the audit runs **only**
+`synoshare --get homes` and `synoshare --get paperless-scan`, parses a
+single exact Path field from each, and insists on
+`/volume1/homes` and `/volume1/paperless-scan`, respectively.
+It separately checks that both real paths are root-owned directory
+site roots, never edits any DSM share, prints no private raw
+`synoshare` output and fails closed for unrecognized share output.
+It also read-only reports whether the optional local Python
+`smbprotocol` module is installed. The mapping preflight only
+verifies DSM's configured share path, **not** a logged-in user's
+effective SMB home redirection/authorization.
+
+After the new synthetic Paperless suite and Ansible syntax check
+pass on `bp-controller`, run the mapping preflight read-only with
+the same private ignored inventory and vault files. An acceptance
+requires exactly:
+`NAS_SMB_SHARE_REAL_ROOT_VERIFIED homes`,
+`NAS_SMB_SHARE_REAL_ROOT_VERIFIED paperless-scan`,
+`NAS_SMB_SHARE_MAPPING_VERIFIED 2`,
+`SMB_NEGATIVE_RIGHTS_NOT_TESTED`, and `NO_FILES_CHANGED`.
+Do not treat the mapping alone as proof of delete denial.
+A real SMB identity must be explicitly approved as a normal
+nonadministrator account; credentials must never enter Git or Ansible.
+The initial `smbprotocol` implementation must first be reviewed for
+the effective SMB topology and dependency; it is not automatically run
+by mapping or any existing playbook.
+
+Other gates still missing: actual negative effective SMB access (one
+user is not universal proof), independent post-canary NAS+LXC
+backup/restore, and any later destructive expiry/purge. There is
+no new archive move, merge or purge authorization.
+
