@@ -142,3 +142,45 @@
               else ['SOURCE_DETAILS_UNAVAILABLE']
             )
           }}
+
+    - name: Independently verify prior archived originals for reused group names without NAS changes
+      ansible.builtin.command:
+        argv:
+          - ssh
+          - -T
+          - -o
+          - BatchMode=yes
+          - -o
+          - StrictHostKeyChecking=yes
+          - -o
+          - ConnectTimeout=15
+          - "{{ synology_admin }}"
+          - >-
+            sudo -n -u {{ synology_config.sync_user | quote }}
+            /usr/bin/python3 - {{ synology_config.state_parent | quote }}
+        stdin: |
+          import base64
+          import sys
+          import types
+          module = types.ModuleType("audit_synology_completed_archive_moves")
+          exec(compile(base64.b64decode("{{ lookup('ansible.builtin.file', playbook_dir + '/../files/paperless/audit_synology_completed_archive_moves.py', rstrip=False) | b64encode }}"), "<reviewed-auditor>", "exec"), module.__dict__)
+          sys.modules[module.__name__] = module
+          {{ lookup('ansible.builtin.file', playbook_dir + '/../files/paperless/diagnose_synology_group_collision_archive_proof.py', rstrip=False) | indent(10, false) }}
+      delegate_to: localhost
+      become: false
+      register: collision_archive_proof_diagnostic
+      failed_when: false
+      changed_when: false
+      no_log: true
+
+    - name: Show only aggregate proof verification markers, never a document identity
+      ansible.builtin.debug:
+        msg: >-
+          {{
+            (
+              collision_archive_proof_diagnostic.stdout_lines |
+              select('match', '^GROUP_ARCHIVE_PROOF (MATCH|NEW_INODE_PRIOR_ARCHIVE_VERIFIED|NEW_INODE_PRIOR_ARCHIVE_UNVERIFIED|SAME_INODE_SAME_BYTES_DRIFT|SAME_INODE_CONTENT_CHANGED_BLOCKED|UNSTABLE_SOURCE|NO_SENT_RECEIPT|RECEIPT_INVALID) [0-9]+$') | list
+            )
+            if collision_archive_proof_diagnostic.rc == 0
+            else ['GROUP_ARCHIVE_PROOF_UNAVAILABLE']
+          }}
