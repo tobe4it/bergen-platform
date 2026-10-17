@@ -1,5 +1,6 @@
 """Offline safety requirements for read-only archived-name reuse preflight."""
 import ast
+import base64
 import importlib.util
 import os
 import tempfile
@@ -8,6 +9,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import yaml
+from jinja2 import Environment
 
 ROOT = Path(__file__).resolve().parents[1]
 PROBE = ROOT / "ansible/files/paperless/diagnose_synology_group_collision_archive_proof.py"
@@ -81,6 +83,31 @@ class GroupCollisionArchiveProofTests(unittest.TestCase):
         self.assertIn("diagnose_synology_group_collision_archive_proof.py", stdin)
         self.assertFalse("mkdir " in stdin)
         self.assertTrue(AUDITOR.is_file())
+
+    def test_an_actual_rendered_nas_stdin_is_valid_python(self):
+        # YAML strips its block indentation before Ansible renders lookup().
+        # Applying Jinja's indent() to the injected Python added indentation
+        # only to subsequent lines and caused the production probe to fail.
+        play = yaml.safe_load(PLAYBOOK.read_text())[0]
+        task = next(t for t in play["tasks"]
+                    if t.get("register") == "collision_archive_proof_diagnostic")
+        source = task["ansible.builtin.command"]["stdin"]
+        env = Environment()
+        env.filters["b64encode"] = lambda s: base64.b64encode(
+            s.encode("utf-8")).decode("ascii")
+        def file_lookup(name, path, rstrip=True):
+            self.assertEqual(name, "ansible.builtin.file")
+            value = Path(path).read_text(encoding="utf-8")
+            return value.rstrip() if rstrip else value
+        rendered = env.from_string(source).render(
+            lookup=file_lookup,
+            playbook_dir=str(PLAYBOOK.parent),
+        )
+        self.assertIn("\\n#!/usr/bin/env python3\\n", rendered)
+        self.assertIn("\\ndef prior_archive_verified(", rendered)
+        self.assertNotIn("\\n          def prior_archive_verified(", rendered)
+        self.assertNotIn("{{", rendered)
+        compile(rendered, "<offline-nas-stdin>", "exec")
 
     def test_only_allowlisted_counts_are_displayed(self):
         raw = PLAYBOOK.read_text()
