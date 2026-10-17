@@ -251,12 +251,12 @@ class SMBDeleteIntentTests(unittest.TestCase):
         from unittest.mock import patch
         calls = []
         with patch.object(m, "negotiate_preflight",
-                          side_effect=lambda server: calls.append(server)):
+                          side_effect=lambda server, port: calls.append((server, port))):
             with patch.object(m.getpass, "getpass",
                               side_effect=AssertionError("No password")):
                 m.main(["--negotiate-preflight", "--server",
                         "ldap.thebergens.net"])
-        self.assertEqual(calls, ["ldap.thebergens.net"])
+        self.assertEqual(calls, [("ldap.thebergens.net", 445)])
         for args in (
             ["--negotiate-preflight"],
             ["--negotiate-preflight", "--server", "ldap.thebergens.net",
@@ -268,6 +268,43 @@ class SMBDeleteIntentTests(unittest.TestCase):
         ):
             with self.subTest(args=args), self.assertRaises(RuntimeError):
                 m.main(args)
+
+    def test_forwarded_smb_port_is_localhost_only(self):
+        self.assertEqual(m.validate_endpoint("127.0.0.1", 1445), 1445)
+        self.assertEqual(m.validate_endpoint("192.168.6.11", 445), 445)
+        for server, port in (
+            ("192.168.6.11", 1445),
+            ("ldap.thebergens.net", 1445),
+            ("0.0.0.0", 1445),
+            ("127.0.0.1", 1446),
+            ("127.0.0.1", 0),
+            ("127.0.0.1", -1),
+            ("127.0.0.1", True),
+            ("bad/server", 445),
+        ):
+            with self.subTest(server=server, port=port):
+                with self.assertRaises(RuntimeError):
+                    m.validate_endpoint(server, port)
+
+    def test_forwarded_tcp_preflight_is_passwordless(self):
+        from unittest.mock import patch
+        from contextlib import redirect_stdout
+        from io import StringIO
+
+        class FakeSocket:
+            def __enter__(self):
+                return self
+            def __exit__(self, *args):
+                return False
+
+        with patch.object(m.socket, "create_connection",
+                          return_value=FakeSocket()) as connected:
+            with patch.object(m.getpass, "getpass",
+                              side_effect=AssertionError("No credentials")):
+                with redirect_stdout(StringIO()):
+                    m.main(["--tcp-preflight", "--server", "127.0.0.1",
+                            "--port", "1445"])
+        connected.assert_called_once_with(("127.0.0.1", 1445), timeout=5)
 
     def test_syntax_and_only_documented_probes(self):
         root = ast.parse(MODULE.read_text(), filename=str(MODULE))
