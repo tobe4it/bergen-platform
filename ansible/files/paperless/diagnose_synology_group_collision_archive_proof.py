@@ -38,12 +38,14 @@ def prior_archive_verified(state, folder, scope, name, receipt, *, move, audit):
     if (previous.get("scope") != scope or previous.get("source") != name
             or previous.get("sender_receipt") != key + ".json"
             or previous.get("sha256") != receipt.get("sha256")
-            or previous.get("signature") != receipt.get("signature")
+            or previous.get("sender_signature", previous.get("signature")) != receipt.get("signature")
             or previous.get("archive_site") != move.SITE_BY_SCOPE[scope]
             or previous.get("archive_name") != key + ".pdf"):
         return False
     saved = move._read_receipt(state / (key + ".json"),
-                               scope, name, previous["signature"], previous["sha256"])
+                               scope, name,
+                               previous.get("sender_signature", previous["signature"]),
+                               previous["sha256"])
     if saved.get("destination") != receipt.get("destination"):
         return False
     protected = move._validated_protected_scope(folder, scope, os.geteuid())
