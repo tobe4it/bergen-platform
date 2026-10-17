@@ -1,0 +1,44 @@
+---
+# One opt-in staging entry point for the group metadata-reconciliation code.
+# Keeps the live systemd archive timer inactive; NEVER moves a source PDF,
+# creates a release gate, rewrites a receipt, or purges an archive.
+# Worker is installed first, then the auditor+alias helper+scheduled sender.
+- name: Require disabled group archive automation before metadata update
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  tasks:
+    - name: Require explicit operator authorization for code-only staging
+      ansible.builtin.assert:
+        that:
+          - (paperless_group_metadata_stage | default(false)) is sameas true
+          - not ansible_check_mode
+          - synology_admin is defined
+          - synology_config is defined
+          - synology_config.schema_version == 1
+          - synology_config.sync_user == 'paperless-sync'
+        fail_msg: "GROUP_METADATA_STAGING_NOT_AUTHORIZED"
+
+    - name: Check automatic archive timer remains disabled
+      ansible.builtin.command:
+        argv:
+          - systemctl
+          - is-active
+          - bergen-paperless-group-auto-v1.timer
+      register: group_metadata_timer
+      changed_when: false
+      failed_when: false
+
+    - name: Refuse any code changes while group archive timer is active
+      ansible.builtin.assert:
+        that:
+          - (group_metadata_timer.stdout | trim) != 'active'
+        fail_msg: "DISABLE_GROUP_AUTO_TIMER_BEFORE_METADATA_UPDATE"
+
+# Existing reviewed root-owned installation handles hash verification,
+# no symlinks, parent permissions, absent gates and atomically staged code.
+- import_playbook: stage-paperless-synology-archive-worker.yml
+
+- import_playbook: stage-paperless-synology-group-collision-sender.yml
+  vars:
+    paperless_group_collision_stage: true
