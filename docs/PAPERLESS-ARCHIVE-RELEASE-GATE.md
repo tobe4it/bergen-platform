@@ -1516,3 +1516,50 @@ journals, backup gates or the Paperless `main` branch on the strength
 of this diagnostic. Independent post-canary off-NAS backup+restore,
 effective SMB permissions and further release criteria remain open.
 
+
+### 2026-10-17 Paperless backup location confirmed: up-to-date LXC, NAS NFS failure domain
+
+Operator validated the simplified feature branch with **749/749** tests.
+A vault-authenticated read-only `venombox` inventory showed an active
+`bergen-synology-backup` Proxmox NFS storage, whose source is
+`192.168.2.145:/volume1/bergen-proxmox-backup`, mounted at
+`/mnt/pve/bergen-synology-backup`. Paperless LXC 126 is on
+`local-zfs`: `rootfs` 32 GiB and `mp0`
+`/srv/bergen-paperless` 100 GiB with `backup=1`.
+Existing `vzdump-lxc-126` archives are dated
+2026-10-15 03:00, 2026-10-16 03:00 and
+**2026-10-17 03:00:12**, the last one being after the
+2026-10-16 one-PDF archive canary. This proves a
+post-canary LXC archive **exists**; neither its per-volume
+backup job log nor its restore was validated by this listing.
+
+Critical dependency: the NFS backup target resides on
+the SAME MountainCloud Synology that holds the protected
+NAS originals, archive PDFs and NAS journal state. The
+LXC `vzdump` alone cannot establish an independently
+restorable complete Paperless + NAS originals and journal
+set after a physical Synology failure.
+
+Efficient next step is to reuse existing `venombox`
+local Proxmox `local` directory storage, which currently
+shows approximately 1.8 TiB available, after confirming
+its exact `pvesm config local` path and verifying available
+space. Make a checksummed copy of the 17 Oct Paperless
+`vzdump` from NAS NFS to this already-configured
+`venombox` local storage. This secures a second
+failure-domain copy of the LXC backup, although not
+independent of `venombox` itself. An earlier isolated
+LXC restore on temporary VMID 901 is useful method
+evidence, but does not certify the Oct 17 backup.
+Then use the existing Synology backup procedure for
+the two active protected archive sites and private
+NAS state/journals, verifying actual covered paths
+and an independent restore before authorizing
+destructive expiry/purge. Avoid new SMB clients,
+SSH tunneling or custom backup infrastructure.
+
+All current source/archive, expiry/purge and `main`
+release gates stay blocked. The limited prior
+`smbclient` directory-list denial must not be
+misreported as a universal effective delete denial.
+
