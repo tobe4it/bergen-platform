@@ -48,4 +48,8 @@
           - "'DSM_SMB_EFFECTIVE_RENAME_NOT_TESTED' in archive_entry_audit.stdout_lines"
           - "'ARCHIVE_COMMIT_NOT_AUTHORIZED' in archive_entry_audit.stdout_lines"
           - "'ACTIVE_PROTECTED_ARCHIVE_PARENTS_AUDITED ' in archive_entry_audit.stdout"
+          - "'NATIVE_SITE_ROOT_ACLS_VERIFIED 2' in archive_entry_audit.stdout_lines"
+          - "(archive_entry_audit.stdout_lines | select('match', '^POSIX_0700_ARCHIVE_PARENTS_VERIFIED [0-9]+
+        fail_msg: "Active protected archive has unverified DSM native ACL or potentially destructive non-admin grants; no additional PDF moves authorized."
+) | list | length) == 1"
         fail_msg: "Active protected archive has unverified DSM native ACL or potentially destructive non-admin grants; no additional PDF moves authorized."
