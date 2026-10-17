@@ -193,6 +193,82 @@ class SMBDeleteIntentTests(unittest.TestCase):
         self.assertIn("safe_exception_type(error)", source)
         self.assertNotIn("print(str(exc))", source)
 
+    def test_unauthenticated_negotiation_sends_no_creds_and_closes_socket(self):
+        from unittest.mock import patch
+        from contextlib import redirect_stdout
+        from io import StringIO
+        states = []
+        class FakeConnection:
+            def __init__(self, guid, server, port):
+                states.append(("constructed", server, port))
+            def connect(self, timeout):
+                states.append(("negotiated", timeout))
+            def disconnect(self, close):
+                states.append(("closed", close))
+        output = StringIO()
+        with patch.object(m, "local_api_preflight", return_value=True):
+            with patch.object(m.getpass, "getpass",
+                              side_effect=AssertionError("No password prompt")):
+                with redirect_stdout(output):
+                    m.negotiate_preflight(
+                        "ldap.thebergens.net",
+                        connection_factory=FakeConnection)
+        self.assertEqual(states, [
+            ("constructed", "ldap.thebergens.net", 445),
+            ("negotiated", 15), ("closed", True),
+        ])
+        self.assertEqual(output.getvalue().splitlines(), [
+            "SMB_DIALECT_NEGOTIATED",
+            "NO_SMB_AUTHENTICATION_ATTEMPTED",
+            "NO_SMB_MUTATING_REQUESTS_SENT",
+        ])
+
+    def test_unauthenticated_negotiation_error_sanitized_and_cleaned(self):
+        from unittest.mock import patch
+        from contextlib import redirect_stderr
+        from io import StringIO
+        states = []
+        class BadConnection:
+            def __init__(self, guid, server, port):
+                pass
+            def connect(self, timeout):
+                raise RuntimeError("private host SMB negotiate text")
+            def disconnect(self, close):
+                states.append(("disconnect", close))
+        err = StringIO()
+        with patch.object(m, "local_api_preflight", return_value=True):
+            with redirect_stderr(err):
+                with self.assertRaisesRegex(
+                        RuntimeError, "SMB_NEGOTIATION_PREFLIGHT_BLOCKED"):
+                    m.negotiate_preflight("ldap.thebergens.net",
+                                          connection_factory=BadConnection)
+        self.assertIn("SMB_PROBE_DIAGNOSTIC SMB_NEGOTIATE VALIDATION",
+                      err.getvalue())
+        self.assertNotIn("private", err.getvalue())
+        self.assertEqual(states, [("disconnect", True)])
+
+    def test_preflight_flags_cannot_trigger_authentication(self):
+        from unittest.mock import patch
+        calls = []
+        with patch.object(m, "negotiate_preflight",
+                          side_effect=lambda server: calls.append(server)):
+            with patch.object(m.getpass, "getpass",
+                              side_effect=AssertionError("No password")):
+                m.main(["--negotiate-preflight", "--server",
+                        "ldap.thebergens.net"])
+        self.assertEqual(calls, ["ldap.thebergens.net"])
+        for args in (
+            ["--negotiate-preflight"],
+            ["--negotiate-preflight", "--server", "ldap.thebergens.net",
+             "--username", "someone"],
+            ["--negotiate-preflight", "--server", "ldap.thebergens.net",
+             "--site-share", "homes"],
+            ["--negotiate-preflight", "--server", "ldap.thebergens.net",
+             "--tcp-preflight"],
+        ):
+            with self.subTest(args=args), self.assertRaises(RuntimeError):
+                m.main(args)
+
     def test_syntax_and_only_documented_probes(self):
         root = ast.parse(MODULE.read_text(), filename=str(MODULE))
         self.assertIsInstance(root, ast.Module)
