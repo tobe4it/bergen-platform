@@ -106,3 +106,39 @@
                 list | first | default('SENDER_ACTIVATION_GATE=UNKNOWN', true))
                if watcher_process_diagnostic.rc == 0 else 'SENDER_ACTIVATION_GATE=UNKNOWN' }}
           - "NO_FILES_CHANGED=true"
+
+    - name: Classify every v1 source mismatch by verified content versus metadata, without filenames
+      ansible.builtin.command:
+        argv:
+          - ssh
+          - -T
+          - -o
+          - BatchMode=yes
+          - -o
+          - StrictHostKeyChecking=yes
+          - -o
+          - ConnectTimeout=15
+          - "{{ synology_admin }}"
+          - >-
+            sudo -n -u {{ synology_config.sync_user | quote }}
+            /usr/bin/python3 - {{ synology_config.state_parent | quote }}
+        stdin: "{{ lookup('ansible.builtin.file', playbook_dir + '/../files/paperless/diagnose_synology_v1_receipt_mismatches.py', rstrip=False) }}"
+      delegate_to: localhost
+      become: false
+      register: source_mismatch_diagnostic
+      failed_when: false
+      changed_when: false
+      no_log: true
+
+    - name: Publish only aggregate allowlisted mismatch categories
+      ansible.builtin.debug:
+        msg: >-
+          {{
+            (
+              (source_mismatch_diagnostic.stdout_lines |
+                select('match', '^SOURCE_CLASS (GROUP|PRIVATE) (MATCH|MISSING_RECEIPT|PREPARED_RECEIPT|RECEIPT_IDENTITY_MISMATCH|METADATA_CTIME_ONLY|METADATA_MTIME_CHANGED|FILE_INODE_CHANGED|FILE_SIZE_CHANGED|CONTENT_CHANGED|CONTENT_CHANGED_SAME_STAT|UNSTABLE_DURING_CHECK|INVALID_RECEIPT) [0-9]+$') |
+                list)
+              if source_mismatch_diagnostic.rc == 0
+              else ['SOURCE_DETAILS_UNAVAILABLE']
+            )
+          }}
