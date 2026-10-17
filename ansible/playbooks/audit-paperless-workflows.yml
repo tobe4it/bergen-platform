@@ -1,0 +1,92 @@
+---
+# Read-only inventory: no changes to Paperless users, documents, workflows,
+# containers, timers, or the Synology sender.
+- name: Inspect existing Paperless import workflows before rights migration
+  hosts: venombox
+  become: true
+  gather_facts: false
+
+  tasks:
+    - name: Verify expected Paperless LXC
+      ansible.builtin.command:
+        argv: [pct, config, '126']
+      register: paperless_acl_ct
+      changed_when: false
+      failed_when: >-
+        paperless_acl_ct.rc != 0 or
+        'hostname: bergen-paperless' not in paperless_acl_ct.stdout_lines or
+        'unprivileged: 1' not in paperless_acl_ct.stdout_lines
+
+    - name: Read live workflow assignment and metadata
+      ansible.builtin.command:
+        argv:
+          - pct
+          - exec
+          - '126'
+          - --
+          - podman
+          - exec
+          - bergen-paperless
+          - python
+          - /usr/src/paperless/src/manage.py
+          - shell
+          - -c
+          - |
+            import json
+            from django.contrib.auth.models import Group, User
+            from documents.models import Workflow
+            from guardian.shortcuts import get_groups_with_perms, get_users_with_perms
+            from documents.models import Document
+
+            def names(manager):
+                return sorted(str(x) for x in manager.all())
+
+            print("=== PAPERLESS WORKFLOWS ===")
+            for workflow in Workflow.objects.all().order_by("order", "pk"):
+                print("WORKFLOW", json.dumps({
+                    "id": workflow.pk,
+                    "name": workflow.name,
+                    "enabled": workflow.enabled,
+                    "order": workflow.order,
+                }, ensure_ascii=True))
+                for trigger in workflow.triggers.all().order_by("pk"):
+                    print("  TRIGGER", json.dumps({
+                        "id": trigger.pk,
+                        "type": trigger.type,
+                        "filter_path": trigger.filter_path,
+                        "filter_filename": trigger.filter_filename,
+                        "sources": str(trigger.sources),
+                        "match": trigger.match,
+                    }, ensure_ascii=True))
+                for action in workflow.actions.all().order_by("order", "pk"):
+                    print("  ACTION", json.dumps({
+                        "id": action.pk,
+                        "type": action.type,
+                        "owner": action.assign_owner.username if action.assign_owner else None,
+                        "view_groups": names(action.assign_view_groups),
+                        "change_groups": names(action.assign_change_groups),
+                        "view_users": names(action.assign_view_users),
+                        "change_users": names(action.assign_change_users),
+                        "remove_all_permissions": action.remove_all_permissions,
+                        "remove_all_owners": action.remove_all_owners,
+                    }, ensure_ascii=True))
+
+            print("=== CURRENT GROUP MEMBERSHIP ===")
+            for name in ("Eltern@bergen.intern", "Familie@bergen.intern", "Kinder@bergen.intern"):
+                try:
+                    group = Group.objects.get(name=name)
+                    print("GROUP", name, "members=", sorted(group.user_set.filter(is_active=True).values_list("username", flat=True)))
+                except Group.DoesNotExist:
+                    print("MISSING_GROUP", name)
+
+            print("=== SHARED DOCUMENT ACCESS BASELINE ===")
+            for doc in Document.objects.filter(pk__in=(12, 13)).order_by("pk"):
+                print("DOC", doc.pk, "owner=", doc.owner.username if doc.owner else None)
+                print("  GROUP_PERMS", json.dumps({g.name: sorted(p) for g, p in get_groups_with_perms(doc, attach_perms=True).items()}, sort_keys=True))
+                print("  USER_PERMS", json.dumps({u.username: sorted(p) for u, p in get_users_with_perms(doc, attach_perms=True).items()}, sort_keys=True))
+      changed_when: false
+      register: paperless_workflow_inventory
+
+    - name: Show workflow inventory
+      ansible.builtin.debug:
+        var: paperless_workflow_inventory.stdout_lines

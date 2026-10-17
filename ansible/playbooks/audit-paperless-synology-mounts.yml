@@ -1,0 +1,44 @@
+---
+# Read-only filesystem topology audit. Never provisions archives.
+- name: Inspect Synology mount topology for safe Paperless archive locations
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  tasks:
+    - name: Require NAS site settings
+      ansible.builtin.assert:
+        that:
+          - synology_admin is defined
+          - synology_admin is match('^[A-Za-z_][A-Za-z0-9_.-]*@[A-Za-z0-9][A-Za-z0-9.-]+$')
+          - synology_config is defined
+          - synology_config.schema_version == 1
+          - synology_config.state_parent is match('^/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$')
+
+    - name: Inspect mount points as NAS administrator without changes
+      ansible.builtin.command:
+        argv:
+          - ssh
+          - -T
+          - -o
+          - BatchMode=yes
+          - -o
+          - StrictHostKeyChecking=yes
+          - -o
+          - ConnectTimeout=15
+          - "{{ synology_admin }}"
+          - >-
+            sudo -n /usr/bin/python3 - {{ synology_config.state_parent | quote }}
+        stdin: "{{ lookup('ansible.builtin.file', playbook_dir + '/../files/paperless/audit_synology_archive_mounts.py', rstrip=False) }}"
+      register: paperless_mount_audit
+      changed_when: false
+
+    - name: Require complete audit and explicit no-approval
+      ansible.builtin.assert:
+        that:
+          - "'NO_FILES_CHANGED' in paperless_mount_audit.stdout_lines"
+          - "'REVIEW_REQUIRED SEPARATE_ROOT_CONTROLLED_ARCHIVE_LOCATION_PER_FILESYSTEM' in paperless_mount_audit.stdout_lines"
+          - "'ARCHIVE_LOCATION_APPROVED NO' in paperless_mount_audit.stdout_lines"
+
+    - name: Display NAS filesystem mapping
+      ansible.builtin.debug:
+        var: paperless_mount_audit.stdout_lines

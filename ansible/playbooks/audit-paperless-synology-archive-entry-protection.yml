@@ -1,0 +1,53 @@
+---
+# Read-only DSM ACL audit of deployed protected SAME-SITE archive parents.
+# Never rename the real archive or write to site/journal/source/backup.
+- name: Audit native ACLs of active protected Paperless archive parents
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  tasks:
+    - name: Require site-local Synology configuration and expected scopes
+      ansible.builtin.assert:
+        that:
+          - synology_admin is defined
+          - synology_admin is match('^[A-Za-z_][A-Za-z0-9_.-]*@[A-Za-z0-9][A-Za-z0-9.-]+$')
+          - synology_config is defined
+          - synology_config.schema_version == 1
+          - synology_config.sync_user == 'paperless-sync'
+          - synology_config.state_parent is match('^/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$')
+
+    - name: Audit native DSM site-root and protected-archive parent ACEs without writes
+      ansible.builtin.command:
+        argv:
+          - ssh
+          - -T
+          - -o
+          - BatchMode=yes
+          - -o
+          - StrictHostKeyChecking=yes
+          - -o
+          - ConnectTimeout=15
+          - "{{ synology_admin }}"
+          - >-
+            sudo -n /usr/bin/python3 - {{ synology_config.state_parent | quote }}
+        stdin: "{{ lookup('ansible.builtin.file', playbook_dir + '/../files/paperless/audit_synology_archive_entry_protection.py', rstrip=False) }}"
+      register: archive_entry_audit
+      changed_when: false
+
+    - name: Display anonymous protected-parent ACL risk findings
+      ansible.builtin.debug:
+        var: archive_entry_audit.stdout_lines
+
+    - name: Fail closed if any group could potentially delete archive entry
+      ansible.builtin.assert:
+        that:
+          - "'NO_FILES_CHANGED' in archive_entry_audit.stdout_lines"
+          - "'ARCHIVE_ENTRY_PROTECTION_BLOCKED' not in archive_entry_audit.stdout_lines"
+          - "'BLOCKER ' not in archive_entry_audit.stdout"
+          - "'ARCHIVE_ENTRY_PROTECTION_NEEDS_EFFECTIVE_TEST' in archive_entry_audit.stdout_lines"
+          - "'DSM_SMB_EFFECTIVE_RENAME_NOT_TESTED' in archive_entry_audit.stdout_lines"
+          - "'ARCHIVE_COMMIT_NOT_AUTHORIZED' in archive_entry_audit.stdout_lines"
+          - "'ACTIVE_PROTECTED_ARCHIVE_PARENTS_AUDITED ' in archive_entry_audit.stdout"
+          - "'NATIVE_SITE_ROOT_ACLS_VERIFIED 2' in archive_entry_audit.stdout_lines"
+          - "(archive_entry_audit.stdout_lines | select('match', '^POSIX_0700_ARCHIVE_PARENTS_VERIFIED [0-9]+$') | list | length) == 1"
+        fail_msg: "Active protected archive has unverified DSM native ACL or potentially destructive non-admin grants; no additional PDF moves authorized."

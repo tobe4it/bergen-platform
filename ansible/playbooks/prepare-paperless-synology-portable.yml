@@ -1,0 +1,287 @@
+---
+# Portable deployment for Synology DSM. Deliberately never activates a task,
+# never creates the enable gate, and never transfers documents.
+# Usage: -e @ansible/vars/paperless-synology.local.yml
+#        --vault-id paperless@prompt -e @ansible/vars/paperless.vault.yml
+- name: Prepare portable Synology scan ingest, watcher and boot supervisor
+  hosts: localhost
+  connection: local
+  gather_facts: false
+
+  vars:
+    synology_code_dir: "{{ synology_config.state_parent }}/bin"
+    synology_files:
+      - name: synology_config.py
+        source: "{{ playbook_dir }}/../files/paperless/synology_config.py"
+      - name: synology_scan_sync.py
+        source: "{{ playbook_dir }}/../files/paperless/synology_scan_sync.py"
+      - name: synology_inotify_watch.py
+        source: "{{ playbook_dir }}/../files/paperless/synology_inotify_watch.py"
+      - name: synology_watcher_supervisor.py
+        source: "{{ playbook_dir }}/../files/paperless/synology_watcher_supervisor.py"
+
+  tasks:
+    - name: Require site-local configuration
+      ansible.builtin.assert:
+        that:
+          - synology_admin is defined
+          - synology_admin is match('^[A-Za-z_][A-Za-z0-9_.-]*@[A-Za-z0-9][A-Za-z0-9.-]+$')
+          - synology_config is defined
+          - synology_config.schema_version == 1
+          - synology_config.state_root is match('^/[A-Za-z0-9_.-]+$')
+          - synology_config.state_parent is match('^/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$')
+          - synology_config.state_parent.startswith(synology_config.state_root + '/')
+          - synology_config.sync_user is match('^[a-z_][a-z0-9_-]{0,31}$')
+          - synology_config.sources | length > 0
+        fail_msg: "Supply valid site-local synology_admin and synology_config; see ansible/vars/paperless-synology.example.yml"
+
+    - name: Check code sources on controller
+      ansible.builtin.stat:
+        path: "{{ item.source }}"
+        checksum_algorithm: sha256
+      loop: "{{ synology_files }}"
+      register: code_stats
+      failed_when: >-
+        not code_stats.stat.exists or
+        not code_stats.stat.isreg or
+        code_stats.stat.islnk
+
+    - name: Validate NAS filesystem and disabled activation gate
+      ansible.builtin.command:
+        argv:
+          - ssh
+          - -T
+          - -o
+          - BatchMode=yes
+          - -o
+          - ConnectTimeout=15
+          - "{{ synology_admin }}"
+          - sudo -n /bin/sh -s
+        stdin: |
+          set -eu
+          ROOT={{ synology_config.state_root | quote }}
+          PARENT={{ synology_config.state_parent | quote }}
+          USER={{ synology_config.sync_user | quote }}
+          STATE=$PARENT/$USER
+          BIN=$PARENT/bin
+          test "$(stat -c '%u:%g:%a' "$ROOT")" = "0:0:755"
+          test "$(stat -c '%u:%g:%a' "$PARENT")" = "0:0:755"
+          test ! -L "$ROOT" && test ! -L "$PARENT"
+          test ! -L "$STATE"
+          test "$(stat -c '%u:%a' "$STATE")" = "$(id -u "$USER"):700"
+          test ! -e "$PARENT/synology-sync.enabled"
+          test ! -L "$PARENT/synology-sync.enabled"
+          if test -e "$BIN" || test -L "$BIN"; then
+            test ! -L "$BIN"
+            test "$(stat -c '%u:%g:%a' "$BIN")" = "0:0:755"
+          fi
+          for name in synology_config.py synology_scan_sync.py synology_inotify_watch.py synology_watcher_supervisor.py synology-paperless.json; do
+            TARGET=$BIN/$name
+            if test -e "$TARGET" || test -L "$TARGET"; then
+              test ! -L "$TARGET"
+              test -f "$TARGET"
+              test "$(stat -c '%u:%g' "$TARGET")" = "0:0"
+            fi
+          done
+          echo NAS_PORTABLE_PREFLIGHT_OK
+      changed_when: false
+
+    - name: Stage, verify, install and probe without enabling
+      block:
+        - name: Allocate isolated NAS staging directory
+          ansible.builtin.command:
+            argv:
+              - ssh
+              - -T
+              - -o
+              - BatchMode=yes
+              - "{{ synology_admin }}"
+              - umask 077; mktemp -d /tmp/bergen-paperless-portable.XXXXXXXX
+          register: nas_tmp
+          changed_when: true
+
+        - name: Validate NAS staging path
+          ansible.builtin.assert:
+            that:
+              - nas_tmp.stdout | trim is match('^/tmp/bergen-paperless-portable\\.[A-Za-z0-9]{8}$')
+
+        - name: Prepare transfer manifest
+          ansible.builtin.set_fact:
+            synology_transfer_manifest: >-
+              {{ (synology_files | map(attribute='name') | list)
+                 + ['synology-paperless.json'] }}
+            synology_config_json: "{{ synology_config | to_nice_json(indent=2) }}"
+          no_log: true
+
+        - name: Copy program files with SSH stdin
+          ansible.builtin.command:
+            argv:
+              - ssh
+              - -T
+              - -o
+              - BatchMode=yes
+              - "{{ synology_admin }}"
+              - "umask 077; cat > {{ nas_tmp.stdout | trim }}/{{ item.name }}"
+            stdin: "{{ lookup('ansible.builtin.file', item.source, rstrip=False) }}"
+            stdin_add_newline: false
+          loop: "{{ synology_files }}"
+          no_log: true
+
+        - name: Copy local settings with SSH stdin
+          ansible.builtin.command:
+            argv:
+              - ssh
+              - -T
+              - -o
+              - BatchMode=yes
+              - "{{ synology_admin }}"
+              - "umask 077; cat > {{ nas_tmp.stdout | trim }}/synology-paperless.json"
+            stdin: "{{ synology_config_json }}"
+            stdin_add_newline: false
+          no_log: true
+
+        - name: Hash staged files on NAS
+          ansible.builtin.command:
+            argv:
+              - ssh
+              - -T
+              - -o
+              - BatchMode=yes
+              - "{{ synology_admin }}"
+              - "sha256sum {{ nas_tmp.stdout | trim }}/{{ item }}"
+          loop: "{{ synology_transfer_manifest }}"
+          register: remote_hashes
+          changed_when: false
+
+        - name: Require byte-identical source files
+          ansible.builtin.assert:
+            that:
+              - remote_hashes.results[index].stdout.split()[0] == code_stats.results[index].stat.checksum
+          loop: "{{ range(0, synology_files | length) | list }}"
+          loop_control:
+            loop_var: index
+
+        - name: Require byte-identical site configuration
+          ansible.builtin.assert:
+            that:
+              - remote_hashes.results[-1].stdout.split()[0] == (synology_config_json | hash('sha256'))
+
+        - name: Install all root-owned files (disabled gate)
+          ansible.builtin.command:
+            argv:
+              - ssh
+              - -T
+              - -o
+              - BatchMode=yes
+              - "{{ synology_admin }}"
+              - sudo -n /bin/sh -s
+            stdin: |
+              set -eu
+              PARENT={{ synology_config.state_parent | quote }}
+              BIN=$PARENT/bin
+              STAGED={{ nas_tmp.stdout | trim | quote }}
+              test ! -e "$PARENT/synology-sync.enabled"
+              test ! -L "$PARENT/synology-sync.enabled"
+              install -d -o root -g root -m 0755 "$BIN"
+              for name in synology_config.py synology_scan_sync.py synology_inotify_watch.py synology_watcher_supervisor.py synology-paperless.json; do
+                TARGET=$BIN/$name
+                if test -e "$TARGET" || test -L "$TARGET"; then
+                  test ! -L "$TARGET"
+                  test -f "$TARGET"
+                  test "$(stat -c '%u:%g' "$TARGET")" = "0:0"
+                fi
+                TMP=$(mktemp "$BIN/.paperless-setup.XXXXXXXX")
+                trap 'rm -f "$TMP"' EXIT
+                install -o root -g root -m 0644 "$STAGED/$name" "$TMP"
+                test "$(sha256sum "$STAGED/$name" | cut -d ' ' -f 1)" = "$(sha256sum "$TMP" | cut -d ' ' -f 1)"
+                mv -f "$TMP" "$TARGET"
+                trap - EXIT
+              done
+              test ! -e "$PARENT/synology-sync.enabled"
+              echo NAS_PORTABLE_INSTALLED
+          changed_when: true
+
+        - name: Hash installed NAS files
+          ansible.builtin.command:
+            argv:
+              - ssh
+              - -T
+              - -o
+              - BatchMode=yes
+              - "{{ synology_admin }}"
+              - "sha256sum {{ synology_code_dir }}/{{ item }}"
+          loop: "{{ synology_transfer_manifest }}"
+          register: installed_hashes
+          changed_when: false
+
+        - name: Require installed bytes match staged bytes
+          ansible.builtin.assert:
+            that:
+              - installed_hashes.results[index].stdout.split()[0] == remote_hashes.results[index].stdout.split()[0]
+          loop: "{{ range(0, synology_transfer_manifest | length) | list }}"
+          loop_control:
+            loop_var: index
+
+        - name: Sender dry-run with actual local NAS settings
+          ansible.builtin.command:
+            argv:
+              - ssh
+              - -T
+              - -o
+              - BatchMode=yes
+              - "{{ synology_admin }}"
+              - "sudo -n -H -u {{ synology_config.sync_user }} python3 {{ synology_code_dir }}/synology_scan_sync.py"
+          register: nas_dry_run
+          changed_when: false
+
+        - name: Print sender dry-run
+          ansible.builtin.debug:
+            var: nas_dry_run.stdout_lines
+
+        - name: Probe inotify watches without transmission
+          ansible.builtin.command:
+            argv:
+              - ssh
+              - -T
+              - -o
+              - BatchMode=yes
+              - "{{ synology_admin }}"
+              - "sudo -n -H -u {{ synology_config.sync_user }} python3 {{ synology_code_dir }}/synology_inotify_watch.py --probe"
+          register: probe
+          changed_when: false
+
+        - name: Confirm kernel watcher probe
+          ansible.builtin.assert:
+            that:
+              - "'INOTIFY_PROBE_OK' in probe.stdout"
+
+        - name: Print probe result
+          ansible.builtin.debug:
+            var: probe.stdout_lines
+
+        - name: Require activation gate remains absent
+          ansible.builtin.command:
+            argv:
+              - ssh
+              - -T
+              - -o
+              - BatchMode=yes
+              - "{{ synology_admin }}"
+              - "sudo -n test ! -e {{ synology_config.state_parent }}/synology-sync.enabled"
+          changed_when: false
+
+      always:
+        - name: Clean isolated NAS staging
+          ansible.builtin.command:
+            argv:
+              - ssh
+              - -T
+              - -o
+              - BatchMode=yes
+              - "{{ synology_admin }}"
+              - "rm -f {{ nas_tmp.stdout | trim }}/synology_config.py {{ nas_tmp.stdout | trim }}/synology_scan_sync.py {{ nas_tmp.stdout | trim }}/synology_inotify_watch.py {{ nas_tmp.stdout | trim }}/synology_watcher_supervisor.py {{ nas_tmp.stdout | trim }}/synology-paperless.json && rmdir {{ nas_tmp.stdout | trim }}"
+          when:
+            - nas_tmp is defined
+            - nas_tmp.stdout is defined
+            - nas_tmp.stdout | trim is match('^/tmp/bergen-paperless-portable\\.[A-Za-z0-9]{8}$')
+          changed_when: false

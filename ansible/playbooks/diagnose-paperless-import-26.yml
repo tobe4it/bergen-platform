@@ -1,0 +1,31 @@
+---
+# Targeted read-only diagnostic for Paperless document 26.
+- name: Diagnose live import proof for Paperless document 26
+  hosts: venombox
+  gather_facts: false
+  become: true
+  tasks:
+    - name: Check expected LXC configuration
+      ansible.builtin.command:
+        argv: [pct, config, '126']
+      register: diagnostic_lxc_config
+      changed_when: false
+
+    - name: Require expected confined Paperless guest
+      ansible.builtin.assert:
+        that:
+          - inventory_hostname == 'venombox'
+          - "'hostname: bergen-paperless' in diagnostic_lxc_config.stdout_lines"
+          - "'unprivileged: 1' in diagnostic_lxc_config.stdout_lines"
+          - "'lxc.apparmor.profile: unconfined' not in diagnostic_lxc_config.stdout"
+
+    - name: Verify document 26 and show the precise failed condition
+      ansible.builtin.command:
+        argv: [pct, exec, '126', --, python3, '-']
+        stdin: "{{ lookup('ansible.builtin.file', playbook_dir + '/../files/paperless/diagnose_paperless_import_26.py', rstrip=False) }}"
+      register: paperless_diagnostic_26
+      changed_when: false
+
+    - name: Display diagnostic result without changing documents
+      ansible.builtin.debug:
+        var: paperless_diagnostic_26.stdout_lines

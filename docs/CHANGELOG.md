@@ -17,6 +17,22 @@ The project follows **Semantic Versioning (SemVer)** and the changelog format is
 
 ---
 
+## [0.13.0] - 2026-10-17
+
+Paperless-ngx group scan automation reference release. Scope is **production group operation only**; the secure deletion/quarantine v2 workflow is not part of this release.
+
+### Added
+- Synology scanner watcher/sender, Paperless ingest and receipt audit, group-specific filename collision handling and metadata-only drift reconciliation without changing historical sender receipts.
+- SHA-/inode-/ACL-verified protected NAS original archive, append-only PREPARED/ARCHIVED journaling, and one-document-per-run automated systemd timer.
+- Read-only lifecycle audits, regression tests and [operations manual](PAPERLESS-GROUP-OPERATIONS.md), with an explicit unsupported-features boundary.
+
+### Verified in the existing deployment
+- 840 local Python regression tests passed prior to code deployment; controller lifecycle audit succeeded with 18 tasks, no failures or changes.
+- Four NAS components staged with root ownership and SHA verification; systemd timer enabled and active; operator confirmed at least one automatically archived group scan.
+- This is a scoped operational acceptance. No production purge/retention/restore or private auto-archive has been authorized.
+
+---
+
 ## [0.12.0] - 2026-10-16
 
 Independent selfHOST DNS-01 wildcard certificate instances. This release

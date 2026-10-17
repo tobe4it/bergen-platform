@@ -1,0 +1,75 @@
+---
+# Strict read-only NEGATIVE and positive user probes on the prepared protected
+# paperless-scan archive. This tests effective local NSS/POSIX permissions,
+# not SMB protocol authorization or the ability to rename the archive ENTRY.
+# Never creates files, changes ACLs, switches workers, moves PDFs or gates.
+- name: Audit actual nonroot NAS identity access to protected Paperless archive
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  tasks:
+    - name: Require explicit selected real NAS identities and trusted site
+      ansible.builtin.assert:
+        that:
+          - inventory_hostname == 'localhost'
+          - not ansible_check_mode
+          - synology_admin is defined
+          - synology_admin is match('^[A-Za-z_][A-Za-z0-9_.-]*@[A-Za-z0-9][A-Za-z0-9.-]+$')
+          - synology_config is defined
+          - synology_config.schema_version == 1
+          - synology_config.sync_user == 'paperless-sync'
+          - synology_config.state_parent is match('^/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$')
+          - paperless_archive_denied_users is defined
+          - paperless_archive_denied_users is sequence
+          - paperless_archive_denied_users is not string
+          - paperless_archive_denied_users | length >= 2
+          - paperless_archive_denied_users | length <= 8
+          - paperless_archive_denied_users | unique | list | length == paperless_archive_denied_users | length
+          - >-
+            paperless_archive_denied_users |
+            select('match', '^[A-Za-z_][A-Za-z0-9_.-]*(@[A-Za-z0-9_.-]+)?$') |
+            list | length == paperless_archive_denied_users | length
+        fail_msg: "Specify 2-8 distinct real NAS NSS usernames for read-only negative access checks"
+      no_log: true
+
+    - name: Probe strictly read-only access as the owner and each unprivileged user
+      ansible.builtin.command:
+        argv:
+          - ssh
+          - -T
+          - -o
+          - BatchMode=yes
+          - -o
+          - StrictHostKeyChecking=yes
+          - -o
+          - ConnectTimeout=15
+          - "{{ synology_admin }}"
+          - >-
+            sudo -n /usr/bin/python3 -
+            {{ synology_config.state_parent | quote }}
+            {{ paperless_archive_denied_users | to_json | quote }}
+        stdin: "{{ lookup('ansible.builtin.file', playbook_dir + '/../files/paperless/audit_synology_effective_archive_access.py', rstrip=False) }}"
+      changed_when: false
+      register: archive_effective_access
+      no_log: true
+
+    - name: Accept only exact non-mutating identity-permission evidence
+      ansible.builtin.assert:
+        that:
+          - archive_effective_access.rc == 0
+          - (archive_effective_access.stderr | trim) == ''
+          - archive_effective_access.stdout_lines | length == 6
+          - archive_effective_access.stdout_lines[0] == 'SELECTED_SITE paperless-scan'
+          - archive_effective_access.stdout_lines[1] == 'ARCHIVE_LOCAL_OWNER_ACCESS_VERIFIED'
+          - >-
+            archive_effective_access.stdout_lines[2] ==
+            ('ARCHIVE_LOCAL_NEGATIVE_IDENTITIES_DENIED ' ~
+             (paperless_archive_denied_users | length | string))
+          - archive_effective_access.stdout_lines[3] == 'SMB_EFFECTIVE_ACCESS_NOT_TESTED'
+          - archive_effective_access.stdout_lines[4] == 'ARCHIVE_COMMIT_NOT_AUTHORIZED'
+          - archive_effective_access.stdout_lines[5] == 'NO_FILES_CHANGED'
+        fail_msg: "Effective nonroot access not verified; any live archive rename remains blocked"
+
+    - name: Display only safe access verdict counts without usernames or paths
+      ansible.builtin.debug:
+        var: archive_effective_access.stdout_lines

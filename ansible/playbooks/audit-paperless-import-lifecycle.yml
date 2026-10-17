@@ -1,0 +1,146 @@
+---
+# Read-only lifecycle reconciliation. NOT an archive readiness or apply gate.
+# All historical receipts remain unchanged, including document 26.
+- name: Audit live Paperless imports and one explicitly journaled user deletion
+  hosts: venombox
+  gather_facts: false
+  become: true
+  vars:
+    approved_deleted_document_id: 26
+    approved_deleted_bridge_receipt: 1ebb2c1d26d7b1494d28d9cd.json
+  tasks:
+    - name: Require expected site-local configuration
+      ansible.builtin.assert:
+        that:
+          - inventory_hostname == 'venombox'
+          - not ansible_check_mode
+          - synology_admin is defined
+          - synology_config is defined
+          - synology_config.schema_version == 1
+          - synology_config.state_parent is match('^/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$')
+          - synology_config.sync_user is match('^[a-z_][a-z0-9_-]{0,31}$')
+
+    - name: Check confined Paperless LXC identity
+      ansible.builtin.command:
+        argv: [pct, config, '126']
+      register: lifecycle_guest_config
+      changed_when: false
+
+    - name: Require expected unprivileged guest
+      ansible.builtin.assert:
+        that:
+          - "'hostname: bergen-paperless' in lifecycle_guest_config.stdout_lines"
+          - "'unprivileged: 1' in lifecycle_guest_config.stdout_lines"
+          - "'lxc.apparmor.profile: unconfined' not in lifecycle_guest_config.stdout"
+
+    - name: Require running Paperless guest
+      ansible.builtin.command:
+        argv: [pct, status, '126']
+      register: lifecycle_guest_status
+      changed_when: false
+      failed_when: "lifecycle_guest_status.rc != 0 or (lifecycle_guest_status.stdout | trim) != 'status: running'"
+
+    - name: Read published journal as restricted ingest user and verify canonical hash
+      ansible.builtin.command:
+        argv:
+          - pct
+          - exec
+          - '126'
+          - --
+          - runuser
+          - -u
+          - paperless-ingest
+          - --
+          - python3
+          - '-'
+        stdin: "{{ lookup('ansible.builtin.file', playbook_dir + '/../files/paperless/export_verified_user_deletion_journal.py', rstrip=False) }}"
+      register: lifecycle_journal
+      changed_when: false
+
+    - name: Verify live Paperless absence of exactly document 26
+      ansible.builtin.command:
+        argv: [pct, exec, '126', --, python3, '-', "{{ approved_deleted_bridge_receipt }}", "{{ approved_deleted_document_id | string }}"]
+        stdin: "{{ lookup('ansible.builtin.file', playbook_dir + '/../files/paperless/export_deleted_import_candidate.py', rstrip=False) }}"
+      register: lifecycle_deleted_paperless
+      changed_when: false
+
+    - name: Recheck absent NAS source and historical SENT receipt under sender lock
+      ansible.builtin.command:
+        argv:
+          - ssh
+          - -T
+          - -o
+          - BatchMode=yes
+          - -o
+          - StrictHostKeyChecking=yes
+          - -o
+          - ConnectTimeout=15
+          - "{{ synology_admin }}"
+          - >-
+            sudo -n -u {{ synology_config.sync_user | quote }}
+            /usr/bin/python3 - {{ synology_config.state_parent | quote }}
+        stdin: "{{ lookup('ansible.builtin.file', playbook_dir + '/../files/paperless/export_deleted_by_user_nas_evidence.py', rstrip=False) }}"
+      delegate_to: localhost
+      become: false
+      register: lifecycle_deleted_nas
+      changed_when: false
+
+    - name: Verify all remaining NAS originals against SENT receipts and file digests
+      ansible.builtin.command:
+        argv:
+          - ssh
+          - -T
+          - -o
+          - BatchMode=yes
+          - -o
+          - StrictHostKeyChecking=yes
+          - -o
+          - ConnectTimeout=15
+          - "{{ synology_admin }}"
+          - >-
+            sudo -n -u {{ synology_config.sync_user | quote }}
+            /usr/bin/python3 - {{ synology_config.state_parent | quote }}
+        stdin: "{{ lookup('ansible.builtin.file', playbook_dir + '/../files/paperless/audit_synology_archive_candidates.py', rstrip=False) }}"
+      delegate_to: localhost
+      become: false
+      register: lifecycle_nas_live
+      changed_when: false
+
+    - name: Reverify every Paperless import and independently recheck deleted document absence
+      ansible.builtin.command:
+        argv:
+          - pct
+          - exec
+          - '126'
+          - --
+          - python3
+          - -c
+          - "{{ lookup('ansible.builtin.file', playbook_dir + '/../files/paperless/export_import_lifecycle.py', rstrip=False) }}"
+        stdin: "{{ {'journal': lifecycle_journal.stdout, 'deleted': lifecycle_deleted_paperless.stdout, 'nas_deleted': lifecycle_deleted_nas.stdout} | to_json }}"
+      register: lifecycle_paperless_live
+      changed_when: false
+
+    - name: Match every NAS original to live import or exactly one verified deletion
+      ansible.builtin.command:
+        argv:
+          - python3
+          - "{{ playbook_dir }}/../files/paperless/match_paperless_import_lifecycle.py"
+        stdin: "{{ {'nas': lifecycle_nas_live.stdout, 'paperless': lifecycle_paperless_live.stdout, 'journal': lifecycle_journal.stdout, 'nas_deleted': lifecycle_deleted_nas.stdout} | to_json }}"
+      delegate_to: localhost
+      become: false
+      register: lifecycle_report
+      changed_when: false
+
+    - name: Require complete lifecycle report without archive permission
+      ansible.builtin.assert:
+        that:
+          - "'IMPORT_LIFECYCLE_RECONCILED' in lifecycle_report.stdout_lines"
+          - "'DELETED_BY_USER 1' in lifecycle_report.stdout_lines"
+          - "'ARCHIVE_NOT_AUTHORIZED' in lifecycle_report.stdout_lines"
+          - "'NO_RECEIPTS_CHANGED' in lifecycle_report.stdout_lines"
+          - "'NO_FILES_CHANGED' in lifecycle_report.stdout_lines"
+          - "'ARCHIVE_MATCH_READY' not in lifecycle_report.stdout_lines"
+
+    - name: Display reconciled imports and confirmed user deletion
+      ansible.builtin.debug:
+        var: lifecycle_report.stdout_lines

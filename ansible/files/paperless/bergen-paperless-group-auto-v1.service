@@ -1,0 +1,17 @@
+[Unit]
+Description=Paperless verified GROUP v1 archive, at most one PDF
+Wants=network-online.target
+After=network-online.target
+ConditionPathExists=/etc/bergen-paperless/group-auto-vault
+
+[Service]
+Type=oneshot
+User=ansible
+Group=ansible
+WorkingDirectory=/home/ansible/bergen-platform-pr81
+LoadCredential=paperless-vault:/etc/bergen-paperless/group-auto-vault
+ExecStart=/usr/bin/bash /usr/local/libexec/bergen-paperless-group-auto-v1 %d/paperless-vault
+TimeoutStartSec=20min
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true

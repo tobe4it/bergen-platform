@@ -37,3 +37,10 @@ ansible/group_vars/all/bergen-proxy.yml
 ansible/vars/ai-oidc.local.yml
 ansible/vars/ai-oidc.vault.yml
 ansible/vars/ai-oidc.vault.yml*
+# Paperless site-specific credentials and recipient mappings
+ansible/vars/paperless.vault.yml
+ansible/vars/paperless-synology.local.yml
+ansible/vars/paperless-synology.local.yml~
+ansible/vars/paperless-synology.local.yml.*~
+ansible/vars/paperless*.local.yml
+ansible/files/paperless/synology-paperless.json

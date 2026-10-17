@@ -1,0 +1,19 @@
+---
+# Deprecated: the universal Synology agents now require a root-owned JSON
+# site configuration. Never deploy one component without that configuration.
+- name: Prevent incomplete legacy Synology Paperless deployment
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  tasks:
+    - name: Use atomic portable NAS installer instead
+      ansible.builtin.fail:
+        msg: >-
+          STOP: This legacy playbook was retired during universalization.
+          Copy ansible/vars/paperless-synology.example.yml to ignored
+          ansible/vars/paperless-synology.local.yml and use
+          ansible/playbooks/prepare-paperless-synology-portable.yml
+          with --vault-id paperless@prompt
+          -e @ansible/vars/paperless.vault.yml
+          -e @ansible/vars/paperless-synology.local.yml.
+          No files were changed on the NAS.

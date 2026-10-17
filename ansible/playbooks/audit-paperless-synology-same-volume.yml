@@ -1,0 +1,45 @@
+---
+# Audit possible hidden per-scope quarantine without touching source PDFs.
+- name: Audit per-source same-volume quarantine feasibility
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  tasks:
+    - name: Require site-local NAS settings
+      ansible.builtin.assert:
+        that:
+          - synology_admin is defined
+          - synology_admin is match('^[A-Za-z_][A-Za-z0-9_.-]*@[A-Za-z0-9][A-Za-z0-9.-]+$')
+          - synology_config is defined
+          - synology_config.schema_version == 1
+          - synology_config.state_parent is match('^/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$')
+          - synology_config.sync_user is match('^[a-z_][a-z0-9_-]{0,31}$')
+
+    - name: Inspect NAS source mounts and hidden quarantine candidates as sync user
+      ansible.builtin.command:
+        argv:
+          - ssh
+          - -T
+          - -o
+          - BatchMode=yes
+          - -o
+          - StrictHostKeyChecking=yes
+          - -o
+          - ConnectTimeout=15
+          - "{{ synology_admin }}"
+          - >-
+            sudo -n -u {{ synology_config.sync_user | quote }}
+            /usr/bin/python3 - {{ synology_config.state_parent | quote }}
+        stdin: "{{ lookup('ansible.builtin.file', playbook_dir + '/../files/paperless/audit_synology_same_volume_archive.py', rstrip=False) }}"
+      register: paperless_same_volume_audit
+      changed_when: false
+
+    - name: Require complete read-only audit
+      ansible.builtin.assert:
+        that:
+          - "'NO_FILES_CHANGED' in paperless_same_volume_audit.stdout_lines"
+          - "'DSM_ACL_REVIEW_REQUIRED Familie' in paperless_same_volume_audit.stdout_lines"
+
+    - name: Show mount and permission feasibility
+      ansible.builtin.debug:
+        var: paperless_same_volume_audit.stdout_lines

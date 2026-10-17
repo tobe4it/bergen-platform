@@ -1,0 +1,13 @@
+[Unit]
+Description=Verify Bergen Paperless import receipts against database and ACL
+Documentation=https://github.com/tobe4it/bergen-platform/pull/60
+ConditionPathExists=/etc/bergen-paperless/ingest-automation.enabled
+RequiresMountsFor=/srv/bergen-paperless/ingest-bridge-state
+
+[Service]
+Type=oneshot
+User=root
+Group=root
+UMask=0077
+TimeoutStartSec=30min
+ExecStart=/usr/bin/python3 /usr/local/libexec/bergen-paperless-reconcile-ingest.py --commit

@@ -1,0 +1,46 @@
+---
+# Read-only diagnosis. Does not run the archive matcher or write any state.
+- name: Diagnose missing NAS source for deliberately deleted Paperless document 26
+  hosts: venombox
+  gather_facts: false
+  become: false
+  tasks:
+    - name: Require configured Synology target
+      ansible.builtin.assert:
+        that:
+          - inventory_hostname == 'venombox'
+          - synology_admin is defined
+          - synology_config is defined
+          - synology_config.schema_version == 1
+          - synology_config.state_parent is match('^/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$')
+          - synology_config.sync_user is match('^[a-z_][a-z0-9_-]{0,31}$')
+    - name: Inspect approved NAS source and sender receipt under sender lock
+      ansible.builtin.command:
+        argv:
+          - ssh
+          - -T
+          - -o
+          - BatchMode=yes
+          - -o
+          - StrictHostKeyChecking=yes
+          - -o
+          - ConnectTimeout=15
+          - "{{ synology_admin }}"
+          - >-
+            sudo -n -u {{ synology_config.sync_user | quote }}
+            /usr/bin/python3 -
+            {{ synology_config.state_parent | quote }}
+            {{ 'Privat/thomas' | quote }}
+            {{ 'Gebuehren 2.pdf' | quote }}
+            {{ '7a9e41ee25d2a98c4e529472f3db2ab6c70b453a3214c1da537175bbcef1b4e8.json' | quote }}
+        stdin: "{{ lookup('ansible.builtin.file', playbook_dir + '/../files/paperless/diagnose_deleted_import_nas_source.py', rstrip=False) }}"
+      delegate_to: localhost
+      register: deleted_nas_diagnosis
+      changed_when: false
+    - name: Show source and sender receipt diagnosis
+      ansible.builtin.debug:
+        var: deleted_nas_diagnosis.stdout_lines
+    - name: Require read-only completion marker
+      ansible.builtin.assert:
+        that:
+          - "'NO_FILES_CHANGED' in deleted_nas_diagnosis.stdout_lines"

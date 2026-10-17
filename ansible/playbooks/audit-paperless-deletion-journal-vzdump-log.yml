@@ -1,0 +1,49 @@
+---
+# Read-only inspection of the most recent successful LXC 126 vzdump task.
+# Verify backup scope in the log; do not change storage or backup settings.
+- name: Inspect last successful Paperless vzdump log
+  hosts: venombox
+  gather_facts: false
+  become: true
+  vars:
+    inspected_vzdump_upid: 'UPID:venombox:000079E1:0B8284CB:6ACED41C:vzdump:126:root@pam:'
+  tasks:
+    - name: Verify inspected backup task completed successfully
+      ansible.builtin.command:
+        argv:
+          - pvesh
+          - get
+          - "/nodes/venombox/tasks/{{ inspected_vzdump_upid }}/status"
+          - --output-format
+          - json
+      register: journal_backup_task_status
+      changed_when: false
+
+    - name: Require expected successful backup task
+      ansible.builtin.assert:
+        that:
+          - (journal_backup_task_status.stdout | from_json).status == 'stopped'
+          - (journal_backup_task_status.stdout | from_json).exitstatus == 'OK'
+
+    - name: Read backup task log
+      ansible.builtin.command:
+        argv:
+          - pvesh
+          - get
+          - "/nodes/venombox/tasks/{{ inspected_vzdump_upid }}/log"
+          - --output-format
+          - json
+      register: journal_backup_task_log
+      changed_when: false
+
+    - name: Show backup lines relevant to inclusion and completion
+      ansible.builtin.debug:
+        msg: >-
+          {{ (journal_backup_task_log.stdout | from_json
+              | map(attribute='t')
+              | select('search', '(?i)(include|exclude|rootfs|mp0|backup|finished|archive|error|success|snapshot|storage|size|create|status)')
+              | list) }}
+
+    - name: Confirm read-only completion
+      ansible.builtin.debug:
+        msg: NO_FILES_CHANGED

@@ -1,0 +1,102 @@
+---
+# Read-only preview of a separately confirmed deletion on Paperless AND NAS.
+# Historical receipts remain untouched. No archive authorization.
+- name: Preview user-deleted document 26 with missing NAS original
+  hosts: venombox
+  gather_facts: false
+  become: true
+  vars:
+    approved_deleted_document_id: 26
+    approved_deleted_bridge_receipt: 1ebb2c1d26d7b1494d28d9cd.json
+    approved_deleted_sender_receipt: 7a9e41ee25d2a98c4e529472f3db2ab6c70b453a3214c1da537175bbcef1b4e8.json
+  tasks:
+    - name: Require expected site-local configuration
+      ansible.builtin.assert:
+        that:
+          - inventory_hostname == 'venombox'
+          - not ansible_check_mode
+          - synology_admin is defined
+          - synology_config is defined
+          - synology_config.schema_version == 1
+          - synology_config.state_parent is match('^/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$')
+          - synology_config.sync_user is match('^[a-z_][a-z0-9_-]{0,31}$')
+    - name: Check expected Paperless guest
+      ansible.builtin.command:
+        argv: [pct, config, '126']
+      register: deleted_guest_config
+      changed_when: false
+    - name: Require confined guest identity
+      ansible.builtin.assert:
+        that:
+          - "'hostname: bergen-paperless' in deleted_guest_config.stdout_lines"
+          - "'unprivileged: 1' in deleted_guest_config.stdout_lines"
+          - "'lxc.apparmor.profile: unconfined' not in deleted_guest_config.stdout"
+    - name: Read and verify Paperless document 26 is absent
+      ansible.builtin.command:
+        argv:
+          - pct
+          - exec
+          - '126'
+          - --
+          - python3
+          - '-'
+          - "{{ approved_deleted_bridge_receipt }}"
+          - "{{ approved_deleted_document_id | string }}"
+        stdin: "{{ lookup('ansible.builtin.file', playbook_dir + '/../files/paperless/export_deleted_import_candidate.py', rstrip=False) }}"
+      register: deleted_paperless_proof
+      changed_when: false
+    - name: Verify historical SENT receipt and absent NAS source under sender lock
+      ansible.builtin.command:
+        argv:
+          - ssh
+          - -T
+          - -o
+          - BatchMode=yes
+          - -o
+          - StrictHostKeyChecking=yes
+          - -o
+          - ConnectTimeout=15
+          - "{{ synology_admin }}"
+          - >-
+            sudo -n -u {{ synology_config.sync_user | quote }}
+            /usr/bin/python3 - {{ synology_config.state_parent | quote }}
+        stdin: "{{ lookup('ansible.builtin.file', playbook_dir + '/../files/paperless/export_deleted_by_user_nas_evidence.py', rstrip=False) }}"
+      delegate_to: localhost
+      become: false
+      register: deleted_nas_proof
+      changed_when: false
+    - name: Compare deletion evidence without changing journals or files
+      ansible.builtin.command:
+        argv:
+          - python3
+          - "{{ playbook_dir }}/../files/paperless/preview_deleted_by_user_policy.py"
+        stdin: "{{ {'nas': deleted_nas_proof.stdout, 'deleted': deleted_paperless_proof.stdout, 'approved_document_id': approved_deleted_document_id, 'approved_bridge_receipt': approved_deleted_bridge_receipt, 'approved_sender_receipt': approved_deleted_sender_receipt} | to_json }}"
+      delegate_to: localhost
+      become: false
+      register: deleted_user_preview
+      changed_when: false
+    - name: Preview proposed DELETED_BY_USER journal record without writing
+      ansible.builtin.command:
+        argv:
+          - python3
+          - "{{ playbook_dir }}/../files/paperless/deleted_by_user_decision_journal.py"
+        stdin: "{{ {'nas': deleted_nas_proof.stdout, 'deleted': deleted_paperless_proof.stdout} | to_json }}"
+      delegate_to: localhost
+      become: false
+      register: deleted_user_journal_preview
+      changed_when: false
+    - name: Show proposed journal identity and payload
+      ansible.builtin.debug:
+        var: deleted_user_journal_preview.stdout_lines
+    - name: Show read-only deletion preview
+      ansible.builtin.debug:
+        var: deleted_user_preview.stdout_lines
+    - name: Assert no archive authorization or mutation
+      ansible.builtin.assert:
+        that:
+          - "'EXCLUDED_FROM_ARCHIVE_MATCH_READY' in deleted_user_preview.stdout_lines"
+          - "'NO_RECEIPT_STATUS_CHANGED' in deleted_user_preview.stdout_lines"
+          - "'NO_FILES_CHANGED' in deleted_user_preview.stdout_lines"
+          - "'NO_JOURNAL_WRITTEN' in deleted_user_journal_preview.stdout_lines"
+          - "'EXCLUDED_FROM_ARCHIVE_MATCH_READY' in deleted_user_journal_preview.stdout_lines"
+          - "'NO_FILES_CHANGED' in deleted_user_journal_preview.stdout_lines"

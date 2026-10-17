@@ -1,0 +1,127 @@
+---
+# Fresh, independently live-verified v1 import -> NAS same-subvolume archive.
+# DRY-RUN BY DEFAULT. Commit requires a pre-existing root-owned mode0600 gate
+# and separate administrative approval, and is NOT released by this playbook.
+- name: Archive exactly one independently verified Paperless scan on Synology
+  hosts: venombox
+  gather_facts: false
+  become: true
+  tasks:
+    - name: Require exact selection, live credentials and opt-in boolean
+      ansible.builtin.assert:
+        that:
+          - inventory_hostname == 'venombox'
+          - not ansible_check_mode
+          - synology_admin is defined
+          - synology_admin is match('^[A-Za-z_][A-Za-z0-9_.-]*@[A-Za-z0-9][A-Za-z0-9.-]+$')
+          - synology_config is defined
+          - synology_config.schema_version == 1
+          - synology_config.sync_user == 'paperless-sync'
+          - synology_config.state_parent is match('^/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$')
+          - paperless_archive_only is defined
+          - paperless_archive_only is match('^(Familie|Eltern|Privat/(thomas|nadja))/[^/\\]+\.pdf$')
+          - (paperless_archive_commit | default(false)) is boolean
+        fail_msg: "Supply exact Scope/Filename.pdf and trusted NAS site variables"
+
+    - name: Verify expected unprivileged Paperless guest identity
+      ansible.builtin.command:
+        argv: [pct, config, '126']
+      register: archive_guest
+      changed_when: false
+
+    - name: Reject unexpected or unconfined Paperless container
+      ansible.builtin.assert:
+        that:
+          - "'hostname: bergen-paperless' in archive_guest.stdout_lines"
+          - "'unprivileged: 1' in archive_guest.stdout_lines"
+          - "'lxc.apparmor.profile: unconfined' not in archive_guest.stdout"
+
+    - name: Verify Paperless guest is running
+      ansible.builtin.command:
+        argv: [pct, status, '126']
+      register: archive_guest_status
+      changed_when: false
+      failed_when: >-
+        archive_guest_status.rc != 0 or
+        (archive_guest_status.stdout | trim) != 'status: running'
+
+    - name: Export freshly verified Paperless IMPORTED documents and ACLs
+      ansible.builtin.command:
+        argv: [pct, exec, '126', --, python3, '-']
+        stdin: "{{ lookup('ansible.builtin.file', playbook_dir + '/../files/paperless/export_imported_scans.py', rstrip=False) }}"
+      register: fresh_imported_documents
+      changed_when: false
+      no_log: true
+
+    - name: Export independently locked NAS SENT/source identity inventory
+      ansible.builtin.command:
+        argv:
+          - ssh
+          - -T
+          - -o
+          - BatchMode=yes
+          - -o
+          - StrictHostKeyChecking=yes
+          - -o
+          - ConnectTimeout=15
+          - "{{ synology_admin }}"
+          - >-
+            sudo -n -u {{ synology_config.sync_user | quote }}
+            /usr/bin/python3 - {{ synology_config.state_parent | quote }}
+        stdin: "{{ lookup('ansible.builtin.file', playbook_dir + '/../files/paperless/audit_synology_archive_candidates.py', rstrip=False) }}"
+      delegate_to: localhost
+      become: false
+      register: fresh_sender_documents
+      changed_when: false
+      no_log: true
+
+    - name: Select exactly one matching independently live verified import
+      ansible.builtin.command:
+        argv:
+          - /usr/bin/python3
+          - "{{ playbook_dir }}/../files/paperless/select_one_verified_archive_move.py"
+        stdin: "{{ {'nas': fresh_sender_documents.stdout, 'paperless': fresh_imported_documents.stdout, 'only': paperless_archive_only} | to_json }}"
+      delegate_to: localhost
+      become: false
+      register: matched_archive_proof
+      changed_when: false
+      no_log: true
+
+    - name: Execute NAS same-subvolume archive check or explicitly gated rename
+      ansible.builtin.command:
+        argv:
+          - ssh
+          - -T
+          - -o
+          - BatchMode=yes
+          - -o
+          - StrictHostKeyChecking=yes
+          - -o
+          - ConnectTimeout=15
+          - "{{ synology_admin }}"
+          - >-
+            sudo -n -u {{ synology_config.sync_user | quote }}
+            /usr/bin/python3
+            {{ (synology_config.state_parent ~ '/bin/synology_same_volume_archive_move.py') | quote }}
+            --state-parent {{ synology_config.state_parent | quote }}
+            --only {{ paperless_archive_only | quote }}
+            {{ '--commit' if (paperless_archive_commit | default(false) | bool) else '' }}
+        stdin: "{{ matched_archive_proof.stdout }}"
+      delegate_to: localhost
+      become: false
+      register: archive_execution
+      changed_when: "archive_execution.stdout is search('(?m)^ARCHIVE_MOVED ')"
+      no_log: false
+
+    - name: Require explicit archive marker and no purge
+      ansible.builtin.assert:
+        that:
+          - "'ARCHIVE_PURGE_DISABLED' in archive_execution.stdout_lines"
+          - >-
+            ('ARCHIVE_MOVED' in archive_execution.stdout or
+             'ARCHIVE_DRY_RUN' in archive_execution.stdout)
+        fail_msg: "Archive result incomplete; never retry a move blindly"
+
+    - name: Show result without private original filename
+      ansible.builtin.debug:
+        var: archive_execution.stdout_lines

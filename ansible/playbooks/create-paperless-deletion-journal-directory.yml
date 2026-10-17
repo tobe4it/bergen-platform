@@ -1,0 +1,60 @@
+---
+# Mutating operation: ONLY after a separate explicit user approval.
+# Must be invoked with -e paperless_deletion_directory_apply_approved=true.
+# This creates only /var/lib/paperless-ingest/deletion-decisions, never a
+# journal entry, and never modifies Paperless documents or sender receipts.
+- name: Explicitly gated creation of private Paperless deletion journal directory
+  hosts: venombox
+  gather_facts: false
+  become: true
+  tasks:
+    - name: Require explicit approval before ANY mutation
+      ansible.builtin.assert:
+        that:
+          - "paperless_deletion_directory_apply_approved | default(false) | bool"
+          - not ansible_check_mode
+        fail_msg: "DIRECTORY_CREATION_NOT_APPROVED"
+
+    - name: Verify Paperless LXC identity
+      ansible.builtin.command:
+        argv: [pct, config, '126']
+      register: deletion_directory_guest
+      changed_when: false
+
+    - name: Require expected guest
+      ansible.builtin.assert:
+        that:
+          - "'hostname: bergen-paperless' in deletion_directory_guest.stdout_lines"
+          - "'unprivileged: 1' in deletion_directory_guest.stdout_lines"
+          - "'lxc.apparmor.profile: unconfined' not in deletion_directory_guest.stdout"
+
+    - name: Preflight directory ownership and filesystem
+      ansible.builtin.command:
+        argv: [pct, exec, '126', --, python3, '-', plan]
+        stdin: "{{ lookup('ansible.builtin.file', playbook_dir + '/../files/paperless/prepare_deletion_journal_directory.py', rstrip=False) }}"
+      register: deletion_directory_preflight
+      changed_when: false
+
+    - name: Require safe preflight
+      ansible.builtin.assert:
+        that:
+          - "'NO_FILES_CHANGED' in deletion_directory_preflight.stdout_lines"
+          - "'ROOTFS_DEVICE_VERIFIED' in deletion_directory_preflight.stdout_lines"
+          - "('READY_TO_CREATE' in deletion_directory_preflight.stdout_lines) or ('ALREADY_SECURE' in deletion_directory_preflight.stdout_lines)"
+
+    - name: Create only private directory as guest root
+      ansible.builtin.command:
+        argv: [pct, exec, '126', --, python3, '-', apply]
+        stdin: "{{ lookup('ansible.builtin.file', playbook_dir + '/../files/paperless/prepare_deletion_journal_directory.py', rstrip=False) }}"
+      register: deletion_directory_created
+      changed_when: "'CREATED_AND_VERIFIED' in deletion_directory_created.stdout_lines"
+
+    - name: Require verified result without journal writes
+      ansible.builtin.assert:
+        that:
+          - "('CREATED_AND_VERIFIED' in deletion_directory_created.stdout_lines) or ('ALREADY_SECURE' in deletion_directory_created.stdout_lines)"
+          - "('NO_JOURNAL_WRITTEN' in deletion_directory_created.stdout_lines) or ('NO_FILES_CHANGED' in deletion_directory_created.stdout_lines)"
+
+    - name: Show directory creation result
+      ansible.builtin.debug:
+        var: deletion_directory_created.stdout_lines

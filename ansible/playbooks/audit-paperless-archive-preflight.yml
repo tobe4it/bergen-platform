@@ -1,0 +1,24 @@
+---
+# Read-only combined entrypoint. Successful audits DO NOT approve archive,
+# source deletion, retention purge, or merge into main.
+- import_playbook: audit-paperless-deletion-journal-backup-integrity.yml
+- import_playbook: audit-paperless-deletion-journal-storage.yml
+- import_playbook: audit-paperless-synology-mounts.yml
+- import_playbook: audit-paperless-synology-acls.yml
+- import_playbook: audit-paperless-synology-archive.yml
+- import_playbook: audit-paperless-receipt-history.yml
+
+- name: Retain mandatory operator release gate
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  tasks:
+    - name: State unimplemented archival and retention gates
+      ansible.builtin.debug:
+        msg:
+          - "PREFLIGHT_ONLY"
+          - "ARCHIVE_NOT_AUTHORIZED"
+          - "SOURCE_DELETE_NOT_AUTHORIZED"
+          - "PURGE_NOT_AUTHORIZED"
+          - "MAIN_MERGE_NOT_AUTHORIZED"
+          - "NO_FILES_CHANGED"
