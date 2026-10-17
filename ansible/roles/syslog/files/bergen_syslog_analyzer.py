@@ -116,6 +116,56 @@ def show(db, mac):
     for ts,source,kind,rssi,raw in db.execute('SELECT ts,source,kind,rssi,raw FROM events WHERE mac=? ORDER BY id DESC LIMIT 25', (mac.lower(),)):
         print(f'{ts} {source} {kind} rssi={rssi if rssi is not None else "-"}\n  {raw}')
 
+def advise(db, mac):
+    """Read-only, evidence-bound advisory; never change WLAN or service state."""
+    mac = mac.lower()
+    row = db.execute('SELECT severity,first_seen,last_seen,handshake_failures,eapol_timeouts,leaves,sources FROM incidents WHERE mac=?', (mac,)).fetchone()
+    if row is None:
+        raise SystemExit('incident/client not found')
+    severity, first_seen, last_seen, handshakes, timeouts, leaves, sources_json = row
+    try:
+        sources = json.loads(sources_json or '[]')
+    except (ValueError, TypeError):
+        sources = []
+    source_count = len(sources) if isinstance(sources, list) else 0
+    failures = int(handshakes or 0) + int(timeouts or 0)
+    leaves = int(leaves or 0)
+
+    # Use only bounded recent observations; do not print raw log lines or AP names.
+    values = [r[0] for r in db.execute(
+        "SELECT rssi FROM events WHERE mac=? AND rssi BETWEEN -110 AND -1 "
+        "AND ts >= datetime('now','-24 hours') ORDER BY id DESC LIMIT 500",
+        (mac,))]
+    print(f'{severity} – WLAN-Diagnose zu {mac}')
+    print(f'Erfasster Vorfall: {first_seen} bis {last_seen}.')
+    print(f'Korrelation: {failures} WPA/EAPOL-Fehler, {leaves} Leave-Ereignisse, '
+          f'{source_count} Logquelle(n).')
+    if source_count >= 2:
+        print('Mehrere Quellen sind betroffen; ein einzelner Access Point '
+              'ist als alleinige Ursache nicht belegt.')
+    if values:
+        mean = sum(values) / len(values)
+        print(f'RSSI aus {len(values)} jüngeren gültigen Messungen: '
+              f'Mittel {mean:.0f} dBm, Spanne {min(values)} bis {max(values)} dBm.')
+        if mean <= -72:
+            print('Funkabdeckung oder Roaming als mögliche Mitursachen prüfen.')
+        else:
+            print('Ein dauerhaft schwaches Signal ist aus diesen Werten nicht belegt.')
+    else:
+        print('Keine verwertbaren jüngeren RSSI-Werte; Signalqualität unbekannt.')
+    if severity == 'ACTION':
+        print('Empfehlung: Client und zugeordnete APs identifizieren, '
+              'SSID/Sicherheit und mögliche Roaming-Wechsel prüfen. '
+              'Keine Kanal- oder Leistungsänderung allein aus dieser Auswertung.')
+    elif severity == 'OBSERVE':
+        print('Empfehlung: Fehlerentwicklung beobachten; noch nichts ändern.')
+    else:
+        print('Empfehlung: Kein automatischer Eingriff; Evidenz bei Bedarf erneut prüfen.')
+    print('Konfidenz: Ereignismuster aus gespeicherten Logs; Ursache und '
+          'zeitliche Vollständigkeit nicht unabhängig bestätigt. '
+          'Keine automatische Konfigurationsänderung.')
+
+
 def run_locked(db):
     os.makedirs(os.path.dirname(LOCK), exist_ok=True)
     with open(LOCK, 'w') as lockfile:
@@ -132,10 +182,12 @@ def main():
     sub.add_parser('run-once')
     lp=sub.add_parser('list'); lp.add_argument('--severity', choices=['INFO','OBSERVE','ACTION','CRITICAL'])
     sp=sub.add_parser('show'); sp.add_argument('mac')
+    ap=sub.add_parser('advise'); ap.add_argument('mac')
     args=p.parse_args(); db=connect()
     if args.cmd=='run-once': print(f'ingested {run_locked(db)} normalized events')
     elif args.cmd=='list': list_incidents(db,args.severity)
     elif args.cmd=='show': show(db,args.mac)
+    elif args.cmd=='advise': advise(db,args.mac)
     else: p.print_help()
 
 if __name__ == '__main__': main()

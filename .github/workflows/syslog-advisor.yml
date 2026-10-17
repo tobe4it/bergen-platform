@@ -1,0 +1,30 @@
+name: Syslog Advisor regression
+
+on:
+  pull_request:
+    paths:
+      - 'ansible/roles/syslog/files/bergen_syslog_analyzer.py'
+      - 'tests/test_syslog_operations_advisor.py'
+      - '.github/workflows/syslog-advisor.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'ansible/roles/syslog/files/bergen_syslog_analyzer.py'
+      - 'tests/test_syslog_operations_advisor.py'
+      - '.github/workflows/syslog-advisor.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  offline-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Test offline advisor against synthetic SQLite incidents
+        run: python -m unittest discover -s tests -p 'test_syslog_operations_advisor.py' -v
+      - name: Compile syslog analyzer
+        run: python -m py_compile ansible/roles/syslog/files/bergen_syslog_analyzer.py
