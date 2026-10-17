@@ -41,3 +41,4 @@ jobs:
           ansible-playbook -i localhost, --syntax-check ansible/playbooks/preflight-paperless.yml
           ansible-playbook -i localhost, --syntax-check ansible/playbooks/prepare-paperless-runtime.yml
           ansible-playbook -i localhost, --syntax-check ansible/playbooks/audit-paperless-existing-backend-readonly.yml
+          ansible-playbook -i localhost, --syntax-check ansible/playbooks/audit-paperless-allauth-timeout-readonly.yml
