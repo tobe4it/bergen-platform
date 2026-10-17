@@ -2101,3 +2101,57 @@ Archivierungsschritt ist erforderlich.
 Noch ausstehend ist ein produktiver Nachweis der weitergehenden
 dokumentweisen Fehlerisolierung bei widersprüchlichen
 Importnachweisen. Diese Fälle bleiben konservativ gesperrt.
+
+
+## 17.10.2026 — Vorläufige Betriebsfreigabe für Paperless-Gruppenbetrieb
+
+**Betreiberentscheidung:** Der Paperless-Betrieb wird für die
+bestehenden Gruppen-Scan-Eingänge `Familie` und `Eltern` vorläufig
+freigegeben. Dies ist eine *Betriebsfreigabe des aktuellen,
+beaufsichtigten Automatikpfads*, keine uneingeschränkte technische
+Endabnahme und keine Freigabe des gesamten PR-Inhalts für `main`.
+
+**Durch Betreiber am 17.10.2026 gemeldete Belege:**
+- `python3 -m unittest discover -s tests -p 'test_paperless_*.py'`:
+  840 Tests, `OK` nach Bereitstellung der Metadatenkorrektur.
+- Code-Only-Staging: `ok=25 changed=4 failed=0`;
+  SHA-/Eigentümerprüfungen bestanden, keine PDFs/Receipts beim
+  Staging verändert.
+- Vollständiges lesendes Live-Lifecycle-Audit:
+  `ok=18 changed=0 failed=0`; zwei nachweislich
+  benutzerseitig gelöschte Paperless-Dokumente bleiben ausgeschlossen.
+- Automatischer systemd-OneShot: `Result=success`,
+  `ExecMainStatus=0` beim ersten Abnahmelauf.
+- Timer `bergen-paperless-group-auto-v1.timer`:
+  `enabled` und `active`, regelmäßiger gruppenbezogener
+  automatischer Start; höchstens ein Gruppenoriginal je Lauf.
+- Der Betreiber bestätigt anschließend, dass ein Dokument
+  automatisch archiviert wurde. Die letzte gezeigte
+  systemd-Dienstabfrage zeigte `ActiveState=activating`,
+  `SubState=start` bei einem weiteren laufenden Durchlauf;
+  aus dieser Meldung allein ergibt sich noch keine abschließende
+  Aussage zum Ergebnis sämtlicher künftiger Durchläufe.
+
+**Betriebsgrenzen:**
+- Nur Gruppen-Scanfluss: fertig geschriebene PDF,
+  automatisch eindeutig behandelte Scanner-Dateinamen,
+  Senderquittung, unabhängig verifizierter lebender
+  Paperless-Import, geschütztes Synology-Originalarchiv.
+- Die Quelldatei wird erst nach dem abgesicherten
+  Importnachweis per atomarer Same-Volume-Verschiebung
+  archiviert; das **Archivoriginal bleibt erhalten**.
+- **Kein** Purge/Archivoriginal-Löschen und **keine** manuelle
+  PDF-Einzelauswahl. Der Gruppen-Timer hat keine Berechtigung
+  für private Eingangsverzeichnisse.
+- Fehler mit unklarer Identität/Import- oder Journalbeweis
+  bleiben fail-closed; die versprochene vollständige
+  Fehlerisolierung *pro fehlerhaftem Dokument* ist noch offen.
+  Deshalb Betriebsfreigabe bewusst vorläufig; regelmäßige
+  Kontrolle fehlgeschlagener Timer-Durchläufe erforderlich.
+- Eine formale Freigabe zur sicheren Löschung der importierten
+  Scan-Quelldaten (über die verifizierte Archivverschiebung
+  hinaus), einschließlich aller Quarantäne-/Wiederanlauf- und
+  Sicherheitsprüfungen, ist **nicht erteilt**.
+- **PR #81 bleibt Draft, kein Merge nach `main`** bis die
+  vereinbarte sichere Lösch-/Archivierungs- und
+  Quarantänefunktion vollständig implementiert und getestet ist.
