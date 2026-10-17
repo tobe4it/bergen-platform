@@ -115,7 +115,7 @@ def native_acl_failure_class(returncode, stdout, stderr):
 # All other native-tool failures remain hard blockers, including generic
 # missing-ACL messages, arbitrary exit 255, mixed errors, and timeouts.
 LINUX_MODE_OUTPUT = re.compile(
-    r"\\(synoacltool[.]c,\\s*[0-9]+\\)\\s*It's Linux mode\\Z")
+    r"\(synoacltool[.]c,\s*[0-9]+\)\s*It's Linux mode\Z")
 
 
 def exact_linux_mode_readout(result):
