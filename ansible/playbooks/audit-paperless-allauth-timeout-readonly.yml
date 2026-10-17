@@ -1,0 +1,71 @@
+---
+# Non-mutating allauth/OIDC runtime audit for the existing protected Paperless LXC.
+# No active service restart and no changes to Quadlets, settings, secrets or users.
+- import_playbook: audit-paperless-existing-backend-readonly.yml
+
+- name: Audit effective Paperless socialaccount timeout without changing services
+  hosts: venombox
+  gather_facts: false
+  become: true
+  tasks:
+    - name: Read the effective in-process allauth timeout without showing config secrets
+      ansible.builtin.command:
+        argv:
+          - pct
+          - exec
+          - '126'
+          - --
+          - podman
+          - exec
+          - bergen-paperless
+          - python3
+          - -c
+          - |
+            import os
+            import django
+            os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'paperless.settings')
+            django.setup()
+            from django.conf import settings
+            from allauth.socialaccount import app_settings
+            timeout = app_settings.REQUESTS_TIMEOUT
+            if type(timeout) not in (int, float) or not (0 < timeout <= 120):
+                raise SystemExit('INVALID_ALLAUTH_TIMEOUT')
+            if 'allauth.socialaccount.providers.openid_connect' not in settings.INSTALLED_APPS:
+                raise SystemExit('OIDC_PROVIDER_NOT_INSTALLED')
+            # No usernames, provider metadata, domains, tokens or redirects.
+            print('ALLAUTH_RUNTIME_TIMEOUT_SECONDS=' + str(timeout))
+            print('ALLAUTH_RUNTIME_CATEGORY=' + (
+                'FIVE_SECONDS' if timeout == 5 else
+                'FIFTEEN_SECONDS' if timeout == 15 else 'OTHER'))
+            print('OIDC_PROVIDER_PRESENT=true')
+            print('PAPERLESS_DJANGO_MODULE=' + (
+                'DEFAULT' if settings.SETTINGS_MODULE == 'paperless.settings' else 'CUSTOM'))
+            print('PAPERLESS_REGULAR_LOGIN_DISABLED=' + (
+                'true' if os.environ.get('PAPERLESS_DISABLE_REGULAR_LOGIN', '').lower() == 'true'
+                else 'false'))
+      register: allauth_runtime_evidence
+      changed_when: false
+      failed_when: false
+      check_mode: false
+      no_log: true
+
+    - name: Fail without a coherent effective timeout and OIDC provider
+      ansible.builtin.assert:
+        that:
+          - allauth_runtime_evidence.rc == 0
+          - allauth_runtime_evidence.stdout_lines | select('match', '^ALLAUTH_RUNTIME_TIMEOUT_SECONDS=') | list | length == 1
+          - allauth_runtime_evidence.stdout_lines | select('match', '^ALLAUTH_RUNTIME_CATEGORY=(FIVE_SECONDS|FIFTEEN_SECONDS|OTHER)$') | list | length == 1
+          - "'OIDC_PROVIDER_PRESENT=true' in allauth_runtime_evidence.stdout_lines"
+          - allauth_runtime_evidence.stdout_lines | select('match', '^PAPERLESS_DJANGO_MODULE=(DEFAULT|CUSTOM)$') | list | length == 1
+        fail_msg: "PAPERLESS_ALLAUTH_READONLY_RUNTIME_AUDIT_FAILED"
+      no_log: true
+
+    - name: Report only the effective timeout class without leaking private OIDC settings
+      ansible.builtin.debug:
+        msg:
+          - "{{ allauth_runtime_evidence.stdout_lines | select('match', '^ALLAUTH_RUNTIME_TIMEOUT_SECONDS=') | first }}"
+          - "{{ allauth_runtime_evidence.stdout_lines | select('match', '^ALLAUTH_RUNTIME_CATEGORY=') | first }}"
+          - "{{ allauth_runtime_evidence.stdout_lines | select('match', '^PAPERLESS_DJANGO_MODULE=') | first }}"
+          - "OIDC_PROVIDER_PRESENT=true"
+          - "NO_SETTINGS_OR_SERVICES_CHANGED=true"
+          - "TIMEOUT_CHANGE_NOT_AUTHORIZED=true"
