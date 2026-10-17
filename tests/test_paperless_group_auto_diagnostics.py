@@ -22,7 +22,11 @@ class GroupAutoDiagnosticsTests(unittest.TestCase):
         self.assertEqual(play["hosts"], "venombox")
         self.assertIn("diagnos", play["name"].lower())
         private = [t for t in play["tasks"] if t.get("register")]
-        self.assertEqual(len(private), 2)
+        self.assertEqual(
+            {t["register"] for t in private},
+            {"sender_audit_diagnostic", "watcher_process_diagnostic",
+             "source_mismatch_diagnostic"},
+        )
         for task in private:
             self.assertIs(task["no_log"], True)
             self.assertIs(task["changed_when"], False)
@@ -32,6 +36,7 @@ class GroupAutoDiagnosticsTests(unittest.TestCase):
             self.assertIn("sudo -n -u", task["ansible.builtin.command"]["argv"][-1])
         self.assertIn("audit_synology_archive_candidates.py", raw)
         self.assertIn("diagnose_synology_watcher_processes.py", raw)
+        self.assertIn("diagnose_synology_v1_receipt_mismatches.py", raw)
         self.assertNotIn("debug:\n        var: sender_audit_diagnostic", raw)
         self.assertNotIn("debug:\n        var: watcher_process_diagnostic", raw)
         self.assertNotIn("ignore_errors:", raw)
