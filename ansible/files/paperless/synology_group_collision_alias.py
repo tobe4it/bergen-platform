@@ -81,7 +81,7 @@ def require_previous_archived(state, folder, scope, name, receipt):
     event = stages["archived"]
     if (event.get("scope") != scope or event.get("source") != name
             or event.get("sender_receipt") != key + ".json"
-            or event.get("signature") != receipt["signature"]
+            or event.get("sender_signature", event.get("signature")) != receipt["signature"]
             or event.get("sha256") != receipt["sha256"]
             or event.get("archive_site") != move.SITE_BY_SCOPE[scope]
             or event.get("archive_name") != key + ".pdf"):
@@ -90,7 +90,7 @@ def require_previous_archived(state, folder, scope, name, receipt):
     # Check original v1 sender receipt using the exact reviewed worker.
     prior = move._read_receipt(
         state / (key + ".json"), scope, name,
-        event["signature"], event["sha256"])
+        event.get("sender_signature", event["signature"]), event["sha256"])
     if prior["destination"] != receipt.get("destination"):
         raise RuntimeError("PRIOR_RECEIVER_RECEIPT_MISMATCH")
 
