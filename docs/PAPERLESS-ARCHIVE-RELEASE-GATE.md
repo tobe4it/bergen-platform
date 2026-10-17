@@ -1850,3 +1850,32 @@ v1-Verarbeitung umfasst nur eindeutig neue Dateinamen
 in `Familie` und `Eltern`; v2-Kollisionsfreiheit
 bleibt der wesentliche unerledigte Teil des Gruppen-Rollouts.
 
+
+## 17.10.2026 — Unbeaufsichtigter systemd-OneShot erstmals erfolgreich
+
+Der Betreiber hat das lokale Vault-Credential auf `bp-controller`
+mit Root-Eigentümerschaft unter
+`/etc/bergen-paperless/group-auto-vault` (0600)
+und dem Root-Verzeichnis `/etc/bergen-paperless` (0700)
+eingerichtet. Das Passwort ist nicht im Repository.
+Anschließend wurde
+`sudo systemctl start bergen-paperless-group-auto-v1.service`
+erfolgreich ausgeführt. `systemctl show` meldete:
+
+```text
+Result=success
+ExecMainStatus=0
+```
+
+Damit ist nach **775 bestandenen Offline-Tests**,
+erfolgreicher systemd-Unit-Prüfung und früherem
+`changed=0`-Ansible-IDLE-Lauf nun auch der nicht-interaktive
+systemd-Lauf real auf dem Controller bestätigt.
+**Noch nicht durch diese Evidenz belegt** ist die Aktivierung
+des Fünf-Minuten-Timers bzw. ein automatisch archivierter
+**neuer** Gruppen-Scan. Der nächste Schritt ist ausdrücklich
+`systemctl enable --now bergen-paperless-group-auto-v1.timer`
+und anschließend der Nachweis an einem neuen eindeutigen
+Familie-/Eltern-PDF. Der volle Gruppen-Rollout bleibt bis
+zum v2-Gleichnamigkeitspfad und einem echten Live-Move offen.
+
