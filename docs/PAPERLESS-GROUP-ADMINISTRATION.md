@@ -48,7 +48,7 @@ Vor einem ausdrücklich autorisierten Apply müssen insbesondere ausgeschlossen 
 
 ## Optionales Vorgehen für den vorhandenen Controller
 
-Alle folgenden Playbooks sind im bestehenden v1-Code verfügbar; **ohne** Apply-Flag sind sie nur für Review und Audit vorgesehen. Vor Ausführung sind die aktuelle Inventarbindung, die Vault-Datei und die effektive Berechtigung zu prüfen. Keine Namen, Secrets oder Papierdokumente in öffentliche Logs kopieren.
+Alle folgenden Playbooks sind im bestehenden v1-Code verfügbar; **ohne** Apply-Flag sind sie nur für Review und Audit vorgesehen (Dry-run als Standard). Vor Ausführung sind die aktuelle Inventarbindung, die Vault-Datei und die effektive Berechtigung zu prüfen. Keine Namen, Secrets oder Papierdokumente in öffentliche Logs kopieren.
 
 ```bash
 cd /home/ansible/bergen-platform
