@@ -1879,3 +1879,83 @@ und anschließend der Nachweis an einem neuen eindeutigen
 Familie-/Eltern-PDF. Der volle Gruppen-Rollout bleibt bis
 zum v2-Gleichnamigkeitspfad und einem echten Live-Move offen.
 
+
+## 17.10.2026 — Scanner-Dateinamenswiederverwendung: archivierte v1-Quelle eindeutig neu instanziieren
+
+Die automatische Archivierung nach den ersten neu eingegangenen Scans
+brach in vier aufeinanderfolgenden Läufen noch **vor jedem Rename**
+mit `SOURCE_RECEIPT_MISMATCH` ab (`changed=0`). Der NAS-Watcher
+und sein Supervisor waren als `SUPERVISED_AND_RUNNING` bestätigt,
+und der Sender-Aktivierungsgate war `ACTIVE`. Auf dem Controller
+bestand die Suite zunächst aus **779 bestandenen Tests**.
+Diese Diagnose beweist **nicht** bereits, dass ausschließlich
+ein wiederverwendeter Dateiname vorliegt: Auch `ctime`-Drift
+einer bestehenden Datei kann die bisherige v1-Signatur verändern.
+
+Der dokumentierte, **noch nicht auf der Synology aktivierte**
+Behebungspfad ist in PR #81:
+- `synology_group_collision_alias.py`: unter der vorhandenen
+  `sync.lock` und dem Root-Gate **nur für Familie/Eltern**.
+  Bei unverändertem Namen, aber anderer Dateisystem-Inode
+  verlangt er die alte unveränderte v1-`SENT`-Quittung,
+  das vollständige PREPARED+ARCHIVED-NAS-Journal sowie die
+  **erneut SHA-256-verifizierte geschützte Archiv-PDF**.
+  Vor jeder Aktion prüft er die Ruhezeit und die
+  Dateisignatur; dann benennt er die **neue** Scan-Datei
+  innerhalb des Scan-Eingangs mit
+  `renameat2(RENAME_NOREPLACE)` auf
+  `<vorheriger-Stamm>--scan-<32-stellige-NONCE>.pdf` um.
+  Die alte archivierte PDF und das alte v1-Receipt bleiben
+  unverändert. Der neue Basename erzeugt eine neue v1-
+  Quittung und ein eigenständiges Ziel in Paperless.
+  Auch identische PDF-Inhalte verschiedener Scans kollidieren
+  nicht; der Nonce steht im v1-Receiver-Stamm **vor der
+  120-Zeichen-Grenze**. Bei Crash nach dem Rename, aber
+  vor Übertragung liegt die neue PDF weiter im Eingang
+  und wird vom periodischen inotify-Sender neu gefunden.
+- `synology_scan_sync.py`: verwendet diesen Schutz
+  **nur bei eingeplantem committed Senderlauf** und
+  nur unter Nachweis einer root-eigenen Helper-Datei.
+  Metadatenänderungen **am selben Inode**, fehlende
+  alte Archivierung, unvollständige Journale und
+  geänderte Quittungen bleiben gesperrt. Keine
+  Hintergrund-Ausführung für private Scans.
+- `diagnose_synology_v1_receipt_mismatches.py`: nur
+  lesende, aggregierte `SOURCE_CLASS GROUP/PRIVATE`-
+  Ursachen. Differenziert gleiche Inode/`ctime`,
+  geänderten Inhalt, geänderte Inode und fehlende Quittung,
+  ohne Dateinamen oder Hashes offenzulegen.
+- `stage-paperless-synology-group-collision-sender.yml`:
+  opt-in `paperless_group_collision_stage=true`,
+  fordert den gestoppten Controller-Archiv-Timer,
+  ein Root-kontrolliertes NAS-`bin`, inaktive
+  Archivfreigaben und SHA-verifizierte, atomare Installation
+  der beiden Hilfsmodule **vor** dem aktiven Sender.
+  Führt selbst keine NAS-PDF-Änderung und keinen Import
+  durch. Die neu erstellten Offline-Tests müssen
+  **vor** einem solchen Stage-Aufruf auf dem
+  Controller erfolgreich sein.
+
+WICHTIG: Die interne Datei wird im Scan-Eingang
+automatisch eindeutig umbenannt; die ursprünglichen
+PDF-Bytes bleiben unberührt. Das ist eine bewusst
+begrenzte Brücke für vorhandene v1-Daten. Die
+angestrebte vollständige v2-Transport-/Archivierung
+mit Nonce-bezogener *Receipt*-Identität ohne
+Änderung des ursprünglichen Dateinamens ist
+weiterhin gesonderte Entwicklungsarbeit.
+Ein durch einen Scanner **vor** der ersten
+sicheren Archivierung bereits überschriebenes
+Original kann nicht durch Aliasierung gerettet
+werden und bleibt ein zwingender STOP-Fall.
+
+Das aktuelle `SOURCE_RECEIPT_MISMATCH` darf
+**nicht** blind durch Aliasierung repariert
+werden, bevor seine Scope- und Inhaltsklasse
+im erweiterten sicheren Diagnose-Playbook
+feststeht. Der automatische Archiv-Timer
+bleibt bis zum vollständig geprüften Sender,
+nachgewiesenen Neuimport und erfolgreichem
+anschließenden Live-Archiv-Move deaktiviert.
+Kein Lösch-/Purge-Release, kein Merge nach `main`.
+
