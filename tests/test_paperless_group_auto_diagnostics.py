@@ -25,7 +25,7 @@ class GroupAutoDiagnosticsTests(unittest.TestCase):
         self.assertEqual(
             {t["register"] for t in private},
             {"sender_audit_diagnostic", "watcher_process_diagnostic",
-             "source_mismatch_diagnostic"},
+             "source_mismatch_diagnostic", "collision_archive_proof_diagnostic"},
         )
         for task in private:
             self.assertIs(task["no_log"], True)
@@ -37,6 +37,9 @@ class GroupAutoDiagnosticsTests(unittest.TestCase):
         self.assertIn("audit_synology_archive_candidates.py", raw)
         self.assertIn("diagnose_synology_watcher_processes.py", raw)
         self.assertIn("diagnose_synology_v1_receipt_mismatches.py", raw)
+        self.assertIn("diagnose_synology_group_collision_archive_proof.py", raw)
+        self.assertIn("audit_synology_completed_archive_moves.py", raw)
+        self.assertIn("NEW_INODE_PRIOR_ARCHIVE_VERIFIED", raw)
         self.assertNotIn("debug:\n        var: sender_audit_diagnostic", raw)
         self.assertNotIn("debug:\n        var: watcher_process_diagnostic", raw)
         self.assertNotIn("ignore_errors:", raw)
