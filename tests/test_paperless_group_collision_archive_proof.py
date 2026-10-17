@@ -103,9 +103,9 @@ class GroupCollisionArchiveProofTests(unittest.TestCase):
             lookup=file_lookup,
             playbook_dir=str(PLAYBOOK.parent),
         )
-        self.assertIn("\\n#!/usr/bin/env python3\\n", rendered)
-        self.assertIn("\\ndef prior_archive_verified(", rendered)
-        self.assertNotIn("\\n          def prior_archive_verified(", rendered)
+        self.assertIn("\n#!/usr/bin/env python3\n", rendered)
+        self.assertIn("\ndef prior_archive_verified(", rendered)
+        self.assertNotIn("\n          def prior_archive_verified(", rendered)
         self.assertNotIn("{{", rendered)
         compile(rendered, "<offline-nas-stdin>", "exec")
 
