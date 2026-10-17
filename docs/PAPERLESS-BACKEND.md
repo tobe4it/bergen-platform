@@ -23,6 +23,8 @@ Erwarteter Abschluss `PAPERLESS_EXISTING_BACKEND_READONLY_OK`. Die Verwendung vo
 
 ## Greenfield-Vorlage
 
+Für eine neue Installation die echte Vault-Datei ausschließlich lokal mit `ansible-vault create ansible/vars/paperless.vault.yml` anlegen und bei der eigenständig freigegebenen Prüfung mit `--ask-vault-pass` verwenden. Niemals Beispiel-Passwörter einsetzen oder die Vault-Datei in Git übernehmen.
+
 Die historischen Konfigurationsbeispiele unter `docs/examples/paperless.local.example.yml` und `paperless.vault.example.yml` enthalten keine gültigen Secrets. Die Vorinstallation und das eigentliche Starten sind getrennte explizite Entscheidungen, niemals ein Side Effect der Bestandsprüfung.
 
 Für die genaue ursprüngliche Rollenstruktur siehe [historisches Design #54](https://github.com/tobe4it/bergen-platform/pull/54); die dortigen Proxmox-/Proxy-/LDAP-Integrationserklärungen dürfen **nicht** als aktuell getestete Live-Aussage übernommen werden. Dieses Release ermöglicht ausschließlich die **sichere Reproduzierbarkeit eines erstmaligen, isolierten Backends** bei vollständig abgenommener Zielumgebung. Die bestehende laufende Instanz wird ausdrücklich nicht „adoptiert“ oder durch einen historischen Role-Stand überschrieben.
