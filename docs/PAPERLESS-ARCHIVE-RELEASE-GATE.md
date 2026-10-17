@@ -1235,3 +1235,48 @@ static ACL, isolated archived canary recovery and full lifecycle
 evidence. This is a connectivity diagnosis only and grants no
 additional archive, purge or merge permission.
 
+
+### 2026-10-17 both NAS LAN/VLAN addresses time out on SMB/445 from controller
+
+The operator tested both NAS real interface addresses separately
+from `bp-controller` (`192.168.20.250`):
+
+```text
+192.168.2.145 via 192.168.20.1 dev eth0 src 192.168.20.250
+SMB_PROBE_DIAGNOSTIC CONNECT_OBJECT TRANSPORT NO_STATUS TimeoutError
+192.168.6.11 via 192.168.20.1 dev eth0 src 192.168.20.250
+SMB_PROBE_DIAGNOSTIC CONNECT_OBJECT TRANSPORT NO_STATUS TimeoutError
+ldap.thebergens.net resolves to 192.168.6.11 for IPv4
+```
+
+The prior remote NAS local inspection counted two 445 LISTEN sockets.
+Consequently the NAS SMB service is probably active, but **neither of
+the two cross-VLAN paths from the controller established a TCP socket**.
+This does not identify the blocking policy yet. The DNS name used
+previously points to the same NAS `192.168.6.11` and so is not a
+separate workaround. An inter-VLAN UniFi firewall policy, NAS
+interface-bound rule, or local DSM firewall could explain the
+timeout. Do not expose SMB/445 externally or create blanket cross-VLAN
+allow rules just to complete the protection assessment.
+
+An alternative **nonmutating**, explicitly temporary assessment path
+is an SSH local forward from controller `127.0.0.1:1445` to NAS
+`127.0.0.1:445`, only after proving that the NAS itself accepts SMB
+on its loopback address. The review-only SMB2 probe now permits
+`--port 1445` exclusively when `--server 127.0.0.1`;
+the default remains 445 for direct interfaces. This avoids permanently
+changing UniFi isolation. On the tunnel, first validate passwordless
+TCP/445-equivalent reachability and SMB negotiate, then only with
+operator approval run a normal-user SMB authentication/access-intent
+probe. A tunneled access verdict is **server-side ACL evidence for
+the selected SMB principal from NAS loopback**, NOT proof of SMB
+accessibility/denial from arbitrary VLAN clients; it also does not
+replace a controlled disposable rename/delete exercise.
+No protected file is to be renamed/deleted.
+
+Full offline tests for the custom-port guard plus existing Paperless
+regressions remain pending operator validation. The original
+archived PDF, static site ACLs and isolated recovery are unchanged.
+There is NO authorization to activate archive gates, enable expiry,
+purge NAS originals or merge the Paperless stack.
+
