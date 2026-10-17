@@ -1073,3 +1073,43 @@ results fail closed. No actual archive file or entry may be mutated
 to test access. Future off-NAS backup/restore proof remains mandatory
 for irreversible purge and main promotion.
 
+
+### 2026-10-17 first authenticated SMB2 access-intent probe inconclusive
+
+After the verified read-only `synoshare` mapping, the operator successfully
+completed the full **756/756** offline Paperless suite and installed
+`smbprotocol==1.17.0` into the existing `bp-controller` virtualenv
+(`pyspnego==0.12.4`). The **first** SMB2 credentialed no-write intent
+probe using the explicitly selected, nonadministrator-domain identity
+`thomas@bergen.intern` against the `paperless-scan` share on
+`ldap.thebergens.net` terminated with only
+`SMB_NEGATIVE_ACCESS_PROBE_BLOCKED`. It produced **no**
+`SMB2_ACCESS_INTENT` verdict. It could have failed at transport,
+authentication, tree-connect, share-root open, API, or cleanup.
+**No effective denial has been proved and no SMB rename/delete/write
+operation was issued.** Do not claim the account was refused or
+allowed any particular DELETE access based on this opaque failure.
+
+A new candidate fail-closed diagnostic reports only:
+`SMB_PROBE_DIAGNOSTIC <allowlisted-phase> <safe-error-class>
+<sanitized-32-bit-NTSTATUS-or-NO_STATUS>`; it never prints
+raw exception content, credentials, usernames, private paths or
+server error descriptions. An optional
+`--local-api-check` inspects the exact installed pinned library,
+constants, public methods and their signatures **without any DNS,
+socket, connection or password prompt**. A new synthetic suite covers
+redaction, numeric status and no-network preflight.
+The probe still asks for only SMB2 `FILE_OPEN` with limited
+desired access; every negative request must return exact
+`STATUS_ACCESS_DENIED`, otherwise block.
+
+**Operator acceptance after pulling updated PR branch:** run the
+complete synthetic tests and
+`python3 ansible/files/paperless/probe_synology_smb_delete_access.py
+--local-api-check`. Only if both pass, retry one approved
+credentialed probe using interactive getpass. Report the safe
+`SMB_PROBE_DIAGNOSTIC` and any preceding `SMB2_ACCESS_INTENT`
+markers, not passwords, raw SMB errors or secrets.
+No NAS/ACL mutation, new archival move, release flag, purge or
+merge into main is authorized by this troubleshooting.
+
