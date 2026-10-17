@@ -1080,9 +1080,9 @@ After the verified read-only `synoshare` mapping, the operator successfully
 completed the full **756/756** offline Paperless suite and installed
 `smbprotocol==1.17.0` into the existing `bp-controller` virtualenv
 (`pyspnego==0.12.4`). The **first** SMB2 credentialed no-write intent
-probe using the explicitly selected, nonadministrator-domain identity
-`thomas@bergen.intern` against the `paperless-scan` share on
-`ldap.thebergens.net` terminated with only
+probe using an operator-selected, nonadministrative SMB identity
+against the confirmed `paperless-scan` share on the configured
+Synology terminated with only
 `SMB_NEGATIVE_ACCESS_PROBE_BLOCKED`. It produced **no**
 `SMB2_ACCESS_INTENT` verdict. It could have failed at transport,
 authentication, tree-connect, share-root open, API, or cleanup.
