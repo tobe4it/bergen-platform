@@ -38,7 +38,7 @@
       register: oidc_audit_guest_status
       changed_when: false
       check_mode: false
-      failed_when: oidc_audit_guest_status.rc != 0 or (oidc_audit_guest_status.stdout | trim) != 'status: running'
+      failed_when: "oidc_audit_guest_status.rc != 0 or (oidc_audit_guest_status.stdout | trim) != 'status: running'"
 
     - name: Require active Open WebUI service
       ansible.builtin.command:
