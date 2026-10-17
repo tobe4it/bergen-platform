@@ -1,0 +1,207 @@
+---
+# Adopt one existing Nextcloud HTTPS certificate consumer and its Certbot deploy hook.
+# All production names, paths and SSH identities come from Git-ignored local vars.
+# Read-only by default. A missing hook is created only with explicit approval.
+# An existing hook is never overwritten, regardless of apply setting.
+- name: Register the approved certificate source
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  tasks:
+    - name: Require narrowly scoped site-local configuration
+      ansible.builtin.assert:
+        that:
+          - mail_tls_source_address is defined
+          - mail_tls_source_ssh_user is defined
+          - mail_cloud_tls_hostname is defined
+          - mail_cloud_tls_hostname is match('^[a-z0-9][a-z0-9.-]*[a-z0-9]$')
+          - "'..' not in mail_cloud_tls_hostname"
+          - mail_cloud_tls_cert_lineage is defined
+          - mail_cloud_tls_cert_lineage is match('^[A-Za-z0-9._-]+$')
+          - mail_cloud_tls_vhost_path is defined
+          - mail_cloud_tls_vhost_path is match('^/etc/nginx/sites-available/[A-Za-z0-9._-]+[.]conf$')
+          - mail_cloud_tls_link_path is defined
+          - mail_cloud_tls_link_path is match('^/etc/nginx/conf[.]d/[A-Za-z0-9._-]+[.]conf$')
+          - mail_cloud_tls_hook_path is defined
+          - mail_cloud_tls_hook_path is match('^/etc/letsencrypt/renewal-hooks/deploy/[A-Za-z0-9._-]+$')
+          - mail_cloud_tls_hook_path != (mail_tls_postfix_hook_path | default(''))
+          - mail_cloud_tls_hook_path != (mail_tls_nginx_hook_path | default(''))
+          - mail_cloud_tls_hook_path != (mail_mta_sts_hook_path | default(''))
+          - not ansible_check_mode
+        fail_msg: Provide approved, Git-ignored Cloud TLS inputs; refusing ambiguous scope.
+      no_log: true
+
+    - name: Register only the approved source
+      ansible.builtin.add_host:
+        name: selected-cloud-tls-source
+        groups: selected_cloud_tls_sources
+        ansible_host: "{{ mail_tls_source_address }}"
+        ansible_user: "{{ mail_tls_source_ssh_user }}"
+        ansible_python_interpreter: /usr/bin/python3
+      changed_when: false
+
+- name: Audit or install exactly one lineage-specific Nginx deploy hook
+  hosts: selected_cloud_tls_sources
+  gather_facts: false
+  become: true
+  any_errors_fatal: true
+  vars:
+    cert_dir: "/etc/letsencrypt/live/{{ mail_cloud_tls_cert_lineage }}"
+    expected_hook: |
+      #!/bin/sh
+      set -eu
+
+      [ "${RENEWED_LINEAGE:-}" = \
+        "/etc/letsencrypt/live/{{ mail_cloud_tls_cert_lineage }}" ] || exit 0
+
+      /usr/sbin/nginx -t
+      exec /usr/bin/systemctl reload nginx
+  tasks:
+    - name: Inspect vhost, symlink and dedicated hook without following links
+      ansible.builtin.stat:
+        path: "{{ item }}"
+        follow: false
+      loop:
+        - "{{ mail_cloud_tls_vhost_path }}"
+        - "{{ mail_cloud_tls_link_path }}"
+        - "{{ mail_cloud_tls_hook_path }}"
+      register: cloud_tls_paths
+      no_log: true
+
+    - name: Require known vhost, existing symlink and safe hook ownership
+      ansible.builtin.assert:
+        that:
+          - cloud_tls_paths.results[0].stat.isreg | default(false)
+          - not (cloud_tls_paths.results[0].stat.islnk | default(false))
+          - cloud_tls_paths.results[0].stat.pw_name | default('') == 'root'
+          - cloud_tls_paths.results[0].stat.gr_name | default('') == 'root'
+          - cloud_tls_paths.results[1].stat.islnk | default(false)
+          - not (cloud_tls_paths.results[2].stat.islnk | default(false))
+          - not (cloud_tls_paths.results[2].stat.exists | default(false)) or (cloud_tls_paths.results[2].stat.isreg | default(false))
+          - not (cloud_tls_paths.results[2].stat.exists | default(false)) or (cloud_tls_paths.results[2].stat.pw_name | default('') == 'root')
+          - not (cloud_tls_paths.results[2].stat.exists | default(false)) or (cloud_tls_paths.results[2].stat.gr_name | default('') == 'root')
+          - not (cloud_tls_paths.results[2].stat.exists | default(false)) or (cloud_tls_paths.results[2].stat.mode | default('') == '0700')
+        fail_msg: The vhost, symlink, or pre-existing deploy hook is not in the reviewed state.
+
+    - name: Resolve existing vhost symlink
+      ansible.builtin.command:
+        argv: [/usr/bin/readlink, -e, "{{ mail_cloud_tls_link_path }}"]
+      register: cloud_tls_link_target
+      changed_when: false
+
+    - name: Require symlink to point to the reviewed real file
+      ansible.builtin.assert:
+        that:
+          - cloud_tls_link_target.stdout == mail_cloud_tls_vhost_path
+
+    - name: Read existing vhost without modifying it
+      ansible.builtin.slurp:
+        src: "{{ mail_cloud_tls_vhost_path }}"
+      register: cloud_tls_vhost
+      no_log: true
+
+    - name: Require exactly the selected cloud hostname and certificate pair
+      ansible.builtin.assert:
+        that:
+          - "(cloud_tls_vhost.content | b64decode | regex_findall('(?m)^[ \\t]*server_name[ \\t]+' ~ (mail_cloud_tls_hostname | regex_escape) ~ '[ \\t]*;') | length) == 2"
+          - "(cloud_tls_vhost.content | b64decode | regex_findall('(?m)^[ \\t]*ssl_certificate[ \\t]+' ~ ((cert_dir ~ '/fullchain.pem') | regex_escape) ~ '[ \\t]*;') | length) == 1"
+          - "(cloud_tls_vhost.content | b64decode | regex_findall('(?m)^[ \\t]*ssl_certificate_key[ \\t]+' ~ ((cert_dir ~ '/privkey.pem') | regex_escape) ~ '[ \\t]*;') | length) == 1"
+        fail_msg: The selected vhost is not already using exactly the reviewed TLS lineage.
+      no_log: true
+
+    - name: Validate certificate covers the selected cloud hostname
+      ansible.builtin.command:
+        argv: [/usr/bin/openssl, x509, -in, "{{ cert_dir }}/fullchain.pem", -noout, -checkhost, "{{ mail_cloud_tls_hostname }}"]
+      changed_when: false
+
+    - name: Confirm the currently installed certificate is not expired
+      ansible.builtin.command:
+        argv: [/usr/bin/openssl, x509, -in, "{{ cert_dir }}/fullchain.pem", -noout, -checkend, "0"]
+      changed_when: false
+
+    - name: Validate combined Nginx configuration
+      ansible.builtin.command:
+        argv: [/usr/sbin/nginx, -t]
+      changed_when: false
+
+    - name: Require running Nginx for this certificate consumer
+      ansible.builtin.command:
+        argv: [/usr/bin/systemctl, is-active, --quiet, nginx]
+      changed_when: false
+
+    - name: Read existing dedicated hook if it is present
+      ansible.builtin.slurp:
+        src: "{{ mail_cloud_tls_hook_path }}"
+      register: cloud_tls_hook_content
+      when: cloud_tls_paths.results[2].stat.exists | default(false)
+      no_log: true
+
+    - name: Refuse any pre-existing hook other than the exact reviewed content
+      ansible.builtin.assert:
+        that:
+          - "not (cloud_tls_paths.results[2].stat.exists | default(false)) or (cloud_tls_hook_content.content | default('') | b64decode) == expected_hook"
+        fail_msg: Existing hook content differs; refusing to overwrite or execute it.
+      no_log: true
+
+    - name: Report whether the dedicated hook already matches
+      ansible.builtin.debug:
+        msg:
+          status: "{{ 'ALREADY_MANAGED' if (cloud_tls_paths.results[2].stat.exists | default(false)) else 'READY_TO_CREATE' }}"
+          apply_authorized: "{{ mail_cloud_tls_hook_apply | default(false) | bool }}"
+          vhost_changed: false
+          existing_hooks_changed: false
+          nginx_reloaded: false
+
+    - name: Install new dedicated hook only when explicitly approved and absent
+      when:
+        - mail_cloud_tls_hook_apply | default(false) | bool
+        - not (cloud_tls_paths.results[2].stat.exists | default(false))
+      block:
+        - name: Ensure Certbot is not running before hook installation
+          ansible.builtin.shell: |
+            if pgrep -x certbot >/dev/null; then
+              echo 'Certbot running; refusing hook installation' >&2
+              exit 1
+            fi
+          args:
+            executable: /bin/sh
+          changed_when: false
+
+        - name: Create only the new scoped deploy hook
+          ansible.builtin.copy:
+            content: "{{ expected_hook }}"
+            dest: "{{ mail_cloud_tls_hook_path }}"
+            owner: root
+            group: root
+            mode: '0700'
+            force: false
+          no_log: true
+
+        - name: Verify new hook shell syntax without reloading Nginx
+          ansible.builtin.command:
+            argv: [/bin/sh, -n, "{{ mail_cloud_tls_hook_path }}"]
+          changed_when: false
+
+        - name: Verify unrelated lineage is ignored without reload
+          ansible.builtin.command:
+            argv: ["{{ mail_cloud_tls_hook_path }}"]
+          environment:
+            RENEWED_LINEAGE: /etc/letsencrypt/live/_unrelated_validation_
+          changed_when: false
+      rescue:
+        - name: Remove only the hook introduced by this run
+          ansible.builtin.file:
+            path: "{{ mail_cloud_tls_hook_path }}"
+            state: absent
+          no_log: true
+
+        - name: Report failed safe installation
+          ansible.builtin.fail:
+            msg: New hook validation failed; the newly created file was removed.
+
+    - name: Validate installed or pre-existing exact hook syntax
+      ansible.builtin.command:
+        argv: [/bin/sh, -n, "{{ mail_cloud_tls_hook_path }}"]
+      changed_when: false
+      when:
+        - (cloud_tls_paths.results[2].stat.exists | default(false)) or (mail_cloud_tls_hook_apply | default(false) | bool)
