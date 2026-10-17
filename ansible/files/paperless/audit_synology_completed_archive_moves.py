@@ -84,11 +84,13 @@ def inspect_events(entries, reader):
             "signature", "archive_site", "archive_scope_dir",
             "archive_month", "archive_name",
         }
-        demand(set(prepared) == expected | {"stage"} and
-               set(archived) == expected | {"stage", "archived_at"} and
+        drift = "sender_signature" in prepared or "sender_signature" in archived
+        fields = expected | ({"sender_signature"} if drift else set())
+        demand(set(prepared) == fields | {"stage"} and
+               set(archived) == fields | {"stage", "archived_at"} and
                prepared.get("stage") == "ARCHIVE_PREPARED" and
                archived.get("stage") == "ARCHIVED" and
-               all(archived.get(k) == prepared.get(k) for k in expected),
+               all(archived.get(k) == prepared.get(k) for k in fields),
                "CONFLICTING_ARCHIVE_JOURNAL")
         demand(prepared.get("schema_version") == 1 and
                type(prepared.get("schema_version")) is int and
@@ -107,6 +109,13 @@ def inspect_events(entries, reader):
         demand(isinstance(sig, list) and len(sig) == 5 and
                all(type(x) is int and x >= 0 for x in sig),
                "INVALID_ARCHIVE_SIGNATURE")
+        if drift:
+            old = prepared.get("sender_signature")
+            demand(prepared.get("scope") in ("Familie", "Eltern")
+                   and isinstance(old, list) and len(old) == 5
+                   and all(type(x) is int and x >= 0 for x in old)
+                   and old[:3] == sig[:3] and old != sig,
+                   "INVALID_ARCHIVE_METADATA_RECONCILIATION")
         try:
             when = datetime.datetime.fromisoformat(archived["archived_at"])
         except (TypeError, ValueError, KeyError):
@@ -214,7 +223,8 @@ def audit(parent):
                         raise RuntimeError("SOURCE_AND_ARCHIVE_BOTH_PRESENT")
                     receipt = move._read_receipt(
                         state / (key + ".json"), scope, name,
-                        event["signature"], event["sha256"])
+                        event.get("sender_signature", event["signature"]),
+                        event["sha256"])
                     demand(receipt["destination"].startswith(scope + "/"),
                            "ARCHIVED_RECEIVER_SCOPE_MISMATCH")
                     monthfd = move._check_dir(
