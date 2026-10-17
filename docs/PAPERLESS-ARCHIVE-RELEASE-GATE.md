@@ -1626,3 +1626,58 @@ sind **separate zukünftige Rollout-Schritte**.
 Kein endgültiges Entfernen archivierter PDFs und kein
 `main`-Merge folgen automatisch aus dem Gruppen-Rollout.
 
+
+## 2026-10-17 — Gruppenarchive vollständig gefüllt (15 produktive Einzel-Moves)
+
+Der Betreiber hat den exakt freigegebenen, bereits separat synthetisch
+geprüften Einmal-Ablauf
+`ansible/playbooks/commit-paperless-reviewed-groups-v1-once.yml`
+nach der zuvor vollständig bestandenen, read-only Liste
+`V1_VERIFIED_ARCHIVE_DRY_RUN_CANDIDATES 21`
+(7 Eltern + 8 Familie + 6 Privat/thomas) produktiv ausgeführt.
+
+Der vollständige Ansible-Lauf endete mit
+`venombox ok=834 changed=15 unreachable=0 failed=0 skipped=31
+rescued=0 ignored=0`. Die abschließende
+Einzeldatei-Nachprüfung meldete:
+
+```text
+ONE_GROUP_PDF_ARCHIVE_COMPLETED
+POST_MOVE_LIFECYCLE_RECONCILED
+ALL_RELEASE_GATES_ABSENT
+ARCHIVE_PURGE_DISABLED
+```
+
+Der Commit-Playbook importierte 15-mal den bereits beim ersten
+Canary bewährten Einzeldokument-Commit. **Jeder** erfolgreiche
+Einzelschritt führte eine frische vollständige Lebenszyklusprüfung
+vor und nach genau einem Move aus und erforderte jeweils eine
+revozierte, quell-/SHA-/Importnachweis-gebundene Freigabe.
+Daher entspricht der fertig geprüfte Bestand bei unverändert
+22 Paperless-Live-Importen nun **6 SENT NAS-Originale**
+(alle `Privat/thomas`), **16 ARCHIVED NAS-Originale**
+(7 `Eltern`, 9 `Familie`, inklusive des vorherigen
+Canary) und 2 unverändert ausgenommenen
+`DELETED_BY_USER`-Dokumenten. Diese Zahlen sind aus
+den 15 bestandenen Einzeldatei-Deltas plus
+anfänglichem 21 SENT + 1 ARCHIVED abgeleitet; der zuletzt
+dargestellte Abschlussbericht selbst druckte die aggregierten
+Zahlen nicht erneut aus.
+
+Weder eine permanent aktivierte Site-Freigabe
+noch eine automatische Löschung noch ein
+archivierter Original-Purge wurden freigegeben.
+Die 6 Privat-Originale sind **noch nicht** archiviert.
+Der Einmal-Ablauf ist jetzt vollständig verbraucht:
+**nicht erneut mit demselben 21-Kandidaten-Gate starten**;
+er würde mit dem neuen 6/16-Bestand kontrolliert blockieren.
+
+**Nächster sachlicher Meilenstein:** fortlaufende, an den
+nachweislich fertigen Paperless-Import gekoppelte Archivierung
+neu eintreffender Scans, zunächst für die beiden freigegebenen
+Gruppenscopes `Familie` und `Eltern`. Das ist noch nicht
+automatisiert. Private Scopes und endgültiger Purge bleiben
+separat zu planen und zu genehmigen; eigenständige Sicherung
+und Restore sind Pflicht vor einer späteren irreversiblen
+Löschung und der vollständigen `main`-Freigabe.
+
