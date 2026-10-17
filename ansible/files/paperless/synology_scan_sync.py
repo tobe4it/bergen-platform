@@ -302,6 +302,14 @@ def scan(commit, only=None, scheduled=False):
                             and old.get("signature") != signature(st)
                             and scope in ("Familie", "Eltern")
                             and commit and scheduled and only is None):
+                        # Do not alias an unchanged same-inode PDF merely
+                        # because DSM metadata changed after its first send.
+                        # This check MUST precede the new-inode collision
+                        # helper, which intentionally blocks same-inode reuse.
+                        if verified_metadata_only_sender_drift(
+                                path, old, signature(st)):
+                            print("TRACKED_METADATA_DRIFT", scope)
+                            continue
                         helper = Path(__file__).resolve().with_name(
                             "synology_group_collision_alias.py")
                         info = helper.lstat()
