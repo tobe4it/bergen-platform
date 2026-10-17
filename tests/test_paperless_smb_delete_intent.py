@@ -69,9 +69,9 @@ class SMBDeleteIntentTests(unittest.TestCase):
         self.assertIn("handle.close()", code)
         self.assertNotIn("close(False)", code)
         self.assertIn('installed == "1.17.0"', code)
-        self.assertLess(code.index("verify_smbprotocol_version()", 
-                                   code.index("def execute(")),
+        self.assertLess(code.index("local_api_preflight()", code.index("def execute(")),
                         code.index("getpass.getpass(", code.index("def execute(")))
+        self.assertIn("verify_smbprotocol_version()", code)
         self.assertIn("require_encryption=True", code)
 
     def test_version_gate_missing_and_wrong_version_fails_closed(self):
@@ -86,6 +86,47 @@ class SMBDeleteIntentTests(unittest.TestCase):
             with self.assertRaisesRegex(
                     RuntimeError, "SMBPROTOCOL_LIBRARY_UNAVAILABLE"):
                 m.verify_smbprotocol_version()
+
+    def test_sanitized_errors_never_expose_credentials_or_paths(self):
+        message = ("SMB authentication failed thomas@bergen.intern "
+                   "/volume1/homes private password token")
+        bad = RuntimeError(message)
+        diagnostic = " ".join(m.safe_diagnostic("SESSION_SETUP", bad))
+        self.assertEqual(diagnostic,
+                         "SMB_PROBE_DIAGNOSTIC SESSION_SETUP VALIDATION NO_STATUS")
+        for prohibited in ("thomas", "/volume1", "password", "token"):
+            self.assertNotIn(prohibited, diagnostic)
+        unknown = " ".join(m.safe_diagnostic(
+            "UNTRUSTED/" + message, bad))
+        self.assertTrue(unknown.startswith("SMB_PROBE_DIAGNOSTIC PRECHECK "))
+        self.assertNotIn("password", unknown)
+
+    def test_sanitized_numeric_ntstatus_retained_without_raw_error(self):
+        class SMBResponseException(Exception):
+            status = 0xC000006D
+        diagnostic = " ".join(m.safe_diagnostic(
+            "SESSION_SETUP", SMBResponseException("confidential\n")))
+        self.assertEqual(
+            diagnostic,
+            "SMB_PROBE_DIAGNOSTIC SESSION_SETUP SMB_STATUS 0xC000006D")
+        self.assertNotIn("confidential", diagnostic)
+
+    def test_local_api_preflight_never_prompts_or_attempts_network(self):
+        from unittest.mock import patch
+        from contextlib import redirect_stdout
+        from io import StringIO
+        output = StringIO()
+        with patch.object(m, "local_api_preflight", return_value=True):
+            with patch.object(m.getpass, "getpass",
+                              side_effect=AssertionError("No credentials")):
+                with redirect_stdout(output):
+                    m.main(["--local-api-check"])
+        self.assertEqual(output.getvalue().splitlines(), [
+            "SMBPROTOCOL_LOCAL_API_CHECK_OK",
+            "NO_SMB_CONNECTION_ATTEMPTED",
+        ])
+        with self.assertRaises(RuntimeError):
+            m.main(["--local-api-check", "--username", "testnormal"])
 
     def test_syntax_and_only_documented_probes(self):
         root = ast.parse(MODULE.read_text(), filename=str(MODULE))
