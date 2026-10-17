@@ -1563,3 +1563,66 @@ release gates stay blocked. The limited prior
 `smbclient` directory-list denial must not be
 misreported as a universal effective delete denial.
 
+
+## 17.10.2026 — Einmalige Archivierung der verbleibenden Gruppenoriginale
+
+Der Betreiber hat die bestehende, vollständige schreibfreie v1-Kandidatenprüfung
+`list-paperless-v1-archive-candidates.yml` erneut erfolgreich ausgeführt:
+`venombox ok=22 changed=0 failed=0`,
+`V1_VERIFIED_ARCHIVE_DRY_RUN_CANDIDATES 21`,
+`DELETED_BY_USER_EXCLUDED 2`,
+`NO_FILES_CHANGED`, `ARCHIVE_NOT_AUTHORIZED`,
+`PURGE_NOT_AUTHORIZED`. Genau **15** davon sind die zuvor
+für den GROUP-FIRST-Rollout vorgesehenen Dateien:
+**7 Eltern + 8 Familie**; die weiteren **6 Privat/thomas**
+bleiben außen vor. Ein früheres PDF wurde bereits nachgewiesenermaßen
+atomar, nur innerhalb der `paperless-scan`-Btrfs-Subvolume,
+ins geschützte Archiv verschoben, mit Journal und
+Wiederherstellungsnachweis. Es sind keine neuen SMB-/Backup-Tests
+als Voraussetzung für den **nicht destruktiven** Archiv-Move
+erforderlich. Der spätere irreversible Purge ist ein separater
+offener Meilenstein.
+
+Als reine Orchestrierung der **bereits bewährten** v1-Einzeldatei-Operation
+wurde `ansible/playbooks/commit-paperless-reviewed-groups-v1-once.yml`
+hinzugefügt: zuerst vollständige frische NAS/Paperless-Kandidatenliste
+einschließlich explizitem Ausschluss der zwei Benutzerlöschungen;
+dann strikte, explizite Abgleichprüfung der **exakt 15** erlaubten
+Gruppenpfade und des erwarteten 21-Quellbestands; anschließend
+**15 statische, der Reihe nach ausgeführte** `import_playbook`
+-Aufrufe des bestehenden
+`commit-paperless-one-group-v1-archive.yml`. Jeder Einzelaufruf
+erzwingt vorab erneut vollständigen aktuellen Lebenszyklus-
+und Importabgleich, genau EIN kurzlebiges,
+quell-/SHA-/Dokument-ID-gebundenes Commit-Gate,
+NAS-`renameat2(RENAME_NOREPLACE)`, beständiges
+PREPARED/ARCHIVED-Journal, Freigabe-Widerruf
+und einen vollständigen **nachfolgenden** Lebenszyklusabgleich.
+Bei irgendeinem Fehler stoppen die weiteren Vorgänge; niemals
+blindes Durchlaufen oder Überschreiben. Kein privater Scope,
+keine dauerhafte Archiv-Freigabe, kein Purge.
+Dieser einmalige Rollout wird nicht als Automatisierung
+neuer Scans missverstanden.
+
+**Freigabe ausschließlich durch expliziten Operator-Aufruf**
+mit beiden Extra-Variablen
+`-e '{"paperless_group_batch_commit":true,"paperless_archive_commit":true}'`.
+Ohne beide Flags darf nichts verschoben werden. Vor einer produktiven
+Ausführung sind auf bp-controller die komplette Paperless-
+Regression und die Ansible-Syntax des neuen Playbooks erforderlich;
+gegenüber dem zuletzt bestätigten Stand 749 sind sechs neue
+Offline-Regressionstests vorgesehen (**755** erwartet).
+**Noch nicht live freigegeben oder ausgeführt.**
+
+Die alten `verify-paperless-one-group-isolated-recovery.yml`-
+Assertions für den einmaligen 21+1-Canary sind nach einer
+erfolgreichen Gruppenarchivierung zwangsläufig veraltet und
+dürfen **nicht** als dynamischer 6+16-Validator verwendet werden;
+stattdessen bildet der bereits vorhandene Lebenszyklus-Audit
+`audit-paperless-import-lifecycle-15-26.yml` die dynamischen
+NAS-SENT-/ARCHIVED-Zahlen ab. Die vier Privatsphärenbereiche
+und ein regulärer kontinuierlicher Archivierungsdienst
+sind **separate zukünftige Rollout-Schritte**.
+Kein endgültiges Entfernen archivierter PDFs und kein
+`main`-Merge folgen automatisch aus dem Gruppen-Rollout.
+
