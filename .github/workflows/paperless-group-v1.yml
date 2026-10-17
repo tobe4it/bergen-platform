@@ -3,8 +3,12 @@ on:
   pull_request:
     paths:
       - 'ansible/files/paperless/**'
+      - 'ansible/roles/paperless/**'
+      - 'ansible/scripts/pct_ssh_proxy.py'
       - 'ansible/playbooks/*paperless*'
       - 'tests/test_paperless_*'
+      - 'ansible/roles/paperless/**'
+      - 'ansible/scripts/pct_ssh_proxy.py'
       - 'docs/PAPERLESS-*.md'
       - '.github/workflows/paperless-group-v1.yml'
   push:
@@ -26,8 +30,14 @@ jobs:
         with:
           python-version: '3.12'
       - name: Python test prerequisites
-        run: python -m pip install pyyaml jinja2
+        run: python -m pip install pyyaml jinja2 ansible-core
       - name: Paperless v1 offline regression tests
         run: python -m unittest discover -s tests -p 'test_paperless_*.py'
       - name: Python syntax for released Paperless scripts
         run: python -m compileall -q ansible/files/paperless
+      - name: Check guarded backend role and read-only audit playbook syntax
+        run: |
+          ansible-playbook -i localhost, --syntax-check ansible/playbooks/deploy-paperless.yml
+          ansible-playbook -i localhost, --syntax-check ansible/playbooks/preflight-paperless.yml
+          ansible-playbook -i localhost, --syntax-check ansible/playbooks/prepare-paperless-runtime.yml
+          ansible-playbook -i localhost, --syntax-check ansible/playbooks/audit-paperless-existing-backend-readonly.yml
