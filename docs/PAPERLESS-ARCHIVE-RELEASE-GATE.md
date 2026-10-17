@@ -1327,3 +1327,47 @@ journals were touched. The external backup restore gate and other
 effective privacy identities remain open, and automatic expiry,
 purge, new archives, and merging into `main` remain prohibited.
 
+
+### 2026-10-17 tunneled SMB negotiate closed before authentication
+
+The operator completed **767/767** full offline Paperless tests, then
+independently confirmed TCP/445 accepts a socket on the NAS at
+`127.0.0.1`, `192.168.2.145` and `192.168.6.11`, without writes.
+
+A short-lived SSH local forward from `bp-controller`
+`127.0.0.1:1445` to NAS `127.0.0.1:445` was then established.
+The credential-free TCP preflight reported
+`SMB_TCP_445_REACHABLE` and
+`NO_SMB_AUTHENTICATION_ATTEMPTED`.
+The ensuing credential-free `smbprotocol 1.17.0` negotiation returned:
+
+```text
+SMB_PROBE_DIAGNOSTIC SMB_NEGOTIATE OTHER NO_STATUS SMBConnectionClosed
+SMB_NEGATIVE_ACCESS_PROBE_BLOCKED
+```
+
+The shell used `set -euo pipefail`, so the subsequent credentialed
+SMB access-intent check **did not run**. The local TCP preflight alone
+does not show that an end-to-end SMB negotiate through SSH succeeded;
+the remote endpoint and/or SMB server closed the connection before
+authentication, and neither password nor user permissions were tested.
+Do not grant archive, effective-SMB, delete-denial or purge clearance.
+
+The next safe diagnostic is to compare **passwordless**
+`--negotiate-preflight` through two separate temporary SSH forwards,
+from controller loopback `127.0.0.1:1445` to NAS interface addresses
+`192.168.6.11:445` and `192.168.2.145:445`.
+The direct NAS-side socket tests already showed both accept TCP. The
+forward must bind only to local loopback, use existing strict host-key
+verification and `ExitOnForwardFailure=yes`, and always be closed
+afterward. This compares NAS loopback-versus-interface server behavior
+without passwords or changing VLAN/DSM ACLs. If both still close on
+SMB negotiate, inspect NAS Samba policy/logs via read-only SSH rather
+than repeatedly retrying credentials or weakening SMB signing/security.
+Synology supports SMB2/SMB3, so no SMB1 downgrade should be attempted.
+
+Accepted prior static ACL, one-PDF isolated recovery and full import
+lifecycle checks remain valid. The independent off-NAS backup/restore
+and effective permission test gates remain open, and no further
+production archive move, retention purge or `main` merge is authorized.
+
