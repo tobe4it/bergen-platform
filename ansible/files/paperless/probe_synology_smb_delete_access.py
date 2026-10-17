@@ -106,7 +106,7 @@ def execute(server, site, username):
             root_opened = True
         finally:
             if root_opened:
-                root.close(False)
+                root.close()
         outcomes = []
         for path, access, label in plan:
             handle = Open(tree, path)
@@ -126,7 +126,7 @@ def execute(server, site, username):
                 error = exc
             finally:
                 if handle_opened:
-                    handle.close(False)
+                    handle.close()
             verdict = classify_smb_result(error, NtStatus.STATUS_ACCESS_DENIED)
             outcomes.append((label, verdict))
             print("SMB2_ACCESS_INTENT", site, label, verdict, flush=True)
