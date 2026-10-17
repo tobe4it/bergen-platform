@@ -1,0 +1,131 @@
+---
+# Effective OIDC config is served by the running app's admin GET endpoints.
+# The response can contain OAuth secrets: ALWAYS no_log all HTTP and raw validation.
+# DO NOT enable group sync or create users/groups.
+- name: Read-only effective OIDC group authorization audit (Open WebUI)
+  hosts: "{{ open_webui_oidc_effective_audit_host | default('__no_selected_host__') }}"
+  gather_facts: false
+  serial: 1
+  tasks:
+    - name: Require one explicitly selected and approved existing guest
+      ansible.builtin.assert:
+        that:
+          - open_webui_oidc_effective_audit_host is defined
+          - inventory_hostname == open_webui_oidc_effective_audit_host
+          - ansible_play_hosts_all | length == 1
+          - open_webui_oidc_effective_audit_approved | default(false) | bool
+          - vault_open_webui_admin_token is defined
+          - vault_open_webui_admin_token | length >= 20
+        fail_msg: "Require one exact target, a protected admin API token, and explicit READ-ONLY approval."
+      no_log: true
+
+    - name: Read application version on guest loopback
+      ansible.builtin.uri:
+        url: http://127.0.0.1:3000/api/version
+        method: GET
+        status_code: 200
+        use_proxy: false
+        follow_redirects: none
+        return_content: false
+        timeout: 10
+      register: oidc_effective_version
+      changed_when: false
+      check_mode: false
+      no_log: true
+
+    - name: Read running OAuth/OIDC configuration using authenticated admin endpoint
+      ansible.builtin.uri:
+        url: http://127.0.0.1:3000/api/v1/auths/admin/config/oauth
+        method: GET
+        headers:
+          Authorization: "Bearer {{ vault_open_webui_admin_token }}"
+        status_code: 200
+        use_proxy: false
+        follow_redirects: none
+        return_content: false
+        timeout: 10
+      register: oidc_effective_oauth
+      changed_when: false
+      check_mode: false
+      no_log: true
+
+    - name: Read effective default-role configuration using admin endpoint
+      ansible.builtin.uri:
+        url: http://127.0.0.1:3000/api/v1/auths/admin/config
+        method: GET
+        headers:
+          Authorization: "Bearer {{ vault_open_webui_admin_token }}"
+        status_code: 200
+        use_proxy: false
+        follow_redirects: none
+        return_content: false
+        timeout: 10
+      register: oidc_effective_admin
+      changed_when: false
+      check_mode: false
+      no_log: true
+
+    - name: Read effective LDAP login toggle using admin endpoint
+      ansible.builtin.uri:
+        url: http://127.0.0.1:3000/api/v1/auths/admin/config/ldap
+        method: GET
+        headers:
+          Authorization: "Bearer {{ vault_open_webui_admin_token }}"
+        status_code: 200
+        use_proxy: false
+        follow_redirects: none
+        return_content: false
+        timeout: 10
+      register: oidc_effective_ldap
+      changed_when: false
+      check_mode: false
+      no_log: true
+
+    - name: Reject unknown API version and malformed authorization flags
+      ansible.builtin.assert:
+        that:
+          - oidc_effective_version.json is mapping
+          - oidc_effective_version.json.version is defined
+          - oidc_effective_version.json.version is string
+          - oidc_effective_oauth.json is mapping
+          - oidc_effective_oauth.json.ENABLE_OAUTH_GROUP_MANAGEMENT is boolean
+          - oidc_effective_oauth.json.ENABLE_OAUTH_GROUP_CREATION is boolean
+          - oidc_effective_oauth.json.ENABLE_OAUTH_ROLE_MANAGEMENT is boolean
+          - oidc_effective_oauth.json.OAUTH_GROUP_CLAIM is string
+          - oidc_effective_oauth.json.OAUTH_BLOCKED_GROUPS is string
+          - oidc_effective_admin.json is mapping
+          - oidc_effective_admin.json.DEFAULT_USER_ROLE is string
+          - oidc_effective_ldap.json is mapping
+          - oidc_effective_ldap.json.ENABLE_LDAP is boolean
+        fail_msg: "Effective OIDC read-only audit failed; do not enable group management."
+      no_log: true
+
+    - name: Build strictly bounded, sanitized effective-authorization classification
+      ansible.builtin.set_fact:
+        oidc_effective_sanitized:
+          OIDC_RUNTIME_VERSION_REVIEWED: "{{ 'V0_10_2' if oidc_effective_version.json.version | regex_search('^v?0[.]10[.]2$') else 'UNREVIEWED_VERSION' }}"
+          OIDC_EFFECTIVE_GROUP_MAPPING: "{{ 'ENABLED' if oidc_effective_oauth.json.ENABLE_OAUTH_GROUP_MANAGEMENT else 'DISABLED' }}"
+          OIDC_EFFECTIVE_GROUP_CREATION: "{{ 'ENABLED' if oidc_effective_oauth.json.ENABLE_OAUTH_GROUP_CREATION else 'DISABLED' }}"
+          OIDC_EFFECTIVE_ROLE_MAPPING: "{{ 'ENABLED' if oidc_effective_oauth.json.ENABLE_OAUTH_ROLE_MANAGEMENT else 'DISABLED' }}"
+          OIDC_EFFECTIVE_GROUP_CLAIM: "{{ 'GROUPS' if oidc_effective_oauth.json.OAUTH_GROUP_CLAIM == 'groups' else 'OTHER' }}"
+          OIDC_EFFECTIVE_BLOCKED_GROUPS: "{{ 'EMPTY' if oidc_effective_oauth.json.OAUTH_BLOCKED_GROUPS in ['[]', ''] else 'NONEMPTY_OR_MALFORMED' }}"
+          OIDC_EFFECTIVE_DEFAULT_ROLE: "{{ 'PENDING' if oidc_effective_admin.json.DEFAULT_USER_ROLE == 'pending' else 'OTHER' }}"
+          OIDC_EFFECTIVE_LDAP_LOGIN: "{{ 'ENABLED' if oidc_effective_ldap.json.ENABLE_LDAP else 'DISABLED' }}"
+      changed_when: false
+      no_log: true
+
+    - name: Print only reviewed categories, never secrets or group names
+      ansible.builtin.debug:
+        msg:
+          - "OIDC_RUNTIME_VERSION_REVIEWED={{ oidc_effective_sanitized.OIDC_RUNTIME_VERSION_REVIEWED }}"
+          - "OIDC_EFFECTIVE_GROUP_MAPPING={{ oidc_effective_sanitized.OIDC_EFFECTIVE_GROUP_MAPPING }}"
+          - "OIDC_EFFECTIVE_GROUP_CREATION={{ oidc_effective_sanitized.OIDC_EFFECTIVE_GROUP_CREATION }}"
+          - "OIDC_EFFECTIVE_ROLE_MAPPING={{ oidc_effective_sanitized.OIDC_EFFECTIVE_ROLE_MAPPING }}"
+          - "OIDC_EFFECTIVE_GROUP_CLAIM={{ oidc_effective_sanitized.OIDC_EFFECTIVE_GROUP_CLAIM }}"
+          - "OIDC_EFFECTIVE_BLOCKED_GROUPS={{ oidc_effective_sanitized.OIDC_EFFECTIVE_BLOCKED_GROUPS }}"
+          - "OIDC_EFFECTIVE_DEFAULT_ROLE={{ oidc_effective_sanitized.OIDC_EFFECTIVE_DEFAULT_ROLE }}"
+          - "OIDC_EFFECTIVE_LDAP_LOGIN={{ oidc_effective_sanitized.OIDC_EFFECTIVE_LDAP_LOGIN }}"
+          - "OIDC_ADMIN_API_READ_ONLY=true"
+          - "OIDC_ABSENT_CLAIM_REVOCATION_NOT_VERIFIED=true"
+          - "OIDC_EXISTING_SESSIONS_NOT_REVOKED=true"
+          - "NO_SETTINGS_USERS_GROUPS_OR_SERVICES_CHANGED=true"
