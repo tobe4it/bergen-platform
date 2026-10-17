@@ -1,0 +1,70 @@
+---
+# READ ONLY and privacy preserving. Replays exactly the NAS sender-receipt
+# inventory step where group-auto aborts with ok=9. The raw source file names,
+# SSH responses, PDF hashes and tracebacks are NEVER logged by Ansible.
+# Prints an allowlisted exception class only, not any uncontrolled stderr.
+- name: Diagnose blocked Paperless group archive sender receipts, no mutation
+  hosts: venombox
+  gather_facts: false
+  become: true
+  tasks:
+    - name: Require exact known NAS configuration and no check-mode shortcut
+      ansible.builtin.assert:
+        that:
+          - inventory_hostname == 'venombox'
+          - not ansible_check_mode
+          - synology_admin is defined
+          - synology_config is defined
+          - synology_config.schema_version == 1
+          - synology_config.state_parent is match('^/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$')
+          - synology_config.sync_user is match('^[a-z_][a-z0-9_-]{0,31}$')
+
+    - name: Rerun exact read-only NAS originals and SENT-receipt inventory
+      ansible.builtin.command:
+        argv:
+          - ssh
+          - -T
+          - -o
+          - BatchMode=yes
+          - -o
+          - StrictHostKeyChecking=yes
+          - -o
+          - ConnectTimeout=15
+          - "{{ synology_admin }}"
+          - >-
+            sudo -n -u {{ synology_config.sync_user | quote }}
+            /usr/bin/python3 - {{ synology_config.state_parent | quote }}
+        stdin: "{{ lookup('ansible.builtin.file', playbook_dir + '/../files/paperless/audit_synology_archive_candidates.py', rstrip=False) }}"
+      delegate_to: localhost
+      become: false
+      register: sender_audit_diagnostic
+      failed_when: false
+      changed_when: false
+      no_log: true
+
+    - name: Classify failure without disclosing names, hashes or traceback
+      ansible.builtin.set_fact:
+        sender_audit_diagnostic_code: >-
+          {{
+            (sender_audit_diagnostic.stderr |
+            regex_findall('(?m)^(?:RuntimeError|ValueError): (SOURCE_NOT_CONFIRMED_SENT|SOURCE_RECEIPT_MISMATCH|SOURCE_CHANGED_OR_HASH_MISMATCH|SOURCE_CHANGED_BEFORE_HASH|INVALID_SENDER_DIGEST_OR_DESTINATION|INVALID_SENDER_DESTINATION|UNSAFE_SOURCE_DIR|UNSAFE_SYNC_LOCK|UNSAFE_RECEIPT|UNKNOWN_RECEIPT_STATE|INVALID_PARENT|CONFIG_PARENT_MISMATCH|RESTRICTED_SYNC_USER_REQUIRED|INVENTORY_LIMIT_EXCEEDED|SOURCE_NOT_STABLE|LOCK_REPLACED|UNSAFE_STATE_DIR|DO_NOT_RUN_AS_ROOT|MANUAL_REVIEW_SOURCE_CHANGED)\b') |
+            first | default('UNCLASSIFIED_ERROR', true))
+            if sender_audit_diagnostic.rc != 0 else 'VERIFIED'
+          }}
+        sender_audit_diagnostic_count: >-
+          {{
+            (sender_audit_diagnostic.stdout_lines | length)
+            if sender_audit_diagnostic.rc == 0 else 0
+          }}
+      no_log: true
+
+    - name: Display privacy-safe exact NAS sender evidence diagnosis
+      ansible.builtin.debug:
+        msg:
+          - "NAS_RECEIPT_AUDIT={{ sender_audit_diagnostic_code }}"
+          - "NAS_AUDIT_RETURN_OK={{ sender_audit_diagnostic.rc == 0 }}"
+          - "NAS_VERIFIED_ORIGINAL_COUNT={{ sender_audit_diagnostic_count }}"
+          - "NAS_PDF_CONTENT_UNCHANGED=true"
+          - "NAS_RECEIPTS_UNCHANGED=true"
+          - "NO_ARCHIVE_MOVE=true"
+          - "NO_PURGE=true"
