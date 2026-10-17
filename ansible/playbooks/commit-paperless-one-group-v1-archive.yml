@@ -1,5 +1,6 @@
 ---
 # Operator-authorized GROUPS-ONLY one-PDF commit, exact 10-minute gate.
+# Fresh audit totals may exceed the initial 22-document canary.
 # A full independent lifecycle audit follows each successful individual move.
 # No private documents, no automatic purge, no broad site gate.
 - import_playbook: audit-paperless-import-lifecycle-15-26.yml
@@ -173,13 +174,22 @@
               select('match', '^NAS_ARCHIVED_VERIFIED [0-9]+$') |
               first).split(' ')[1] | int }}
 
+    - name: Pin freshly audited total Paperless imports before one move
+      ansible.builtin.set_fact:
+        group_before_import_count: >-
+          {{ (lifecycle_report.stdout_lines |
+              select('match', '^PAPERLESS_LIVE_IMPORTED [0-9]+$') |
+              first).split(' ')[1] | int }}
+
     - name: Require some remaining verified NAS source and full live document count
       ansible.builtin.assert:
         that:
           - group_before_source_count | int > 0
           - group_before_archive_count | int >= 0
-          - group_before_source_count | int + group_before_archive_count | int == 22
-          - "'PAPERLESS_LIVE_IMPORTED 22' in lifecycle_report.stdout_lines"
+          - group_before_import_count | int >= 22
+          - group_before_source_count | int + group_before_archive_count | int == group_before_import_count | int
+          - "('NAS_CURRENT_ORIGINALS_VERIFIED ' ~ (group_before_import_count | string)) in lifecycle_report.stdout_lines"
+          - "('PAPERLESS_LIVE_IMPORTED ' ~ (group_before_import_count | string)) in lifecycle_report.stdout_lines"
           - "'DELETED_BY_USER 2' in lifecycle_report.stdout_lines"
           - "'ARCHIVE_NOT_AUTHORIZED' in lifecycle_report.stdout_lines"
 
@@ -225,15 +235,15 @@
   gather_facts: false
   become: true
   tasks:
-    - name: Require unchanged 22 Paperless imports, 2 deletions and exact count delta
+    - name: Require unchanged live import total and exact one-move delta
       ansible.builtin.assert:
         that:
           - "'IMPORT_LIFECYCLE_RECONCILED' in lifecycle_report.stdout_lines"
-          - "'PAPERLESS_LIVE_IMPORTED 22' in lifecycle_report.stdout_lines"
+          - "('PAPERLESS_LIVE_IMPORTED ' ~ (group_before_import_count | string)) in lifecycle_report.stdout_lines"
           - "'DELETED_BY_USER 2' in lifecycle_report.stdout_lines"
           - "('NAS_SENT_VERIFIED ' ~ ((group_before_source_count | int - 1) | string)) in lifecycle_report.stdout_lines"
           - "('NAS_ARCHIVED_VERIFIED ' ~ ((group_before_archive_count | int + 1) | string)) in lifecycle_report.stdout_lines"
-          - "'NAS_CURRENT_ORIGINALS_VERIFIED 22' in lifecycle_report.stdout_lines"
+          - "('NAS_CURRENT_ORIGINALS_VERIFIED ' ~ (group_before_import_count | string)) in lifecycle_report.stdout_lines"
           - "'ARCHIVE_NOT_AUTHORIZED' in lifecycle_report.stdout_lines"
           - "'NO_FILES_CHANGED' in lifecycle_report.stdout_lines"
         fail_msg: "Post-move lifecycle ambiguous. STOP processing; do not retry automatically."
