@@ -89,13 +89,13 @@ class GroupCollisionSenderOnceTests(unittest.TestCase):
                         "Classify allowlisted NAS sender blockers"))
         source = task["ansible.builtin.set_fact"]["sender_once_group_error_codes"]
         # Execute the YAML-loaded regex, not a separately hand-copied one.
-        pattern = re.search(r"regex_findall\\('([^']+)'", source).group(1)
+        pattern = re.search(r"regex_findall\('([^']+)'", source).group(1)
         stderr = (
-            "REJECTED Familie/scan 123.pdf OLD_INODE_STILL_ACTIVE_REQUIRES_REVIEW\\n"
-            "REJECTED Eltern/familien scan.pdf PRIOR_ARCHIVE_RECEIPT_MISMATCH\\n"
-            "REJECTED Privat/thomas/private.pdf SCHEDULE_GATE_UNSAFE\\n"
-            "REJECTED Familie/OLD_INODE_STILL_ACTIVE_REQUIRES_REVIEW.pdf unknown_problem\\n"
-            "RuntimeError: SYNC_FAILED: names redacted by this test\\n"
+            "REJECTED Familie/scan 123.pdf OLD_INODE_STILL_ACTIVE_REQUIRES_REVIEW\n"
+            "REJECTED Eltern/familien scan.pdf PRIOR_ARCHIVE_RECEIPT_MISMATCH\n"
+            "REJECTED Privat/thomas/private.pdf SCHEDULE_GATE_UNSAFE\n"
+            "REJECTED Familie/OLD_INODE_STILL_ACTIVE_REQUIRES_REVIEW.pdf unknown_problem\n"
+            "RuntimeError: SYNC_FAILED: names redacted by this test\n"
         )
         self.assertEqual(re.findall(pattern, stderr), [
             "OLD_INODE_STILL_ACTIVE_REQUIRES_REVIEW",
