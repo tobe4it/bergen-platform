@@ -1,0 +1,85 @@
+---
+# Read-only, secret-redacted inventory of the three site-selected Open WebUI
+# family groups. Does not fetch individual members or change group ACLs.
+- name: Audit stable Bergen-AI family group inventory without mutations
+  hosts: "{{ bergen_ai_family_audit_host | default('__no_approved_family_host__') }}"
+  gather_facts: false
+  serial: 1
+  tasks:
+    - name: Require one explicitly approved inventory target, group mapping and admin token
+      ansible.builtin.assert:
+        that:
+          - bergen_ai_family_audit_host is defined
+          - bergen_ai_family_audit_host == inventory_hostname
+          - ansible_play_hosts_all | length == 1
+          - bergen_ai_family_audit_approved | default(false) | bool
+          - bergen_ai_family_group_expected is defined
+          - bergen_ai_family_group_expected is mapping
+          - vault_open_webui_admin_token is defined
+          - vault_open_webui_admin_token | length >= 20
+        fail_msg: "Specify exact target, approved READ-ONLY audit, expected groups, encrypted admin token."
+      no_log: true
+
+    - name: Read running application version on loopback
+      ansible.builtin.uri:
+        url: http://127.0.0.1:3000/api/version
+        method: GET
+        use_proxy: false
+        follow_redirects: none
+        status_code: 200
+        return_content: false
+        timeout: 10
+      register: family_audit_version
+      changed_when: false
+      check_mode: false
+      no_log: true
+
+    - name: Enumerate groups using the authenticated local read-only API
+      ansible.builtin.uri:
+        url: http://127.0.0.1:3000/api/v1/groups/
+        method: GET
+        headers:
+          Authorization: "Bearer {{ vault_open_webui_admin_token }}"
+        use_proxy: false
+        follow_redirects: none
+        status_code: 200
+        return_content: false
+        timeout: 10
+      register: family_audit_groups
+      changed_when: false
+      check_mode: false
+      no_log: true
+
+    - name: Require expected JSON shapes without disclosing identities
+      ansible.builtin.assert:
+        that:
+          - family_audit_version.json is mapping
+          - family_audit_version.json.version is defined
+          - family_audit_version.json.version is string
+          - family_audit_groups.json is sequence
+          - family_audit_groups.json is not string
+          - family_audit_groups.json | length <= 1000
+        fail_msg: "Malformed Open WebUI response, not an approved group inventory."
+      no_log: true
+
+    - name: Produce bounded three-group inventory classifications
+      ansible.builtin.set_fact:
+        family_audit_summary: >-
+          {{ family_audit_groups.json | bergen_ai_family_group_inventory(
+              bergen_ai_family_group_expected, family_audit_version.json.version
+          ) }}
+      changed_when: false
+      no_log: true
+
+    - name: Display non-identifying group review categories only
+      ansible.builtin.debug:
+        msg:
+          - "VERSION_REVIEWED={{ family_audit_summary.VERSION_REVIEWED }}"
+          - "FAMILY_GROUP={{ family_audit_summary.FAMILY_GROUP }}"
+          - "ADULTS_GROUP={{ family_audit_summary.ADULTS_GROUP }}"
+          - "CHILDREN_GROUP={{ family_audit_summary.CHILDREN_GROUP }}"
+          - "STATUS={{ family_audit_summary.STATUS }}"
+          - "MEMBERSHIP_SEPARATION_PROVEN={{ family_audit_summary.MEMBERSHIP_SEPARATION_PROVEN }}"
+          - "RESOURCE_ACL_SEPARATION_PROVEN={{ family_audit_summary.RESOURCE_ACL_SEPARATION_PROVEN }}"
+          - "EXISTING_SESSIONS_REVOKED={{ family_audit_summary.EXISTING_SESSIONS_REVOKED }}"
+          - "GROUPS_OR_PERMISSIONS_CHANGED={{ family_audit_summary.GROUPS_OR_PERMISSIONS_CHANGED }}"
