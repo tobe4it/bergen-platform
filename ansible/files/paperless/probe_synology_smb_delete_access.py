@@ -86,7 +86,7 @@ def execute(server, site, username):
     try:
         connection.connect(timeout=15)
         session = Session(connection, username, password,
-                          require_encryption=False)
+                          require_encryption=True)
         session.connect()
         tree = TreeConnect(session, "\\\\" + server + "\\" + site)
         tree.connect()
@@ -94,6 +94,7 @@ def execute(server, site, username):
         # interpreting denied protected child opens as authorization proof.
         # READ_ATTRIBUTES request is a no-write FILE_OPEN on the share root.
         root = Open(tree, "")
+        root_opened = False
         try:
             root.create(
                 ImpersonationLevel.Impersonation,
@@ -102,13 +103,15 @@ def execute(server, site, username):
                 ShareAccess.FILE_SHARE_READ | ShareAccess.FILE_SHARE_WRITE
                 | ShareAccess.FILE_SHARE_DELETE,
                 CreateDisposition.FILE_OPEN, CreateOptions.FILE_DIRECTORY_FILE)
+            root_opened = True
         finally:
-            if root.file_id is not None:
+            if root_opened:
                 root.close(False)
         outcomes = []
         for path, access, label in plan:
             handle = Open(tree, path)
             error = None
+            handle_opened = False
             try:
                 handle.create(
                     ImpersonationLevel.Impersonation,
@@ -118,10 +121,11 @@ def execute(server, site, username):
                     | ShareAccess.FILE_SHARE_DELETE,
                     CreateDisposition.FILE_OPEN,
                     CreateOptions.FILE_DIRECTORY_FILE)
+                handle_opened = True
             except SMBResponseException as exc:
                 error = exc
             finally:
-                if handle.file_id is not None:
+                if handle_opened:
                     handle.close(False)
             verdict = classify_smb_result(error, NtStatus.STATUS_ACCESS_DENIED)
             outcomes.append((label, verdict))
