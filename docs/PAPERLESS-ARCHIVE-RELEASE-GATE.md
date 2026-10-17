@@ -2072,3 +2072,32 @@ kein Mergen von PR #81, keine Lockerung bei anderem Inode oder anderem
 PDF-SHA-256. Noch unklare/falsche Importbeweise blockieren die Verarbeitung
 weiterhin konservativ; die weitergehende dokumentweise Fehlerisolation ist
 noch nicht fertiggestellt und darf nicht als produktiv behauptet werden.
+
+
+## 17.10.2026 — Post-OneShot-Abnahme vor automatischer Timer-Freigabe
+
+Nach bestandenem quiet-Lifecycle-Audit und systemd-OneShot
+(`Result=success`, `ExecMainStatus=0`) muss die Automatik
+einen **tatsächlichen zusätzlichen geschützten Archivnachweis**
+erbringen; ein erfolgreicher Leerlauf reicht nicht.
+
+Das ausschließlich lesende Playbook
+`verify-paperless-group-auto-v1-readiness.yml` importiert das
+unabhängige vollständige Paperless-/NAS-/Journalaudit,
+gleicht `NAS_SENT_VERIFIED + NAS_ARCHIVED_VERIFIED` mit den
+lebenden Importen ab, verlangt gegenüber den zuvor verifizierten
+16 Archiven jetzt mindestens 17, überprüft wenigstens ein
+Gruppen-Archiv sowie die Abwesenheit aller Root-Release-Gates.
+Die Ausgabe enthält ausschließlich Zähler, keine Dokumentnamen,
+Hashwerte oder Benutzeridentitäten.
+
+Die anschließende Timer-Aktivierung darf ausschließlich nach
+einer erfolgreichen Ausführung dieses Playbooks erfolgen:
+`sudo systemctl enable --now bergen-paperless-group-auto-v1.timer`.
+Der Timer startet den **automatisch auswählenden** OneShot maximal
+mit einem Archivdokument je erfolgreichem Durchlauf; kein manueller
+Archivierungsschritt ist erforderlich.
+
+Noch ausstehend ist ein produktiver Nachweis der weitergehenden
+dokumentweisen Fehlerisolierung bei widersprüchlichen
+Importnachweisen. Diese Fälle bleiben konservativ gesperrt.
