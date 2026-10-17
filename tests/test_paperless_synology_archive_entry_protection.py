@@ -252,6 +252,84 @@ class EntryProtectionTests(unittest.TestCase):
                 m.get_aces("/trusted/synoacltool", Path("/dummy"))
         self.assertNotIn("alice", str(captured.exception))
 
+
+    def test_exact_native_linux_mode_requires_rc_255_and_empty_stderr(self):
+        good = SimpleNamespace(
+            returncode=255, stdout="(synoacltool.c, 201)It's Linux mode\n",
+            stderr="")
+        self.assertTrue(m.exact_linux_mode_readout(good))
+        with patch.object(m.subprocess, "run", return_value=good):
+            self.assertIsNone(m.get_aces("synoacltool", Path("/synthetic")))
+        for changed in (
+            {"returncode": 1},
+            {"returncode": 0},
+            {"stderr": "warning"},
+            {"stdout": "(synoacltool.c, 201)It's Linux mode\n"
+                       "user:someone:allow:rwxpdDaARWcCo"},
+            {"stdout": "(synoacltool.c, 201)It's Linux mode extra"},
+            {"stdout": "It's Linux mode"},
+            {"stdout": "No ACL found"},
+            {"stdout": "Permission denied"},
+        ):
+            case = SimpleNamespace(
+                **dict(vars(good), **changed))
+            with self.subTest(changed=changed):
+                self.assertFalse(m.exact_linux_mode_readout(case))
+                with patch.object(m.subprocess, "run", return_value=case):
+                    if case.returncode == 0:
+                        with self.assertRaisesRegex(
+                                RuntimeError, "NO_ACL_ENTRIES|UNPARSEABLE_ACL_ACE"):
+                            m.get_aces("synoacltool", Path("/synthetic"))
+                    else:
+                        with self.assertRaisesRegex(
+                                RuntimeError,
+                                "ACTIVE_ARCHIVE_NATIVE_ACL_QUERY_FAILED"):
+                            m.get_aces("synoacltool", Path("/synthetic"))
+
+    def test_posix_only_protected_children_require_0700_correct_uid(self):
+        for kind in ("PROTECTED_ROOT", "PROTECTED_INTERMEDIATE",
+                     "PROTECTED_SCOPE", "ARCHIVE_MONTH"):
+            with self.subTest(kind=kind):
+                self.assertIsNone(
+                    m.require_posix_only_archive_parent(
+                        kind, SimpleNamespace(st_mode=0o40700, st_uid=1001),
+                        1001))
+        for kind, mode, owner in (
+            ("SITE_ROOT", 0o40700, 1001),
+            ("PROTECTED_ROOT", 0o40755, 1001),
+            ("PROTECTED_ROOT", 0o40770, 1001),
+            ("PROTECTED_ROOT", 0o40700, 1002),
+            ("PROTECTED_ROOT", 0o100700, 1001),
+            ("OTHER", 0o40700, 1001),
+        ):
+            with self.subTest(kind=kind, mode=mode, owner=owner):
+                with self.assertRaisesRegex(
+                        RuntimeError, "POSIX_ARCHIVE_PARENT_NOT_VERIFIED"):
+                    m.require_posix_only_archive_parent(
+                        kind, SimpleNamespace(st_mode=mode, st_uid=owner),
+                        1001)
+
+    def test_native_acl_path_still_parsed_and_unsafe_grants_blocked(self):
+        listing = sample(
+            "[0] group:Familie@bergen.intern:allow:rwxpdDaARWc--:"
+            "fd-- (level:0)")
+        response = SimpleNamespace(returncode=0, stdout=listing, stderr="")
+        with patch.object(m.subprocess, "run", return_value=response):
+            rows = m.get_aces("synoacltool", Path("/synthetic"))
+        self.assertEqual(
+            m.unsafe_parent_grants(rows, "paperless-sync"),
+            [("group", "Familie@bergen.intern")])
+
+    def test_limited_posix_fallback_keeps_native_site_roots_mandatory(self):
+        source = FILE.read_text()
+        playbook = (
+            FILE.parents[2] / "playbooks" /
+            "audit-paperless-synology-archive-entry-protection.yml").read_text()
+        self.assertIn('if site not in native_site_roots:', source)
+        self.assertIn('native_site_roots != {"homes", "paperless-scan"}', source)
+        self.assertIn('NATIVE_SITE_ROOT_ACLS_VERIFIED 2', playbook)
+        self.assertIn('ARCHIVE_COMMIT_NOT_AUTHORIZED', playbook)
+
     def test_readonly_probe_contains_no_archive_mutations(self):
         code = FILE.read_text()
         for token in ("os.rename(", "os.replace(", "os.unlink(", ".unlink(",
