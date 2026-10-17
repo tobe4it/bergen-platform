@@ -1416,3 +1416,50 @@ off-NAS restore for expiry/purge. No further production archive
 moves, automatic source purge, gate activation or main merge
 are authorized.
 
+
+### 2026-10-17 direct on-NAS SMB3.0.2 negotiation accepted
+
+Operator fast-forwarded PR #81 to `743b762` and successfully ran
+**774/774** Paperless offline tests. The new independent low-level
+no-authentication SMB3.0.2-only wire probe was streamed over existing
+pinned NAS SSH into `sudo -n /usr/bin/python3 -` and executed
+**on MountainCloud**, not through any SMB or SSH forwarding socket.
+It returned:
+
+```text
+SMB3_02_NEGOTIATE 127.0.0.1 SMB3_02_NEGOTIATED
+SMB3_02_NEGOTIATE 192.168.6.11 SMB3_02_NEGOTIATED
+SMB3_02_NEGOTIATE 192.168.2.145 SMB3_02_NEGOTIATED
+NO_SMB_AUTHENTICATION_ATTEMPTED
+NO_MUTATING_SMB_REQUESTS_SENT
+NO_FILES_CHANGED
+```
+
+This independently proves the NAS Samba server correctly responds to
+the minimal SMB 3.0.2 negotiation on loopback and both active
+physical interfaces. This **does not yet** demonstrate that
+`smbprotocol 1.17.0` can negotiate a full SMB3 session through the
+existing controller-to-NAS SSH forward, nor that an SMB user has
+effective DELETE/FILE_DELETE_CHILD denial.
+
+Next test: take the **same exact Python minimal-wire program already
+validated on the NAS** and run it from `bp-controller` with
+`--controller-forward` through one strictly loopback-bound,
+single-use SSH forward `127.0.0.1:1445 -> NAS 127.0.0.1:445`.
+The forwarded program intentionally sends no credentials and no
+SMB2 SESSION_SETUP, CREATE, WRITE, RENAME or DELETE commands.
+If this minimal request succeeds over the forward,
+the previous `smbprotocol` failures likely arise from its negotiate
+dialects/contexts or another client/transport-specific behavior;
+investigate without weakening server security. If the minimal request
+also fails, investigate SSH forwarding and NAS TCP policies before
+additional credentials or permissions tests. In either case preserve
+the existing successful DSM/POSIX ACL audit, one-PDF isolated recovery
+and full reconciled 21+1 NAS/Paperless lifecycle evidence.
+
+Do not modify Synology SMB dialect policy, DSM firewall,
+UniFi inter-VLAN policy, protected archive ACLs, source files,
+journals, backup gates or the Paperless `main` branch on the strength
+of this diagnostic. Independent post-canary off-NAS backup+restore,
+effective SMB permissions and further release criteria remain open.
+
