@@ -18,6 +18,7 @@ import getpass
 import re
 import sys
 import uuid
+from importlib.metadata import PackageNotFoundError, version
 
 SITE_SHARES = frozenset(("homes", "paperless-scan"))
 ROOT = ".bergen-paperless-archive"
@@ -65,10 +66,20 @@ def validate_site(server, site, username):
     return request_plan(site)
 
 
+def verify_smbprotocol_version():
+    # The low-level SMB2 API was reviewed against 1.17.0. Refuse
+    # unknown versions before requesting any private credentials.
+    try:
+        installed = version("smbprotocol")
+    except PackageNotFoundError:
+        raise RuntimeError("SMBPROTOCOL_LIBRARY_UNAVAILABLE") from None
+    demand(installed == "1.17.0")
+    return installed
+
+
 def execute(server, site, username):
     plan = validate_site(server, site, username)
-    password = getpass.getpass("SMB password (not logged): ")
-    demand(bool(password))
+    verify_smbprotocol_version()
     try:
         from smbprotocol.connection import Connection
         from smbprotocol.exceptions import SMBResponseException
@@ -82,6 +93,8 @@ def execute(server, site, username):
     except ImportError:
         raise RuntimeError("SMBPROTOCOL_LIBRARY_UNAVAILABLE") from None
 
+    password = getpass.getpass("SMB password (not logged): ")
+    demand(bool(password))
     connection = Connection(uuid.uuid4(), server, 445)
     try:
         connection.connect(timeout=15)
