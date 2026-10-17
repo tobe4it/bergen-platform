@@ -154,7 +154,7 @@ class SameVolumeArchiveTests(unittest.TestCase):
         self.assertFalse(self.event("prepared").exists())
 
     def test_group_drift_different_inode_cannot_reuse_old_receipt(self):
-        self.source.unlink()
+        self.source.rename(self.folder / "preserved-old-original.bin")
         self.source.write_bytes(PDF)
         with self.assertRaisesRegex(RuntimeError, "SENDER_RECEIPT_MISMATCH"):
             self.execute(commit=True)
