@@ -2024,3 +2024,51 @@ Keines dieser Resultate ist schon eine Archivierungsfreigabe.
 
 Diese Entscheidung beschreibt das **Ziel**, nicht einen
 bereits produktiv freigegebenen Archiv-Automaten.
+
+
+## 17.10.2026 — Automatischer Gruppen-Metadatenabgleich im Entwicklungsbranch
+
+Implementierung in PR #81, **noch nicht deployed/freigegeben**:
+
+- Der planmäßige Synology-Sender prüft einen bekannten Gruppen-PDF bei
+  abweichender Metadaten-Signatur zuerst auf exakt dieselbe Device/Inode/
+  Größen-Identität und unveränderten PDF-SHA-256. Dann wird die frühere
+  SENT-Quittung als `TRACKED_METADATA_DRIFT` übernommen, ohne sie zu ändern.
+  Diese Prüfung erfolgt **vor** der eigentlichen Aliasbehandlung für einen
+  neuen Inode. Unklarer/veränderter Inhalt bleibt gesperrt.
+- Der lesende Sender-Auditor erlaubt für `Familie` und `Eltern`
+  ausschließlich abweichende Zeitstempel bei gleichem Inode und Größe
+  **nach** vollständiger stabiler SHA-256-Nachprüfung. Private Dokumente
+  bleiben beim strikten historischen Signaturvergleich.
+- Der bereits durch das Controller-Systemd-Programm gesteuerte
+  Same-Volume-Archiv-Worker prüft erneut die Originalbytes und den
+  Paperless-Importnachweis. Nur bei unverändertem Gruppen-PDF kann er
+  ein vorbereitetes und archiviertes Journal mit zusätzlicher
+  `sender_signature` erzeugen. Diese enthält die alte unveränderte
+  SENT-Signatur, während `signature` die tatsächlich archivierte
+  Dateisignatur enthält. Der unabhängige Archivauditor verlangt
+  exakte Übereinstimmung beider Journalstadien, unveränderten
+  Senderbeleg, denselben Inode/dieselbe Größe und erneut die
+  geschützte Archiv-PDF mit passendem SHA-256.
+- Die unveränderten v1-Journale der bestehenden 16 Archive bleiben
+  rückwärtskompatibel, ebenso die Prüfung archivierter Vorgänger
+  erneut verwendeter Dateinamen.
+- Die Codebereitstellung erfolgt nur durch
+  `stage-paperless-group-auto-metadata-reconciliation.yml` mit
+  expliziter Zustimmung, inaktivem Controller-Timer, zuerst aktualisiertem
+  Archiv-Worker und danach aktualisiertem NAS-Sender samt
+  geschütztem Archivauditor.
+
+**Noch zu prüfen:** Offline-Negativtests auf dem Controller, Hash-gesicherte
+NAS-Codebereitstellung, anschließend vollständiges nur lesendes
+Paperless/NAS-Lifecycle-Audit und ein tatsächlicher fehlerfreier
+Systemd-OneShot für eine automatisch ausgewählte Gruppen-PDF mit
+postoperativer Auditfreigabe. Erst anschließend wieder
+`bergen-paperless-group-auto-v1.timer` aktivieren.
+
+**Unverändert:** Keine manuelle Dokumentauswahl, kein automatischer Purge,
+keine Übernahme privater Scans durch den Gruppen-Timer,
+kein Mergen von PR #81, keine Lockerung bei anderem Inode oder anderem
+PDF-SHA-256. Noch unklare/falsche Importbeweise blockieren die Verarbeitung
+weiterhin konservativ; die weitergehende dokumentweise Fehlerisolation ist
+noch nicht fertiggestellt und darf nicht als produktiv behauptet werden.
