@@ -790,3 +790,27 @@ it must remain fail-closed; do not modify NAS ACLs or repeat commits.
 No additional PDF move, automatic purge or `main` merge is authorized
 by this change.
 
+### 2026-10-17 corrective patch before live acceptance
+
+The first local acceptance run after adding the Linux-mode exception
+**failed**, with `732` synthetic tests, one failure in
+`test_exact_native_linux_mode_requires_rc_255_and_empty_stderr`,
+and an Ansible YAML parser error in the `POSIX_0700_ARCHIVE_PARENTS_VERIFIED`
+assertion. The errors were introduced by overescaped literal backslashes
+in the Python regular expression and by a truncated YAML expression.
+**No live DSM ACL probe was attempted from that failed acceptance.**
+
+Both defects are fixed in the PR branch: the regex now matches the exact
+observed native tool output, and the POSIX summary assertion is a
+complete, correctly quoted YAML string with one `fail_msg`.
+An additional test uses `yaml.safe_load` to detect invalid playbook
+syntax and requires the complete POSIX counter assertion. A local isolated
+regex sanity check confirmed matching the exact Linux-mode example and
+rejecting appended ACL content; this is **not** a production acceptance.
+Expected complete Paperless suite count is now **733**, pending operator
+verification on `bp-controller`.
+
+Do not rerun the live ACL audit until all 733 tests and Ansible
+`--syntax-check` pass. Archive moves, purge and promotion to
+`main` remain unauthorized.
+
