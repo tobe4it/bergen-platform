@@ -75,7 +75,7 @@ class CurrentGroupImportReadOnlyTests(unittest.TestCase):
         row = current("scan")
         wrong = imported(row, 1)
         wrong["sha256"] = "b" * 64
-        with self.assertRaisesRegex(RuntimeError, "GROUP_IMPORT_SHA_MISMATCH"):
+        with self.assertRaisesRegex(RuntimeError, "INVALID_RECEIVER_IDENTITY"):
             mod.join({"nas": nas_stream([row]), "paperless": live_stream([wrong])})
 
     def test_duplicate_identity_and_unexpected_status_rejected(self):
