@@ -1825,3 +1825,28 @@ und der zugehörige v2-Archiv-/Nachprüfungsweg produktiv fertig
 sind. Dies ist ausdrücklich noch **kein vollständiger
 Gruppen-Rollout**.
 
+
+## 17.10.2026 — Controller-Abnahme der optionalen Gruppen-Timer-Paketierung
+
+Auf `bp-controller` wurde der Stand `4a282f8` im isolierten PR-81-Worktree
+per Fast-Forward übernommen. Die vollständige Regression meldete
+**775 Tests in 0,320 s: OK**. Die drei bereits vorbereiteten Dateien
+`run-paperless-group-auto-v1.sh`,
+`bergen-paperless-group-auto-v1.service` und
+`bergen-paperless-group-auto-v1.timer` wurden mit Root-Besitz und
+vorgesehenen Dateimodi installiert. `systemctl daemon-reload` und
+`systemd-analyze verify` endeten ebenfalls erfolgreich, ohne
+Fehlermeldungen. Ein früherer manueller produktiver IDLE-Lauf des
+zugrundeliegenden Playbooks war `ok=27 changed=0 failed=0 skipped=58`.
+
+**Noch nicht eingerichtet:** Ein sicherer nur lokal für Root lesbarer
+`/etc/bergen-paperless/group-auto-vault`-Credential und der
+erste systemd-OneShot-Abnahmelauf. Der Timer bleibt noch
+**nicht aktiviert**. Erst Credential, manuellen systemd-Start,
+Erfolgskontrolle und dann ein explizites
+`systemctl enable --now bergen-paperless-group-auto-v1.timer`
+auf dem Controller freigeben. Die fortlaufende
+v1-Verarbeitung umfasst nur eindeutig neue Dateinamen
+in `Familie` und `Eltern`; v2-Kollisionsfreiheit
+bleibt der wesentliche unerledigte Teil des Gruppen-Rollouts.
+
