@@ -865,3 +865,56 @@ The last independent archive lifecycle count prior to this audit was
 deletions. This ACL-only run did not independently recalculate
 those lifecycle counts; retain that evidence as a separate audit.
 
+
+## 2026-10-17 isolated read-only recovery canary implementation (acceptance pending)
+
+The 10-directory native DSM/POSIX static protection audit passed with
+`NATIVE_SITE_ROOT_ACLS_VERIFIED 2`,
+`POSIX_0700_ARCHIVE_PARENTS_VERIFIED 8` and
+`POTENTIAL_NATIVE_DELETE_GRANTS 0`. It does not prove actual SMB rename
+denial or independent off-NAS backup recovery.
+
+A new separate read-only recovery playbook,
+`ansible/playbooks/verify-paperless-one-group-isolated-recovery.yml`,
+is intentionally pinned to the **sole already archived canary**
+`Familie/Bergen-Platform-fuer-Dummies.pdf` (Paperless document 8). It:
+(1) runs the existing full independent import/archived-journal lifecycle audit
+quietly and requires **exactly 21 current SENT, one ARCHIVED,
+22 live imported, and exactly two historical user deletions**;
+(2) calls a restricted `paperless-sync` NAS stream program over SSH
+via source-on-stdin; that program validates the protected root, both
+canonical archived journal events, exactly the reviewed sender receipt,
+the original source's absence, device/inode/size/mtime/ctime, full original
+SHA-256 and PDF header/footer under `sync.lock`, and streams only
+that PDF's bytes with bounded metadata; (3) copies those bytes to
+**`bp-controller` `/dev/shm` tmpfs**, privately owned in a temporary
+0700 directory, creates the disposable PDF with `O_EXCL|O_NOFOLLOW`
+and mode `0600`, validates framing, SHA-256 and PDF structure, reopens
+and rehashes the isolated copy, and removes it on scope exit;
+(4) runs the same full lifecycle audit a second time, requiring the
+original 21+1 counts and Paperless live/deletion evidence unchanged.
+The NAS-side tool performs **no NAS writes at all**. It does not
+create/delete archive entries, update receipts, create gates, invoke a
+purge, or reimport any document. All private file bytes, names and raw
+receipts remain hidden from Ansible's public output. A process crash
+on `bp-controller` may leave a restricted tmpfs copy until reboot;
+inspect and remove it under explicit controlled recovery if needed.
+
+Implementation files:
+`ansible/files/paperless/readonly_archive_recovery_stream.py`,
+`ansible/files/paperless/verify_isolated_archive_recovery.py`,
+and `tests/test_paperless_isolated_archive_recovery.py`.
+The synthetic suite covers exact binary framing, size/hash/PDF corruption,
+tmpfs copy protection, complete archived-journal binding, inode changes,
+untrusted journal modifications and both read-only lifecycle imports.
+No stage or activation step is needed. The staged NAS archive worker remains
+unchanged and release gates remain absent.
+
+**Acceptance pending on bp-controller:** Fast-forward the PR branch and run
+the full `test_paperless_*.py` suite; syntax-check the new Ansible playbook.
+Only after all tests/syntax pass, execute it with the normal local inventory,
+Vault and Synology ignored variables. Passing isolated NAS-read/copy recovery
+does **not** demonstrate restore from a separately stored backup or effective
+nonadministrator SMB rename/delete denial. Those are subsequent independent
+release gates for Paperless `main` promotion and any irreversible expiry.
+
