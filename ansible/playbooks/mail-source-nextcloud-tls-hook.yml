@@ -175,6 +175,20 @@
             group: root
             mode: '0700'
             force: false
+          register: cloud_tls_hook_created
+          no_log: true
+
+        - name: Read the newly installed hook before executing it
+          ansible.builtin.slurp:
+            src: "{{ mail_cloud_tls_hook_path }}"
+          register: cloud_tls_hook_after_install
+          no_log: true
+
+        - name: Reject a concurrent or mismatched hook without executing it
+          ansible.builtin.assert:
+            that:
+              - (cloud_tls_hook_after_install.content | b64decode) == expected_hook
+            fail_msg: Hook appeared or differs after copy; refusing to execute.
           no_log: true
 
         - name: Verify new hook shell syntax without reloading Nginx
@@ -189,10 +203,11 @@
             RENEWED_LINEAGE: /etc/letsencrypt/live/_unrelated_validation_
           changed_when: false
       rescue:
-        - name: Remove only the hook introduced by this run
+        - name: Remove only a hook positively created by this run
           ansible.builtin.file:
             path: "{{ mail_cloud_tls_hook_path }}"
             state: absent
+          when: cloud_tls_hook_created.changed | default(false)
           no_log: true
 
         - name: Report failed safe installation
