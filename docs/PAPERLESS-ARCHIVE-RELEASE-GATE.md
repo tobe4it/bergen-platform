@@ -1,6 +1,54 @@
 # Paperless archive preflight and main promotion gate
 
 
+## Gruppen-Rollout: Bestandsarchivierung erfolgreich, Automatik noch offen (17.10.2026)
+
+**Verbindliche Statuskorrektur:** Der GROUP-FIRST-Rollout ist NICHT
+abgeschlossen. Zwar wurden nach dem ersten Canary nun auch alle weiteren
+15 alten Gruppen-PDFs mit dem produktiv erfolgreich geprüften Einmal-Playbook
+archiviert (`venombox ok=834 changed=15 failed=0`), und die jeweiligen
+POST_MOVE-Lifecycle-Prüfungen, Gate-Widerrufe und `ARCHIVE_PURGE_DISABLED`
+wurden bestätigt. Resultierende Bestandssumme: **16 geschützte
+Gruppenoriginale ARCHIVED + 6 private NAS-Originale SENT =
+22 weiterhin in Paperless importierte Dokumente**. Zwei früher bewusst
+gelöschte Paperless-Dokumente bleiben ausgeschlossen.
+
+**Abschlusskriterium Gruppen-Rollout:** Ein **neuer** Scan in `Eltern` oder
+`Familie` wird ohne pro-Dokument-Operatorinteraktion nach einem
+frischen, unabhängigen und effektiven Paperless-Import-/ACL-Nachweis
+dauerhaft und kollisionsfrei in `.bergen-paperless-archive` auf
+demselben Btrfs-Subvolume archiviert; Quelle verschwindet dabei nur durch
+`renameat2(RENAME_NOREPLACE)`. PREPARED/ARCHIVED-Journale und
+Post-Move-Lifecycle-Abgleich bestehen auch nach Neustart und
+Wiederholung. Unvollständige/veränderte Imports, doppelte
+Dateinamen und nicht abgeschlossene Journalzustände werden
+ohne stillen Replay sicher behandelt. Die sechs privaten PDFs,
+Archiv-Retention-Purge und generelle Löschfunktionen bleiben
+außerhalb der Gruppen-Freigabe.
+
+**Aktuell nicht erfüllt:** v1 ist senderseitig an den Original-
+Dateinamen gebunden und verhindert nach dessen Verarbeitung
+die erneut sichere Annahme eines gleichnamigen Scans. Die vorhandenen
+v2-Receipt-Module sind noch Offline-/Entwicklungsbausteine.
+Der erfolgreiche Einmal-Playbook-Rollout ist **kein Trigger für
+spätere Scans**. Ein autonomer Lauf darf niemals aus dem bloßen
+NAS-SENT-Status einen bestätigten Paperless-Import ableiten.
+
+**Entwicklungsschritt auf PR #81:** Der bereits bewährte
+`commit-paperless-one-group-v1-archive.yml` verwendet jetzt
+die dynamische, frisch gemeldete Anzahl `PAPERLESS_LIVE_IMPORTED`
+statt der bisherigen statischen 22 für Vorher-/Nachher-Deltas.
+Das ändert weder NAS-Code noch Produktivbetrieb und autorisiert
+keinen zeitgesteuerten Commit. Der zustandsgebundene v2-Sender mit
+kollisionsfreien Instanz-IDs und die vollständige
+automatische Folge aus Importbestätigung und Archiv-Move müssen
+noch implementiert und mit neuen Gruppenscans nachgewiesen werden.
+
+Die externe Backup-/Restore-Freigabe ist insbesondere für
+späteren irreversiblen Purge erforderlich, aber kein zusätzlicher
+Blocker für die sichere reine Archivverschiebung. Keine automatische
+Archivfreigabe und kein `main`-Merge bis zum Live-Nachweis.
+
 ## Aktueller Arbeitsstand — 17.10.2026 (verbindlich)
 
 **Keine weiteren SMB-Client-, SSH-Tunnel- oder Einzelbenutzertests
@@ -26,8 +74,8 @@ die darin genannten Python-Dateipfade sind nach der Bereinigung
 teilweise nicht mehr vorhanden. Keiner dieser fehlgeschlagenen
 Tunnelversuche ändert die vorhandenen, gültigen Archivaudits.
 
-**Nächster operativer Schwerpunkt: unabhängige Sicherung und
-Wiederherstellung NACH dem Canary vom 16.10.2026.** Der
+**Separater offener Meilenstein (für spätere irreversible Löschung): unabhängige Sicherung und
+Wiederherstellung des NAS-/LXC-Datenstands nach dem Canary vom 16.10.2026.** Der
 `vzdump-lxc-126-2026_10_15-03_00_12.tar.zst` ist zeitlich zu
 alt, um die spätere Archivverschiebung nachzuweisen.
 `/mnt/pve/bergen-synology-backup` muss anhand des wirklichen
