@@ -1959,3 +1959,68 @@ nachgewiesenen Neuimport und erfolgreichem
 anschließenden Live-Archiv-Move deaktiviert.
 Kein Lösch-/Purge-Release, kein Merge nach `main`.
 
+
+## 17.10.2026 — Architekturentscheidung: keine manuelle Archivierung mehr
+
+**Verbindliche Betriebsanforderung:** Nach erfolgreichem NAS-Sendertransfer
+und unabhängig nachgewiesenem lebendem Paperless-Import (SHA-256,
+Dokument-ID, Eigentümer/ACL, Bridge- und Senderidentität) wird das
+jeweilige Scan-Original **unbeaufsichtigt** in das native, auf demselben
+Synology-Volume geschützte Archiv überführt. Die Bedienperson wählt
+keine Einzeldokumente aus und gibt keine periodischen
+Archivfreigaben per Hand. Der vorhandene
+`bergen-paperless-group-auto-v1.timer` ist der vorgesehene
+gruppenbezogene Einstieg, aber momentan **deaktiviert**.
+
+**Live-Zwischenstand:** Zwei wiederverwendete Dateinamen wurden
+vom laufenden NAS-Watcher eindeutig neu instanziiert und übertragen.
+Ein anschließender unabhängiger Importabgleich ergab
+`GROUP_CURRENT_NAS_SENT 8`,
+`GROUP_CURRENT_LIVE_IMPORTED 8`,
+`GROUP_CURRENT_WAITING_FOR_IMPORT 0`.
+Ein altes Gruppenoriginal hat denselben Inode, dieselbe Größe
+und denselben PDF-SHA-256, jedoch abweichende `mtime`/`ctime`;
+auch dessen Paperless-Import ist unabhängig bestätigt.
+Keines dieser Resultate ist schon eine Archivierungsfreigabe.
+
+**Akzeptanzkriterien für die wieder aktivierte Automatik:**
+
+1. Automatische, identitätsgebundene Behandlung reiner
+   Metadatenabweichungen **ohne Überschreiben alter SENT-Quittungen**,
+   ohne Zurücksetzen von Zeitstempeln und ohne Blindfreigabe
+   anderer Inodes/Dateiinhalte. Eine dauerhaft nachvollziehbare
+   Reconciliation muss auch vom Archiv-Worker und vom
+   anschließenden unabhängigen Archiv-Auditor überprüft werden.
+2. **Fehlerisolierung pro PDF:** Ein nicht eindeutig
+   rekonstruierbarer Scan wird gesperrt und gemeldet; er darf
+   nicht sämtliche anderen sauber importierten Originale
+   blockieren. Fehlende/inkonsistente Import- oder Archivereignisse
+   bleiben STOP-Fälle für die jeweilige Datei.
+3. Jede vollautomatische einzelne Archivverschiebung verlangt
+   denselben frischen unabhängigen Paperless-Importnachweis,
+   geschützte NAS-ACLs, Schreibruhe, atomaren
+   `RENAME_NOREPLACE`, den exakten kurzlebigen Root-Gate und
+   unabhängige Journal-/Archiv- und Nachprüfung wie die
+   bereits erfolgreichen 16 Einzelarchive.
+4. Kein vollständiger Dateipurge, kein Löschen aus Paperless,
+   kein Zugriffserweitern und keine implizite
+   Berechtigung zum Archivieren privater Verzeichnisse.
+   Für private Scans ist ein eigener gleich strenger
+   automatischer Betriebs-/Freigabepfad vorzusehen;
+   sie dürfen nicht über die Gruppenautomatik laufen.
+5. **Ohne Benutzereingriff** bei normalem Verlauf.
+   Nur tatsächliche Beweisketten- oder Sicherheitsverletzungen
+   bedürfen eines Fehlersignals und gesonderter Behandlung.
+   Kein vorgeschlagener manueller Ersatzweg über
+   `commit-paperless-one-group-v1-archive.yml`.
+6. Vor Wiederaktivierung: isolierte Negativtests einschließlich
+   mtime-/ctime-Drift, anderer Inode, gleichnamiger neuer Scan,
+   verändertem PDF-SHA, verlorener Importquittung,
+   unvollständigem Journal, Unterbrechung nach Rename,
+   ACL-Verschlechterung und Wiederanlauf; danach ein
+   kontrollierter echter automatischer Archivierungslauf.
+   Bis dahin `main`-Merge, Purge und Timer-Aktivierung
+   weiterhin gesperrt.
+
+Diese Entscheidung beschreibt das **Ziel**, nicht einen
+bereits produktiv freigegebenen Archiv-Automaten.
