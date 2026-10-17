@@ -100,6 +100,14 @@ class GroupSenderMetadataTests(unittest.TestCase):
             code.index("from synology_group_collision_alias import resolve_under_sender_lock"))
         self.assertNotIn("write_receipt(receipt_file, old)", code)
 
+    def test_readonly_nas_inventory_rehashes_group_drift_and_keeps_private_strict(self):
+        audit_source = (CODE / "audit_synology_archive_candidates.py").read_text()
+        self.assertIn('scope in ("Familie", "Eltern")', audit_source)
+        self.assertIn('prior_signature[:3] == actual_signature[:3]', audit_source)
+        self.assertIn('sha.hexdigest() != digest', audit_source)
+        self.assertIn('receipt.get("status") != "SENT"', audit_source)
+        self.assertIn('signature(metadata(path)) != signature(before)', audit_source)
+
     def test_automation_still_requires_full_lifecycle_pre_and_post(self):
         source = AUTO.read_text()
         self.assertIn("list-paperless-v1-archive-candidates.yml", source)
