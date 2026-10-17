@@ -19,6 +19,7 @@ import re
 import sys
 import uuid
 import inspect
+import socket
 from importlib.metadata import PackageNotFoundError, version
 
 SITE_SHARES = frozenset(("homes", "paperless-scan"))
@@ -81,8 +82,8 @@ def verify_smbprotocol_version():
 # Fixed phase labels only. Never report raw exceptions: SMB exceptions can
 # include names, paths, usernames, server details and authentication state.
 SAFE_PHASES = frozenset((
-    "PRECHECK", "IMPORTS", "PASSWORD_INPUT", "CONNECT",
-    "SESSION_SETUP", "TREE_CONNECT", "SHARE_ROOT_OPEN",
+    "PRECHECK", "IMPORTS", "PASSWORD_INPUT", "CONNECT_OBJECT",
+    "SMB_NEGOTIATE", "SESSION_SETUP", "TREE_CONNECT", "SHARE_ROOT_OPEN",
     "SHARE_ROOT_CLOSE", "NEGATIVE_VERDICT", "TEARDOWN",
     "PROTECTED_ENTRY_DELETE_OPEN", "PROTECTED_ENTRY_DELETE_CLOSE",
     "SITE_ROOT_DELETE_CHILD_OPEN", "SITE_ROOT_DELETE_CHILD_CLOSE",
@@ -111,11 +112,44 @@ def safe_error_label(error):
     return category, code
 
 
+def safe_exception_type(error):
+    """Whitelist exact standard/library exception classes, never raw content."""
+    possible = (
+        "ValueError", "RuntimeError", "TypeError", "AttributeError",
+        "OSError", "ConnectionError", "ConnectionRefusedError",
+        "ConnectionResetError", "ConnectionAbortedError",
+        "TimeoutError", "socket.timeout", "gaierror",
+        "SMBException", "SMBResponseException", "SMBConnectionClosed",
+        "SMBConnectionTimeout", "SMBAuthenticationError",
+    )
+    name = type(error).__name__
+    return name if name in possible else "OTHER_EXCEPTION"
+
+
 def safe_diagnostic(phase, error):
     label, status = safe_error_label(error)
     return ("SMB_PROBE_DIAGNOSTIC",
             phase if phase in SAFE_PHASES else "PRECHECK",
-            label, status)
+            label, status, safe_exception_type(error))
+
+
+def tcp_preflight(server):
+    """Check TCP/445 without SMB messages, credentials or filesystem writes.
+
+    Success means TCP connectivity only, NEVER authentication or permission.
+    Socket errors are safely categorized without exposing local addresses.
+    """
+    demand(isinstance(server, str) and SERVER.fullmatch(server))
+    try:
+        with socket.create_connection((server, 445), timeout=5):
+            pass
+    except Exception as error:
+        print(*safe_diagnostic("CONNECT_OBJECT", error),
+              file=sys.stderr, flush=True)
+        raise RuntimeError("SMB_TCP_445_NOT_REACHABLE") from None
+    print("SMB_TCP_445_REACHABLE")
+    print("NO_SMB_AUTHENTICATION_ATTEMPTED")
+    print("NO_SMB_MUTATING_REQUESTS_SENT")
 
 
 def local_api_preflight():
@@ -175,8 +209,9 @@ def execute(server, site, username):
         phase = "PASSWORD_INPUT"
         password = getpass.getpass("SMB password (not logged): ")
         demand(bool(password))
-        phase = "CONNECT"
+        phase = "CONNECT_OBJECT"
         connection = Connection(uuid.uuid4(), server, 445)
+        phase = "SMB_NEGOTIATE"
         connection.connect(timeout=15)
         phase = "SESSION_SETUP"
         session = Session(connection, username, password,
@@ -252,15 +287,22 @@ def execute(server, site, username):
 def main(argv=None):
     parser = argparse.ArgumentParser()
     parser.add_argument("--local-api-check", action="store_true")
+    parser.add_argument("--tcp-preflight", action="store_true")
     parser.add_argument("--server")
     parser.add_argument("--site-share", choices=sorted(SITE_SHARES))
     parser.add_argument("--username")
     opts = parser.parse_args(argv)
     if opts.local_api_check:
-        demand(not any((opts.server, opts.site_share, opts.username)))
+        demand(not opts.tcp_preflight and
+               not any((opts.server, opts.site_share, opts.username)))
         local_api_preflight()
         print("SMBPROTOCOL_LOCAL_API_CHECK_OK")
         print("NO_SMB_CONNECTION_ATTEMPTED")
+        return
+    if opts.tcp_preflight:
+        demand(not opts.local_api_check and
+               opts.server and not opts.site_share and not opts.username)
+        tcp_preflight(opts.server)
         return
     demand(all((opts.server, opts.site_share, opts.username)))
     execute(opts.server, opts.site_share, opts.username)
