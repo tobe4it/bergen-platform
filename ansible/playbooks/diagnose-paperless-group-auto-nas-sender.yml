@@ -68,3 +68,41 @@
           - "NAS_RECEIPTS_UNCHANGED=true"
           - "NO_ARCHIVE_MOVE=true"
           - "NO_PURGE=true"
+
+    - name: Inspect only expected restricted-user Synology supervisor and watcher processes
+      ansible.builtin.command:
+        argv:
+          - ssh
+          - -T
+          - -o
+          - BatchMode=yes
+          - -o
+          - StrictHostKeyChecking=yes
+          - -o
+          - ConnectTimeout=15
+          - "{{ synology_admin }}"
+          - >-
+            sudo -n -u {{ synology_config.sync_user | quote }}
+            /usr/bin/python3 - {{ synology_config.state_parent | quote }}
+        stdin: "{{ lookup('ansible.builtin.file', playbook_dir + '/../files/paperless/diagnose_synology_watcher_processes.py', rstrip=False) }}"
+      delegate_to: localhost
+      become: false
+      register: watcher_process_diagnostic
+      failed_when: false
+      changed_when: false
+      no_log: true
+
+    - name: Report only allowlisted watcher state markers
+      ansible.builtin.debug:
+        msg:
+          - >-
+            {{ (watcher_process_diagnostic.stdout_lines |
+                select('match', '^WATCHER_PROCESS_STATE=(SUPERVISED_AND_RUNNING|SUPERVISOR_ONLY|UNSUPERVISED_WATCHER|NOT_RUNNING|DUPLICATE)$') |
+                list | first | default('WATCHER_PROCESS_STATE=UNKNOWN', true))
+               if watcher_process_diagnostic.rc == 0 else 'WATCHER_PROCESS_STATE=UNKNOWN' }}
+          - >-
+            {{ (watcher_process_diagnostic.stdout_lines |
+                select('match', '^SENDER_ACTIVATION_GATE=(ACTIVE|ABSENT_OR_UNSAFE)$') |
+                list | first | default('SENDER_ACTIVATION_GATE=UNKNOWN', true))
+               if watcher_process_diagnostic.rc == 0 else 'SENDER_ACTIVATION_GATE=UNKNOWN' }}
+          - "NO_FILES_CHANGED=true"
