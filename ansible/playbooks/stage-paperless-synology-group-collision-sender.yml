@@ -79,6 +79,7 @@
           test -f "$BIN/synology_same_volume_archive_move.py"
           test ! -L "$BIN/synology_same_volume_archive_move.py"
           test "$(stat -c '%u:%g:%a' "$BIN/synology_same_volume_archive_move.py")" = '0:0:644'
+          test "$(sha256sum "$BIN/synology_same_volume_archive_move.py" | cut -d ' ' -f 1)" = {{ (lookup('ansible.builtin.file', playbook_dir + '/../files/paperless/synology_same_volume_archive_move.py', rstrip=False) | hash('sha256')) | quote }}
           echo TRUSTED_COLLISION_SENDER_CODE_PARENT
       register: collision_source_guard
       changed_when: false
