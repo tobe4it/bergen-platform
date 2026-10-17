@@ -1,0 +1,222 @@
+---
+- name: Require explicitly reviewed backup target and deployment approval
+  ansible.builtin.assert:
+    that:
+      - paperless_backup_schedule_approved | bool
+      - paperless_backup_unit == 'bergen-paperless-vzdump'
+      - inventory_hostname == paperless_backup_pve_host
+      - paperless_backup_vmid | int >= 100
+      - paperless_backup_guest_hostname is match('^[a-z][a-z0-9-]+$')
+      - paperless_backup_storage is match('^[a-zA-Z0-9_-]+$')
+      - paperless_backup_expected_export is match('^[^ :]+:/[^ ]+$')
+      - paperless_backup_calendar == '*-*-* 03:00:00 Europe/Berlin'
+      - paperless_backup_tmpdir == '/var/tmp'
+      - paperless_backup_prune == 'keep-daily=7,keep-weekly=4,keep-monthly=12'
+    fail_msg: >-
+      Refusing backup timer changes without exact site-local host, guest,
+      NFS export and paperless_backup_schedule_approved=true.
+    quiet: true
+
+- name: Read actual Proxmox host identity
+  ansible.builtin.command:
+    argv: [hostname, -s]
+  register: backup_node_identity
+  changed_when: false
+  check_mode: false
+
+- name: Refuse wrong host
+  ansible.builtin.assert:
+    that:
+      - backup_node_identity.stdout == paperless_backup_pve_host
+    fail_msg: "Connected host is not the explicitly selected Proxmox node."
+    quiet: true
+
+- name: Read Paperless LXC configuration without modifications
+  ansible.builtin.command:
+    argv: [pct, config, "{{ paperless_backup_vmid | string }}"]
+  register: backup_guest_config
+  changed_when: false
+  check_mode: false
+
+- name: Verify exact guest, dedicated ZFS data mount and backup inclusion
+  ansible.builtin.assert:
+    that:
+      - >-
+        ('hostname: ' ~ paperless_backup_guest_hostname)
+        in backup_guest_config.stdout_lines
+      - "'unprivileged: 1' in backup_guest_config.stdout_lines"
+      - >-
+        backup_guest_config.stdout_lines |
+        select('match', '^rootfs: local-zfs:') | list | length == 1
+      - >-
+        backup_guest_config.stdout_lines |
+        select('match', '^mp0: local-zfs:.*mp=/srv/bergen-paperless,backup=1(,|$)') |
+        list | length == 1
+    fail_msg: "The guest or its included ZFS data volume does not match the reviewed plan."
+    quiet: true
+
+- name: Check Proxmox storage status
+  ansible.builtin.command:
+    argv: [pvesm, status]
+  register: backup_storage_status
+  changed_when: false
+  check_mode: false
+
+- name: Require active NFS backup storage
+  ansible.builtin.assert:
+    that:
+      - >-
+        backup_storage_status.stdout_lines |
+        select('match', '^' ~ (paperless_backup_storage | regex_escape) ~ '\s+nfs\s+active\s+') |
+        list | length == 1
+    fail_msg: "The selected NFS backup storage is not active."
+    quiet: true
+
+- name: Read actual NFS mount source
+  ansible.builtin.command:
+    argv:
+      - findmnt
+      - --mountpoint
+      - "/mnt/pve/{{ paperless_backup_storage }}"
+      - -n
+      - -o
+      - SOURCE
+  register: backup_mount_source
+  changed_when: false
+  check_mode: false
+
+- name: Read actual NFS filesystem type
+  ansible.builtin.command:
+    argv:
+      - findmnt
+      - --mountpoint
+      - "/mnt/pve/{{ paperless_backup_storage }}"
+      - -n
+      - -o
+      - FSTYPE
+  register: backup_mount_fstype
+  changed_when: false
+  check_mode: false
+
+- name: Require exact NFS export and protocol
+  ansible.builtin.assert:
+    that:
+      - backup_mount_source.stdout == paperless_backup_expected_export
+      - backup_mount_fstype.stdout in ['nfs', 'nfs4']
+    fail_msg: "The backup storage is mounted from an unexpected filesystem or export."
+    quiet: true
+
+- name: Inspect local temporary directory permissions
+  ansible.builtin.stat:
+    path: "{{ paperless_backup_tmpdir }}"
+  register: backup_tmpdir_stat
+
+- name: Check temporary directory filesystem type
+  ansible.builtin.command:
+    argv: [findmnt, -n, -o, FSTYPE, -T, "{{ paperless_backup_tmpdir }}"]
+  register: backup_tmpdir_fstype
+  changed_when: false
+  check_mode: false
+
+- name: Require local sticky-writable temporary directory
+  ansible.builtin.assert:
+    that:
+      - backup_tmpdir_stat.stat.isdir | default(false)
+      - backup_tmpdir_stat.stat.mode == '1777'
+      - backup_tmpdir_fstype.stdout not in ['nfs', 'nfs4', 'cifs', 'smb3']
+    fail_msg: "The VZDump tmpdir must be /var/tmp on a local filesystem with mode 1777."
+    quiet: true
+
+- name: Inspect current systemd unit files before any write
+  ansible.builtin.stat:
+    path: "/etc/systemd/system/{{ paperless_backup_unit }}.{{ item }}"
+    follow: false
+  loop: [service, timer]
+  register: backup_existing_units
+
+- name: Refuse half-installed, untrusted or symlinked unit state
+  ansible.builtin.assert:
+    that:
+      - backup_existing_units.results[0].stat.exists == backup_existing_units.results[1].stat.exists
+      - not backup_existing_units.results[0].stat.islnk | default(false)
+      - not backup_existing_units.results[1].stat.islnk | default(false)
+      - not backup_existing_units.results[0].stat.exists or (backup_existing_units.results[0].stat.isreg | default(false) and backup_existing_units.results[0].stat.pw_name == 'root' and backup_existing_units.results[0].stat.mode == '0644')
+      - not backup_existing_units.results[1].stat.exists or (backup_existing_units.results[1].stat.isreg | default(false) and backup_existing_units.results[1].stat.pw_name == 'root' and backup_existing_units.results[1].stat.mode == '0644')
+    fail_msg: "BACKUP_UNIT_PARTIAL_OR_UNTRUSTED"
+  no_log: true
+
+- name: Read existing backup units securely, without emitting contents
+  ansible.builtin.slurp:
+    src: "/etc/systemd/system/{{ paperless_backup_unit }}.{{ item }}"
+  loop: [service, timer]
+  register: backup_original_units
+  when: backup_existing_units.results[0].stat.exists
+  no_log: true
+
+- name: Refuse overwriting any existing non-identical backup systemd unit
+  ansible.builtin.assert:
+    that:
+      - backup_original_units.results[0].content | b64decode == lookup('ansible.builtin.template', role_path ~ '/templates/bergen-paperless-vzdump.service.j2')
+      - backup_original_units.results[1].content | b64decode == lookup('ansible.builtin.template', role_path ~ '/templates/bergen-paperless-vzdump.timer.j2')
+    fail_msg: "BACKUP_UNIT_DRIFT: existing timer/service are protected; reconcile separately, never overwrite"
+  when: backup_existing_units.results[0].stat.exists
+  no_log: true
+
+- name: Read existing timer enablement (never start or stop)
+  ansible.builtin.command:
+    argv: [systemctl, is-enabled, "{{ paperless_backup_unit }}.timer"]
+  register: backup_existing_enabled
+  changed_when: false
+  failed_when: false
+  check_mode: false
+  when: backup_existing_units.results[0].stat.exists
+
+- name: Require explicit authorization before changing an existing timer state
+  ansible.builtin.assert:
+    that:
+      - (backup_existing_enabled.stdout | trim == ('enabled' if paperless_backup_timer_enabled | bool else 'disabled')) or (paperless_backup_existing_timer_state_change_approved | default(false) | bool)
+    fail_msg: "BACKUP_EXISTING_SCHEDULE_CHANGE_REQUIRES_SEPARATE_APPROVAL"
+  when: backup_existing_units.results[0].stat.exists
+
+- name: Install dedicated Paperless backup service
+  when: not backup_existing_units.results[0].stat.exists
+  ansible.builtin.template:
+    src: bergen-paperless-vzdump.service.j2
+    dest: "/etc/systemd/system/{{ paperless_backup_unit }}.service"
+    owner: root
+    group: root
+    mode: "0644"
+
+- name: Install dedicated Paperless backup timer
+  when: not backup_existing_units.results[0].stat.exists
+  ansible.builtin.template:
+    src: bergen-paperless-vzdump.timer.j2
+    dest: "/etc/systemd/system/{{ paperless_backup_unit }}.timer"
+    owner: root
+    group: root
+    mode: "0644"
+
+- name: Enable or disable the daily timer according to reviewed site state
+  ansible.builtin.systemd:
+    name: "{{ paperless_backup_unit }}.timer"
+    daemon_reload: true
+    enabled: "{{ paperless_backup_timer_enabled | bool }}"
+    state: "{{ 'started' if paperless_backup_timer_enabled | bool else 'stopped' }}"
+  when:
+    - not ansible_check_mode
+    - not backup_existing_units.results[0].stat.exists or
+      (paperless_backup_existing_timer_state_change_approved | default(false) | bool)
+
+- name: Report scheduled Paperless backup without triggering one
+  ansible.builtin.debug:
+    msg:
+      host: "{{ inventory_hostname }}"
+      vmid: "{{ paperless_backup_vmid }}"
+      target_storage: "{{ paperless_backup_storage }}"
+      mode: stop
+      compressor: zstd
+      tmpdir: "{{ paperless_backup_tmpdir }}"
+      calendar: "{{ paperless_backup_calendar }}"
+      retention: "{{ paperless_backup_prune }}"
+      enabled: "{{ paperless_backup_timer_enabled | bool }}"
+      backup_executed_by_playbook: false

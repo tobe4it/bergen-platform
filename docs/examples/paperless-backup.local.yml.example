@@ -1,0 +1,13 @@
+---
+# Copy into ansible/vars/paperless-backup.local.yml (ignored by Git).
+# Review locally; do not commit private network or export details.
+paperless_backup_pve_host: venombox
+paperless_backup_vmid: 126
+paperless_backup_guest_hostname: bergen-paperless
+paperless_backup_storage: bergen-synology-backup
+
+# Exact SOURCE from findmnt --mountpoint /mnt/pve/bergen-synology-backup -n -o SOURCE
+paperless_backup_expected_export: "REPLACE_WITH_NFS_SERVER:/volume1/bergen-proxmox-backup"
+
+# An explicit -e paperless_backup_schedule_approved=true is ALSO required.
+paperless_backup_timer_enabled: true
