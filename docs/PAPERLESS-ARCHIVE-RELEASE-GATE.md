@@ -1780,3 +1780,48 @@ Niemals den alten statischen 15-Dateien-Einmal-Rollout
 wiederholen.
 
 
+## 17.10.2026 — Freigabepflichtiger Controller-Timer für v1-Gruppenarchive
+
+Nach dem produktiv erfolgreichen ersten IDLE-Lauf mit
+`venombox ok=27 changed=0 failed=0 skipped=58`
+ist die **Infrastruktur für einen 5-Minuten-Timer** vorbereitet,
+jedoch **nicht installiert oder aktiviert**. Der IDLE-Nachweis
+belegt null Änderungen; bei einem neuen Gruppenimport muss
+noch ein automatischer erfolgreicher Live-Move nachgewiesen werden.
+
+Quelltexte:
+- `ansible/files/paperless/run-paperless-group-auto-v1.sh`:
+  startet ausschließlich das schon überprüfte
+  `archive-next-verified-paperless-group-v1.yml`
+  mit genau den beiden bisherigen ignorierten Standortvariablen,
+  den zwei ausdrücklichen Commit-/Automatik-Flags und
+  einem **von systemd zur Laufzeit übergebenen Vault-Credential-Pfad**.
+  Kein Passwort als Argument oder in Git.
+- `ansible/files/paperless/bergen-paperless-group-auto-v1.service`:
+  `Type=oneshot`, `User=ansible`, `LoadCredential` aus
+  `/etc/bergen-paperless/group-auto-vault` (durch Root
+  **extern und restriktiv** bereitzustellen), eingeschränktes
+  `NoNewPrivileges`; bleibt bei fehlender Datei gesperrt.
+- `ansible/files/paperless/bergen-paperless-group-auto-v1.timer`:
+  ein neuer Lauf **fünf Minuten nach dem letzten vollständig
+  beendeten**, zusätzlich fünf Minuten nach Boot; jeder Lauf
+  lässt die vorhandene Ansible-Steuerung höchstens **ein**
+  vollständig importbestätigtes Gruppen-PDF mit
+  allen bestehenden Freigabe-/Journal-/Nachaudit-Prüfungen
+  archivieren.
+- Vier zusätzliche Offline-Unit-Tests für Shell-Syntax,
+  Service-Identität, Credential-Isolierung und Timer-Cadence.
+
+Die Dateien werden bewusst **nicht automatisch aktiviert**.
+Vor der erstmaligen produktiven Nutzung die vollständige
+Paperless-Unit-Test-Suite, `bash -n`,
+`systemd-analyze verify`, korrekten Pfad zu Ansible-venv,
+stabile Controller-SSH-Rechte, sichere Bereitstellung des
+Vault-Passworts und eine isolierte Probeausführung bestätigen.
+Der 5-Minuten-Timer archiviert nur v1-Scans mit erstmals
+benutztem Dateinamen; erneute Dateinamen werden vom alten Sender
+gesperrt, bis der noch nicht ausgelieferte v2-Inkarnationssender
+und der zugehörige v2-Archiv-/Nachprüfungsweg produktiv fertig
+sind. Dies ist ausdrücklich noch **kein vollständiger
+Gruppen-Rollout**.
+
