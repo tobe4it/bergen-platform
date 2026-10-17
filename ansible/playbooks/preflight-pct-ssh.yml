@@ -1,0 +1,86 @@
+---
+# Read-only prerequisites for tunneled guest SSH, targeting Proxmox not guest.
+# Safe to run in check mode; no firewall, route, inventory, package or key writes.
+- name: Preflight for Proxmox-mediated SSH to an isolated LXC
+  hosts: '{{ pve_inventory_host | default(pve_node) }}'
+  become: true
+  gather_facts: false
+  tasks:
+    - name: Require an explicit existing LXC identity and bridge
+      ansible.builtin.assert:
+        that:
+          - lxc_vmid is defined
+          - lxc_vmid | int >= 100
+          - lxc_hostname is defined
+          - lxc_hostname is match('^[a-z][a-z0-9-]+$')
+          - lxc_bridge is defined
+          - lxc_bridge is match('^[A-Za-z0-9_.-]+$')
+        fail_msg: 'Specify the intended existing LXC in ignored local variables.'
+
+    - name: Read current container state
+      ansible.builtin.command:
+        argv: [pct, status, '{{ lxc_vmid | string }}']
+      register: pct_transport_status
+      changed_when: false
+      check_mode: false
+
+    - name: Require running container
+      ansible.builtin.assert:
+        that:
+          - "'status: running' in pct_transport_status.stdout"
+
+    - name: Read effective container configuration
+      ansible.builtin.command:
+        argv: [pct, config, '{{ lxc_vmid | string }}']
+      register: pct_transport_config
+      changed_when: false
+      check_mode: false
+
+    - name: Bind transport to the expected unprivileged identity and bridge
+      ansible.builtin.assert:
+        that:
+          - >-
+            pct_transport_config.stdout
+            | regex_findall('(?m)^hostname: ([^\r\n]+)$') == [lxc_hostname]
+          - "'unprivileged: 1' in pct_transport_config.stdout"
+          - >-
+            pct_transport_config.stdout
+            | regex_findall('(?m)^net0: ([^\r\n]+)$')
+            | select('search', 'bridge=' ~ lxc_bridge | regex_escape ~ '(,|$)')
+            | list | length == 1
+
+    - name: Confirm guest Python 3 is installed
+      ansible.builtin.command:
+        argv: [pct, exec, '{{ lxc_vmid | string }}', --, /usr/bin/python3, --version]
+      register: pct_transport_python
+      changed_when: false
+      check_mode: false
+
+    - name: Confirm guest sshd is active
+      ansible.builtin.command:
+        argv: [pct, exec, '{{ lxc_vmid | string }}', --, systemctl, is-active, ssh]
+      register: pct_transport_sshd
+      changed_when: false
+      check_mode: false
+
+    - name: Read guest ED25519 SSH host key fingerprint
+      ansible.builtin.command:
+        argv: [pct, exec, '{{ lxc_vmid | string }}', --, ssh-keygen, -lf, /etc/ssh/ssh_host_ed25519_key.pub]
+      register: pct_transport_fingerprint
+      changed_when: false
+      check_mode: false
+
+    - name: Report read-only preflight and expected SSH key identity
+      ansible.builtin.debug:
+        msg:
+          status: PASS
+          container: '{{ lxc_hostname }}'
+          vmid: '{{ lxc_vmid }}'
+          bridge: '{{ lxc_bridge }}'
+          python: '{{ pct_transport_python.stdout }}'
+          ssh_service: '{{ pct_transport_sshd.stdout }}'
+          expected_guest_host_key: '{{ pct_transport_fingerprint.stdout }}'
+          changed_system_state: false
+          note: >-
+            This proves guest readiness but not raw binary transport or
+            SSH public-key login. Validate the forwarded connection next.
