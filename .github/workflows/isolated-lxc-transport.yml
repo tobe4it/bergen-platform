@@ -1,0 +1,40 @@
+name: Isolated LXC transport regression
+
+on:
+  pull_request:
+    paths:
+      - 'ansible/scripts/pct_ssh_proxy.py'
+      - 'ansible/playbooks/preflight-pct-ssh.yml'
+      - 'ansible/playbooks/bootstrap-isolated-lxc.yml'
+      - 'tests/test_pct_ssh_proxy.py'
+      - 'tests/test_bootstrap_isolated_lxc.py'
+      - '.github/workflows/isolated-lxc-transport.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'ansible/scripts/pct_ssh_proxy.py'
+      - 'ansible/playbooks/preflight-pct-ssh.yml'
+      - 'ansible/playbooks/bootstrap-isolated-lxc.yml'
+      - 'tests/test_pct_ssh_proxy.py'
+      - 'tests/test_bootstrap_isolated_lxc.py'
+      - '.github/workflows/isolated-lxc-transport.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  offline-checks:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install dependencies
+        run: python -m pip install pyyaml ansible-core
+      - name: Test PCT-mediated SSH and gated LXC baseline
+        run: python -m unittest discover -s tests -p 'test_pct_ssh_proxy.py' -v && python -m unittest discover -s tests -p 'test_bootstrap_isolated_lxc.py' -v
+      - name: Ansible playbook syntax
+        run: |
+          ansible-playbook -i localhost, --syntax-check ansible/playbooks/preflight-pct-ssh.yml
+          ansible-playbook -i localhost, --syntax-check ansible/playbooks/bootstrap-isolated-lxc.yml
