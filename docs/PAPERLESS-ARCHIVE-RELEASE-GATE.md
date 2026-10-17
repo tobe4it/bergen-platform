@@ -1371,3 +1371,48 @@ lifecycle checks remain valid. The independent off-NAS backup/restore
 and effective permission test gates remain open, and no further
 production archive move, retention purge or `main` merge is authorized.
 
+
+### 2026-10-17 SMB2 negotiate resets on both forwarded NAS interfaces
+
+The operator tested two distinct short-lived loopback-bound SSH forwards
+to the actual NAS interfaces `192.168.6.11:445` and
+`192.168.2.145:445`. Both authenticated-free
+`smbprotocol==1.17.0` negotiate preflights returned
+`SMB_PROBE_DIAGNOSTIC SMB_NEGOTIATE OTHER NO_STATUS SMBConnectionClosed`
+and an independent lower-level `ECONNRESET` indication.
+The NAS loopback forwarded case was already similarly blocked.
+In each case there was **no SMB Session Setup, no password,
+no authenticated identity and no DELETE desired-access test**.
+The TCP-accept checks remain valid but are not SMB dialect evidence.
+
+A new branch-only read-only independent probe
+`ansible/files/paperless/probe_synology_smb3_negotiate_wire.py`
+sends a single standard Microsoft SMB2 NEGOTIATE packet with the
+SMB 3.0.2 dialect and signing enabled, never SMB1, an SMB session,
+Tree Connect, file opens or mutations. It uses only the Python 3
+standard library, so it can run on the NAS via the existing
+SSH `sudo -n /usr/bin/python3 -` stdin transport without
+installing anything there. The default run checks the NAS's
+`127.0.0.1:445` and discovered `ethN` IPv4 addresses only;
+Docker bridge interfaces are excluded.
+An optional `--controller-forward` checks a separately established
+loopback forward `127.0.0.1:1445`, allowing comparison of the
+same wire protocol on both transports independently of
+`smbprotocol`. It prints only bounded response codes and
+synthetic status markers, no authentication challenges or
+private SMB file information. A response such as
+`SMB2_ERROR_STATUS_0xC00000BB` is evidence that the server
+answered but **not** a successful dialect negotiation.
+Only `SMB3_02_NEGOTIATED` proves the specific 3.0.2 handshake.
+Other dialects are deliberately not tested by this probe.
+
+The operator must first run full synthetic Paperless suite with
+new expected total **774** and then execute the credentialless
+local NAS wire probe. Interpret the result before changing any
+DSM SMB or UniFi setting or entering further SMB passwords.
+Effective SMB rights and independent post-canary NAS+LXC
+backup/restore remain release blockers, as does an independent
+off-NAS restore for expiry/purge. No further production archive
+moves, automatic source purge, gate activation or main merge
+are authorized.
+
