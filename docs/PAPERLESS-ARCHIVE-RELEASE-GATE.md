@@ -1,5 +1,58 @@
 # Paperless archive preflight and main promotion gate
 
+
+## Aktueller Arbeitsstand — 17.10.2026 (verbindlich)
+
+**Keine weiteren SMB-Client-, SSH-Tunnel- oder Einzelbenutzertests
+für diese Abnahme.** Die vorhandene DSM-/POSIX-Archivschutzprüfung
+(2 NAS-Site-Root-ACLs, 8 innere POSIX-0700-Verzeichnisse,
+0 statisch erkannte gefährliche native Delete-Grants) bleibt die
+technische ACL-Basis. Bereits am 16.10. wurde auf MountainCloud der
+**vorhandene** Client `/usr/local/bin/smbclient` gegen
+`//127.0.0.1/paperless-scan` mit einem regulären Familienkonto
+verwendet: Wechsel nach `.bergen-paperless-archive` war möglich,
+das Auflisten endete mit `NT_STATUS_ACCESS_DENIED`. Dies ist
+**nachgewiesene Auflistungsverweigerung**, nicht der Nachweis der
+effektiven Verweigerung aller SMB-Umbenennungs- und Löschrechte.
+Es wurde bereits explizit auf weitere persönliche SMB-Tests
+verzichtet; keine stillschweigende Verallgemeinerung auf alle
+Identitäten, andere Freigaben oder Rechte.
+
+Die späteren experimentellen, nicht erfolgreichen SMB-Protokoll-
+und SSH-Tunnelprüfer samt Tests wurden deshalb aus diesem
+Entwicklungszweig **entfernt**. Historische Diagnoseabschnitte weiter
+unten erklären den Ablauf, sind aber **keine aktuellen Runbooks**;
+die darin genannten Python-Dateipfade sind nach der Bereinigung
+teilweise nicht mehr vorhanden. Keiner dieser fehlgeschlagenen
+Tunnelversuche ändert die vorhandenen, gültigen Archivaudits.
+
+**Nächster operativer Schwerpunkt: unabhängige Sicherung und
+Wiederherstellung NACH dem Canary vom 16.10.2026.** Der
+`vzdump-lxc-126-2026_10_15-03_00_12.tar.zst` ist zeitlich zu
+alt, um die spätere Archivverschiebung nachzuweisen.
+`/mnt/pve/bergen-synology-backup` muss anhand des wirklichen
+Storage-Backends geprüft werden: Bei NAS/NFS auf derselben
+Synology ist eine dort abgelegte Sicherung **nicht unabhängig
+von einem Synology-Ausfall**, selbst wenn sie von Proxmox
+geschrieben wurde. Ein belastbarer Restore-Nachweis
+braucht einen zeitlich passenden Paperless-LXC-Backupstand und
+unabhängig wiederherstellbare Synology-Originalarchive samt
+zugehörigen Journalen außerhalb derselben Ausfall-Domäne.
+
+Bestehende Live-Nachweise:
+`NAS_SENT_VERIFIED 21`, `NAS_ARCHIVED_VERIFIED 1`,
+`PAPERLESS_LIVE_IMPORTED 22`,
+`DELETED_BY_USER 2`, jeweils reconciled;
+ein exakt archiviertes Familien-PDF wurde isoliert und
+SHA-geprüft wieder eingelesen. Es bleibt in seinem NAS-Archiv
+erhalten. Keine neuen Archiv-Moves, Source-Purge,
+Retention-Freigabe oder Merge nach `main`. Eine noch
+fehlende effektive Rename/Delete-Verweigerung bleibt klar
+als **nicht nachgewiesen** markiert, wird aber ohne neuen
+Benutzer-Testparcours nicht künstlich zur nächsten Aufgabe
+gemacht.
+
+
 Status, 2026-10-16: **one approved exact-file group-only production archive relocation completed and independently reconciled**; the reviewed worker and root release runner remain staged, with all temporary commit gates absent. No production archive-move gate, inbox source deletion, or 30-day purge is active. Paperless remains outside `main` until the authorized import -> journal -> archival location change and the separately gated safe deletion after proven recoverability have passed live tests.
 
 An **atomic protected archive location change** is not conditional on an immediately preceding backup. The original PDF continues to exist on NAS. **Irreversible expiry/purge** requires a tested, recoverable backup of Paperless + NAS archives + journals as an independent gate. No `archive-move.<site>.enabled` flags are to be created by any audit.
