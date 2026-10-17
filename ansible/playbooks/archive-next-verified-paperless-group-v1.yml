@@ -1,0 +1,78 @@
+---
+# Idempotent ONE-PDF group archiver entrypoint (v1, existing source names).
+# Not a background scheduler and not a new sender. Exactly the same reviewed
+# single-file worker and independent lifecycle audits as the 16 live canaries.
+# If nothing is eligible, no write. If any active source lacks an independently
+# verified Paperless import, the upstream strict audit FAILS CLOSED.
+# This may NOT handle reused source names: only nonce-bound v2 can do that.
+- import_playbook: list-paperless-v1-archive-candidates.yml
+  vars:
+    paperless_lifecycle_quiet: true
+
+- name: Select one independently confirmed group import for atomic archive
+  hosts: venombox
+  gather_facts: false
+  become: true
+  tasks:
+    - name: Require explicit group automation permission and no implicit commit
+      ansible.builtin.assert:
+        that:
+          - (paperless_group_auto_archive | default(false)) is sameas true
+          - (paperless_archive_commit | default(false)) is sameas true
+          - not ansible_check_mode
+          - archive_candidates_report is defined
+          - archive_candidates_report.rc == 0
+          - "'CANDIDATE_AUDIT_COMPLETE' in archive_candidates_report.stdout_lines"
+          - "'PURGE_NOT_AUTHORIZED' in archive_candidates_report.stdout_lines"
+        fail_msg: "GROUP_AUTO_ARCHIVE_NOT_AUTHORIZED"
+
+    - name: Select at most one group PDF from the full fresh lifecycle
+      ansible.builtin.command:
+        argv:
+          - /usr/bin/python3
+          - "{{ playbook_dir }}/../files/paperless/select_next_verified_group_archive.py"
+        stdin: "{{ archive_candidates_report.stdout }}"
+      delegate_to: localhost
+      become: false
+      register: group_archive_auto_selection
+      changed_when: false
+      no_log: true
+
+    - name: Validate exact non-mutating selection status
+      ansible.builtin.assert:
+        that:
+          - group_archive_auto_selection.rc == 0
+          - (group_archive_auto_selection.stderr | trim) == ''
+          - (group_archive_auto_selection.stdout | from_json).schema_version == 1
+          - (group_archive_auto_selection.stdout | from_json).status in ['READY', 'IDLE']
+          - >-
+            ((group_archive_auto_selection.stdout | from_json).status == 'IDLE'
+             and (group_archive_auto_selection.stdout | from_json).only is none)
+            or
+            ((group_archive_auto_selection.stdout | from_json).status == 'READY'
+             and (group_archive_auto_selection.stdout | from_json).only is string
+             and (group_archive_auto_selection.stdout | from_json).only is match('^(Familie|Eltern)/[^/]+[.]pdf$'))
+        fail_msg: "GROUP_AUTO_SELECTION_INCONCLUSIVE"
+
+    - name: Remember a single exact group candidate for the reviewed release runner
+      ansible.builtin.set_fact:
+        paperless_group_auto_selected_only: >-
+          {{ (group_archive_auto_selection.stdout | from_json).only | default('', true) }}
+      no_log: true
+
+    - name: Report only whether a verified group import is waiting to be archived
+      ansible.builtin.debug:
+        msg: >-
+          {{ 'VERIFIED_GROUP_IMPORT_READY'
+             if paperless_group_auto_selected_only | length > 0
+             else 'NO_GROUP_IMPORT_READY' }}
+
+# Static import, condition evaluated at execution after the selection play:
+# every invocation of this existing one-PDF play independently reruns the
+# entire NAS/Paperless audit both before and after its exact 10-minute-gated
+# atomic no-overwrite rename. The 15-file one-shot playbook is NOT reused.
+- import_playbook: commit-paperless-one-group-v1-archive.yml
+  vars:
+    paperless_archive_only: "{{ hostvars['venombox'].paperless_group_auto_selected_only }}"
+  when:
+    - (hostvars['venombox'].paperless_group_auto_selected_only | default('') | length) > 0
