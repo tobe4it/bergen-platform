@@ -332,26 +332,18 @@ class EntryProtectionTests(unittest.TestCase):
 
     def test_playbook_yaml_parses_and_posix_count_assertion_is_complete(self):
         import yaml
-        file = (FILE.parents[2] / "playbooks" /
-                "audit-paperless-synology-archive-entry-protection.yml")
-        plays = yaml.safe_load(file.read_text())
-        self.assertEqual(len(plays), 1)
-        tasks = plays[0]["tasks"]
+        playbook = (FILE.parents[2] / "playbooks" /
+                    "audit-paperless-synology-archive-entry-protection.yml")
+        parsed = yaml.safe_load(playbook.read_text())
+        self.assertEqual(len(parsed), 1)
+        tasks = parsed[0]["tasks"]
         self.assertEqual(len(tasks), 4)
         conditions = tasks[-1]["ansible.builtin.assert"]["that"]
-        exact = ("(archive_entry_audit.stdout_lines | select('match', "
-                 "'^POSIX_0700_ARCHIVE_PARENTS_VERIFIED [0-9]+
-        code = FILE.read_text()
-        for token in ("os.rename(", "os.replace(", "os.unlink(", ".unlink(",
-                      "shutil.move(", "os.mkdir(", "subprocess.Popen("):
-            self.assertNotIn(token, code)
-
-
-if __name__ == "__main__":
-    unittest.main()
-) | list | "
-                 "length) == 1")
-        self.assertIn(exact, conditions)
+        suffix = chr(36)
+        expected = ("(archive_entry_audit.stdout_lines | select('match', "
+                    "'^POSIX_0700_ARCHIVE_PARENTS_VERIFIED [0-9]+" + suffix +
+                    "') | list | length) == 1")
+        self.assertIn(expected, conditions)
         self.assertIn(
             "'NATIVE_SITE_ROOT_ACLS_VERIFIED 2' in "
             "archive_entry_audit.stdout_lines", conditions)
