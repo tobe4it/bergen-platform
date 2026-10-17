@@ -14,3 +14,6 @@ paperless_uid: 1000
 paperless_gid: 1000
 paperless_postgres_uid: 999
 paperless_redis_uid: 999
+
+# Optional ASN label recognition for *new* isolated backend only. No importer changes.
+paperless_scan_asn_enabled: false
