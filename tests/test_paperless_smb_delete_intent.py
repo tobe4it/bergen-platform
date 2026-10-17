@@ -93,7 +93,7 @@ class SMBDeleteIntentTests(unittest.TestCase):
         bad = RuntimeError(message)
         diagnostic = " ".join(m.safe_diagnostic("SESSION_SETUP", bad))
         self.assertEqual(diagnostic,
-                         "SMB_PROBE_DIAGNOSTIC SESSION_SETUP VALIDATION NO_STATUS")
+                         "SMB_PROBE_DIAGNOSTIC SESSION_SETUP VALIDATION NO_STATUS RuntimeError")
         for prohibited in ("thomas", "/volume1", "password", "token"):
             self.assertNotIn(prohibited, diagnostic)
         unknown = " ".join(m.safe_diagnostic(
@@ -108,7 +108,8 @@ class SMBDeleteIntentTests(unittest.TestCase):
             "SESSION_SETUP", SMBResponseException("confidential\n")))
         self.assertEqual(
             diagnostic,
-            "SMB_PROBE_DIAGNOSTIC SESSION_SETUP SMB_STATUS 0xC000006D")
+            "SMB_PROBE_DIAGNOSTIC SESSION_SETUP SMB_STATUS 0xC000006D "
+            "SMBResponseException")
         self.assertNotIn("confidential", diagnostic)
 
     def test_local_api_preflight_never_prompts_or_attempts_network(self):
@@ -127,6 +128,70 @@ class SMBDeleteIntentTests(unittest.TestCase):
         ])
         with self.assertRaises(RuntimeError):
             m.main(["--local-api-check", "--username", "testnormal"])
+
+    def test_tcp_preflight_is_passwordless_and_nonmutating(self):
+        from unittest.mock import patch
+        from contextlib import redirect_stdout
+        from io import StringIO
+        from types import SimpleNamespace
+
+        class FakeSocket:
+            def __enter__(self):
+                return self
+            def __exit__(self, *args):
+                return False
+
+        output = StringIO()
+        with patch.object(m.socket, "create_connection",
+                          return_value=FakeSocket()) as connected:
+            with patch.object(m.getpass, "getpass",
+                              side_effect=AssertionError("No password prompt")):
+                with redirect_stdout(output):
+                    m.main(["--tcp-preflight",
+                            "--server", "ldap.thebergens.net"])
+        connected.assert_called_once_with(("ldap.thebergens.net", 445),
+                                          timeout=5)
+        self.assertEqual(output.getvalue().splitlines(), [
+            "SMB_TCP_445_REACHABLE",
+            "NO_SMB_AUTHENTICATION_ATTEMPTED",
+            "NO_SMB_MUTATING_REQUESTS_SENT",
+        ])
+        for args in (
+            ["--tcp-preflight"],
+            ["--tcp-preflight", "--server", "invalid/host"],
+            ["--tcp-preflight", "--server", "ldap.thebergens.net",
+             "--username", "someuser"],
+            ["--tcp-preflight", "--server", "ldap.thebergens.net",
+             "--site-share", "homes"],
+            ["--local-api-check", "--tcp-preflight"],
+        ):
+            with self.subTest(args=args), self.assertRaises(RuntimeError):
+                m.main(args)
+
+    def test_tcp_failure_redacted_and_blocks_without_smb(self):
+        from unittest.mock import patch
+        from contextlib import redirect_stderr
+        from io import StringIO
+        failure = OSError("SECRET user@domain /private/contents")
+        err = StringIO()
+        with patch.object(m.socket, "create_connection",
+                          side_effect=failure):
+            with redirect_stderr(err):
+                with self.assertRaisesRegex(
+                        RuntimeError, "SMB_TCP_445_NOT_REACHABLE"):
+                    m.tcp_preflight("ldap.thebergens.net")
+        self.assertIn("SMB_PROBE_DIAGNOSTIC CONNECT_OBJECT TRANSPORT", err.getvalue())
+        self.assertNotIn("SECRET", err.getvalue())
+        self.assertNotIn("/private/", err.getvalue())
+
+    def test_distinct_connection_construction_and_negotiation_phases(self):
+        source = MODULE.read_text()
+        self.assertIn('phase = "CONNECT_OBJECT"', source)
+        self.assertIn('phase = "SMB_NEGOTIATE"', source)
+        self.assertLess(source.index('phase = "CONNECT_OBJECT"'),
+                        source.index('phase = "SMB_NEGOTIATE"'))
+        self.assertIn("safe_exception_type(error)", source)
+        self.assertNotIn("print(str(exc))", source)
 
     def test_syntax_and_only_documented_probes(self):
         root = ast.parse(MODULE.read_text(), filename=str(MODULE))
