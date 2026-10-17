@@ -225,6 +225,45 @@ def require_schedule_gate():
         raise RuntimeError("SCHEDULE_GATE_UNSAFE " + str(SCHEDULE_GATE))
 
 
+def verified_metadata_only_sender_drift(path, old, current_signature):
+    """Read-only group SENT reconciliation; NEVER changes sender receipt.
+
+    Only the exact same filesystem device, inode, size and PDF SHA qualifies.
+    Both fstat and lstat must remain stable during SHA hashing. This is NOT
+    archive authorization: the independent archive worker repeats all proofs.
+    """
+    old_signature = old.get("signature")
+    digest = old.get("sha256")
+    if (not isinstance(old_signature, list) or len(old_signature) != 5
+            or any(type(n) is not int or n < 0 for n in old_signature)
+            or not isinstance(digest, str)
+            or re.fullmatch(r"[a-f0-9]{64}", digest) is None
+            or old.get("status") != "SENT"
+            or old_signature[:3] != current_signature[:3]):
+        return False
+    before = metadata(path)
+    if signature(before) != current_signature:
+        return False
+    fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC)
+    try:
+        if signature(os.fstat(fd)) != current_signature:
+            return False
+        sha = hashlib.sha256()
+        first, tail = b"", b""
+        with os.fdopen(fd, "rb", closefd=False) as pdf:
+            for data in iter(lambda: pdf.read(1024 * 1024), b""):
+                if not first:
+                    first = data[:8]
+                tail = (tail + data)[-2048:]
+                sha.update(data)
+        return (signature(os.fstat(fd)) == current_signature
+                and signature(metadata(path)) == current_signature
+                and first.startswith(b"%PDF-") and b"%%EOF" in tail
+                and sha.hexdigest() == digest)
+    finally:
+        os.close(fd)
+
+
 def scan(commit, only=None, scheduled=False):
     if os.geteuid() == 0:
         raise RuntimeError("DO_NOT_RUN_AS_ROOT")
@@ -288,6 +327,11 @@ def scan(commit, only=None, scheduled=False):
                             raise RuntimeError("MANUAL_REVIEW_PREPARED " + scope + "/" + path.name)
                         if old.get("signature") == signature(st):
                             print("TRACKED", scope + "/" + path.name)
+                            continue
+                        if (scope in ("Familie", "Eltern")
+                                and verified_metadata_only_sender_drift(
+                                    path, old, signature(st))):
+                            print("TRACKED_METADATA_DRIFT", scope)
                             continue
                         # Do not silently overwrite proof of a different
                         # source version with the same path.
