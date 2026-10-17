@@ -60,6 +60,28 @@ class GroupCollisionSenderOnceTests(unittest.TestCase):
         self.assertNotIn("sender_once_result.stdout }}", joined)
         self.assertIn("SENDER_PARTIAL_OR_BLOCKED", self.text)
 
+    def test_private_and_group_errors_redacted_and_only_codes_reported(self):
+        task = next(t for t in self.tasks
+                    if t.get("name", "").startswith(
+                        "Classify allowlisted NAS sender blockers"))
+        self.assertIs(task["no_log"], True)
+        data = task["ansible.builtin.set_fact"]
+        self.assertIn("REJECTED (Familie|Eltern)/", data["sender_once_group_rejected_count"])
+        self.assertIn("REJECTED Privat/(thomas|nadja)/", data["sender_once_private_rejected_count"])
+        self.assertIn("OLD_INODE_STILL_ACTIVE_REQUIRES_REVIEW", data["sender_once_group_error_codes"])
+        self.assertIn("PRIOR_ARCHIVE_RECEIPT_MISMATCH", data["sender_once_group_error_codes"])
+        self.assertIn("COLLISION_SOURCE_CHANGED_DURING_RENAME", data["sender_once_group_error_codes"])
+        self.assertIn("Errno", data["sender_once_errno"])
+        publish = next(t for t in self.tasks
+                       if t.get("name", "").startswith(
+                           "Publish count-only NAS block classifications"))
+        printed = "\n".join(publish["ansible.builtin.debug"]["msg"])
+        self.assertIn("GROUP_KNOWN_BLOCK_CODES=", printed)
+        self.assertIn("GROUP_REJECTED_COUNT=", printed)
+        self.assertIn("OS_ERRNO_ALLOWLIST=", printed)
+        self.assertNotIn("sender_once_result.stderr }}", printed)
+        self.assertNotIn("sender_once_result.stdout }}", printed)
+
     def test_no_archive_code_or_direct_receipt_writes(self):
         for bad in ("archive-next-verified", "commit-paperless-one-group",
                     "archive-move --commit", "unlink(", "write_receipt(",
