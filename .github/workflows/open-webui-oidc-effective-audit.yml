@@ -1,0 +1,32 @@
+name: Open WebUI effective OIDC read-only audit
+
+on:
+  pull_request:
+    paths:
+      - 'ansible/playbooks/audit-open-webui-oidc-effective-readonly.yml'
+      - 'tests/test_open_webui_oidc_effective_readonly.py'
+      - '.github/workflows/open-webui-oidc-effective-audit.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'ansible/playbooks/audit-open-webui-oidc-effective-readonly.yml'
+      - 'tests/test_open_webui_oidc_effective_readonly.py'
+      - '.github/workflows/open-webui-oidc-effective-audit.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  offline:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install offline dependencies
+        run: python -m pip install pyyaml ansible-core
+      - name: Verify non-mutating bounded admin API contract
+        run: python -m unittest discover -s tests -p 'test_open_webui_oidc_effective_readonly.py' -v
+      - name: Check Ansible syntax without site secrets
+        run: ansible-playbook -i localhost, --syntax-check ansible/playbooks/audit-open-webui-oidc-effective-readonly.yml
