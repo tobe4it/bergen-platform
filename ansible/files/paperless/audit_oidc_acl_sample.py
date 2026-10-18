@@ -30,8 +30,19 @@ CODES = frozenset({
 })
 
 
+# These statuses refer only to operator-defined A/B aliases. They never
+# include usernames, e-mails, provider IDs, subjects or document identifiers.
+SAFE_ACTOR_STATES = frozenset({
+    "MATCHED", "NO_CONFIGURED_OIDC_LINK", "NOT_LINKED_TO_BERGEN_AI",
+    "SUBJECT_MISMATCH", "DUPLICATE_OIDC_LINK",
+    "INACTIVE_OR_PRIVILEGED", "SUBJECT_COLLISION",
+})
+
+
 class AuditError(Exception):
-    pass
+    def __init__(self, code, actor_states=None):
+        super().__init__(code)
+        self.actor_states = actor_states
 
 
 def demand(cond, code):
@@ -127,40 +138,76 @@ def verify_ai_fingerprints(ai):
     return result
 
 
-def bind_users(people, ai, key, provider):
+def bind_users(people, ai, key, provider, actor_order=None):
     ai_by_email = verify_ai_fingerprints(ai)
+    # Ordered aliases come from the operator-reviewed matrix. Never print
+    # the usernames, even when matching fails.
+    actor_order = list(actor_order) if actor_order is not None else sorted(people)
+    demand(len(actor_order) == 2 and set(actor_order) == people
+           and len(set(actor_order)) == 2, "ACTORS_INVALID")
     links = list(
         SocialAccount.objects.filter(provider=provider)
         .select_related("user").order_by("pk")[:1001]
     )
     demand(len(links) <= 1000, "INPUT_INVALID")
     result = {}
-    used_ai_subjects = set()
+    states = {name: "NO_CONFIGURED_OIDC_LINK" for name in people}
+    subjects = {}
     for link in links:
         user = link.user
-        if user.username not in people:
+        name = user.username
+        if name not in people:
             continue
-        demand(user.username not in result, "IDENTITY_AMBIGUOUS")
-        demand(isinstance(user, User) and user.is_active
-               and not user.is_superuser and not user.is_staff,
-               "IDENTITY_PRIVILEGED")
+        # A second link for the same selected user must never overwrite the
+        # first binding, even if the earlier link was malformed.
+        if states[name] != "NO_CONFIGURED_OIDC_LINK":
+            states[name] = "DUPLICATE_OIDC_LINK"
+            result.pop(name, None)
+            continue
+        if not isinstance(user, User) or not user.is_active \
+                or user.is_superuser or user.is_staff:
+            states[name] = "INACTIVE_OR_PRIVILEGED"
+            continue
         email = user.email.strip().casefold() if isinstance(user.email, str) else ""
         email_hash = fingerprint(key, email)
         required_subject = ai_by_email.get(email_hash)
-        demand(required_subject is not None, "IDENTITY_UNLINKED")
+        if required_subject is None:
+            states[name] = "NOT_LINKED_TO_BERGEN_AI"
+            continue
         extra = link.extra_data or {}
-        demand(isinstance(extra, dict), "IDENTITY_AMBIGUOUS")
+        if not isinstance(extra, dict):
+            states[name] = "SUBJECT_MISMATCH"
+            continue
         candidates = (link.uid, extra.get("sub"))
-        matching = any(isinstance(sub, str) and sub and
-                       fingerprint(key, sub) == required_subject
-                       for sub in candidates)
-        demand(matching and required_subject not in used_ai_subjects,
-               "IDENTITY_AMBIGUOUS")
-        used_ai_subjects.add(required_subject)
-        result[user.username] = user
-    demand(set(result) == people, "IDENTITY_UNLINKED")
-    return result
+        if not any(isinstance(sub, str) and sub and
+                   fingerprint(key, sub) == required_subject
+                   for sub in candidates):
+            states[name] = "SUBJECT_MISMATCH"
+            continue
+        states[name] = "MATCHED"
+        result[name] = user
+        subjects[name] = required_subject
 
+    # HMAC subject uniqueness is required independently of per-account
+    # matching: one authenticated AI identity must never bind to two users.
+    seen = {}
+    for name, subject in subjects.items():
+        if subject in seen:
+            states[name] = "SUBJECT_COLLISION"
+            states[seen[subject]] = "SUBJECT_COLLISION"
+            result.pop(name, None)
+            result.pop(seen[subject], None)
+        seen[subject] = name
+    if any(state != "MATCHED" for state in states.values()):
+        safe = {
+            "A": states[actor_order[0]],
+            "B": states[actor_order[1]],
+        }
+        demand(all(s in SAFE_ACTOR_STATES for s in safe.values()),
+               "IDENTITY_AMBIGUOUS")
+        raise AuditError("IDENTITY_UNLINKED", safe)
+    demand(set(result) == people, "IDENTITY_AMBIGUOUS")
+    return result
 
 def authorize_examples(cases, users, docs):
     existing = set(Document.objects.filter(pk__in=docs).values_list("pk", flat=True))
@@ -209,7 +256,12 @@ def run():
         provider = oidc_provider(
             getattr(settings, "SOCIALACCOUNT_PROVIDERS", None)
         )
-        users = bind_users(people, request.get("ai"), secret, provider)
+        # The matrix generator records its account labels in A, B order.
+        # Derive aliases from first appearance, never from sorted usernames.
+        actor_order = list(dict.fromkeys(case["username"] for case in cases))
+        users = bind_users(
+            people, request.get("ai"), secret, provider, actor_order
+        )
         checks = authorize_examples(cases, users, docs)
         expected_checks = 2 * len(cases)
         demand(checks == expected_checks, "AUTHORIZATION_MISMATCH")
@@ -241,7 +293,14 @@ def run():
         }, sort_keys=True))
     except AuditError as e:
         code = str(e) if str(e) in CODES else "AUDIT_INTERNAL_ERROR"
-        print(FRAME + json.dumps({"AUDIT": "FAILED_CLOSED", "CODE": code}))
+        message = {"AUDIT": "FAILED_CLOSED", "CODE": code}
+        if (code == "IDENTITY_UNLINKED"
+            and isinstance(e.actor_states, dict)
+            and set(e.actor_states) == {"A", "B"}
+            and all(s in SAFE_ACTOR_STATES for s in e.actor_states.values())):
+            message["ACCOUNT_A_LINK"] = e.actor_states["A"]
+            message["ACCOUNT_B_LINK"] = e.actor_states["B"]
+        print(FRAME + json.dumps(message, sort_keys=True))
         raise SystemExit(2)
     except Exception:
         print(FRAME + '{"AUDIT":"FAILED_CLOSED","CODE":"AUDIT_INTERNAL_ERROR"}')
