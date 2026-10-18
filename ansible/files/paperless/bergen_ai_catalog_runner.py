@@ -141,6 +141,7 @@ def ensure_config(request, *, apply):
            "MODEL_UNREVIEWED")
     ai_ready = bool(config.ai_enabled and config.llm_backend == "ollama"
                     and endpoint == expected and config.llm_model == model
+                    and config.llm_allow_internal_endpoints
                     and not config.llm_embedding_backend)
     model_ready = bool(ai_ready and ollama_model_available(endpoint, model))
     if apply:
