@@ -10,6 +10,8 @@ on:
       - 'ansible/files/bergen_ai/diagnose_default_permissions_v0102.py'
       - 'ansible/playbooks/diagnose-bergen-ai-default-permissions-readonly.yml'
       - 'tests/test_bergen_ai_default_permissions_diagnostic.py'
+      - 'ansible/roles/open_webui/defaults/main.yml'
+      - 'ansible/roles/open_webui/templates/open-webui.container.j2'
       - '.github/workflows/bergen-ai-default-permissions-baseline.yml'
   push:
     branches: [main]
