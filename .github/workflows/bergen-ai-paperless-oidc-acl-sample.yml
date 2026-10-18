@@ -4,6 +4,7 @@ on:
   pull_request:
     paths:
       - 'ansible/files/paperless/audit_oidc_acl_sample.py'
+      - 'ansible/scripts/prepare_paperless_oidc_acl_matrix.py'
       - 'ansible/playbooks/audit-bergen-ai-paperless-oidc-acl-sample-readonly.yml'
       - 'tests/test_bergen_ai_paperless_oidc_acl.py'
       - 'docs/BERGEN-AI-PAPERLESS-OIDC-ACL-SAMPLE.md'
@@ -12,6 +13,7 @@ on:
     branches: [main]
     paths:
       - 'ansible/files/paperless/audit_oidc_acl_sample.py'
+      - 'ansible/scripts/prepare_paperless_oidc_acl_matrix.py'
       - 'ansible/playbooks/audit-bergen-ai-paperless-oidc-acl-sample-readonly.yml'
       - 'tests/test_bergen_ai_paperless_oidc_acl.py'
 
