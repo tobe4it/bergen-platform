@@ -1,0 +1,35 @@
+name: Bergen-AI child learning companion security contract
+
+on:
+  pull_request:
+    paths:
+      - 'ansible/files/bergen_ai/audit_learning_companion_v0102.py'
+      - 'ansible/files/bergen_ai/prompts/learning_companion_de_v1.md'
+      - 'ansible/playbooks/audit-bergen-ai-learning-companion-readonly.yml'
+      - 'tests/test_bergen_ai_learning_companion_audit.py'
+      - 'docs/BERGEN-AI-LEARNING-COMPANION.md'
+      - '.github/workflows/bergen-ai-learning-companion.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'ansible/files/bergen_ai/audit_learning_companion_v0102.py'
+      - 'ansible/files/bergen_ai/prompts/learning_companion_de_v1.md'
+      - 'ansible/playbooks/audit-bergen-ai-learning-companion-readonly.yml'
+      - 'tests/test_bergen_ai_learning_companion_audit.py'
+
+jobs:
+  offline-learning-companion:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install offline validation dependencies
+        run: python -m pip install 'ansible-core>=2.16,<2.18' 'PyYAML>=6,<7'
+      - name: Run fail-closed synthetic SQLite permission and pedagogy checks
+        run: python -m unittest discover -s tests -p 'test_bergen_ai_learning_companion_audit.py' -v
+      - name: Run Ansible syntax check without production inventory
+        run: ansible-playbook -i ansible/inventory.yml ansible/playbooks/audit-bergen-ai-learning-companion-readonly.yml --syntax-check
