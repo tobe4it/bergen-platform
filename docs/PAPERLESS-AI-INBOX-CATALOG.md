@@ -94,6 +94,44 @@ install -m 600 \
   "$BASE/ansible/vars/paperless-ai-catalog.local.yml"
 ~~~
 
+### 0a — One-command inventory with no local variables (run FIRST)
+
+The new `audit-paperless-ai-catalog-runtime-readonly.yml` reads only
+the expected LXC 126 Paperless/Django installation and loopback Ollama
+`GET /api/tags` inside the expected LXC 110. It reports aggregate
+inbox/OIDC counts, effective AI model status and local Ollama model
+names. No document IDs, users, group names, OCR content or IP addresses
+are printed. No configuration file or document is written.
+
+~~~bash
+(
+set -euo pipefail
+BASE="$HOME/bergen-platform"
+WT="$HOME/bergen-platform-paperless-ai-catalog"
+cd "$BASE"
+git fetch origin feat/paperless-native-ai-inbox-catalog-20261018
+if test -e "$WT/.git"; then
+  cd "$WT"
+  git switch --detach FETCH_HEAD
+else
+  test ! -e "$WT"
+  git worktree add --detach "$WT" FETCH_HEAD
+  cd "$WT"
+fi
+"$BASE/.venv/bin/ansible-playbook" \
+  -i ansible/inventory.yml \
+  -i "$BASE/ansible/inventory.local.yml" \
+  ansible/playbooks/audit-paperless-ai-catalog-runtime-readonly.yml \
+  --vault-id ai@prompt
+)
+~~~
+
+**If `OLLAMA_LOOPBACK_API=UNREACHABLE`**, the model could still be hosted
+elsewhere or the service may not run. Do not invent an endpoint; inspect
+the private Bergen-AI service inventory in a separate audited step.
+If `PARENT_GROUPS=0` or `ACTIVE_PARENT_ACCOUNTS=0`, do not bypass
+the OIDC/ACL gate by treating staff accounts as regular parents.
+
 ### 1 — Read-only Paperless runtime preflight
 
 Choose the reviewed Paperless parental group, private Ollama endpoint and
