@@ -178,6 +178,15 @@ class CatalogPolicyTest(unittest.TestCase):
         timer_spec = (ROOT / "ansible/files/paperless/bergen-ai-catalog.timer").read_text()
         self.assertIn("OnCalendar=*:0/5", timer_spec)
 
+    def test_pending_inbox_cannot_starve_new_documents(self):
+        runner = RUNNER.read_text()
+        self.assertIn('scan_count > 2000', runner)
+        self.assertIn('SELECT 1 FROM catalogue WHERE document_id=?', runner)
+        self.assertIn('if processed:', runner)
+        self.assertIn('iterator(chunk_size=100)', runner)
+        self.assertIn('len(ids) >= count', runner)
+        self.assertIn('mode != "rollback" or bool(pilot)', runner)
+
     def test_native_ai_configuration_is_independent_from_public_ai_features(self):
         source = LOCAL_CONFIG.read_text()
         self.assertIn("not effective.ai_enabled", source)
