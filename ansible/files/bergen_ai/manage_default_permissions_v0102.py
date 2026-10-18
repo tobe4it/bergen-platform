@@ -149,19 +149,26 @@ def backup_file(before_sha):
     return BACKUP_DIR / ("default-user-permissions-" + before_sha + ".json")
 
 
-def save_backup(before, after):
+def ensure_root():
     if os.geteuid() != 0:
         raise GateError("Root-only backup requires privilege")
+
+
+def save_backup(before, after):
+    ensure_root()
     BACKUP_DIR.mkdir(mode=0o700, parents=True, exist_ok=True)
     # Do not follow a replaced directory or an existing symlink.
     st = BACKUP_DIR.lstat()
-    if not BACKUP_DIR.is_dir() or st.st_uid != 0 or (st.st_mode & 0o077):
+    if not BACKUP_DIR.is_dir() or st.st_uid != os.geteuid() or (st.st_mode & 0o077):
         raise GateError("Unsafe backup directory permissions")
     before_sha = digest(before)
     record = {"version": "0.10.2", "before": before, "after": after,
               "before_sha": before_sha, "after_sha": digest(after)}
     path = backup_file(before_sha)
     if path.exists() or path.is_symlink():
+        current = path.lstat()
+        if not path.is_file() or current.st_uid != os.geteuid() or current.st_mode & 0o077:
+            raise GateError("Unsafe existing backup")
         existing = json.loads(path.read_text())
         if existing != record:
             raise GateError("Existing backup mismatch")
@@ -175,13 +182,14 @@ def save_backup(before, after):
 
 
 def load_backup(before_sha):
+    ensure_root()
     if not isinstance(before_sha, str) or len(before_sha) != 64 or any(
         c not in "0123456789abcdef" for c in before_sha
     ):
         raise GateError("Invalid rollback selector")
     path = backup_file(before_sha)
     st = path.lstat()
-    if not path.is_file() or st.st_uid != 0 or st.st_mode & 0o077:
+    if not path.is_file() or st.st_uid != os.geteuid() or st.st_mode & 0o077:
         raise GateError("Unsafe rollback backup")
     record = json.loads(path.read_text())
     if record.get("version") != "0.10.2" or record.get("before_sha") != before_sha:
