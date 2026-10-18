@@ -1,0 +1,36 @@
+name: Nextcloud and Collabora production adoption
+
+on:
+  pull_request:
+    paths:
+      - 'ansible/playbooks/mail-source-nextcloud-stack-audit.yml'
+      - 'ansible/vars/mail-nextcloud-stack.local.yml.example'
+      - 'ansible/templates/mail-nextcloud-stack/**'
+      - 'tests/test_mail_source_nextcloud_stack_audit.py'
+      - '.github/workflows/nextcloud-stack-adoption.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'ansible/playbooks/mail-source-nextcloud-stack-audit.yml'
+      - 'ansible/vars/mail-nextcloud-stack.local.yml.example'
+      - 'ansible/templates/mail-nextcloud-stack/**'
+      - 'tests/test_mail_source_nextcloud_stack_audit.py'
+      - '.github/workflows/nextcloud-stack-adoption.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  offline-checks:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install test dependencies
+        run: python -m pip install pytest pyyaml ansible-core
+      - name: Test read-only baseline
+        run: python -m pytest -q tests/test_mail_source_nextcloud_stack_audit.py
+      - name: Check Ansible syntax
+        run: ansible-playbook -i localhost, --syntax-check ansible/playbooks/mail-source-nextcloud-stack-audit.yml
