@@ -68,7 +68,7 @@
         that:
           - bp_ai_timer_version.rc == 0
           - bp_ai_timer_version.stdout | trim == '3.3.0'
-      fail_msg: PAPERLESS_VERSION_UNREVIEWED
+        fail_msg: PAPERLESS_VERSION_UNREVIEWED
       no_log: true
 
     - name: Read highest current Paperless document ID from its running ORM
