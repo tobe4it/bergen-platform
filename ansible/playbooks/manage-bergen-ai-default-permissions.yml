@@ -24,6 +24,14 @@
         fail_msg: "Require exact approved inventory target, explicit mode and private family mapping."
       no_log: true
 
+    - name: Reject mutating actions during Ansible check mode
+      ansible.builtin.assert:
+        that:
+          - not ansible_check_mode
+        fail_msg: "Apply and rollback require a real explicitly approved run; --check is audit-only."
+      when: bergen_ai_defaults_action != 'audit'
+      no_log: true
+
     - name: Require fingerprint and separate approval for changes
       ansible.builtin.assert:
         that:
