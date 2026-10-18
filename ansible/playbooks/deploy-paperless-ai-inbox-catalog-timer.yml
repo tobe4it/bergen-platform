@@ -73,6 +73,241 @@
       fail_msg: PAPERLESS_VERSION_UNREVIEWED
       no_log: true
 
+    - name: Read current highest Paperless document ID directly from Django
+      ansible.builtin.command:
+        argv:
+          - pct
+          - exec
+          - '126'
+          - --
+          - podman
+          - exec
+          - bergen-paperless
+          - python
+          - /usr/src/paperless/src/manage.py
+          - shell
+          - --verbosity=0
+          - -c
+          - "from documents.models import Document; print('CATALOG_MAX_ID=' + str(Document.objects.order_by('-pk').values_list('pk',flat=True).first() or 0))"
+      register: bp_ai_timer_max_doc
+      changed_when: false
+      no_log: true
+
+    - name: Prevent accidental historical reclassification with exact pre-activation high watermark
+      ansible.builtin.assert:
+        that:
+          - bp_ai_timer_max_doc.rc == 0
+          - bp_ai_timer_max_doc.stdout_lines | select('match', '^CATALOG_MAX_ID=[0-9]+      ansible.builtin.command:
+        argv: [systemctl, is-enabled, bergen-ai-catalog.timer]
+      register: bp_ai_timer_previous
+      changed_when: false
+      failed_when: false
+      no_log: true
+
+    - name: Require independent change approval for existing live automation
+      ansible.builtin.assert:
+        that:
+          - bp_ai_timer_previous.stdout | trim != 'enabled' or
+            (paperless_ai_catalog_timer_upgrade_approved | default(false) | bool)
+      fail_msg: EXISTING_AI_AUTOMATION_REQUIRES_SEPARATE_UPGRADE_APPROVAL
+      no_log: true
+
+    - name: Create private policy and source directory
+      ansible.builtin.file:
+        path: "{{ bp_ai_timer_conf_dir }}"
+        owner: root
+        group: root
+        mode: '0700'
+        state: directory
+
+    - name: Install pinned Python policy and Paperless 3.3 runner code
+      ansible.builtin.copy:
+        src: "{{ playbook_dir }}/../files/paperless/{{ item }}"
+        dest: "{{ bp_ai_timer_conf_dir }}/{{ item }}"
+        owner: root
+        group: root
+        mode: '0600'
+      loop:
+        - bergen_ai_catalog_policy.py
+        - bergen_ai_catalog_runner.py
+      no_log: true
+
+    - name: Install protected already-reviewed automatic-only settings
+      ansible.builtin.copy:
+        content: >-
+          {{ {
+              'protocol': 'catalog-v1',
+              'mode': 'apply',
+              'allowed_group': bp_ai_timer_allowed_group,
+              'expected_model': bp_ai_timer_model,
+              'expected_endpoint': bp_ai_timer_endpoint,
+              'min_document_id': bp_ai_timer_watermark,
+              'pilot_ids': [],
+              'batch_size': 1,
+              'approved': true
+             } | to_json }}
+        dest: "{{ bp_ai_timer_conf_dir }}/catalog-policy.json"
+        owner: root
+        group: root
+        mode: '0600'
+      no_log: true
+
+    - name: Install the dedicated Proxmox-local launcher
+      ansible.builtin.copy:
+        src: "{{ playbook_dir }}/../files/paperless/bergen-ai-catalog-run.sh"
+        dest: /usr/local/libexec/bergen-ai-catalog-run
+        owner: root
+        group: root
+        mode: '0750'
+      no_log: true
+
+    - name: Install one-shot service and disabled-by-default schedule definitions
+      ansible.builtin.copy:
+        src: "{{ playbook_dir }}/../files/paperless/{{ item }}"
+        dest: "/etc/systemd/system/{{ item }}"
+        owner: root
+        group: root
+        mode: '0644'
+      loop:
+        - bergen-ai-catalog.service
+        - bergen-ai-catalog.timer
+
+    - name: Register and start only the separately approved timer
+      ansible.builtin.systemd:
+        name: bergen-ai-catalog.timer
+        enabled: true
+        state: started
+        daemon_reload: true
+
+    - name: Verify schedule enabled without exposing any user or document data
+      ansible.builtin.command:
+        argv: [systemctl, is-enabled, bergen-ai-catalog.timer]
+      register: bp_ai_timer_enabled
+      changed_when: false
+
+    - name: Require managed timer enabled
+      ansible.builtin.assert:
+        that:
+          - bp_ai_timer_enabled.stdout | trim == 'enabled'
+
+    - name: Report activation boundary without exposing policy file
+      ansible.builtin.debug:
+        msg:
+          - TIMER=ENABLED
+          - SOURCE=VERSIONED_BERGEN_PLATFORM
+          - SCOPE=ONLY_POST_WATERMARK_INBOX_DOCUMENTS_WITH_APPROVED_OWNER
+          - DOCUMENT_CHANGES=TITLE_CORRESPONDENT_TAGS_DOCUMENT_TYPE_ONLY
+          - INBOX_TAG_REMOVAL=NEVER
+          - DOCUMENT_PERMISSIONS=UNCHANGED
+          - RETRIES_AFTER_CONFLICT=MANUAL_REVIEW_ONLY
+) | list | length == 1
+          - bp_ai_timer_watermark == ((bp_ai_timer_max_doc.stdout_lines | select('match', '^CATALOG_MAX_ID=[0-9]+      ansible.builtin.command:
+        argv: [systemctl, is-enabled, bergen-ai-catalog.timer]
+      register: bp_ai_timer_previous
+      changed_when: false
+      failed_when: false
+      no_log: true
+
+    - name: Require independent change approval for existing live automation
+      ansible.builtin.assert:
+        that:
+          - bp_ai_timer_previous.stdout | trim != 'enabled' or
+            (paperless_ai_catalog_timer_upgrade_approved | default(false) | bool)
+      fail_msg: EXISTING_AI_AUTOMATION_REQUIRES_SEPARATE_UPGRADE_APPROVAL
+      no_log: true
+
+    - name: Create private policy and source directory
+      ansible.builtin.file:
+        path: "{{ bp_ai_timer_conf_dir }}"
+        owner: root
+        group: root
+        mode: '0700'
+        state: directory
+
+    - name: Install pinned Python policy and Paperless 3.3 runner code
+      ansible.builtin.copy:
+        src: "{{ playbook_dir }}/../files/paperless/{{ item }}"
+        dest: "{{ bp_ai_timer_conf_dir }}/{{ item }}"
+        owner: root
+        group: root
+        mode: '0600'
+      loop:
+        - bergen_ai_catalog_policy.py
+        - bergen_ai_catalog_runner.py
+      no_log: true
+
+    - name: Install protected already-reviewed automatic-only settings
+      ansible.builtin.copy:
+        content: >-
+          {{ {
+              'protocol': 'catalog-v1',
+              'mode': 'apply',
+              'allowed_group': bp_ai_timer_allowed_group,
+              'expected_model': bp_ai_timer_model,
+              'expected_endpoint': bp_ai_timer_endpoint,
+              'min_document_id': bp_ai_timer_watermark,
+              'pilot_ids': [],
+              'batch_size': 1,
+              'approved': true
+             } | to_json }}
+        dest: "{{ bp_ai_timer_conf_dir }}/catalog-policy.json"
+        owner: root
+        group: root
+        mode: '0600'
+      no_log: true
+
+    - name: Install the dedicated Proxmox-local launcher
+      ansible.builtin.copy:
+        src: "{{ playbook_dir }}/../files/paperless/bergen-ai-catalog-run.sh"
+        dest: /usr/local/libexec/bergen-ai-catalog-run
+        owner: root
+        group: root
+        mode: '0750'
+      no_log: true
+
+    - name: Install one-shot service and disabled-by-default schedule definitions
+      ansible.builtin.copy:
+        src: "{{ playbook_dir }}/../files/paperless/{{ item }}"
+        dest: "/etc/systemd/system/{{ item }}"
+        owner: root
+        group: root
+        mode: '0644'
+      loop:
+        - bergen-ai-catalog.service
+        - bergen-ai-catalog.timer
+
+    - name: Register and start only the separately approved timer
+      ansible.builtin.systemd:
+        name: bergen-ai-catalog.timer
+        enabled: true
+        state: started
+        daemon_reload: true
+
+    - name: Verify schedule enabled without exposing any user or document data
+      ansible.builtin.command:
+        argv: [systemctl, is-enabled, bergen-ai-catalog.timer]
+      register: bp_ai_timer_enabled
+      changed_when: false
+
+    - name: Require managed timer enabled
+      ansible.builtin.assert:
+        that:
+          - bp_ai_timer_enabled.stdout | trim == 'enabled'
+
+    - name: Report activation boundary without exposing policy file
+      ansible.builtin.debug:
+        msg:
+          - TIMER=ENABLED
+          - SOURCE=VERSIONED_BERGEN_PLATFORM
+          - SCOPE=ONLY_POST_WATERMARK_INBOX_DOCUMENTS_WITH_APPROVED_OWNER
+          - DOCUMENT_CHANGES=TITLE_CORRESPONDENT_TAGS_DOCUMENT_TYPE_ONLY
+          - INBOX_TAG_REMOVAL=NEVER
+          - DOCUMENT_PERMISSIONS=UNCHANGED
+          - RETRIES_AFTER_CONFLICT=MANUAL_REVIEW_ONLY
+) | first | regex_replace('^CATALOG_MAX_ID=', '')) | int)
+        fail_msg: WATERMARK_MUST_EQUAL_LIVE_MAX_DOCUMENT_ID
+      no_log: true
+
     - name: Prevent unreviewed modification of an already enabled timer
       ansible.builtin.command:
         argv: [systemctl, is-enabled, bergen-ai-catalog.timer]
