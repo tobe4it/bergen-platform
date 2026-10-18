@@ -1,0 +1,232 @@
+#!/usr/bin/env python3
+"""Consistent Nextcloud -> Synology NFS backup. Installed by Ansible only.
+
+The remote backup remains a standard GNU tar.gz archive; no mx2-specific
+decryption material is needed to restore it. Do not run this via cron manually.
+"""
+import datetime as dt
+import fcntl
+import gzip
+import hashlib
+import os
+from pathlib import Path
+import re
+import shutil
+import socket
+import subprocess
+import sys
+import time
+
+HOST = "{{ nextcloud_stack_host_fqdn }}"
+ROOT = Path("{{ nextcloud_stack_root }}")
+NFS_MOUNT = Path("{{ nextcloud_backup_mount }}")
+NFS_SOURCE = "{{ nextcloud_backup_nfs_source }}"
+REMOTE = NFS_MOUNT / "mx2-nextcloud"
+STATE = Path("/var/lib/bergen-nextcloud-backup")
+STAGE = STATE / "stage"
+KEEP = 30
+
+def say(message):
+    print(message, flush=True)
+
+def abort(message):
+    raise RuntimeError(message)
+
+def run(args, label, stdout=subprocess.DEVNULL):
+    result = subprocess.run(args, stdout=stdout, stderr=subprocess.PIPE, check=False)
+    if result.returncode != 0:
+        abort(label + "_FAILED (rc=" + str(result.returncode) + ")")
+    return result
+
+def read(args, label):
+    result = run(args, label, stdout=subprocess.PIPE)
+    return result.stdout.decode("utf-8", "replace").strip()
+
+def occ(*args):
+    return read(["runuser", "-u", "apache", "--", "php", str(ROOT / "occ"), *args], "OCC")
+
+def sha256(path):
+    h = hashlib.sha256()
+    with path.open("rb") as f:
+        for buf in iter(lambda: f.read(1024 * 1024), b""):
+            h.update(buf)
+    return h.hexdigest()
+
+def preflight():
+    if os.geteuid() != 0 or read(["hostname", "-f"], "HOST") != HOST:
+        abort("UNAPPROVED_HOST")
+    if ROOT.is_symlink() or not (ROOT / "config/config.php").is_file():
+        abort("NEXTCLOUD_ROOT_UNSAFE")
+    if not (ROOT / "data").is_dir() or (ROOT / "data").is_symlink():
+        abort("NEXTCLOUD_DATA_UNSAFE")
+    for line in read(["findmnt", "-rn", "-o", "TARGET"], "MOUNT_SCAN").splitlines():
+        if line.startswith(str(ROOT) + "/"):
+            abort("NESTED_NEXTCLOUD_MOUNT_REQUIRES_REVIEW")
+    mount = read(["findmnt", "-rn", "-o", "SOURCE,OPTIONS", "-M", str(NFS_MOUNT)],
+                 "NFS_MOUNT")
+    fields = mount.split(None, 1)
+    if len(fields) != 2 or fields[0] != NFS_SOURCE:
+        abort("WRONG_NFS_EXPORT")
+    options = set(fields[1].split(","))
+    if "rw" not in options or "vers=4.1" not in options:
+        abort("NFS_NOT_RW_V41")
+    if not REMOTE.is_dir() or REMOTE.is_symlink():
+        abort("NFS_BACKUP_DIR_MISSING")
+    for directory in [NFS_MOUNT, REMOTE]:
+        st = directory.stat()
+        if (st.st_mode & 0o777) != 0o700 or st.st_uid != 0:
+            abort("NFS_DIRECTORY_PERMISSIONS_UNSAFE")
+    status = occ("status")
+    for expected in ("installed: true", "maintenance: false", "needsDbUpgrade: false"):
+        if expected not in status:
+            abort("NEXTCLOUD_STATUS_UNSAFE")
+    if not shutil.which("rsync") or not shutil.which("mariadb-dump"):
+        abort("BACKUP_DEPENDENCY_MISSING")
+    tables = read(["mariadb", "--protocol=socket", "-Nse",
+        "SELECT COUNT(*) FROM information_schema.tables "
+        "WHERE table_schema='nextcloud' AND table_type='BASE TABLE' "
+        "AND engine <> 'InnoDB'"], "INNODB_CHECK")
+    if tables != "0":
+        abort("NON_INNODB_TABLES")
+    if shutil.disk_usage(STATE).free < 24 * 1024 ** 3:
+        abort("LOCAL_FREE_SPACE_BELOW_24_GIB")
+
+def sync_files():
+    STAGE.mkdir(mode=0o700, parents=True, exist_ok=True)
+    (STAGE / "html").mkdir(mode=0o700, exist_ok=True)
+    os.chmod(STAGE, 0o700)
+    os.chmod(STAGE / "html", 0o700)
+    run(["rsync", "-aHAX", "--numeric-ids", "--one-file-system", "--delete",
+         str(ROOT) + "/", str(STAGE / "html") + "/"], "RSYNC_LOCAL")
+
+def dump_database():
+    plain = STAGE / "nextcloud.sql"
+    compressed = STAGE / "nextcloud.sql.gz"
+    with plain.open("wb") as out:
+        os.chmod(plain, 0o600)
+        run(["mariadb-dump", "--protocol=socket", "--single-transaction",
+             "--quick", "--skip-lock-tables", "--hex-blob", "--routines",
+             "--events", "--triggers", "--databases", "nextcloud"],
+            "MARIADB_DUMP", stdout=out)
+    if not plain.stat().st_size:
+        abort("EMPTY_DATABASE_DUMP")
+    with plain.open("rb") as src, gzip.open(compressed, "wb", compresslevel=1) as dst:
+        shutil.copyfileobj(src, dst)
+    os.chmod(compressed, 0o600)
+    plain.unlink()
+    with gzip.open(compressed, "rb") as src:
+        if not src.read(256):
+            abort("EMPTY_COMPRESSED_DATABASE_DUMP")
+
+def wait_for_cron():
+    deadline = time.monotonic() + 120
+    while True:
+        result = subprocess.run(
+            ["pgrep", "-u", "apache", "-f", r"[/]cron[.]php"],
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False)
+        if result.returncode == 1:
+            break
+        if result.returncode != 0 or time.monotonic() > deadline:
+            abort("ACTIVE_NEXTCLOUD_CRON_TIMEOUT")
+        time.sleep(2)
+    # Let requests admitted immediately before maintenance finish.
+    time.sleep(10)
+
+def archive_to_synology(backup_id):
+    manifest = STAGE / "BACKUP-MANIFEST.txt"
+    manifest.write_text(
+        "format=bergen-nextcloud-v1\n"
+        + "host=" + HOST + "\n"
+        + "database=nextcloud\n"
+        + "snapshot_utc=" + backup_id + "\n"
+        + "restore_requires=GNU_tar_and_MariaDB\n")
+    os.chmod(manifest, 0o600)
+    local = STATE / ("backup-" + backup_id + ".tar.gz")
+    try:
+        say("ARCHIVE_LOCAL_START")
+        run(["tar", "--acls", "--xattrs", "--selinux", "--numeric-owner",
+             "-I", "gzip -1", "-cf", str(local), "-C", str(STAGE),
+             "html", "nextcloud.sql.gz", "BACKUP-MANIFEST.txt"], "TAR_CREATE")
+        os.chmod(local, 0o600)
+        run(["tar", "-tzf", str(local)], "TAR_VERIFY")
+        digest = sha256(local)
+        pending = REMOTE / (".incoming-" + backup_id)
+        final = REMOTE / ("backup-" + backup_id)
+        if pending.exists() or final.exists() or pending.is_symlink() or final.is_symlink():
+            abort("BACKUP_ID_COLLISION")
+        pending.mkdir(mode=0o700)
+        os.chmod(pending, 0o700)
+        remote_file = pending / "nextcloud.tar.gz"
+        say("NFS_TRANSFER_START")
+        shutil.copyfile(local, remote_file)
+        os.chmod(remote_file, 0o600)
+        if sha256(remote_file) != digest:
+            abort("REMOTE_SHA256_MISMATCH")
+        sums = pending / "SHA256SUMS"
+        sums.write_text(digest + "  nextcloud.tar.gz\n")
+        os.chmod(sums, 0o600)
+        complete = pending / "COMPLETE"
+        complete.write_text("VERIFIED_SHA256=" + digest + "\n")
+        os.chmod(complete, 0o600)
+        os.rename(pending, final)
+        say("REMOTE_VERIFIED=YES")
+        say("BACKUP_SET=" + str(final))
+        success = STATE / "last-success.txt"
+        tmp = STATE / "last-success.tmp"
+        tmp.write_text(backup_id + "\n" + str(final) + "\n" + digest + "\n")
+        os.chmod(tmp, 0o600)
+        os.replace(tmp, success)
+        rotate()
+    finally:
+        if local.exists():
+            local.unlink()
+
+def rotate():
+    # Retain 30 independently verified dated backup sets; never touch other files.
+    accepted = re.compile(r"backup-\d{8}T\d{6}Z-\d+$")
+    snapshots = sorted(
+        [p for p in REMOTE.iterdir() if p.is_dir() and not p.is_symlink()
+         and accepted.fullmatch(p.name) and (p / "COMPLETE").is_file()],
+        key=lambda p: p.name, reverse=True)
+    for old in snapshots[KEEP:]:
+        shutil.rmtree(old)
+
+def main():
+    STATE.mkdir(mode=0o700, parents=True, exist_ok=True)
+    os.chmod(STATE, 0o700)
+    lock_fd = os.open(STATE / "backup.lock", os.O_CREAT | os.O_RDWR, 0o600)
+    try:
+        fcntl.flock(lock_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except BlockingIOError:
+        abort("BACKUP_ALREADY_RUNNING")
+    preflight()
+    backup_id = dt.datetime.now(dt.timezone.utc).strftime("%Y%m%dT%H%M%SZ") + "-" + str(os.getpid())
+    say("PRESYNC_START")
+    sync_files()
+    say("MAINTENANCE_BEGIN")
+    must_resume = True
+    try:
+        occ("maintenance:mode", "--on")
+        wait_for_cron()
+        say("FINAL_SYNC_START")
+        sync_files()
+        dump_database()
+    finally:
+        if must_resume:
+            try:
+                occ("maintenance:mode", "--off")
+                must_resume = False
+                say("NEXTCLOUD_ONLINE=YES")
+            except Exception:
+                say("CRITICAL_NEXTCLOUD_MAINTENANCE_DISABLE_FAILED")
+                raise
+    archive_to_synology(backup_id)
+    say("NEXTCLOUD_BACKUP_SUCCESS=YES")
+
+if __name__ == "__main__":
+    try:
+        main()
+    except Exception as exc:
+        # No database, secret, file-name or command output is printed.
+        say("NEXTCLOUD_BACKUP_FAILED=" + type(exc).__name__ + ":" + str(exc))
+        sys.exit(1)
