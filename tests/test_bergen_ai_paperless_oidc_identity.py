@@ -236,6 +236,66 @@ class IdentityBoundaryTests(unittest.TestCase):
         self.assertIn("UNCLASSIFIED_FAILURE",
                       str(tasks[names.index(diagnostic_name)]))
 
+    def test_django_shell_startup_banner_and_one_framed_payload(self):
+        # Example default Django 5.2+ shell output; status messages are
+        # not JSON and must not be included in the private identity records.
+        a, p = inputs(
+            [ai_row("parent@example.invalid", "subject")],
+            [p_row("parent@example.invalid", sub="subject")],
+        )
+        raw = (
+            "42 objects imported automatically (use -v 2 for details).\\n"
+            "\\n"
+            + JOIN.PAPERLESS_FRAME + json.dumps(p, sort_keys=True) + "\\n"
+        )
+        parsed, skipped = JOIN.parse_paperless_stdout(raw)
+        self.assertEqual(parsed, p)
+        self.assertEqual(skipped, 1)
+        result = JOIN.compare(a, parsed)
+        self.assertEqual(result["MATCHED_ACTIVE_EMAIL_AND_SUBJECT"], 1)
+        self.assertNotIn("parent@example.invalid", json.dumps(result))
+
+    def test_ambiguous_missing_or_malformed_paperless_frame_fails_closed(self):
+        p = inputs([], [p_row("parent@example.invalid", sub="abc")])[1]
+        marker = JOIN.PAPERLESS_FRAME
+        valid = marker + json.dumps(p)
+        cases = (
+            "42 objects imported automatically (use -v 2 for details).\\n",
+            valid + "\\n" + valid,
+            marker + "this is not JSON",
+            marker + json.dumps({"AUDIT": "FAILED_CLOSED"}),
+        )
+        expected = (
+            "PAPERLESS_FRAME_MISSING",
+            "PAPERLESS_FRAME_DUPLICATE",
+            "PAPERLESS_FRAME_JSON_INVALID",
+            "PAPERLESS_FRAME_SCHEMA_INVALID",
+        )
+        for raw, code in zip(cases, expected):
+            with self.subTest(code=code), self.assertRaisesRegex(JOIN.Unsafe, "^" + code + "$"):
+                JOIN.parse_paperless_stdout(raw)
+
+    def test_paperless_controller_protocol_protects_raw_stdout(self):
+        tasks = yaml.safe_load(PLAY_FILE.read_text())[0]["tasks"]
+        paperless = next(t for t in tasks if t.get("name") ==
+                         "Read sealed Paperless allauth OIDC linkage without changing users")
+        args = paperless["ansible.builtin.command"]["argv"]
+        self.assertIn("--verbosity=0", args)
+        self.assertTrue(paperless["no_log"])
+        comparator = next(t for t in tasks if t.get("name") ==
+                          "Compare only ephemeral keyed fingerprints on controller")
+        self.assertTrue(comparator["no_log"])
+        self.assertFalse(comparator["failed_when"])
+        self.assertIn("paperless_stdout", str(comparator))
+        self.assertNotIn("oidc_identity_paperless_raw.stdout | from_json",
+                         PLAY_FILE.read_text())
+        self.assertIn("PAPERLESS_OIDC_COMPARE_FAILURE",
+                      PLAY_FILE.read_text())
+        self.assertIn("Fail closed if Paperless result envelope",
+                      PLAY_FILE.read_text())
+        self.assertIn("RESULT_FRAME + json.dumps",
+                      PAPERLESS_FILE.read_text())
+
     def test_playbook_has_no_mutations_and_guards_all_secret_outputs(self):
         plays = yaml.safe_load(PLAY_FILE.read_text())
         self.assertEqual(len(plays), 1)
