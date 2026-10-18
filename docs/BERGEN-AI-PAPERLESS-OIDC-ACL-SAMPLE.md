@@ -15,8 +15,11 @@ not evidence of any Bergen-AI right.
 The playbook ansible/playbooks/audit-bergen-ai-paperless-oidc-acl-sample-readonly.yml
 first imports PR #108's entire identity check, retaining its short-lived HMAC
 challenge in protected Ansible facts. It then checks operator-supplied
-eight cases: exactly two existing non-staff, non-superuser Paperless OIDC users
-against four real documents, with at least one allow and one deny per actor.
+a reviewed sample of exactly two existing non-staff, non-superuser
+Paperless OIDC users. The balanced profile uses four real documents and
+eight cases with an allow and a deny for each user. The optional
+`no-private-b` profile uses three documents and six cases, testing a
+deny only for account B; it is explicitly marked as limited.
 
 For each actor, the helper requires a matching existing allauth subject and
 email HMAC from the identical in-memory PR #108 run. The exact configured
@@ -24,10 +27,13 @@ single OIDC provider_id is pinned; unknown or multiple OIDC providers fail close
 An email match alone cannot establish authority. The helper compares each
 expected allow/deny with both Paperless permitted_document_ids(view_document)
 and an independent authenticated in-process DRF document-detail GET.
-16 of 16 checks must pass. No document bodies, metadata, filenames,
-user identifiers, claims, actual IDs or API responses are exported.
+The balanced profile requires 16 of 16 checks; the reduced profile
+requires 12 of 12 checks and reports its untested deny coverage separately.
+No document bodies, metadata, filenames, user identifiers, claims, actual
+IDs or API responses are exported.
 
-Only aggregate results or a bounded error code are printed. No database
+Only aggregate results or a bounded error code are printed.
+Neither success status is an approval for AI retrieval. No database
 permissions, groups, documents, services or tokens are changed.
 
 ## Private site matrix (fictional example; never use unchanged)
