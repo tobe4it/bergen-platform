@@ -1,0 +1,262 @@
+---
+# Install the dedicated daily Nextcloud backup and run the first complete
+# snapshot automatically. No changes to existing mail/root backup.sh or cron.
+- name: Confirm approved Nextcloud backup target on controller
+  hosts: localhost
+  gather_facts: false
+  tasks:
+    - name: Require site-specific approved target and NFS export
+      ansible.builtin.assert:
+        that:
+          - mail_tls_source_address is defined
+          - mail_tls_source_ssh_user is defined
+          - nextcloud_stack_host_fqdn is defined
+          - nextcloud_stack_root is defined
+          - nextcloud_backup_nfs_source is defined
+          - nextcloud_backup_mount is defined
+          - nextcloud_stack_host_fqdn is match('^[a-z0-9][a-z0-9.-]*[a-z0-9]$')
+          - nextcloud_stack_root is match('^/[A-Za-z0-9/._-]+$')
+          - nextcloud_backup_nfs_source is match('^[0-9.]+:/[A-Za-z0-9/._-]+$')
+          - nextcloud_backup_mount is match('^/[A-Za-z0-9/._-]+$')
+          - nextcloud_backup_mount != '/'
+          - not ansible_check_mode
+        fail_msg: Use reviewed, ignored site-specific local vars for this host.
+      no_log: true
+
+    - name: Register only reviewed mx2
+      ansible.builtin.add_host:
+        name: selected-nextcloud-backup-host
+        groups: selected_nextcloud_backup_hosts
+        ansible_host: "{{ mail_tls_source_address }}"
+        ansible_user: "{{ mail_tls_source_ssh_user }}"
+        ansible_python_interpreter: /usr/bin/python3
+      changed_when: false
+
+- name: Install and verify the isolated Nextcloud backup
+  hosts: selected_nextcloud_backup_hosts
+  gather_facts: false
+  become: true
+  any_errors_fatal: true
+  tasks:
+    - name: Confirm remote hostname before writes
+      ansible.builtin.command:
+        argv: [hostname, -f]
+      register: backup_remote_fqdn
+      changed_when: false
+
+    - name: Fail closed on any other host
+      ansible.builtin.assert:
+        that:
+          - backup_remote_fqdn.stdout == nextcloud_stack_host_fqdn
+
+    - name: Confirm existing NFS mount source
+      ansible.builtin.command:
+        argv:
+          - findmnt
+          - -rn
+          - -o
+          - SOURCE
+          - -M
+          - "{{ nextcloud_backup_mount }}"
+      changed_when: false
+      register: backup_nfs_export
+
+    - name: Require exactly the reviewed existing Synology export
+      ansible.builtin.assert:
+        that:
+          - backup_nfs_export.stdout == nextcloud_backup_nfs_source
+
+    - name: Verify backup prerequisites without changing services
+      ansible.builtin.command:
+        argv: [command, -v, "{{ item }}"]
+      # Shell built-in command is not executable; use /usr/bin/which instead.
+      changed_when: false
+      loop: []
+      when: false
+
+    - name: Verify necessary executables exist
+      ansible.builtin.command:
+        argv: [/usr/bin/which, "{{ item }}"]
+      loop:
+        - python3
+        - rsync
+        - tar
+        - gzip
+        - mariadb
+        - mariadb-dump
+        - runuser
+        - findmnt
+      changed_when: false
+
+    - name: Inspect fstab before adopting the mount
+      ansible.builtin.slurp:
+        src: /etc/fstab
+      register: backup_fstab
+      no_log: true
+
+    - name: Refuse to create a second fstab declaration for an existing mount
+      ansible.builtin.assert:
+        that:
+          - >-
+            (
+              (backup_fstab.content | b64decode).splitlines()
+              | reject('match', '^\s*#')
+              | select('search', '(\s|^)' ~ (nextcloud_backup_mount | regex_escape) ~ '\s')
+              | list | length == 0
+            )
+            or
+            ('# BEGIN BERGEN NEXTCLOUD BACKUP NFS' in
+             (backup_fstab.content | b64decode))
+        fail_msg: Existing unmanaged NFS fstab entry needs separate review.
+      no_log: true
+
+    - name: Persist only this dedicated NFS mount for reboot
+      ansible.builtin.blockinfile:
+        path: /etc/fstab
+        marker: "# {mark} BERGEN NEXTCLOUD BACKUP NFS"
+        block: >-
+          {{ nextcloud_backup_nfs_source }} {{ nextcloud_backup_mount }}
+          nfs4 rw,vers=4.1,sec=sys,_netdev,nofail 0 0
+        owner: root
+        group: root
+        mode: '0644'
+        backup: true
+
+    - name: Create local protected backup state directory
+      ansible.builtin.file:
+        path: /var/lib/bergen-nextcloud-backup
+        state: directory
+        owner: root
+        group: root
+        mode: '0700'
+
+    - name: Install the standalone backup runner
+      ansible.builtin.template:
+        src: ../templates/nextcloud-backup/bergen-nextcloud-backup.py.j2
+        dest: /usr/local/sbin/bergen-nextcloud-backup.py
+        owner: root
+        group: root
+        mode: '0700'
+
+    - name: Confirm Python syntax before activation
+      ansible.builtin.command:
+        argv:
+          - python3
+          - -c
+          - >-
+            import ast,pathlib;
+            ast.parse(pathlib.Path('/usr/local/sbin/bergen-nextcloud-backup.py').read_text())
+      changed_when: false
+
+    - name: Install a single non-overlapping systemd service
+      ansible.builtin.copy:
+        dest: /etc/systemd/system/bergen-nextcloud-backup.service
+        owner: root
+        group: root
+        mode: '0644'
+        content: |
+          [Unit]
+          Description=Bergen Nextcloud consistent snapshot to Synology NFS
+          Wants=network-online.target
+          After=network-online.target
+          RequiresMountsFor={{ nextcloud_backup_mount }}
+
+          [Service]
+          Type=oneshot
+          User=root
+          Group=root
+          UMask=0077
+          ExecStartPre=/usr/bin/mountpoint -q {{ nextcloud_backup_mount }}
+          ExecStart=/usr/bin/python3 /usr/local/sbin/bergen-nextcloud-backup.py
+          TimeoutStartSec=infinity
+          Nice=10
+          IOSchedulingClass=best-effort
+
+    - name: Install nightly schedule separate from mail backup
+      ansible.builtin.copy:
+        dest: /etc/systemd/system/bergen-nextcloud-backup.timer
+        owner: root
+        group: root
+        mode: '0644'
+        content: |
+          [Unit]
+          Description=Daily Bergen Nextcloud consistent backup
+
+          [Timer]
+          OnCalendar=*-*-* 04:30:00
+          Persistent=false
+          Unit=bergen-nextcloud-backup.service
+
+          [Install]
+          WantedBy=timers.target
+
+    - name: Reload units without restarting any application
+      ansible.builtin.systemd:
+        daemon_reload: true
+
+    - name: Check whether a successful snapshot already exists
+      ansible.builtin.stat:
+        path: /var/lib/bergen-nextcloud-backup/last-success.txt
+      register: backup_last_success
+
+    - name: Run initial automated snapshot before enabling timer
+      ansible.builtin.systemd:
+        name: bergen-nextcloud-backup.service
+        state: started
+      async: 10800
+      poll: 20
+      when: not backup_last_success.stat.exists
+
+    - name: Verify local proof and committed remote archive
+      ansible.builtin.command:
+        argv:
+          - python3
+          - -c
+          - |
+            from pathlib import Path
+            import os
+            base = Path("/var/lib/bergen-nextcloud-backup/last-success.txt")
+            lines = base.read_text().splitlines()
+            assert len(lines) == 3
+            stamp, dest, digest = lines
+            path = Path(dest)
+            assert path.parent == Path("{{ nextcloud_backup_mount }}") / "mx2-nextcloud"
+            assert not path.is_symlink() and path.is_dir()
+            assert (path / "nextcloud.tar.gz").is_file()
+            assert (path / "SHA256SUMS").read_text().strip() == digest + "  nextcloud.tar.gz"
+            assert (path / "COMPLETE").read_text().strip() == "VERIFIED_SHA256=" + digest
+            print("NEXTCLOUD_BACKUP_REMOTE_COMMITTED=YES")
+      changed_when: false
+      register: backup_first_verification
+
+    - name: Activate future automated daily backups
+      ansible.builtin.systemd:
+        name: bergen-nextcloud-backup.timer
+        enabled: true
+        state: started
+
+    - name: Confirm timer and working Nextcloud status
+      ansible.builtin.command:
+        argv: "{{ item }}"
+      loop:
+        - [systemctl, is-enabled, bergen-nextcloud-backup.timer]
+        - [systemctl, is-active, bergen-nextcloud-backup.timer]
+        - [runuser, -u, apache, --, php, "{{ nextcloud_stack_root }}/occ", status]
+      changed_when: false
+      register: backup_final_status
+
+    - name: Require working timer and available production Cloud
+      ansible.builtin.assert:
+        that:
+          - backup_final_status.results[0].stdout == 'enabled'
+          - backup_final_status.results[1].stdout == 'active'
+          - "'maintenance: false' in backup_final_status.results[2].stdout"
+          - "'installed: true' in backup_final_status.results[2].stdout"
+
+    - name: Report first actual completed snapshot and enabled nightly timer
+      ansible.builtin.debug:
+        msg:
+          initial_backup: "{{ backup_first_verification.stdout }}"
+          nightly_timer: ENABLED_04_30_LOCAL
+          nextcloud: ONLINE
+          old_mail_backups: UNCHANGED
