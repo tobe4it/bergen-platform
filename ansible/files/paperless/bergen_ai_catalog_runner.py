@@ -139,7 +139,10 @@ def ensure_config(request, *, apply):
     demand(isinstance(model, str) and 1 <= len(model) <= 96
            and all(c.isalnum() or c in "._:-" for c in model),
            "MODEL_UNREVIEWED")
-    ai_ready = bool(config.ai_enabled and config.llm_backend == "ollama"
+    # Native v3.3 ai_classifier can be used directly by this bounded worker
+    # with the global Paperless AI/UI master switch OFF. This avoids exposing
+    # document chat and archive-wide AI tools to all Paperless users.
+    ai_ready = bool(not config.ai_enabled and config.llm_backend == "ollama"
                     and endpoint == expected and config.llm_model == model
                     and config.llm_allow_internal_endpoints
                     and not config.llm_embedding_backend)
