@@ -1,5 +1,6 @@
 """No-live-service security tests for sealed Paperless/Bergen-AI identity JOIN."""
 import importlib.util
+import ast
 import contextlib
 import io
 import json
@@ -43,11 +44,73 @@ def p_row(email, sub=None, uid=None, active=True):
 def inputs(a, b):
     return (
         {"AUDIT": "READ_ONLY", "SYSTEM": "BERGEN_AI", "ACCOUNTS": a, "COUNT": len(a)},
-        {"AUDIT": "READ_ONLY", "SYSTEM": "PAPERLESS", "ACCOUNTS": b, "COUNT": len(b)},
+        {"AUDIT": "READ_ONLY", "SYSTEM": "PAPERLESS",
+         "PROVIDER_SELECTION": "CONFIGURED_OIDC_APP",
+         "ACCOUNTS": b, "COUNT": len(b)},
     )
 
 
+def selected_provider_from_source():
+    # The production script is a Django manage.py shell -c command.
+    # Importing it would run its audit and require Django. Isolate only
+    # the pure provider-selector function and exception class for offline CI.
+    tree = ast.parse(PAPERLESS_FILE.read_text())
+    parts = [
+        node for node in tree.body
+        if isinstance(node, (ast.FunctionDef, ast.ClassDef))
+        and node.name in ("Unsafe", "selected_oidc_provider")
+    ]
+    namespace = {}
+    exec(compile(ast.Module(body=parts, type_ignores=[]),
+                 str(PAPERLESS_FILE), "exec"), namespace)
+    return namespace["selected_oidc_provider"], namespace["Unsafe"]
+
+
+PROVIDER_SELECT, PROVIDER_UNSAFE = selected_provider_from_source()
+
+
 class IdentityBoundaryTests(unittest.TestCase):
+    def test_allauth_socialaccount_uses_configured_provider_id(self):
+        # django-allauth's openid_connect is a provider facade. Individual
+        # SocialAccount rows are keyed by the per-app provider_id.
+        apps = {"openid_connect": {"APPS": [{"provider_id": "sso-synthetic"}]}}
+        self.assertEqual(PROVIDER_SELECT(apps, "auto"), "sso-synthetic")
+        self.assertEqual(PROVIDER_SELECT(apps, "sso-synthetic"), "sso-synthetic")
+        self.assertNotEqual(PROVIDER_SELECT(apps, "auto"), "openid_connect")
+
+    def test_multiple_oidc_providers_must_not_be_automatically_conflated(self):
+        apps = {"openid_connect": {"APPS": [
+            {"provider_id": "sso-1"}, {"provider_id": "sso-2"}
+        ]}}
+        with self.assertRaisesRegex(PROVIDER_UNSAFE, "OIDC_CONFIG_AMBIGUOUS"):
+            PROVIDER_SELECT(apps, "auto")
+        self.assertEqual(PROVIDER_SELECT(apps, "sso-2"), "sso-2")
+        with self.assertRaisesRegex(PROVIDER_UNSAFE, "OIDC_SELECTOR_INVALID"):
+            PROVIDER_SELECT(apps, "unknown")
+
+    def test_other_social_providers_never_matched_to_oidc(self):
+        for config in (None, {}, {"google": {"APPS": [{"provider_id": "google"}]}}):
+            with self.subTest(config=config), self.assertRaisesRegex(
+                PROVIDER_UNSAFE, "OIDC_CONFIG_MISSING"
+            ):
+                PROVIDER_SELECT(config, "auto")
+        with self.assertRaisesRegex(PROVIDER_UNSAFE, "OIDC_CONFIG_INVALID"):
+            PROVIDER_SELECT({"openid_connect": {"APPS": [
+                {"provider_id": "malformed provider name"}
+            ]}}, "auto")
+
+    def test_framed_paperless_failure_only_exposes_approved_diagnostic(self):
+        payload = JOIN.PAPERLESS_FRAME + json.dumps({
+            "AUDIT": "FAILED_CLOSED", "CODE": "OIDC_CONFIG_AMBIGUOUS"
+        })
+        with self.assertRaisesRegex(JOIN.Unsafe, "^OIDC_CONFIG_AMBIGUOUS$"):
+            JOIN.parse_paperless_stdout(payload)
+        malicious = JOIN.PAPERLESS_FRAME + json.dumps({
+            "AUDIT": "FAILED_CLOSED", "CODE": "private@example.invalid"
+        })
+        with self.assertRaisesRegex(JOIN.Unsafe, "^PAPERLESS_FRAME_SCHEMA_INVALID$"):
+            JOIN.parse_paperless_stdout(malicious)
+
     def test_positive_identity_subject_and_email_match(self):
         a, p = inputs(
             [ai_row("parent@example.invalid", "random-subject")],
@@ -56,6 +119,7 @@ class IdentityBoundaryTests(unittest.TestCase):
         result = JOIN.compare(a, p)
         self.assertEqual(result["STATUS"], "LINK_CANDIDATES_PRESENT")
         self.assertEqual(result["MATCHED_ACTIVE_EMAIL_AND_SUBJECT"], 1)
+        self.assertEqual(result["PAPERLESS_PROVIDER_SELECTION"], "CONFIGURED_OIDC_APP")
         self.assertEqual(result["ISSUER_EQUALITY"], "NOT_PROVEN")
         self.assertEqual(result["LIVE_USER_DELEGATION"], "NOT_PROVEN")
         self.assertEqual(result["PAPERLESS_DOCUMENT_ACL"], "NOT_PROVEN")
