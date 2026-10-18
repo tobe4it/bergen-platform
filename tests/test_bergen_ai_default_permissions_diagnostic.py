@@ -38,14 +38,50 @@ class FailedApplyDiagnosisTests(unittest.TestCase):
     def test_safe_classifier_does_not_print_raw_subprocess_output(self):
         class Result:
             returncode = 0
-            stdout = "CONFIDENTIAL_KEY=do_not_print\nPROBE=READ_CONFIRMED\n"
+            stdout = (
+                "CONFIDENTIAL_KEY=do_not_print\n"
+                "PROBE=PYTHON_STARTED\nPROBE=BACKEND_PACKAGE_PRESENT\n"
+                "PROBE=IMPORT_OK\nPROBE=READ_CONFIRMED\n"
+            )
+            stderr = ""
         with mock.patch.object(AUDIT.subprocess, "run", return_value=Result()):
-            self.assertEqual(AUDIT.probe_app(self.sha), "READ_CONFIRMED")
+            outcome = AUDIT.probe_app(self.sha)
+            self.assertEqual(outcome["APP_ORM_READ"], "READ_CONFIRMED")
+            self.assertEqual(outcome["APP_STAGE"], "ORM_READ_OK")
+            self.assertEqual(outcome["APP_PACKAGE"], "PRESENT")
+            self.assertNotIn("do_not_print", json.dumps(outcome))
+
             Result.stdout = "Traceback: confidential\n"
-            self.assertEqual(AUDIT.probe_app(self.sha), "UNCLASSIFIED_FAILURE")
-            Result.stdout = "PROBE=READ_CONFIRMED\n"
+            Result.stderr = "Traceback: confidential token\n"
             Result.returncode = 1
-            self.assertEqual(AUDIT.probe_app(self.sha), "UNCLASSIFIED_FAILURE")
+            outcome = AUDIT.probe_app(self.sha)
+            self.assertEqual(outcome["APP_ORM_READ"], "UNCLASSIFIED_FAILURE")
+            self.assertEqual(outcome["APP_STAGE"], "PROCESS_NOT_STARTED")
+            self.assertEqual(outcome["APP_STDERR_CLASS"], "PYTHON_EXCEPTION")
+            self.assertNotIn("confidential", json.dumps(outcome))
+
+            Result.stdout = "PROBE=PYTHON_STARTED\nPROBE=IMPORT_FAILED\nPROBE_ERROR=ModuleNotFoundError\n"
+            Result.stderr = "ModuleNotFoundError: No module named 'secret-name'\n"
+            outcome = AUDIT.probe_app(self.sha)
+            self.assertEqual(outcome["APP_ORM_READ"], "IMPORT_FAILED")
+            self.assertEqual(outcome["APP_ERROR_CLASS"], "ModuleNotFoundError")
+            self.assertEqual(outcome["APP_STDERR_CLASS"], "MODULE_NOT_FOUND")
+            self.assertNotIn("secret-name", json.dumps(outcome))
+
+            Result.stdout = "PROBE=PYTHON_STARTED\nPROBE=IMPORT_OK\nPROBE=READ_CONFIRMED\n"
+            Result.stderr = ""
+            Result.returncode = 1
+            outcome = AUDIT.probe_app(self.sha)
+            self.assertEqual(outcome["APP_ORM_READ"], "UNCLASSIFIED_FAILURE")
+
+    def test_failure_classification_is_bounded(self):
+        self.assertEqual(AUDIT.classify_stderr(
+            "Error: exec container process: exec: \"python3\": executable file not found"
+        ), "PYTHON_BINARY_NOT_FOUND")
+        self.assertEqual(AUDIT.classify_stderr(
+            "ModuleNotFoundError: No module named 'private.something'"
+        ), "MODULE_NOT_FOUND")
+        self.assertEqual(AUDIT.classify_stderr(""), "NONE")
 
     def test_digest_is_stable_and_version_gate_rejects_unknown(self):
         self.assertEqual(self.sha, AUDIT.sha256(json.loads(json.dumps(self.value))))
