@@ -31,10 +31,8 @@ class FailedApplyDiagnosisTests(unittest.TestCase):
         self.sha = AUDIT.sha256(self.value)
 
     def test_missing_backup(self):
-        with mock.patch.object(AUDIT, "Path", wraps=Path) as p:
-            backup = p.return_value.__truediv__.return_value
-            backup.exists.return_value = False
-            backup.is_symlink.return_value = False
+        root = Path(self.temp.name)
+        with mock.patch.object(AUDIT, "Path", return_value=root):
             self.assertEqual(AUDIT.check_backup("0" * 64), "NOT_FOUND")
 
     def test_safe_classifier_does_not_print_raw_subprocess_output(self):
