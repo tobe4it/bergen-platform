@@ -140,6 +140,43 @@ class IdentityBoundaryTests(unittest.TestCase):
             self.assertEqual(data[0]["role"], "USER")
             db.close()
 
+    def test_json_null_oauth_accounts_are_not_assumed_to_be_corrupt(self):
+        # SQLAlchemy Column(JSON) can persist Python None as the literal
+        # JSON text "null", alongside true SQLite NULL in older records.
+        with tempfile.TemporaryDirectory() as tmp:
+            file = Path(tmp) / "webui.db"
+            db = sqlite3.connect(file)
+            db.execute("CREATE TABLE user (email TEXT, role TEXT, oauth TEXT)")
+            db.executemany("INSERT INTO user VALUES (?,?,?)", [
+                ("local@example.invalid", "admin", None),
+                ("oauth-unlinked@example.invalid", "user", "null"),
+                ("oauth-linked@example.invalid", "user",
+                 json.dumps({"oidc": {"sub": "signed-oidc-subject"}})),
+            ])
+            db.commit()
+            before = file.read_bytes()
+            rows = AI.read_rows(file, KEY, "oidc")
+            self.assertEqual(before, file.read_bytes())
+            self.assertEqual(len(rows), 1)
+            self.assertEqual(rows[0]["email"], AI.seal(KEY, "oauth-linked@example.invalid"))
+            self.assertNotIn("signed-oidc-subject", json.dumps(rows))
+            db.close()
+
+    def test_non_null_unsupported_oauth_shapes_still_fail_closed(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            file = Path(tmp) / "webui.db"
+            db = sqlite3.connect(file)
+            db.execute("CREATE TABLE user (email TEXT, role TEXT, oauth TEXT)")
+            for invalid in ("[]", "true", '"text"', "1", "123.4"):
+                with self.subTest(invalid=invalid):
+                    db.execute("DELETE FROM user")
+                    db.execute("INSERT INTO user VALUES (?,?,?)",
+                               ("a@example.invalid", "user", invalid))
+                    db.commit()
+                    with self.assertRaisesRegex(AI.Unsafe, "^OAUTH_SHAPE_INVALID$"):
+                        AI.read_rows(file, KEY, "oidc")
+            db.close()
+
     def test_wrong_provider_is_not_conflated_with_oidc(self):
         with tempfile.TemporaryDirectory() as tmp:
             file = Path(tmp) / "webui.db"
