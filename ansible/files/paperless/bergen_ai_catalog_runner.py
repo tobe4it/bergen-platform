@@ -237,7 +237,13 @@ def process_one(doc_id, group, minimum, pilot, db):
                 current_doc.add_nested_tags(add)
             demand(current_doc.tags.filter(is_inbox_tag=True).exists(),
                    "INBOX_TAG_REMOVED")
-            after = stable_snapshot(snapshot(current_doc))
+            post = snapshot(current_doc)
+            # Nested tags may add parent tags; capture all additions precisely
+            # for rollback, never remove a previously existing (incl. inbox) tag.
+            changes["add_tag_ids"] = sorted(
+                set(post["tag_ids"]) - set(before["tag_ids"])
+            )
+            after = stable_snapshot(post)
         db.execute("UPDATE catalogue SET state=?,after_json=?,applied_json=? WHERE document_id=?",
                    ("APPLIED", after, json.dumps(changes, sort_keys=True), doc_id))
         db.commit()
