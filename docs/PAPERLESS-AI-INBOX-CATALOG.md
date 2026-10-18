@@ -116,7 +116,7 @@ BASE="$HOME/bergen-platform"
 
 Expected: \`AUDIT=READ_ONLY\`, \`CHANGED=False\`. The status may initially be
 \`AI_CONFIG_NOT_READY\`. **Do not apply** until \`STATUS=READY\`. Check
-actual Paperless model availability, AI enabled, that the Ollama endpoint
+actual Paperless model availability, global AI UI **disabled**, that the Ollama endpoint
 is reachable *from inside the Paperless guest*, that its DNS resolves only to
 private addresses and the embedding backend is **empty**. The native
 Paperless \`AIConfig\` may read effective database overrides; environment
@@ -125,13 +125,56 @@ configuration alone is not proof.
 **Current runtime configuration cannot be established from GitHub.**
 Do not guess Ollama's address or assume an image/model is already installed.
 
-Paperless permits its optional AI feature to be configured via the
-admin's Application Configuration. Configure a local \`ollama\` backend,
-reviewed endpoint and model there only after a site approval. Ensure the
-Paperless internal-LLM endpoint setting permits the reviewed local
-endpoint; reject any external provider. Enabling native AI can expose
-other native AI UI functions; separately review end-user permissions.
-Do not enable Paperless's embedding backend or model.
+### 1a — Independent native Ollama settings (global AI UI stays OFF)
+
+Paperless 3.3.0's native `get_ai_document_classification` and
+`AIClient` can be used by our guarded background runner **while
+`PAPERLESS_AI_ENABLED=false`**. That avoids exposing native document
+chat/other AI UI features to all users, and keeps the embedding index off.
+
+First run the **read-only** configuration audit:
+
+~~~bash
+(
+set -euo pipefail
+cd "$HOME/bergen-platform-paperless-ai-catalog"
+BASE="$HOME/bergen-platform"
+"$BASE/.venv/bin/ansible-playbook" \
+  -i ansible/inventory.yml \
+  -i "$BASE/ansible/inventory.local.yml" \
+  ansible/playbooks/manage-paperless-ai-local-ollama.yml \
+  --vault-id ai@prompt \
+  -e "@$BASE/ansible/vars/paperless-ai-catalog.local.yml"
+)
+~~~
+
+The result contains an opaque `CURRENT_SHA256`. After independently
+confirming the latest backup and Ollama's local endpoint/model, place the
+**observed** hash only in the ignored local YAML file. To configure:
+
+~~~yaml
+paperless_ai_catalog_config_action: apply
+paperless_ai_catalog_config_approved: true
+paperless_ai_catalog_verified_backup: true
+paperless_ai_catalog_config_expected_sha256: REPLACE_WITH_OBSERVED_64_HEX
+~~~
+
+Re-run the same playbook. The version-pinned ORM transaction changes
+**only** `llm_backend=ollama`, the exact model and local endpoint. It
+creates a protected 0600 preimage for configuration rollback; it never
+enables global AI/UI/embeddings or touches document content/permissions.
+
+Configuration rollback needs a new audit/current fingerprint,
+`paperless_ai_catalog_config_action: rollback`, plus
+`paperless_ai_catalog_config_rollback_approved: true`. A changed
+configuration aborts instead of overwriting someone else's change.
+
+The upstream v3.3 setting `PAPERLESS_AI_LLM_ALLOW_INTERNAL_ENDPOINTS`
+defaults to true but must be effectively enabled; no unreviewed changes
+to the existing Paperless environment or service restart are performed.
+The worker validates private DNS and the **exact installed model** using
+only Ollama's local `GET /api/tags` (no proxies or redirects).
+Once `STATUS=READY` on the **worker** audit, proceed to the pilot.
 
 ### 2 — Controlled single-document pilot
 
@@ -227,10 +270,10 @@ during classification halts that document for manual review.**
 - Metadata suggestion reliability and speed must be measured for the
   actual installed model; empty OCR, model timeout/JSON errors, new tag
   proposals and manually pre-edited fields are required regression tests.
-- Native Paperless AI and the Ollama backend require runtime review of
-  privacy, session rights and app configuration. This PR **does not**
-  activate AI features, create users/groups or enable Paperless document
-  chat/RAG. Family group sync (#98) and parent-only live AI→Paperless
+- The native local Ollama client requires a separately approved,
+  rollbackable ORM setting change; **global Paperless AI/UI stays OFF**,
+  embeddings remain disabled, and no service restart is performed.
+  No users/groups, document permissions or RAG/document chat are activated. Family group sync (#98) and parent-only live AI→Paperless
   retrieval (#63) remain separate controlled releases.
 
 ## Upstream source pinned and reviewed
