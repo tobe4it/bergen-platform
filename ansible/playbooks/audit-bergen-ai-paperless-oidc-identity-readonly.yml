@@ -87,8 +87,39 @@
       delegate_to: "{{ oidc_identity_ai_host }}"
       register: oidc_identity_ai_raw
       changed_when: false
+      failed_when: false
       check_mode: false
       no_log: true
+
+    - name: Decode classified AI identity-read failure only if the helper stopped
+      ansible.builtin.set_fact:
+        oidc_identity_ai_error_code: >-
+          {{ (oidc_identity_ai_raw.stdout | from_json).CODE | default('UNCLASSIFIED_FAILURE') }}
+      when: oidc_identity_ai_raw.rc != 0
+      changed_when: false
+      no_log: true
+
+    - name: Publish only allowlisted diagnostic category, not private failure data
+      ansible.builtin.debug:
+        msg: >-
+          AI_OIDC_SQLITE_FAILURE={{
+            oidc_identity_ai_error_code if oidc_identity_ai_error_code in [
+              'INVALID_IDENTITY', 'INVALID_PROVIDER_SELECTOR', 'NO_USER_TABLE',
+              'EXCESSIVE_USER_COUNT', 'OAUTH_JSON_INVALID', 'OAUTH_SHAPE_INVALID',
+              'OAUTH_SUBJECT_INVALID', 'OAUTH_EMAIL_AMBIGUOUS', 'ROLE_UNREVIEWED',
+              'APP_VERSION_UNREVIEWED', 'CHALLENGE_INVALID', 'CONTAINER_UNEXPECTED',
+              'STORAGE_UNEXPECTED', 'CONTAINER_ENV_UNEXPECTED', 'DATABASE_EXTERNAL',
+              'DATABASE_MISSING', 'DB_READ_ERROR', 'RUNTIME_INSPECTION_ERROR',
+              'INPUT_JSON_INVALID', 'UNEXPECTED_INTERNAL_ERROR'
+            ] else 'UNCLASSIFIED_FAILURE'
+          }}
+      when: oidc_identity_ai_raw.rc != 0
+
+    - name: Fail closed before Paperless access if AI identity inventory is invalid
+      ansible.builtin.assert:
+        that:
+          - oidc_identity_ai_raw.rc == 0
+        fail_msg: "AI identity read failed; see non-identifying diagnostic category above."
 
     - name: Require existing confined Paperless guest hostname
       ansible.builtin.command:
