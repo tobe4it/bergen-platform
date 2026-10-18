@@ -1,0 +1,132 @@
+---
+# Issue #113: one-shot, strictly bounded, version-pinned Paperless native AI audit.
+# No cron, workflow change, account/group/ACL change or application restart.
+# A separately approved automation/timer will invoke this same policy runner
+# only after the live read-only and one-document trial gates pass.
+- name: Review and control Paperless 3.3 AI inbox metadata cataloguing
+  hosts: venombox
+  become: true
+  gather_facts: false
+  vars:
+    bp_catalog_mode: "{{ paperless_ai_catalog_mode | default('audit') }}"
+    bp_catalog_apply: "{{ bp_catalog_mode in ['apply', 'rollback'] }}"
+    bp_catalog_payload:
+      protocol: catalog-v1
+      mode: "{{ bp_catalog_mode }}"
+      allowed_group: "{{ paperless_ai_catalog_allowed_group | default('') }}"
+      expected_model: "{{ paperless_ai_catalog_model | default('') }}"
+      expected_endpoint: "{{ paperless_ai_catalog_endpoint | default('') }}"
+      min_document_id: "{{ paperless_ai_catalog_min_document_id | default(0) | int }}"
+      pilot_ids: "{{ paperless_ai_catalog_pilot_ids | default([]) }}"
+      batch_size: "{{ paperless_ai_catalog_batch_size | default(1) | int }}"
+      approved: "{{ paperless_ai_catalog_approved | default(false) | bool }}"
+  tasks:
+    - name: Require reviewed settings and explicit approval before any metadata write
+      ansible.builtin.assert:
+        that:
+          - inventory_hostname == 'venombox'
+          - bp_catalog_mode in ['audit', 'preview', 'apply', 'rollback']
+          - paperless_ai_catalog_allowed_group is defined
+          - paperless_ai_catalog_model is defined
+          - paperless_ai_catalog_endpoint is defined
+          - not ansible_check_mode or not bp_catalog_apply
+          - not bp_catalog_apply or (paperless_ai_catalog_approved | default(false) | bool)
+          - not bp_catalog_apply or (paperless_ai_catalog_verified_backup | default(false) | bool)
+          - not bp_catalog_apply or (paperless_ai_catalog_rollback_approved | default(false) | bool) or bp_catalog_mode != 'rollback'
+          - not bp_catalog_apply or ((paperless_ai_catalog_pilot_ids | default([]) | length) > 0)
+          - (paperless_ai_catalog_batch_size | default(1) | int) <= 2
+        fail_msg: CATALOG_GATES_NOT_SATISFIED
+      no_log: true
+
+    - name: Confirm confined Paperless LXC and current application instance
+      ansible.builtin.command:
+        argv: [pct, config, '126']
+      register: bp_catalog_lxc
+      changed_when: false
+      check_mode: false
+      no_log: true
+
+    - name: Refuse wrong guest or privileged LXC
+      ansible.builtin.assert:
+        that:
+          - bp_catalog_lxc.rc == 0
+          - "'hostname: bergen-paperless' in bp_catalog_lxc.stdout_lines"
+          - "'unprivileged: 1' in bp_catalog_lxc.stdout_lines"
+          - "'lxc.apparmor.profile: unconfined' not in bp_catalog_lxc.stdout"
+        fail_msg: WRONG_PAPERLESS_GUEST
+      no_log: true
+
+    - name: Execute application-native read-only inspection or independently authorized trial
+      ansible.builtin.command:
+        argv:
+          - pct
+          - exec
+          - '126'
+          - --
+          - podman
+          - exec
+          - -i
+          - bergen-paperless
+          - python
+          - /usr/src/paperless/src/manage.py
+          - shell
+          - --verbosity=0
+          - -c
+          - "{{ lookup('ansible.builtin.file', playbook_dir ~ '/../files/paperless/bergen_ai_catalog_policy.py') ~ '\n' ~ lookup('ansible.builtin.file', playbook_dir ~ '/../files/paperless/bergen_ai_catalog_runner.py') }}"
+        stdin: "{{ bp_catalog_payload | to_json }}"
+        stdin_add_newline: true
+      register: bp_catalog_raw
+      changed_when: false
+      failed_when: false
+      check_mode: false
+      no_log: true
+
+    - name: Isolate the one bounded sanitized output record
+      ansible.builtin.set_fact:
+        bp_catalog_frames: >-
+          {{ bp_catalog_raw.stdout_lines | select('match', '^BERGEN_PAPERLESS_AI_CATALOG_V1:') | list }}
+      changed_when: false
+      no_log: true
+
+    - name: Require exactly one framed result, no unverified output
+      ansible.builtin.assert:
+        that:
+          - bp_catalog_frames | length == 1
+          - bp_catalog_frames[0] | length < 2000
+        fail_msg: CATALOG_RESULT_INVALID
+      no_log: true
+
+    - name: Parse only the minimal aggregate inventory
+      ansible.builtin.set_fact:
+        bp_catalog_result: >-
+          {{ (bp_catalog_frames[0] | regex_replace('^BERGEN_PAPERLESS_AI_CATALOG_V1:', '')) | from_json }}
+      changed_when: false
+      no_log: true
+
+    - name: Fail closed if runtime rejected a configuration or write attempt
+      ansible.builtin.assert:
+        that:
+          - bp_catalog_raw.rc == 0
+          - bp_catalog_result.AUDIT in ['READ_ONLY', 'CONTROLLED']
+          - bp_catalog_result.STATUS in ['READY', 'AI_CONFIG_NOT_READY', 'COMPLETED', 'NO_ELIGIBLE_DOCUMENTS']
+          - bp_catalog_result.CHANGED is boolean
+          - not bp_catalog_apply or bp_catalog_result.AUDIT == 'CONTROLLED'
+          - bp_catalog_apply or not bp_catalog_result.CHANGED
+          - not bp_catalog_apply or bp_catalog_result.REVIEW_REQUIRED | default(0) | int == 0
+          - not bp_catalog_apply or bp_catalog_result.INBOX_TAG_REMOVAL | default('NEVER') == 'NEVER'
+          - not bp_catalog_apply or bp_catalog_result.DOCUMENT_ACL_CHANGES | default('NEVER') == 'NEVER'
+        fail_msg: CATALOG_AUDIT_FAILED_OR_REQUIRES_REVIEW
+      no_log: true
+
+    - name: Report only bounded non-identifying cataloguing evidence
+      ansible.builtin.debug:
+        msg:
+          - "AUDIT={{ bp_catalog_result.AUDIT }}"
+          - "STATUS={{ bp_catalog_result.STATUS }}"
+          - "PAPERLESS_VERSION={{ bp_catalog_result.PAPERLESS_VERSION | default('3.3.0') }}"
+          - "ELIGIBLE_SAMPLE={{ bp_catalog_result.ELIGIBLE_SAMPLE | default('N/A') }}"
+          - "APPLIED={{ bp_catalog_result.APPLIED | default(0) }}"
+          - "REVIEW_REQUIRED={{ bp_catalog_result.REVIEW_REQUIRED | default(0) }}"
+          - "ALREADY_RECORDED={{ bp_catalog_result.ALREADY_RECORDED | default(0) }}"
+          - "ROLLED_BACK={{ bp_catalog_result.ROLLED_BACK | default(0) }}"
+          - "CHANGED={{ bp_catalog_result.CHANGED }}"
