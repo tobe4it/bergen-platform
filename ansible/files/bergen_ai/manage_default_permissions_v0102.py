@@ -28,8 +28,32 @@ BACKUP_DIR = Path("/var/lib/bergen-platform/open-webui")
 APP_WRITER = r"""
 import asyncio
 import json
+import os
+from pathlib import Path
 import sys
+
+def initialize_existing_secret():
+    # start.sh makes the key available to the uvicorn process, not
+    # necessarily to separate podman exec processes. Reuse the key
+    # file in memory without exposing its contents in args or logs.
+    if os.getenv("WEBUI_SECRET_KEY") or os.getenv("WEBUI_JWT_SECRET_KEY"):
+        return
+    name = os.getenv("WEBUI_SECRET_KEY_FILE", ".webui_secret_key")
+    path = Path(name)
+    if not path.is_absolute():
+        path = Path("/app/backend") / path
+    if path.is_symlink() or not path.is_file():
+        raise RuntimeError("Existing WebUI key file unavailable")
+    existing = path.read_text().strip()
+    if not existing:
+        raise RuntimeError("Existing WebUI key file empty")
+    os.environ["WEBUI_SECRET_KEY"] = existing
+
+initialize_existing_secret()
 from open_webui.models.config import Config
+# Import only the config storage model, not open_webui.config:
+# the latter runs migrations and copies static assets on import.
+Config.configure(defaults={}, enable_persistent=True, enable_oauth_persistent=False)
 
 async def main():
     request = json.load(sys.stdin)
