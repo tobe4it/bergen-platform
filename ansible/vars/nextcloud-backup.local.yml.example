@@ -1,0 +1,12 @@
+---
+# Store a reviewed copy as ansible/vars/nextcloud-backup.local.yml (ignored).
+# These values document the actual target and NFS export: do not copy
+# placeholders to production without review.
+nextcloud_backup_nfs_source: 192.0.2.10:/volume1/EXAMPLE_BACKUP
+nextcloud_backup_mount: /mnt/nextcloud-backup
+
+# The playbook also requires the existing ignored files:
+# ansible/vars/mail-tls.local.yml
+# ansible/vars/mail-nextcloud-stack.local.yml
+# which supply mail_tls_source_address, mail_tls_source_ssh_user,
+# nextcloud_stack_host_fqdn, and nextcloud_stack_root.

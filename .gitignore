@@ -57,3 +57,7 @@ ansible/group_vars/all/bergen-paperless.yml
 
 # Private Nextcloud and Collabora production baseline
 ansible/vars/mail-nextcloud-stack.local.yml
+
+# Protected site-specific Nextcloud backup mount and target
+ansible/vars/nextcloud-backup.local.yml
+ansible/vars/nextcloud-backup.local.yml~
