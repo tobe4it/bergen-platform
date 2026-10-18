@@ -194,6 +194,12 @@ class BaselineContract(unittest.TestCase):
                          ["python3", "-c"])
         source = PLAYBOOK.read_text() + HELPER.read_text()
         self.assertIn("Config.upsert", source)
+        self.assertIn("initialize_existing_secret", MODULE.APP_WRITER)
+        self.assertIn("from open_webui.models.config import Config", MODULE.APP_WRITER)
+        self.assertIn("Config.configure(defaults={}, enable_persistent=True", MODULE.APP_WRITER)
+        self.assertNotIn("from open_webui.config import Config", MODULE.APP_WRITER)
+        self.assertNotIn("WEBUI_AUTH=False", MODULE.APP_WRITER)
+        self.assertNotIn("print(existing)", MODULE.APP_WRITER)
         self.assertIn("mode=ro", source)
         self.assertIn("query_only=ON", source)
         for forbidden in ("vault_open_webui_admin_token", "ansible.builtin.shell",
