@@ -13,6 +13,11 @@ from django.contrib.auth.models import User
 from allauth.socialaccount.models import SocialAccount
 
 
+# A uniquely framed single-line result tolerates django-admin shell banners
+# without printing private account details into controller debug output.
+RESULT_FRAME = "BERGEN_PAPERLESS_OIDC_AUDIT_V1:"
+
+
 class Unsafe(Exception):
     pass
 
@@ -68,11 +73,11 @@ def run():
         if not isinstance(key, str) or len(key) < 48 or len(key) > 120:
             raise Unsafe("Invalid ephemeral key")
         records = read_rows(key, req.get("provider"))
-        print(json.dumps({"AUDIT": "READ_ONLY", "SYSTEM": "PAPERLESS",
+        print(RESULT_FRAME + json.dumps({"AUDIT": "READ_ONLY", "SYSTEM": "PAPERLESS",
                           "ACCOUNTS": records, "COUNT": len(records)},
                          sort_keys=True))
     except Exception:
-        print('{"AUDIT":"FAILED_CLOSED"}')
+        print(RESULT_FRAME + '{"AUDIT":"FAILED_CLOSED"}')
         raise SystemExit(2)
 
 
