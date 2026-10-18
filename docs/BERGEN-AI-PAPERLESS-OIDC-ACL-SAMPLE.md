@@ -33,7 +33,7 @@ permissions, groups, documents, services or tokens are changed.
 ## Private site matrix (fictional example; never use unchanged)
 
 The local, git-ignored path is:
-  $HOME/bergen-platform/ansible/vars/bergen-ai-paperless-acl.local.yml
+  $HOME/bergen-platform/ansible/vars/paperless-ai-acl.local.yml
 
 Example YAML:
 
@@ -53,6 +53,47 @@ not automatically copied from live effective permissions. Choose only users
 which are among the already linked Bergen-AI OIDC identities; an extra
 Paperless-only identity may not be used as an AI user.
 
+## Guided local matrix preparation
+
+The previous historical paperless-acl.local.yml file is not present on
+the controller. Do not recreate a matrix by copying current Paperless
+allow/deny results. Instead, the following interactive local script builds
+the expected ACL **from four independently confirmed document categories**:
+
+- Private document owned by account A: A can read, B must be denied.
+- Private document owned by account B: B can read, A must be denied.
+- Document explicitly shared with both adults through the Eltern scope:
+  A and B can read.
+- Document explicitly shared with both accounts through the Familie scope:
+  A and B can read.
+
+Only use this guided path if the **two OIDC-linked AI identities are in fact
+the two adult Paperless accounts**, each has a suitable genuinely private
+document, and there is one distinct currently present document in each
+shared category. Otherwise STOP and design a different approved matrix.
+These are intended ACL expectations, **not current measured grants**.
+
+On bp-controller, after creating the worktree described below:
+
+    cd "$HOME/bergen-platform-ai-paperless-acl"
+    python3 ansible/scripts/prepare_paperless_oidc_acl_matrix.py \
+      --base "$HOME/bergen-platform"
+
+The script asks **locally, without echoing input**, for the two exact
+Paperless usernames and four real document IDs visible in the Paperless
+UI (A-private, B-private, Eltern, Familie). It requires explicit confirmation
+that owner/group sharing and intended access were reviewed independently.
+It does **not** contact Paperless, read an ACL, use any token, or change a
+document. It writes the eight-case YAML only to the protected site-local
+paperless-ai-acl.local.yml with mode 0600, **only if the file does not
+already exist**; no overwrite or secrets printed. The canonical filename
+is intentionally covered by the existing `ansible/vars/paperless*.local.yml`
+ignore rule in the **main** working tree as well as the PR branch.
+
+Confirm the produced file exists and has restricted permissions with
+`stat -c '%a %n' "$HOME/bergen-platform/ansible/vars/paperless-ai-acl.local.yml"`.
+Do not paste its contents into chat or GitHub.
+
 ## Controller execution
 
 Create a new worktree for the branch feat/bergen-ai-paperless-oidc-acl-audit-20261018
@@ -66,7 +107,7 @@ from the existing repo, then run:
       ansible/playbooks/audit-bergen-ai-paperless-oidc-acl-sample-readonly.yml \
       --vault-id ai@prompt \
       -e oidc_identity_audit_approved=true \
-      -e @$BASE/ansible/vars/bergen-ai-paperless-acl.local.yml
+      -e @$BASE/ansible/vars/paperless-ai-acl.local.yml
 
 Ansible Vault is required for the encrypted inventory, not the application
 API itself. Do not paste the actual private matrix into chat or GitHub.
