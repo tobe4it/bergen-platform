@@ -100,6 +100,34 @@ Confirm the produced file exists and has restricted permissions with
 `stat -c '%a %n' "$HOME/bergen-platform/ansible/vars/paperless-ai-acl.local.yml"`.
 Do not paste its contents into chat or GitHub.
 
+## Paperless username is not the OIDC login name
+
+The matrix field `username` must equal **Paperless Django `User.username`**,
+not the Synology LDAP principal, UPN, LDAP group CN or the Open WebUI
+internal user handle. For instance, Paperless could store `account_a`
+while the Synology login is `account_a@realm.example` (illustrative only).
+
+Open WebUI is **not required** to understand or reuse Paperless usernames.
+PR #108 compares OIDC-linked e-mail and stable subject candidates after
+per-run HMAC protection. The PR #109 Paperless in-process ACL helper first
+resolves the exact configured Paperless username to its `SocialAccount`
+and then demands a distinct matching AI OIDC e-mail+subject candidate.
+Never add realm suffixes heuristically, silently strip them from names,
+or accept an e-mail-only match to bypass a missing subject.
+
+If a matrix was created using an OIDC login instead of the current exact
+Paperless username, review the local `paperless-ai-acl.local.yml` in a
+private editor. Change **only the `username:` values** for A and B in all
+rows; preserve `document_id`, `allow`, `paperless_oidc_acl_profile` and
+approval status only if their scope and ownership remain correct.
+Keep mode 0600. Do not post the file, identities or document IDs.
+
+An `IDENTITY_UNLINKED` failure never means a Paperless ACL was checked.
+On an identity mismatch, the helper returns only the independently
+allowlisted alias-level states `MATRIX_ACCOUNT_A_LINK` and
+`MATRIX_ACCOUNT_B_LINK`, such as `MATCHED` or
+`NO_CONFIGURED_OIDC_LINK`. These do not disclose any name or claim.
+
 ## Partial profile when account B has no private document
 
 Observed on 18 October 2026: account B has **no private documents**.
