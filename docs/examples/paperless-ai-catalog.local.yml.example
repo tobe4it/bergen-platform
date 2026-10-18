@@ -17,6 +17,13 @@ paperless_ai_catalog_batch_size: 1
 # Existing documents are NOT retroactively classified.
 paperless_ai_catalog_min_document_id: 0
 
+# First configure the *native LLM client only* via its guarded ORM playbook.
+# Global Paperless AI UI and embedding features stay DISABLED.
+paperless_ai_catalog_config_action: audit
+paperless_ai_catalog_config_approved: false
+paperless_ai_catalog_config_expected_sha256: ""
+paperless_ai_catalog_config_rollback_approved: false
+
 # The default Ansible run is read-only.
 paperless_ai_catalog_mode: audit
 paperless_ai_catalog_approved: false
