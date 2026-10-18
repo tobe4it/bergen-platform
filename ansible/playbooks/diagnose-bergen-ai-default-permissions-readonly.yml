@@ -74,6 +74,23 @@
               'CONFIG_INVALID', 'CONFIG_MISMATCH', 'DATABASE_READ_FAILED',
               'TIMEOUT', 'EXEC_FAILED', 'UNCLASSIFIED_FAILURE'
             ]
+          - bergen_ai_diagnose_result.APP_STAGE in [
+              'ORM_READ_OK', 'ORM_READ_FAILED', 'ORM_CONFIG_MISMATCH',
+              'IMPORT_OK', 'IMPORT_FAILED', 'PYTHON_STARTED',
+              'PROCESS_NOT_STARTED', 'PROCESS_TIMEOUT', 'PROCESS_LAUNCH_FAILED'
+            ]
+          - bergen_ai_diagnose_result.APP_PACKAGE in ['PRESENT', 'MISSING', 'UNVERIFIED', None]
+          - bergen_ai_diagnose_result.APP_STDERR_CLASS in [
+              'CONTAINER_NOT_FOUND', 'PERMISSION_DENIED', 'PYTHON_BINARY_NOT_FOUND',
+              'MODULE_NOT_FOUND', 'IMPORT_ERROR', 'DATABASE_ERROR',
+              'PYTHON_EXCEPTION', 'OTHER_ERROR', 'NONE'
+            ]
+          - bergen_ai_diagnose_result.APP_ERROR_CLASS in [
+              'ModuleNotFoundError', 'ImportError', 'PermissionError',
+              'OperationalError', 'RuntimeError', 'AttributeError',
+              'TypeError', 'ValueError', 'KeyError', 'OSError', 'SystemExit',
+              'FileNotFoundError', 'AssertionError', 'OTHER', 'NONE'
+            ]
         fail_msg: "Invalid or incomplete read-only diagnostic output."
       no_log: true
 
@@ -87,3 +104,8 @@
           - "CURRENT_SHA256={{ bergen_ai_diagnose_result.CURRENT_SHA256 }}"
           - "BACKUP_FOR_PREVIOUS_STATE={{ bergen_ai_diagnose_result.BACKUP_FOR_PREVIOUS_STATE }}"
           - "APP_ORM_READ={{ bergen_ai_diagnose_result.APP_ORM_READ }}"
+          - "APP_STAGE={{ bergen_ai_diagnose_result.APP_STAGE }}"
+          - "APP_PACKAGE={{ bergen_ai_diagnose_result.APP_PACKAGE | default('UNVERIFIED') }}"
+          - "APP_ERROR_CLASS={{ bergen_ai_diagnose_result.APP_ERROR_CLASS }}"
+          - "APP_STDERR_CLASS={{ bergen_ai_diagnose_result.APP_STDERR_CLASS }}"
+          - "APP_EXIT={{ bergen_ai_diagnose_result.APP_EXIT | default('UNVERIFIED') }}"
