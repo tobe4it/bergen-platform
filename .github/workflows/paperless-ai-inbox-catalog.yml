@@ -6,6 +6,7 @@ on:
       - 'ansible/files/paperless/bergen_ai_catalog_*.py'
       - 'ansible/playbooks/manage-paperless-ai-inbox-catalog.yml'
       - 'ansible/playbooks/manage-paperless-ai-local-ollama.yml'
+      - 'ansible/playbooks/audit-paperless-ai-catalog-runtime-readonly.yml'
       - 'ansible/playbooks/deploy-paperless-ai-inbox-catalog-timer.yml'
       - 'ansible/files/paperless/bergen-ai-catalog-*'
       - 'tests/test_paperless_ai_catalog_policy.py'
@@ -18,6 +19,7 @@ on:
       - 'ansible/files/paperless/bergen_ai_catalog_*.py'
       - 'ansible/playbooks/manage-paperless-ai-inbox-catalog.yml'
       - 'ansible/playbooks/manage-paperless-ai-local-ollama.yml'
+      - 'ansible/playbooks/audit-paperless-ai-catalog-runtime-readonly.yml'
       - 'ansible/playbooks/deploy-paperless-ai-inbox-catalog-timer.yml'
       - 'ansible/files/paperless/bergen-ai-catalog-*'
       - 'tests/test_paperless_ai_catalog_policy.py'
@@ -40,4 +42,5 @@ jobs:
         run: |
           ansible-playbook -i ansible/inventory.yml ansible/playbooks/manage-paperless-ai-inbox-catalog.yml --syntax-check
           ansible-playbook -i ansible/inventory.yml ansible/playbooks/manage-paperless-ai-local-ollama.yml --syntax-check
+          ansible-playbook -i ansible/inventory.yml ansible/playbooks/audit-paperless-ai-catalog-runtime-readonly.yml --syntax-check
           ansible-playbook -i ansible/inventory.yml ansible/playbooks/deploy-paperless-ai-inbox-catalog-timer.yml --syntax-check
