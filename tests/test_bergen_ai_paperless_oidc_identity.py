@@ -244,9 +244,9 @@ class IdentityBoundaryTests(unittest.TestCase):
             [p_row("parent@example.invalid", sub="subject")],
         )
         raw = (
-            "42 objects imported automatically (use -v 2 for details).\\n"
-            "\\n"
-            + JOIN.PAPERLESS_FRAME + json.dumps(p, sort_keys=True) + "\\n"
+            "42 objects imported automatically (use -v 2 for details).\n"
+            "\n"
+            + JOIN.PAPERLESS_FRAME + json.dumps(p, sort_keys=True) + "\n"
         )
         parsed, skipped = JOIN.parse_paperless_stdout(raw)
         self.assertEqual(parsed, p)
@@ -260,8 +260,8 @@ class IdentityBoundaryTests(unittest.TestCase):
         marker = JOIN.PAPERLESS_FRAME
         valid = marker + json.dumps(p)
         cases = (
-            "42 objects imported automatically (use -v 2 for details).\\n",
-            valid + "\\n" + valid,
+            "42 objects imported automatically (use -v 2 for details).\n",
+            valid + "\n" + valid,
             marker + "this is not JSON",
             marker + json.dumps({"AUDIT": "FAILED_CLOSED"}),
         )
