@@ -1,0 +1,167 @@
+---
+# Stage 1: repeat the published, version-pinned read-only OIDC identity
+# preflight from PR #108. Challenge and sealed user IDs remain in volatile
+# Ansible facts for Stage 2; never print or persist them.
+- import_playbook: audit-bergen-ai-paperless-oidc-identity-readonly.yml
+
+# Stage 2: only a bounded, operator-reviewed 2-account / 4-document
+# evidence matrix. Does not provide API tokens to AI, read document bodies,
+# alter Django/guardian ACLs, or enable any integration.
+- name: Verify sampled Paperless document ACL for matching Bergen-AI OIDC identities
+  hosts: localhost
+  gather_facts: false
+  vars:
+    paperless_oidc_acl_host: venombox
+  tasks:
+    - name: Require matching OIDC identities and independent reviewed evidence matrix
+      ansible.builtin.assert:
+        that:
+          - oidc_identity_audit_approved | default(false) | bool
+          - paperless_oidc_acl_audit_approved | default(false) | bool
+          - oidc_identity_comparison.STATUS == 'LINK_CANDIDATES_PRESENT'
+          - oidc_identity_comparison.PAPERLESS_PROVIDER_SELECTION == 'CONFIGURED_OIDC_APP'
+          - oidc_identity_comparison.PAPERLESS_LINK_MISSING == 0
+          - oidc_identity_comparison.SUBJECT_MISMATCH_SAME_EMAIL == 0
+          - oidc_identity_comparison.INACTIVE_PAPERLESS_IDENTITY == 0
+          - oidc_identity_comparison.MATCHED_ACTIVE_EMAIL_AND_SUBJECT > 0
+          - oidc_identity_ai.AUDIT == 'READ_ONLY'
+          - oidc_identity_ephemeral_hmac | length >= 48
+          - paperless_oidc_acl_host == 'venombox'
+          - paperless_oidc_acl_expected_cases is defined
+          - paperless_oidc_acl_expected_cases is sequence
+          - paperless_oidc_acl_expected_cases | length == 8
+        fail_msg: "OIDC_LINKED_ACL_NOT_READY"
+      no_log: true
+
+    - name: Confirm existing guest hostname again before authenticated in-process ACL checks
+      ansible.builtin.command:
+        argv: [pct, exec, '126', --, /bin/hostname, -s]
+      delegate_to: "{{ paperless_oidc_acl_host }}"
+      become: true
+      register: paperless_oidc_acl_guest
+      changed_when: false
+      check_mode: false
+      no_log: true
+
+    - name: Require known Paperless LXC
+      ansible.builtin.assert:
+        that:
+          - paperless_oidc_acl_guest.rc == 0
+          - paperless_oidc_acl_guest.stdout | trim == 'bergen-paperless'
+        fail_msg: "OIDC_LINKED_ACL_GUEST_MISMATCH"
+      no_log: true
+
+    - name: Read effective Paperless Guardian and DRF decisions for verified identity-linked sample
+      ansible.builtin.command:
+        argv:
+          - pct
+          - exec
+          - '126'
+          - --
+          - podman
+          - exec
+          - -i
+          - bergen-paperless
+          - python
+          - /usr/src/paperless/src/manage.py
+          - shell
+          - --verbosity=0
+          - -c
+          - "{{ lookup('ansible.builtin.file', playbook_dir ~ '/../files/paperless/audit_oidc_acl_sample.py') }}"
+        stdin: >-
+          {{ {
+            'key': oidc_identity_ephemeral_hmac,
+            'ai': oidc_identity_ai,
+            'cases': paperless_oidc_acl_expected_cases
+          } | to_json }}
+        stdin_add_newline: true
+      delegate_to: "{{ paperless_oidc_acl_host }}"
+      become: true
+      register: paperless_oidc_acl_raw
+      changed_when: false
+      failed_when: false
+      check_mode: false
+      no_log: true
+
+    - name: Extract only the unique framed Paperless ACL result privately
+      ansible.builtin.set_fact:
+        paperless_oidc_acl_frames: >-
+          {{ paperless_oidc_acl_raw.stdout_lines |
+             select('match', '^BERGEN_PAPERLESS_OIDC_ACL_V1:') | list }}
+      changed_when: false
+      no_log: true
+
+    - name: Require one bounded result frame
+      ansible.builtin.assert:
+        that:
+          - paperless_oidc_acl_frames | length == 1
+          - paperless_oidc_acl_frames[0] | length < 2500
+        fail_msg: "OIDC_LINKED_ACL_FRAME_INVALID"
+      no_log: true
+
+    - name: Parse only framed aggregate result
+      ansible.builtin.set_fact:
+        paperless_oidc_acl_result: >-
+          {{ (paperless_oidc_acl_frames[0] |
+               regex_replace('^BERGEN_PAPERLESS_OIDC_ACL_V1:', '')) | from_json }}
+      changed_when: false
+      no_log: true
+
+    - name: Publish only enumerated and non-sensitive failure category
+      ansible.builtin.debug:
+        msg: >-
+          OIDC_LINKED_ACL_FAILURE={{
+            paperless_oidc_acl_result.CODE
+            if paperless_oidc_acl_result.CODE | default('UNKNOWN') in [
+              'INPUT_INVALID', 'ACTORS_INVALID', 'DOCS_INVALID',
+              'CASES_INVALID', 'AUTHORIZATION_MISMATCH',
+              'IDENTITY_AMBIGUOUS', 'IDENTITY_UNLINKED',
+              'IDENTITY_PRIVILEGED', 'OIDC_CONFIG_MISSING',
+              'OIDC_CONFIG_AMBIGUOUS', 'OIDC_CONFIG_INVALID',
+              'OIDC_PROVIDER_MISSING', 'DOC_MISSING',
+              'API_CHECK_FAILED', 'AUDIT_INTERNAL_ERROR'
+            ] else 'UNCLASSIFIED_FAILURE'
+          }}
+      when: paperless_oidc_acl_raw.rc != 0
+
+    - name: Fail closed on any denied or incomplete ACL decision
+      ansible.builtin.assert:
+        that:
+          - paperless_oidc_acl_raw.rc == 0
+          - paperless_oidc_acl_result.AUDIT == 'READ_ONLY'
+          - paperless_oidc_acl_result.STATUS == 'OIDC_LINKED_PAPERLESS_ACL_SAMPLE_PASS'
+          - paperless_oidc_acl_result.CHANGED is boolean
+          - not paperless_oidc_acl_result.CHANGED
+          - paperless_oidc_acl_result.ACTORS == 2
+          - paperless_oidc_acl_result.DOCUMENTS == 4
+          - paperless_oidc_acl_result.CASES == 8
+          - paperless_oidc_acl_result.GUARDIAN_AND_DRF_CHECKS == 16
+          - paperless_oidc_acl_result.GUARDIAN_AND_DRF_FAIL == 0
+          - paperless_oidc_acl_result.ALLOWED_CASES > 0
+          - paperless_oidc_acl_result.DENIED_CASES > 0
+          - paperless_oidc_acl_result.ISSUER_EQUALITY == 'NOT_PROVEN'
+          - paperless_oidc_acl_result.LIVE_USER_DELEGATION == 'NOT_PROVEN'
+          - paperless_oidc_acl_result.AI_RAG_AUTHORIZATION == 'NOT_PROVEN'
+          - paperless_oidc_acl_result.CHILD_ACCESS_SEPARATION == 'NOT_PROVEN'
+          - paperless_oidc_acl_result.GROUP_REVOCATION == 'NOT_PROVEN'
+        fail_msg: "OIDC_LINKED_ACL_NOT_ACCEPTED"
+      no_log: true
+
+    - name: Report only scoped sampled identity-linked Paperless authorization
+      ansible.builtin.debug:
+        msg:
+          - "AUDIT={{ paperless_oidc_acl_result.AUDIT }}"
+          - "STATUS={{ paperless_oidc_acl_result.STATUS }}"
+          - "ACTORS={{ paperless_oidc_acl_result.ACTORS }}"
+          - "DOCUMENTS={{ paperless_oidc_acl_result.DOCUMENTS }}"
+          - "CASES={{ paperless_oidc_acl_result.CASES }}"
+          - "ALLOWED_CASES={{ paperless_oidc_acl_result.ALLOWED_CASES }}"
+          - "DENIED_CASES={{ paperless_oidc_acl_result.DENIED_CASES }}"
+          - "GUARDIAN_AND_DRF_CHECKS={{ paperless_oidc_acl_result.GUARDIAN_AND_DRF_CHECKS }}"
+          - "GUARDIAN_AND_DRF_FAIL={{ paperless_oidc_acl_result.GUARDIAN_AND_DRF_FAIL }}"
+          - "ISSUER_EQUALITY={{ paperless_oidc_acl_result.ISSUER_EQUALITY }}"
+          - "LIVE_USER_DELEGATION={{ paperless_oidc_acl_result.LIVE_USER_DELEGATION }}"
+          - "AI_RAG_AUTHORIZATION={{ paperless_oidc_acl_result.AI_RAG_AUTHORIZATION }}"
+          - "CHILD_ACCESS_SEPARATION={{ paperless_oidc_acl_result.CHILD_ACCESS_SEPARATION }}"
+          - "GROUP_REVOCATION={{ paperless_oidc_acl_result.GROUP_REVOCATION }}"
+          - "CHANGED={{ paperless_oidc_acl_result.CHANGED }}"
