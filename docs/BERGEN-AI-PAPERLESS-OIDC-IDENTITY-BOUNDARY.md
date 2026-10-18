@@ -73,11 +73,26 @@ the established unprivileged Paperless LXC **126** with its existing
   result may be `REQUIRES_IDENTITY_REVIEW`; that is not permission to
   rewrite accounts or relax the check.
 
-Default Open WebUI provider label `oidc` and Paperless allauth provider
-label `openid_connect` **are only initial inspection selectors**. If the
-installed site's labels differ, pass the actual selector using a private
-ignored Ansible variables file after read-only verification; do not match
-every provider. Neither selector is a hardcoded domain/group namespace.
+The Open WebUI provider link is selected by its exact configured key
+(`oidc` for this deployment). **Paperless's allauth OIDC SocialAccount
+provider is normally the `provider_id` of its configured OIDC app,
+NOT the facade key `openid_connect`.** The first live run searched the
+facade key and found 0 Paperless accounts despite known working Synology SSO.
+The corrected inspector obtains the exact provider ID from the live
+`settings.SOCIALACCOUNT_PROVIDERS['openid_connect']['APPS']` inventory
+without printing provider names, issuer URLs, app secrets or account data.
+Its default selector `auto` is accepted **only when one OIDC app is
+configured**. For multiple apps, the audit **fails closed** until an
+explicit exact OIDC `provider_id` is supplied through a private site-local
+variable and confirmed against the configured app list. A missing or
+ambiguous app mapping also fails closed. Neither app-specific provider ID
+nor logical family group names are assumed common across installations.
+
+If an installation configures its allauth OIDC application only through
+database `SocialApp` records rather than the live settings dictionary, the
+current inspector intentionally returns `OIDC_CONFIG_MISSING`. A separate
+version-reviewed read-only mapping extension is needed; never fall back to
+matching all SocialAccounts or email addresses alone.
 
 **Crucial limitation:** This is *not* proof that both apps use the same
 OIDC issuer: Open WebUI 0.10.2 retains `sub` but does not persist
@@ -108,12 +123,15 @@ BASE="$HOME/bergen-platform"
   -i ansible/inventory.yml \
   -i "$BASE/ansible/inventory.local.yml" \
   ansible/playbooks/audit-bergen-ai-paperless-oidc-identity-readonly.yml \
+  --vault-id ai@prompt \
   -e oidc_identity_audit_approved=true
 )
 ```
 
-No Vault password is needed because no API or OIDC credentials are
-used. Operator privileges for the existing Paperless LXC are required.
+No application API or OIDC bearer token is used. **Ansible still
+requires the existing Vault password to load the encrypted site inventory**,
+even though the audit itself does not request a credential.
+Operator privileges for the existing Paperless LXC are required.
 Expected Ansible result: `changed=0`. A `LINK_CANDIDATES_PRESENT`
 result is a *candidate for further user-bound authorization testing*,
 not acceptance. If no candidates match, do **not** use email-only
