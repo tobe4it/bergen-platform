@@ -2,9 +2,9 @@
 """Prepare a private, independently reviewed ACL EXPECTATION matrix.
 
 Never reads Paperless or the running AI system. It solicits two existing
-non-privileged OIDC-linked Paperless account names and four document IDs;
+non-privileged OIDC-linked Paperless account names and three or four document IDs;
 expected access derives exclusively from the operator-confirmed category
-(private A/private B/shared adult/shared family), NOT the current grants.
+(private A/optional private B/shared adult/shared family), NOT live grants.
 Output: protected, git-ignored site-local file (0600), no overwrite.
 """
 import argparse
@@ -17,44 +17,57 @@ import sys
 
 ALLOWED_FILE = "paperless-ai-acl.local.yml"
 USER_RE = re.compile(r"^[A-Za-z0-9_.@+-]{1,100}$")
-SCOPE_RULES = (
-    ("Privates Dokument des Kontos A", (True, False)),
-    ("Privates Dokument des Kontos B", (False, True)),
-    ("Gemeinsam freigegebenes Eltern-Dokument", (True, True)),
-    ("Gemeinsam freigegebenes Familien-Dokument", (True, True)),
-)
+SCOPE_RULES = {
+    "balanced": (
+        ("Privates Dokument des Kontos A", (True, False)),
+        ("Privates Dokument des Kontos B", (False, True)),
+        ("Gemeinsam freigegebenes Eltern-Dokument", (True, True)),
+        ("Gemeinsam freigegebenes Familien-Dokument", (True, True)),
+    ),
+    # B has no private documents yet: deliberately weaker A-denial coverage.
+    "no-private-b": (
+        ("Privates Dokument des Kontos A", (True, False)),
+        ("Gemeinsam freigegebenes Eltern-Dokument", (True, True)),
+        ("Gemeinsam freigegebenes Familien-Dokument", (True, True)),
+    ),
+}
 
 
 class InvalidMatrix(ValueError):
     pass
 
 
-def build_cases(users, document_ids):
+def build_cases(users, document_ids, profile="balanced"):
+    if profile not in SCOPE_RULES:
+        raise InvalidMatrix("INVALID_PROFILE")
+    rules = SCOPE_RULES[profile]
     if (not isinstance(users, (list, tuple)) or len(users) != 2
         or any(not isinstance(u, str) or not USER_RE.fullmatch(u) for u in users)
         or users[0] == users[1]):
         raise InvalidMatrix("INVALID_IDENTITIES")
     if (not isinstance(document_ids, (list, tuple))
-        or len(document_ids) != 4
+        or len(document_ids) != len(rules)
         or any(type(doc) is not int or doc <= 0 for doc in document_ids)
-        or len(set(document_ids)) != 4):
+        or len(set(document_ids)) != len(rules)):
         raise InvalidMatrix("INVALID_DOCUMENT_IDS")
     return [
         {"username": user, "document_id": doc, "allow": allow}
-        for doc, (_, expectations) in zip(document_ids, SCOPE_RULES)
+        for doc, (_, expectations) in zip(document_ids, rules)
         for user, allow in zip(users, expectations)
     ]
 
 
-def render_matrix(cases):
-    if not isinstance(cases, list) or len(cases) != 8:
+def render_matrix(cases, profile="balanced"):
+    if profile not in SCOPE_RULES or not isinstance(cases, list) or len(cases) != 2 * len(SCOPE_RULES[profile]):
         raise InvalidMatrix("INVALID_CASE_COUNT")
     lines = [
         "---",
         "# Private owner-reviewed expected ACL policy. NO imported live grants.",
         "# Exactly two actual non-staff OIDC-linked Paperless users.",
-        "# Four independently classified existing Paperless documents.",
+        "# Independently classified existing Paperless documents.",
+        "# no-private-b is a limited read-only diagnostic, NOT full denial coverage.",
         "paperless_oidc_acl_audit_approved: true",
+        "paperless_oidc_acl_profile: " + profile,
         "paperless_oidc_acl_expected_cases:",
     ]
     for entry in cases:
@@ -117,6 +130,8 @@ def ask_doc(name):
 def main():
     parser = argparse.ArgumentParser(description="Create a private reviewed Paperless ACL matrix")
     parser.add_argument("--base", required=True, help="Existing main working tree")
+    parser.add_argument("--profile", choices=sorted(SCOPE_RULES), default="balanced",
+                        help="Choose no-private-b when account B has no private document")
     args = parser.parse_args()
     basedir = Path(args.base).expanduser().resolve()
     if not (basedir / "ansible" / "vars").is_dir():
@@ -127,28 +142,35 @@ def main():
     # Intentionally do not inspect current Paperless permissions or user/group
     # lists: doing so would risk using the actual ACL as the policy expectation.
     print("Nur lokal, keine Paperless-Abfrage und kein produktiver Rechte-Write.")
-    print("Voraussetzung: Zwei echte OIDC-verknuepfte, nichtprivilegierte")
-    print("Paperless-Konten mit jeweils einem privaten Dokument.")
-    print("Erwartung: Privat A => nur A, Privat B => nur B,")
-    print("Eltern/Familie => beide Konten. Keine Kindertrennung bewiesen.")
+    print("Zwei echte OIDC-verknuepfte, nichtprivilegierte Paperless-Konten.")
+    print("Profil: " + args.profile)
+    print("Erwartung: nur bestaetigte private und Gruppen-Dokumente.")
+    if args.profile == "no-private-b":
+        print("ACHTUNG: Fuer Konto A gibt es KEINEN Negativtest.")
+        print("Die KI-Freigabe bleibt gesperrt, auch nach erfolgreichem Audit.")
+    print("Keine Kindertrennung bewiesen. Keine aktuellen ACLs kopiert.")
     users = [ask_user("A"), ask_user("B")]
-    ids = [ask_doc(name) for name, _ in SCOPE_RULES]
-    cases = build_cases(users, ids)
-    print("Erwartete Entscheidungen: Konto A 3× erlaubt / 1× verboten;")
-    print("Konto B 3× erlaubt / 1× verboten. Keine aktuellen ACLs kopiert.")
+    ids = [ask_doc(name) for name, _ in SCOPE_RULES[args.profile]]
+    cases = build_cases(users, ids, args.profile)
+    allows = sum(x["allow"] for x in cases)
+    denies = len(cases) - allows
+    print("Erwartete Tests:", len(cases), "davon erlaubt:", allows, "verweigert:", denies)
     approved = input(
         "Sind Konten, Dokumentkategorien und Sollrechte unabhaengig geprueft? "
         "Tippe EXAKT 'FREIGABE': "
     ).strip()
     if approved != "FREIGABE":
         raise InvalidMatrix("REVIEW_NOT_APPROVED")
-    write_private(out, render_matrix(cases))
+    write_private(out, render_matrix(cases, args.profile))
     # Do not disclose usernames, document IDs, or private matrix contents.
     print("PRIVATE_MATRIX_CREATED=YES")
     print("FILE_MODE=0600")
-    print("CASES=8")
-    print("EXPECTED_ALLOWED=6")
-    print("EXPECTED_DENIED=2")
+    print("PROFILE=" + args.profile)
+    print("CASES=" + str(len(cases)))
+    print("EXPECTED_ALLOWED=" + str(allows))
+    print("EXPECTED_DENIED=" + str(denies))
+    print("PER_ACTOR_DENY_COVERAGE=" +
+          ("BOTH_ACTORS" if args.profile == "balanced" else "ONLY_ONE_ACTOR"))
     print("PAPERLESS_ACL_READ=NO")
     print("PRODUCTION_CHANGED=NO")
 
