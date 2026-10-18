@@ -68,6 +68,7 @@ async def main():
         raise SystemExit(2)
 
 asyncio.run(main())
+"""
 
 
 class AuditError(Exception):
