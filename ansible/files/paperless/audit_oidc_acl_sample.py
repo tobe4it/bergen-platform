@@ -45,8 +45,11 @@ def fingerprint(secret, value):
     return hmac.new(secret.encode(), value.encode(), hashlib.sha256).hexdigest()
 
 
-def verify_cases(cases):
-    demand(isinstance(cases, list) and len(cases) == 8, "CASES_INVALID")
+def verify_cases(cases, profile="balanced"):
+    demand(profile in ("balanced", "no-private-b"), "CASES_INVALID")
+    doc_count = 4 if profile == "balanced" else 3
+    demand(isinstance(cases, list)
+           and len(cases) == doc_count * 2, "CASES_INVALID")
     people, docs, seen = set(), set(), set()
     allow_counts = {}
     deny_counts = {}
@@ -65,11 +68,21 @@ def verify_cases(cases):
         docs.add(doc)
         stat = allow_counts if case["allow"] else deny_counts
         stat[name] = stat.get(name, 0) + 1
-    demand(len(people) == 2 and len(docs) == 4
-           and len(seen) == 8, "ACTORS_INVALID")
+    demand(len(people) == 2 and len(docs) == doc_count
+           and len(seen) == doc_count * 2, "ACTORS_INVALID")
     for name in people:
-        demand(allow_counts.get(name, 0) > 0 and deny_counts.get(name, 0) > 0,
-               "CASES_INVALID")
+        demand(allow_counts.get(name, 0) > 0, "CASES_INVALID")
+    # Symmetric baseline requires at least one negative per actor.
+    # Without a B-owned private document, one actor remains untested for
+    # denial: never silently represent a partial sample as full coverage.
+    without_negative = sum(deny_counts.get(name, 0) == 0 for name in people)
+    if profile == "balanced":
+        demand(without_negative == 0, "CASES_INVALID")
+    else:
+        demand(without_negative == 1
+               and sum(allow_counts.values()) == 5
+               and sum(deny_counts.values()) == 1, "CASES_INVALID")
+        # Every document must be represented for each user.
     return people, docs, sum(allow_counts.values()), sum(deny_counts.values())
 
 
@@ -191,19 +204,30 @@ def run():
         demand(isinstance(secret, str) and 48 <= len(secret) <= 120,
                "INPUT_INVALID")
         cases = request.get("cases")
-        people, docs, allowed, denied = verify_cases(cases)
+        profile = request.get("profile", "balanced")
+        people, docs, allowed, denied = verify_cases(cases, profile)
         provider = oidc_provider(
             getattr(settings, "SOCIALACCOUNT_PROVIDERS", None)
         )
         users = bind_users(people, request.get("ai"), secret, provider)
         checks = authorize_examples(cases, users, docs)
-        demand(checks == 16, "AUTHORIZATION_MISMATCH")
+        expected_checks = 2 * len(cases)
+        demand(checks == expected_checks, "AUTHORIZATION_MISMATCH")
+        is_limited = profile == "no-private-b"
         print(FRAME + json.dumps({
             "AUDIT": "READ_ONLY",
-            "STATUS": "OIDC_LINKED_PAPERLESS_ACL_SAMPLE_PASS",
+            "STATUS": (
+                "OIDC_LINKED_PAPERLESS_ACL_SAMPLE_LIMITED"
+                if is_limited else "OIDC_LINKED_PAPERLESS_ACL_SAMPLE_PASS"
+            ),
+            "PROFILE": profile,
+            "PER_ACTOR_DENY_COVERAGE": (
+                "ONE_ACTOR_UNTESTED" if is_limited
+                else "BOTH_ACTORS_TESTED"
+            ),
             "ACTORS": 2,
-            "DOCUMENTS": 4,
-            "CASES": 8,
+            "DOCUMENTS": len(docs),
+            "CASES": len(cases),
             "ALLOWED_CASES": allowed,
             "DENIED_CASES": denied,
             "GUARDIAN_AND_DRF_CHECKS": checks,
