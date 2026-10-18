@@ -9,7 +9,10 @@
     oidc_identity_proxmox_host: venombox
     oidc_identity_paperless_vmid: '126'
     oidc_identity_ai_provider: oidc
-    oidc_identity_paperless_provider: openid_connect
+    # "auto" is accepted only when exactly one OIDC app is declared in
+    # Paperless's live allauth configuration. More than one requires an
+    # exact, explicitly reviewed local selector.
+    oidc_identity_paperless_provider: auto
   tasks:
     - name: Require deliberate approval and reviewed inventory targets
       ansible.builtin.assert:
@@ -166,6 +169,7 @@
       delegate_to: "{{ oidc_identity_proxmox_host }}"
       register: oidc_identity_paperless_raw
       changed_when: false
+      failed_when: false
       check_mode: false
       no_log: true
 
@@ -207,7 +211,10 @@
               'PAPERLESS_STDOUT_INVALID', 'PAPERLESS_FRAME_MISSING',
               'PAPERLESS_FRAME_DUPLICATE', 'PAPERLESS_FRAME_JSON_INVALID',
               'PAPERLESS_FRAME_SCHEMA_INVALID', 'IDENTITY_COMPARE_FAILED',
-              'COMPARE_INTERNAL_ERROR'
+              'COMPARE_INTERNAL_ERROR', 'OIDC_CONFIG_MISSING',
+              'OIDC_CONFIG_AMBIGUOUS', 'OIDC_CONFIG_INVALID',
+              'OIDC_SELECTOR_INVALID', 'OIDC_INSPECTOR_INVALID',
+              'OIDC_INSPECTOR_INTERNAL'
             ] else 'UNCLASSIFIED_FAILURE'
           }}
       when: oidc_identity_compared_raw.rc != 0
@@ -236,6 +243,7 @@
           - oidc_identity_comparison.ISSUER_EQUALITY == 'NOT_PROVEN'
           - oidc_identity_comparison.LIVE_USER_DELEGATION == 'NOT_PROVEN'
           - oidc_identity_comparison.PAPERLESS_DOCUMENT_ACL == 'NOT_PROVEN'
+          - oidc_identity_comparison.PAPERLESS_PROVIDER_SELECTION == 'CONFIGURED_OIDC_APP'
           - oidc_identity_comparison.AUTOMATIC_GROUP_SYNC_SAFE == 'NO'
         fail_msg: The identity preflight cannot be accepted.
       no_log: true
@@ -248,6 +256,7 @@
           - "CHANGED={{ oidc_identity_comparison.CHANGED }}"
           - "AI_OIDC_ACCOUNTS={{ oidc_identity_comparison.AI_OIDC_ACCOUNTS }}"
           - "PAPERLESS_OIDC_ACCOUNTS={{ oidc_identity_comparison.PAPERLESS_OIDC_ACCOUNTS }}"
+          - "PAPERLESS_PROVIDER_SELECTION={{ oidc_identity_comparison.PAPERLESS_PROVIDER_SELECTION }}"
           - "PAPERLESS_SHELL_STATUS_LINES_SUPPRESSED={{ oidc_identity_comparison.PAPERLESS_SHELL_STATUS_LINES_SUPPRESSED }}"
           - "MATCHED_ACTIVE_EMAIL_AND_SUBJECT={{ oidc_identity_comparison.MATCHED_ACTIVE_EMAIL_AND_SUBJECT }}"
           - "PAPERLESS_LINK_MISSING={{ oidc_identity_comparison.PAPERLESS_LINK_MISSING }}"
