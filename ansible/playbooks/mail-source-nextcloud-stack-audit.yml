@@ -142,7 +142,7 @@
           - nextcloud_config.results[0].stdout == 'cron'
           - nextcloud_config.results[1].stdout is match('^[1-9][0-9]+$')
           - nextcloud_config.results[2].stdout == nextcloud_stack_collabora_ip
-        fail_msg: Cron/WOPI configuration drift: inspect the host manually.
+        fail_msg: "Cron/WOPI configuration drift: inspect the host manually."
 
     - name: Inspect rootful Collabora Quadlet filesystem entries
       ansible.builtin.stat:
