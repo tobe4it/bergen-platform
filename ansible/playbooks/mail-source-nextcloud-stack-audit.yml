@@ -38,7 +38,7 @@
           - nextcloud_stack_collabora_ca_chain is defined
           - nextcloud_stack_collabora_ca_chain is match('^/[A-Za-z0-9/._-]+$')
           - nextcloud_stack_collabora_aliasgroup is defined
-          - nextcloud_stack_collabora_aliasgroup is match('^https://[A-Za-z0-9.\\-]+$')
+          - nextcloud_stack_collabora_aliasgroup is match('^https://[A-Za-z0-9.\\\\-]+$')
           - not ansible_check_mode
         fail_msg: Supply reviewed host-specific Nextcloud stack values in ignored local YAML.
       no_log: true
