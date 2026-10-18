@@ -11,6 +11,8 @@ ROOT = Path(__file__).resolve().parents[1]
 POLICY = ROOT / "ansible/files/paperless/bergen_ai_catalog_policy.py"
 RUNNER = ROOT / "ansible/files/paperless/bergen_ai_catalog_runner.py"
 PLAY = ROOT / "ansible/playbooks/manage-paperless-ai-inbox-catalog.yml"
+LOCAL_CONFIG = ROOT / "ansible/files/paperless/bergen_ai_catalog_config.py"
+CONFIG_PLAY = ROOT / "ansible/playbooks/manage-paperless-ai-local-ollama.yml"
 
 
 def load_policy():
@@ -175,6 +177,45 @@ class CatalogPolicyTest(unittest.TestCase):
         self.assertIn("StandardError=null", unit)
         timer_spec = (ROOT / "ansible/files/paperless/bergen-ai-catalog.timer").read_text()
         self.assertIn("OnCalendar=*:0/5", timer_spec)
+
+    def test_native_ai_configuration_is_independent_from_public_ai_features(self):
+        source = LOCAL_CONFIG.read_text()
+        self.assertIn("not effective.ai_enabled", source)
+        self.assertIn("not effective.llm_embedding_backend", source)
+        self.assertIn("settings.LLM_ALLOW_INTERNAL_ENDPOINTS", source)
+        self.assertIn("ApplicationConfiguration.objects.count() == 1", source)
+        self.assertIn("select_for_update()", source)
+        self.assertIn("FINGERPRINT_CHANGED", source)
+        self.assertIn("ROLLBACK_BACKUP_MISSING", source)
+        self.assertIn("O_EXCL", source)
+        self.assertIn("LOCAL_LLM_CONFIG_APPLIED", source)
+        self.assertIn("GLOBAL_AI_OR_INDEX_ALREADY_ACTIVE", source)
+        self.assertIn("llm_backend", source)
+        self.assertIn("llm_model", source)
+        self.assertIn("llm_endpoint", source)
+        self.assertNotIn('obj.ai_enabled = True', source)
+        self.assertNotIn('obj.llm_embedding_backend =', source)
+        self.assertNotIn('setattr(locked, "ai_enabled"', source)
+        self.assertIn("not config.ai_enabled", RUNNER.read_text())
+
+    def test_versioned_ansible_llm_configuration_has_backup_and_fingerprint_gates(self):
+        plays = yaml.safe_load(CONFIG_PLAY.read_text())
+        self.assertEqual(plays[0]["hosts"], "venombox")
+        tasks = plays[0]["tasks"]
+        checks = json.dumps(tasks[0]["ansible.builtin.assert"])
+        for name in ("paperless_ai_catalog_config_approved",
+                     "paperless_ai_catalog_config_expected_sha256",
+                     "paperless_ai_catalog_verified_backup",
+                     "paperless_ai_catalog_config_rollback_approved"):
+            self.assertIn(name, checks)
+        app = next(t for t in tasks if
+                   "Audit or deliberately update" in t.get("name", ""))
+        self.assertTrue(app["no_log"])
+        argv = app["ansible.builtin.command"]["argv"]
+        self.assertIn("bergen_ai_catalog_policy.py", json.dumps(argv))
+        self.assertIn("bergen_ai_catalog_config.py", json.dumps(argv))
+        self.assertIn("stdin", app["ansible.builtin.command"])
+        self.assertFalse(app["failed_when"])
 
     def test_playbook_declines_write_without_backups_and_approval(self):
         plays = yaml.safe_load(PLAY.read_text())
