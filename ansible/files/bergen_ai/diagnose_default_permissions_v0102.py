@@ -16,38 +16,58 @@ APP_PROBE = r"""
 import asyncio
 import hashlib
 import json
+import os
 import sys
 
+ERROR_CLASSES = {
+    "ModuleNotFoundError", "ImportError", "PermissionError",
+    "OperationalError", "RuntimeError", "AttributeError",
+    "TypeError", "ValueError", "KeyError", "OSError",
+    "SystemExit", "FileNotFoundError", "AssertionError",
+}
+
+def mark(value):
+    print("PROBE=" + value, flush=True)
+
+def safe_error(exc):
+    name = type(exc).__name__
+    print("PROBE_ERROR=" + (name if name in ERROR_CLASSES else "OTHER"), flush=True)
+
+mark("PYTHON_STARTED")
+mark("BACKEND_PACKAGE_PRESENT" if os.path.isdir("/app/backend/open_webui") else "BACKEND_PACKAGE_MISSING")
 try:
     from open_webui.config import Config
-except Exception:
-    print("PROBE=IMPORT_FAILED")
+except BaseException as exc:
+    safe_error(exc)
+    mark("IMPORT_FAILED")
     raise SystemExit(2)
+
+mark("IMPORT_OK")
 
 async def main():
     try:
         if not Config.persistent_enabled_for("user.permissions"):
-            print("PROBE=PERSISTENCE_DISABLED")
+            mark("PERSISTENCE_DISABLED")
             raise SystemExit(2)
         value = await Config.get("user.permissions")
         if not isinstance(value, dict):
-            print("PROBE=CONFIG_INVALID")
+            mark("CONFIG_INVALID")
             raise SystemExit(2)
         sha = hashlib.sha256(json.dumps(
             value, sort_keys=True, separators=(",", ":")
         ).encode("utf-8")).hexdigest()
         if sha != json.load(sys.stdin).get("expected_sha256"):
-            print("PROBE=CONFIG_MISMATCH")
+            mark("CONFIG_MISMATCH")
             raise SystemExit(2)
-        print("PROBE=READ_CONFIRMED")
+        mark("READ_CONFIRMED")
     except SystemExit:
         raise
-    except Exception:
-        print("PROBE=DATABASE_READ_FAILED")
+    except BaseException as exc:
+        safe_error(exc)
+        mark("DATABASE_READ_FAILED")
         raise SystemExit(2)
 
 asyncio.run(main())
-"""
 
 
 class AuditError(Exception):
@@ -83,6 +103,28 @@ def check_backup(sha):
         return "UNREADABLE"
 
 
+def classify_stderr(stderr):
+    """Fixed categories only; never return any excerpt of a traceback."""
+    text = stderr.lower()
+    if "no such container" in text or "container not found" in text:
+        return "CONTAINER_NOT_FOUND"
+    if "permission denied" in text:
+        return "PERMISSION_DENIED"
+    if "executable file not found" in text or "executable not found" in text:
+        return "PYTHON_BINARY_NOT_FOUND"
+    if "modulenotfounderror" in text:
+        return "MODULE_NOT_FOUND"
+    if "importerror" in text:
+        return "IMPORT_ERROR"
+    if "operationalerror" in text:
+        return "DATABASE_ERROR"
+    if "traceback" in text:
+        return "PYTHON_EXCEPTION"
+    if text.strip():
+        return "OTHER_ERROR"
+    return "NONE"
+
+
 def probe_app(current_sha):
     try:
         result = subprocess.run(
@@ -94,25 +136,70 @@ def probe_app(current_sha):
             check=False,
         )
     except subprocess.TimeoutExpired:
-        return "TIMEOUT"
+        return {"APP_ORM_READ": "TIMEOUT", "APP_STAGE": "PROCESS_TIMEOUT",
+                "APP_ERROR_CLASS": "NONE", "APP_STDERR_CLASS": "NONE"}
     except Exception:
-        return "EXEC_FAILED"
+        return {"APP_ORM_READ": "EXEC_FAILED", "APP_STAGE": "PROCESS_LAUNCH_FAILED",
+                "APP_ERROR_CLASS": "NONE", "APP_STDERR_CLASS": "NONE"}
+
+    # Whitelist only exact stage markers and known Python exception class names.
+    stages = {
+        "PYTHON_STARTED", "BACKEND_PACKAGE_PRESENT", "BACKEND_PACKAGE_MISSING",
+        "IMPORT_OK", "IMPORT_FAILED", "PERSISTENCE_DISABLED", "CONFIG_INVALID",
+        "CONFIG_MISMATCH", "READ_CONFIRMED", "DATABASE_READ_FAILED",
+    }
+    error_classes = {
+        "ModuleNotFoundError", "ImportError", "PermissionError",
+        "OperationalError", "RuntimeError", "AttributeError",
+        "TypeError", "ValueError", "KeyError", "OSError",
+        "SystemExit", "FileNotFoundError", "AssertionError", "OTHER",
+    }
+    markers = [
+        line.removeprefix("PROBE=")
+        for line in result.stdout.splitlines()
+        if line.startswith("PROBE=") and line.removeprefix("PROBE=") in stages
+    ]
+    errors = [
+        line.removeprefix("PROBE_ERROR=")
+        for line in result.stdout.splitlines()
+        if line.startswith("PROBE_ERROR=") and line.removeprefix("PROBE_ERROR=") in error_classes
+    ]
+    if "IMPORT_OK" in markers:
+        stage = "IMPORT_OK"
+    elif "IMPORT_FAILED" in markers:
+        stage = "IMPORT_FAILED"
+    elif "PYTHON_STARTED" in markers:
+        stage = "PYTHON_STARTED"
+    else:
+        stage = "PROCESS_NOT_STARTED"
 
     accepted = {
         "IMPORT_FAILED", "PERSISTENCE_DISABLED", "CONFIG_INVALID",
-        "CONFIG_MISMATCH", "READ_CONFIRMED", "DATABASE_READ_FAILED"
+        "CONFIG_MISMATCH", "READ_CONFIRMED", "DATABASE_READ_FAILED",
     }
-    # Application may emit startup logs to stdout. Whitelist only exact markers.
-    found = [
-        line.removeprefix("PROBE=")
-        for line in result.stdout.splitlines()
-        if line.startswith("PROBE=") and line.removeprefix("PROBE=") in accepted
-    ]
-    if len(found) != 1:
-        return "UNCLASSIFIED_FAILURE"
-    if (result.returncode == 0) != (found[0] == "READ_CONFIRMED"):
-        return "UNCLASSIFIED_FAILURE"
-    return found[0]
+    terminal = [m for m in markers if m in accepted]
+    outcome = terminal[0] if len(terminal) == 1 else "UNCLASSIFIED_FAILURE"
+    if result.returncode == 0 and outcome != "READ_CONFIRMED":
+        outcome = "UNCLASSIFIED_FAILURE"
+    if result.returncode != 0 and outcome == "READ_CONFIRMED":
+        outcome = "UNCLASSIFIED_FAILURE"
+    if outcome == "READ_CONFIRMED":
+        stage = "ORM_READ_OK"
+    elif outcome == "DATABASE_READ_FAILED":
+        stage = "ORM_READ_FAILED"
+    elif outcome == "CONFIG_MISMATCH":
+        stage = "ORM_CONFIG_MISMATCH"
+    return {
+        "APP_ORM_READ": outcome,
+        "APP_STAGE": stage,
+        "APP_PACKAGE": (
+            "PRESENT" if "BACKEND_PACKAGE_PRESENT" in markers else
+            "MISSING" if "BACKEND_PACKAGE_MISSING" in markers else "UNVERIFIED"
+        ),
+        "APP_ERROR_CLASS": errors[0] if len(errors) == 1 else "NONE",
+        "APP_STDERR_CLASS": classify_stderr(result.stderr),
+        "APP_EXIT": "ZERO" if result.returncode == 0 else "NONZERO",
+    }
 
 
 def audit(req):
@@ -151,15 +238,16 @@ def audit(req):
         if not isinstance(value, dict):
             raise AuditError("Malformed persisted settings")
     current_sha = sha256(value)
-    return {
+    result = {
         "STATUS": "DIAGNOSTIC_COMPLETE",
         "CHANGED": False,
         "STATE": "UNCHANGED" if current_sha == former_sha else "DIFFERENT",
         "CURRENT_SHA256": current_sha,
         "BACKUP_FOR_PREVIOUS_STATE": check_backup(former_sha),
-        "APP_ORM_READ": probe_app(current_sha),
         "AUDIT": "READ_ONLY",
     }
+    result.update(probe_app(current_sha))
+    return result
 
 
 if __name__ == "__main__":
