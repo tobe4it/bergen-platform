@@ -176,6 +176,15 @@ class BaselineContract(unittest.TestCase):
         with self.assertRaises(MODULE.GateError):
             MODULE.execute(req)
 
+    def test_quadlet_will_preserve_persistent_db_rights_after_redeploy(self):
+        defaults = yaml.safe_load((
+            ROOT / "ansible/roles/open_webui/defaults/main.yml"
+        ).read_text())
+        template = (ROOT / "ansible/roles/open_webui/templates/open-webui.container.j2").read_text()
+        self.assertIs(defaults["open_webui_persistent_config"], True)
+        self.assertIn("Environment=ENABLE_PERSISTENT_CONFIG={{ open_webui_persistent_config", template)
+        self.assertNotIn("Environment=ENABLE_PERSISTENT_CONFIG=false", template)
+
     def test_playbook_only_invokes_pinned_python_application_helper(self):
         data = yaml.safe_load(PLAYBOOK.read_text())
         self.assertEqual(len(data), 1)
