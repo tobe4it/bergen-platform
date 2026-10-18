@@ -1,0 +1,123 @@
+---
+# Preview-only family rights plan for Open WebUI v0.10.2.
+# No implementation of apply or rollback exists in this playbook.
+- name: Preview Bergen-AI family permissions without changes
+  hosts: "{{ bergen_ai_family_audit_host | default('__no_selected_family_host__') }}"
+  gather_facts: false
+  serial: 1
+  tasks:
+    - name: Require one approved host and local family group mapping
+      ansible.builtin.assert:
+        that:
+          - bergen_ai_family_audit_host is defined
+          - inventory_hostname == bergen_ai_family_audit_host
+          - ansible_play_hosts_all | length == 1
+          - bergen_ai_family_audit_approved | default(false) | bool
+          - bergen_ai_family_group_expected is defined
+          - bergen_ai_family_group_expected is mapping
+          - (bergen_ai_family_group_expected.keys() | list | sort) == ['adults', 'children', 'family']
+        fail_msg: "Read-only preview requires existing approved exact host and private role map."
+      no_log: true
+
+    - name: Read installed application version
+      ansible.builtin.uri:
+        url: http://127.0.0.1:3000/api/version
+        method: GET
+        status_code: 200
+        use_proxy: false
+        follow_redirects: none
+        return_content: false
+        timeout: 10
+      register: family_plan_version
+      changed_when: false
+      check_mode: false
+      no_log: true
+
+    - name: Reject unreviewed application versions
+      ansible.builtin.assert:
+        that:
+          - family_plan_version.json is mapping
+          - family_plan_version.json.version == '0.10.2'
+        fail_msg: "Planner is compatible only with Open WebUI 0.10.2."
+      no_log: true
+
+    - name: Preview target without database writes or user changes
+      ansible.builtin.command:
+        argv:
+          - python3
+          - -c
+          - "{{ lookup('ansible.builtin.file', playbook_dir ~ '/../files/bergen_ai/plan_family_rights_v0102.py') }}"
+        stdin: >-
+          {{ {
+               'version': family_plan_version.json.version,
+               'expected': bergen_ai_family_group_expected
+             } | to_json }}
+        stdin_add_newline: true
+      register: family_plan_raw
+      changed_when: false
+      check_mode: false
+      no_log: true
+
+    - name: Parse sanitized preview output
+      ansible.builtin.set_fact:
+        family_plan: "{{ family_plan_raw.stdout | from_json }}"
+      changed_when: false
+      no_log: true
+
+    - name: Verify read-only planner output structure
+      ansible.builtin.assert:
+        that:
+          - family_plan.STATUS in ['NEEDS_POLICY_REVIEW', 'READY_FOR_SEPARATE_APPROVAL']
+          - family_plan.AUDIT == 'READ_ONLY'
+          - family_plan.CHANGED is boolean
+          - not family_plan.CHANGED
+          - family_plan.VERSION == 'V0_10_2'
+          - family_plan.NO_MEMBERSHIPS_CHANGED == 'YES'
+          - family_plan.NO_PERSISTED_RIGHTS_CHANGED == 'YES'
+          - family_plan.CURRENT_BUNDLE_SHA256 | length == 64
+          - family_plan.TARGET_BUNDLE_SHA256 | length == 64
+          - family_plan.TARGET_CHILD_MEMORIES == 'ON'
+          - family_plan.TARGET_CHILD_CALENDAR == 'ON'
+          - family_plan.TARGET_CHILD_AUTOMATIONS == 'OFF'
+          - family_plan.TARGET_CHILD_WEB_SEARCH == 'OFF'
+          - family_plan.TARGET_CHILD_IMAGE_GENERATION == 'OFF'
+          - family_plan.TARGET_CHILD_CODE_INTERPRETER == 'OFF'
+          - family_plan.TARGET_CHILD_FILE_UPLOAD == 'OFF'
+          - family_plan.TARGET_CHILD_WEB_UPLOAD == 'OFF'
+          - family_plan.TARGET_CHILD_CHAT_SHARING == 'OFF'
+        fail_msg: "Family rights plan failed to prove the read-only contract."
+      no_log: true
+
+    - name: Report fingerprints and bounded differences for future manual review
+      ansible.builtin.debug:
+        msg:
+          - "STATUS={{ family_plan.STATUS }}"
+          - "AUDIT={{ family_plan.AUDIT }}"
+          - "CHANGED={{ family_plan.CHANGED }}"
+          - "CURRENT_BUNDLE_SHA256={{ family_plan.CURRENT_BUNDLE_SHA256 }}"
+          - "TARGET_BUNDLE_SHA256={{ family_plan.TARGET_BUNDLE_SHA256 }}"
+          - "CURRENT_GLOBAL_SHA256={{ family_plan.CURRENT_GLOBAL_SHA256 }}"
+          - "TARGET_GLOBAL_SHA256={{ family_plan.TARGET_GLOBAL_SHA256 }}"
+          - "CURRENT_GLOBAL_MEMORIES={{ family_plan.CURRENT_GLOBAL_MEMORIES }}"
+          - "CURRENT_GLOBAL_CALENDAR={{ family_plan.CURRENT_GLOBAL_CALENDAR }}"
+          - "CURRENT_GLOBAL_WEB_UPLOAD={{ family_plan.CURRENT_GLOBAL_WEB_UPLOAD }}"
+          - "CURRENT_GLOBAL_CHAT_SHARING={{ family_plan.CURRENT_GLOBAL_CHAT_SHARING }}"
+          - "TARGET_CHILD_MEMORIES={{ family_plan.TARGET_CHILD_MEMORIES }}"
+          - "TARGET_CHILD_CALENDAR={{ family_plan.TARGET_CHILD_CALENDAR }}"
+          - "TARGET_CHILD_AUTOMATIONS={{ family_plan.TARGET_CHILD_AUTOMATIONS }}"
+          - "TARGET_CHILD_WEB_SEARCH={{ family_plan.TARGET_CHILD_WEB_SEARCH }}"
+          - "TARGET_CHILD_IMAGE_GENERATION={{ family_plan.TARGET_CHILD_IMAGE_GENERATION }}"
+          - "TARGET_CHILD_CODE_INTERPRETER={{ family_plan.TARGET_CHILD_CODE_INTERPRETER }}"
+          - "TARGET_CHILD_FILE_UPLOAD={{ family_plan.TARGET_CHILD_FILE_UPLOAD }}"
+          - "TARGET_CHILD_WEB_UPLOAD={{ family_plan.TARGET_CHILD_WEB_UPLOAD }}"
+          - "TARGET_CHILD_CHAT_SHARING={{ family_plan.TARGET_CHILD_CHAT_SHARING }}"
+          - "REMAINING_UNREVIEWED_GROUP_TRUE={{ family_plan.REMAINING_UNREVIEWED_GROUP_TRUE }}"
+          - "REMAINING_UNREVIEWED_WORKSPACE_TRUE={{ family_plan.REMAINING_UNREVIEWED_WORKSPACE_TRUE }}"
+          - "REMAINING_UNREVIEWED_SHARING_TRUE={{ family_plan.REMAINING_UNREVIEWED_SHARING_TRUE }}"
+          - "REMAINING_UNREVIEWED_FEATURES_TRUE={{ family_plan.REMAINING_UNREVIEWED_FEATURES_TRUE }}"
+          - "REMAINING_UNREVIEWED_CHAT_TRUE={{ family_plan.REMAINING_UNREVIEWED_CHAT_TRUE }}"
+          - "REMAINING_UNREVIEWED_ACCESS_GRANTS_TRUE={{ family_plan.REMAINING_UNREVIEWED_ACCESS_GRANTS_TRUE }}"
+          - "REMAINING_UNREVIEWED_OTHER_TRUE={{ family_plan.REMAINING_UNREVIEWED_OTHER_TRUE }}"
+          - "USER_E2E={{ family_plan.USER_E2E }}"
+          - "CHILD_MEMORY_E2E={{ family_plan.CHILD_MEMORY_E2E }}"
+          - "CALENDAR_DELIVERY_E2E={{ family_plan.CALENDAR_DELIVERY_E2E }}"
