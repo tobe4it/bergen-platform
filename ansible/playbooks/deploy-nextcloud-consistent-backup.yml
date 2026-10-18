@@ -66,17 +66,10 @@
         that:
           - backup_nfs_export.stdout == nextcloud_backup_nfs_source
 
-    - name: Verify backup prerequisites without changing services
-      ansible.builtin.command:
-        argv: [command, -v, "{{ item }}"]
-      # Shell built-in command is not executable; use /usr/bin/which instead.
-      changed_when: false
-      loop: []
-      when: false
-
     - name: Verify necessary executables exist
-      ansible.builtin.command:
-        argv: [/usr/bin/which, "{{ item }}"]
+      ansible.builtin.shell: 'command -v "$PROGRAM" >/dev/null'
+      environment:
+        PROGRAM: "{{ item }}"
       loop:
         - python3
         - rsync
