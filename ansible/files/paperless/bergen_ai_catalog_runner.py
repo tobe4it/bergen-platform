@@ -356,16 +356,35 @@ def run():
                    CHANGED=False)
             return
         demand(len(pilot) <= count, "PILOT_BATCH_INVALID")
-        ids = pilot or [d.pk for d in candidates if eligible(
-            d, group, min_id, False)][:count]
-        demand(len(ids) <= count, "BATCH_INVALID")
-        if not ids:
-            report(AUDIT="CONTROLLED", STATUS="NO_ELIGIBLE_DOCUMENTS",
-                   CHANGED=False)
-            return
+        demand(mode != "rollback" or bool(pilot), "PILOT_REQUIRED")
         with init_journal() as db:
             with open(JOURNAL_BASE / "lock", "a+") as lock:
                 fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                ids = list(pilot)
+                if not pilot:
+                    # Already catalogued documents intentionally stay in inbox.
+                    # Skip durable journal entries, otherwise the timer would
+                    # select the same reviewed-pending document forever.
+                    scan_count = 0
+                    for candidate in queryset.order_by("pk").iterator(chunk_size=100):
+                        scan_count += 1
+                        if scan_count > 2000:
+                            break
+                        processed = db.execute(
+                            "SELECT 1 FROM catalogue WHERE document_id=?",
+                            (candidate.pk,),
+                        ).fetchone()
+                        if processed:
+                            continue
+                        if eligible(candidate, group, min_id, False):
+                            ids.append(candidate.pk)
+                            if len(ids) >= count:
+                                break
+                demand(len(ids) <= count, "BATCH_INVALID")
+                if not ids:
+                    report(AUDIT="CONTROLLED", STATUS="NO_ELIGIBLE_DOCUMENTS",
+                           CHANGED=False)
+                    return
                 outcomes = []
                 for doc_id in ids:
                     if mode == "rollback":
@@ -390,7 +409,7 @@ def run():
             "APPROVAL_REQUIRED", "AI_CONFIG_NOT_READY",
             "OLLAMA_NETWORK_NOT_PRIVATE", "WATERMARK_REQUIRED",
             "DATA_MOUNT_NOT_READY", "JOURNAL_UNSAFE", "DOCUMENT_NOT_ELIGIBLE",
-            "PILOT_BATCH_INVALID", "INBOX_REMOVED", "SNAPSHOT_INVALID",
+            "PILOT_BATCH_INVALID", "PILOT_REQUIRED", "INBOX_REMOVED", "SNAPSHOT_INVALID",
             "ROLLBACK_UNAVAILABLE", "ROLLBACK_REVIEW_REQUIRED",
             "INBOX_TAG_REMOVED", "APP_CONFIG_MISSING", "OLLAMA_MODEL_UNAVAILABLE",
         }
