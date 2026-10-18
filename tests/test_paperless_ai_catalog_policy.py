@@ -143,6 +143,39 @@ class CatalogPolicyTest(unittest.TestCase):
                           "document.owner =", "document.created ="):
             self.assertNotIn(forbidden, source)
 
+    def test_runtime_readiness_and_scheduled_activation_guards(self):
+        runner = RUNNER.read_text()
+        self.assertIn("ApplicationConfiguration.objects.exists()", runner)
+        self.assertIn("ollama_model_available(endpoint, model)", runner)
+        self.assertIn('"/api/tags"', runner)
+        self.assertIn("ProxyHandler({})", runner)
+        self.assertIn("NoRedirect()", runner)
+        self.assertIn('model_ready, groups.first()', runner)
+        self.assertIn('"OLLAMA_MODEL_UNAVAILABLE"', runner)
+        timer = ROOT / "ansible/playbooks/deploy-paperless-ai-inbox-catalog-timer.yml"
+        tasks = yaml.safe_load(timer.read_text())[0]["tasks"]
+        guard = str(tasks[0]["ansible.builtin.assert"])
+        for word in (
+            "paperless_ai_catalog_timer_approved",
+            "paperless_ai_catalog_pilot_passed",
+            "paperless_ai_catalog_verified_backup",
+            "paperless_ai_catalog_min_document_id",
+        ):
+            self.assertTrue(word in guard or word.replace(
+                "paperless_ai_catalog_min_document_id",
+                "bp_ai_timer_watermark") in guard)
+        all_text = timer.read_text()
+        self.assertIn("WATERMARK_MUST_EQUAL_LIVE_MAX_DOCUMENT_ID", all_text)
+        self.assertIn('CATALOG_MAX_ID=', all_text)
+        self.assertIn("paperless_ai_catalog_timer_upgrade_approved", all_text)
+        wrapper = (ROOT / "ansible/files/paperless/bergen-ai-catalog-run.sh").read_text()
+        self.assertIn("pct exec 126", wrapper)
+        self.assertIn("podman exec -i bergen-paperless", wrapper)
+        unit = (ROOT / "ansible/files/paperless/bergen-ai-catalog.service").read_text()
+        self.assertIn("StandardError=null", unit)
+        timer_spec = (ROOT / "ansible/files/paperless/bergen-ai-catalog.timer").read_text()
+        self.assertIn("OnCalendar=*:0/5", timer_spec)
+
     def test_playbook_declines_write_without_backups_and_approval(self):
         plays = yaml.safe_load(PLAY.read_text())
         self.assertEqual(len(plays), 1)
