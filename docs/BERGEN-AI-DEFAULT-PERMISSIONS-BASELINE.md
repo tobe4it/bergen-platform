@@ -47,10 +47,14 @@ does not alter OIDC. As an internal API, it must be re-reviewed after a WebUI
 upgrade. It bypasses the HTTP route's event publication; prompt existing user
 sessions to refresh, and validate effective API access separately.
 
-This solution intentionally **does not flip**
-`ENABLE_PERSISTENT_CONFIG=false`: the active configuration is DB-backed and
-the repository Quadlet template currently declares a different value.
-Investigate that deployment drift separately before a future redeployment.
+This workflow does **not** flip persistence during apply or restart the
+container. A previously discovered repository drift was corrected in this PR:
+the Open WebUI role Quadlet template now renders
+`ENABLE_PERSISTENT_CONFIG=True` by default, matching the **observed running
+production instance**. This template change is only committed to Git; the
+Open WebUI service has **not** been redeployed or restarted by this change.
+Review the eventual regular deployment separately, including the current OIDC
+drop-in and local/environment configuration, before allowing a restart.
 
 ## Security and rollback contract
 
