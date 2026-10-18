@@ -61,7 +61,7 @@ class BaselineContract(unittest.TestCase):
         self.backup_override = mock.patch.object(MODULE, "BACKUP_DIR", self.backups)
         self.backup_override.start()
         self.addCleanup(self.backup_override.stop)
-        self.root_override = mock.patch.object(MODULE.os, "geteuid", return_value=0)
+        self.root_override = mock.patch.object(MODULE, "ensure_root", return_value=None)
         self.root_override.start()
         self.addCleanup(self.root_override.stop)
 
