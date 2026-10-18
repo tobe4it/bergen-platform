@@ -127,6 +127,33 @@
           }}
       when: paperless_oidc_acl_raw.rc != 0
 
+    - name: Report only bounded A and B linkage classifications on identity failure
+      ansible.builtin.debug:
+        msg:
+          - >-
+            MATRIX_ACCOUNT_A_LINK={{
+              paperless_oidc_acl_result.ACCOUNT_A_LINK
+              if paperless_oidc_acl_result.ACCOUNT_A_LINK | default('UNKNOWN') in [
+                'MATCHED', 'NO_CONFIGURED_OIDC_LINK',
+                'NOT_LINKED_TO_BERGEN_AI', 'SUBJECT_MISMATCH',
+                'DUPLICATE_OIDC_LINK', 'INACTIVE_OR_PRIVILEGED',
+                'SUBJECT_COLLISION'
+              ] else 'UNCLASSIFIED_FAILURE'
+            }}
+          - >-
+            MATRIX_ACCOUNT_B_LINK={{
+              paperless_oidc_acl_result.ACCOUNT_B_LINK
+              if paperless_oidc_acl_result.ACCOUNT_B_LINK | default('UNKNOWN') in [
+                'MATCHED', 'NO_CONFIGURED_OIDC_LINK',
+                'NOT_LINKED_TO_BERGEN_AI', 'SUBJECT_MISMATCH',
+                'DUPLICATE_OIDC_LINK', 'INACTIVE_OR_PRIVILEGED',
+                'SUBJECT_COLLISION'
+              ] else 'UNCLASSIFIED_FAILURE'
+            }}
+      when:
+        - paperless_oidc_acl_raw.rc != 0
+        - paperless_oidc_acl_result.CODE | default('') == 'IDENTITY_UNLINKED'
+
     - name: Fail closed on any denied or incomplete ACL decision
       ansible.builtin.assert:
         that:
