@@ -14,6 +14,43 @@ class Unsafe(Exception):
 HEX = re.compile(r"^[0-9a-f]{64}$")
 
 
+# The Paperless django-admin shell can emit initialization banners on stdout
+# before the single sealed audit record. Never parse stdout as bare JSON.
+PAPERLESS_FRAME = "BERGEN_PAPERLESS_OIDC_AUDIT_V1:"
+PARSER_ERRORS = frozenset({
+    "PAPERLESS_STDOUT_INVALID",
+    "PAPERLESS_FRAME_MISSING",
+    "PAPERLESS_FRAME_DUPLICATE",
+    "PAPERLESS_FRAME_JSON_INVALID",
+    "PAPERLESS_FRAME_SCHEMA_INVALID",
+})
+
+
+def parse_paperless_stdout(raw):
+    if not isinstance(raw, str) or len(raw) > 300_000:
+        raise Unsafe("PAPERLESS_STDOUT_INVALID")
+    lines = [s.strip() for s in raw.splitlines() if s.strip()]
+    if len(lines) > 40:
+        raise Unsafe("PAPERLESS_STDOUT_INVALID")
+    frames = [line[len(PAPERLESS_FRAME):] for line in lines
+              if line.startswith(PAPERLESS_FRAME)]
+    if not frames:
+        raise Unsafe("PAPERLESS_FRAME_MISSING")
+    if len(frames) != 1:
+        raise Unsafe("PAPERLESS_FRAME_DUPLICATE")
+    try:
+        data = json.loads(frames[0])
+    except (ValueError, TypeError):
+        raise Unsafe("PAPERLESS_FRAME_JSON_INVALID") from None
+    # Validate the canonical envelope before the existing per-account
+    # fingerprint checks in compare(). A FAIL_CLOSED result is not accepted.
+    if (not isinstance(data, dict)
+        or data.get("AUDIT") != "READ_ONLY"
+        or data.get("SYSTEM") != "PAPERLESS"):
+        raise Unsafe("PAPERLESS_FRAME_SCHEMA_INVALID")
+    return data, len(lines) - 1
+
+
 def checked(value):
     if not isinstance(value, str) or HEX.fullmatch(value) is None:
         raise Unsafe("Invalid fingerprint")
@@ -104,10 +141,19 @@ def compare(ai, paperless):
 def main():
     try:
         inp = json.load(sys.stdin)
-        result = compare(inp["ai"], inp["paperless"])
+        paperless, ignored_lines = parse_paperless_stdout(inp["paperless_stdout"])
+        result = compare(inp["ai"], paperless)
+        # Only the number of discarded shell status lines is reported, never
+        # their contents. The untrusted text remains protected by no_log.
+        result["PAPERLESS_SHELL_STATUS_LINES_SUPPRESSED"] = ignored_lines
         print(json.dumps(result, sort_keys=True))
+    except Unsafe as err:
+        code = str(err) if str(err) in PARSER_ERRORS else "IDENTITY_COMPARE_FAILED"
+        print(json.dumps({"AUDIT": "FAILED_CLOSED", "CHANGED": False,
+                          "CODE": code}, sort_keys=True))
+        raise SystemExit(2)
     except Exception:
-        print('{"AUDIT":"FAILED_CLOSED","CHANGED":false}')
+        print('{"AUDIT":"FAILED_CLOSED","CHANGED":false,"CODE":"COMPARE_INTERNAL_ERROR"}')
         raise SystemExit(2)
 
 
