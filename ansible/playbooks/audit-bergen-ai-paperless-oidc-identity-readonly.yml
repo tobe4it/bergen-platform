@@ -1,0 +1,184 @@
+---
+# Read-only OIDC identity JOIN: one short-lived HMAC key, no persistent exports.
+# Does not authenticate a live user or grant access to Paperless knowledge.
+- name: Compare existing Bergen-AI and Paperless OIDC identity links without writes
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  vars:
+    oidc_identity_ai_host: bergen-ai
+    oidc_identity_proxmox_host: venombox
+    oidc_identity_paperless_vmid: '126'
+    oidc_identity_ai_provider: oidc
+    oidc_identity_paperless_provider: openid_connect
+  tasks:
+    - name: Require deliberate approval and reviewed inventory targets
+      ansible.builtin.assert:
+        that:
+          - oidc_identity_audit_approved | default(false) | bool
+          - oidc_identity_ai_host == 'bergen-ai'
+          - oidc_identity_proxmox_host == 'venombox'
+          - oidc_identity_paperless_vmid == '126'
+          - oidc_identity_ai_host in groups['all']
+          - oidc_identity_proxmox_host in groups['all']
+          - oidc_identity_ai_provider is match('^[A-Za-z0-9_.:-]{1,80}$')
+          - oidc_identity_paperless_provider is match('^[A-Za-z0-9_.:-]{1,80}$')
+        fail_msg: Review the one approved AI host and Paperless VMID before running.
+      no_log: true
+
+    - name: Create one-use in-memory challenge shared by both independent audits
+      ansible.builtin.set_fact:
+        oidc_identity_ephemeral_hmac: "{{ lookup('ansible.builtin.password', '/dev/null length=64 chars=ascii_letters,digits') }}"
+      changed_when: false
+      no_log: true
+
+    - name: Read Bergen-AI running version using loopback GET
+      ansible.builtin.uri:
+        url: http://127.0.0.1:3000/api/version
+        method: GET
+        status_code: 200
+        use_proxy: false
+        follow_redirects: none
+        timeout: 10
+        return_content: false
+      delegate_to: "{{ oidc_identity_ai_host }}"
+      register: oidc_identity_version
+      changed_when: false
+      check_mode: false
+      no_log: true
+
+    - name: Require Open WebUI v0.10.2 only
+      ansible.builtin.assert:
+        that:
+          - oidc_identity_version.json is mapping
+          - oidc_identity_version.json.version == '0.10.2'
+        fail_msg: Only the reviewed 0.10.2 SQLite identity layout is supported.
+      no_log: true
+
+    - name: Read sealed Bergen-AI OIDC linkage from SQLite without writes
+      ansible.builtin.command:
+        argv:
+          - python3
+          - -c
+          - "{{ lookup('ansible.builtin.file', playbook_dir ~ '/../files/bergen_ai/audit_oidc_identity_binding_v0102.py') }}"
+        stdin: >-
+          {{ {
+               'version': oidc_identity_version.json.version,
+               'key': oidc_identity_ephemeral_hmac,
+               'provider': oidc_identity_ai_provider
+             } | to_json }}
+        stdin_add_newline: true
+      delegate_to: "{{ oidc_identity_ai_host }}"
+      register: oidc_identity_ai_raw
+      changed_when: false
+      check_mode: false
+      no_log: true
+
+    - name: Require existing confined Paperless guest hostname
+      ansible.builtin.command:
+        argv: [pct, exec, '126', --, /bin/hostname, -s]
+      become: true
+      delegate_to: "{{ oidc_identity_proxmox_host }}"
+      register: oidc_identity_guest_name
+      changed_when: false
+      check_mode: false
+      no_log: true
+
+    - name: Refuse other guests or hostname drift
+      ansible.builtin.assert:
+        that:
+          - oidc_identity_guest_name.rc == 0
+          - oidc_identity_guest_name.stdout | trim == 'bergen-paperless'
+        fail_msg: Wrong existing Paperless guest.
+      no_log: true
+
+    - name: Read sealed Paperless allauth OIDC linkage without changing users
+      ansible.builtin.command:
+        argv:
+          - pct
+          - exec
+          - '126'
+          - --
+          - podman
+          - exec
+          - -i
+          - bergen-paperless
+          - python
+          - /usr/src/paperless/src/manage.py
+          - shell
+          - -c
+          - "{{ lookup('ansible.builtin.file', playbook_dir ~ '/../files/paperless/audit_oidc_identity_binding.py') }}"
+        stdin: >-
+          {{ {
+               'key': oidc_identity_ephemeral_hmac,
+               'provider': oidc_identity_paperless_provider
+             } | to_json }}
+        stdin_add_newline: true
+      become: true
+      delegate_to: "{{ oidc_identity_proxmox_host }}"
+      register: oidc_identity_paperless_raw
+      changed_when: false
+      check_mode: false
+      no_log: true
+
+    - name: Read private fingerprint inventories into in-memory facts
+      ansible.builtin.set_fact:
+        oidc_identity_ai: "{{ oidc_identity_ai_raw.stdout | from_json }}"
+        oidc_identity_paperless: "{{ oidc_identity_paperless_raw.stdout | from_json }}"
+      changed_when: false
+      no_log: true
+
+    - name: Compare only ephemeral keyed fingerprints on controller
+      ansible.builtin.command:
+        argv:
+          - python3
+          - -c
+          - "{{ lookup('ansible.builtin.file', playbook_dir ~ '/../files/bergen_ai/compare_oidc_subject_fingerprints.py') }}"
+        stdin: >-
+          {{ {'ai': oidc_identity_ai,
+              'paperless': oidc_identity_paperless} | to_json }}
+        stdin_add_newline: true
+      register: oidc_identity_compared_raw
+      changed_when: false
+      check_mode: false
+      no_log: true
+
+    - name: Parse bounded result without printing pseudonymous identities
+      ansible.builtin.set_fact:
+        oidc_identity_comparison: "{{ oidc_identity_compared_raw.stdout | from_json }}"
+      changed_when: false
+      no_log: true
+
+    - name: Enforce read-only status and no authorization claims
+      ansible.builtin.assert:
+        that:
+          - oidc_identity_comparison.AUDIT == 'READ_ONLY'
+          - oidc_identity_comparison.STATUS in ['LINK_CANDIDATES_PRESENT', 'REQUIRES_IDENTITY_REVIEW']
+          - oidc_identity_comparison.CHANGED is boolean
+          - not oidc_identity_comparison.CHANGED
+          - oidc_identity_comparison.ISSUER_EQUALITY == 'NOT_PROVEN'
+          - oidc_identity_comparison.LIVE_USER_DELEGATION == 'NOT_PROVEN'
+          - oidc_identity_comparison.PAPERLESS_DOCUMENT_ACL == 'NOT_PROVEN'
+          - oidc_identity_comparison.AUTOMATIC_GROUP_SYNC_SAFE == 'NO'
+        fail_msg: The identity preflight cannot be accepted.
+      no_log: true
+
+    - name: Print aggregate OIDC-link evidence and explicit remaining safety gates
+      ansible.builtin.debug:
+        msg:
+          - "STATUS={{ oidc_identity_comparison.STATUS }}"
+          - "AUDIT={{ oidc_identity_comparison.AUDIT }}"
+          - "CHANGED={{ oidc_identity_comparison.CHANGED }}"
+          - "AI_OIDC_ACCOUNTS={{ oidc_identity_comparison.AI_OIDC_ACCOUNTS }}"
+          - "PAPERLESS_OIDC_ACCOUNTS={{ oidc_identity_comparison.PAPERLESS_OIDC_ACCOUNTS }}"
+          - "MATCHED_ACTIVE_EMAIL_AND_SUBJECT={{ oidc_identity_comparison.MATCHED_ACTIVE_EMAIL_AND_SUBJECT }}"
+          - "PAPERLESS_LINK_MISSING={{ oidc_identity_comparison.PAPERLESS_LINK_MISSING }}"
+          - "SUBJECT_MISMATCH_SAME_EMAIL={{ oidc_identity_comparison.SUBJECT_MISMATCH_SAME_EMAIL }}"
+          - "INACTIVE_PAPERLESS_IDENTITY={{ oidc_identity_comparison.INACTIVE_PAPERLESS_IDENTITY }}"
+          - "SUBJECT_MATCH_EMAIL_DRIFT={{ oidc_identity_comparison.SUBJECT_MATCH_EMAIL_DRIFT }}"
+          - "ISSUER_EQUALITY={{ oidc_identity_comparison.ISSUER_EQUALITY }}"
+          - "GROUP_CLAIM_VALIDITY={{ oidc_identity_comparison.GROUP_CLAIM_VALIDITY }}"
+          - "LIVE_USER_DELEGATION={{ oidc_identity_comparison.LIVE_USER_DELEGATION }}"
+          - "PAPERLESS_DOCUMENT_ACL={{ oidc_identity_comparison.PAPERLESS_DOCUMENT_ACL }}"
+          - "CHILD_ACCESS_SEPARATION={{ oidc_identity_comparison.CHILD_ACCESS_SEPARATION }}"
+          - "AUTOMATIC_GROUP_SYNC_SAFE={{ oidc_identity_comparison.AUTOMATIC_GROUP_SYNC_SAFE }}"
