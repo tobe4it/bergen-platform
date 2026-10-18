@@ -1,0 +1,123 @@
+---
+# Guarded Open WebUI 0.10.2 global default-rights management.
+# audit: no writes; apply/rollback: explicit approval and exact sha256 required.
+# The application ORM, NOT raw SQLite, persists the configuration.
+- name: Manage Bergen-AI least-privilege default rights via installed application
+  hosts: "{{ bergen_ai_family_audit_host | default('__no_selected_family_host__') }}"
+  gather_facts: false
+  serial: 1
+  vars:
+    bergen_ai_defaults_action: audit
+
+  tasks:
+    - name: Require single approved inventory host and private role mapping
+      ansible.builtin.assert:
+        that:
+          - bergen_ai_family_audit_host is defined
+          - inventory_hostname == bergen_ai_family_audit_host
+          - ansible_play_hosts_all | length == 1
+          - bergen_ai_family_group_expected is defined
+          - bergen_ai_family_group_expected is mapping
+          - (bergen_ai_family_group_expected.keys() | list | sort) == ['adults', 'children', 'family']
+          - bergen_ai_defaults_action in ['audit', 'apply', 'rollback']
+          - bergen_ai_family_audit_approved | default(false) | bool
+        fail_msg: "Require exact approved inventory target, explicit mode and private family mapping."
+      no_log: true
+
+    - name: Require fingerprint and separate approval for changes
+      ansible.builtin.assert:
+        that:
+          - bergen_ai_defaults_approved | default(false) | bool
+          - bergen_ai_defaults_expected_sha256 is defined
+          - bergen_ai_defaults_expected_sha256 is string
+          - bergen_ai_defaults_expected_sha256 | length == 64
+          - (bergen_ai_defaults_action != 'rollback') or
+            (bergen_ai_defaults_rollback_selector is defined and
+             bergen_ai_defaults_rollback_selector | length == 64)
+        fail_msg: "Apply/rollback requires explicit approval and exact audit fingerprint."
+      when: bergen_ai_defaults_action != 'audit'
+      no_log: true
+
+    - name: Read running version without a token
+      ansible.builtin.uri:
+        url: http://127.0.0.1:3000/api/version
+        method: GET
+        status_code: 200
+        use_proxy: false
+        follow_redirects: none
+        return_content: false
+        timeout: 10
+      register: bergen_ai_defaults_version
+      changed_when: false
+      check_mode: false
+      no_log: true
+
+    - name: Refuse unreviewed application versions
+      ansible.builtin.assert:
+        that:
+          - bergen_ai_defaults_version.json is mapping
+          - bergen_ai_defaults_version.json.version == '0.10.2'
+        fail_msg: "Bergen-AI rights baseline is reviewed only for Open WebUI 0.10.2."
+      no_log: true
+
+    - name: Execute read-only audit or approved ORM-backed change
+      ansible.builtin.command:
+        argv:
+          - python3
+          - -c
+          - "{{ lookup('ansible.builtin.file', playbook_dir ~ '/../files/bergen_ai/manage_default_permissions_v0102.py') }}"
+        stdin: >-
+          {{ {
+              'version': bergen_ai_defaults_version.json.version,
+              'action': bergen_ai_defaults_action,
+              'expected': bergen_ai_family_group_expected,
+              'approved': bergen_ai_defaults_approved | default(false) | bool,
+              'expected_sha256': bergen_ai_defaults_expected_sha256 | default(''),
+              'rollback_selector': bergen_ai_defaults_rollback_selector | default('')
+             } | to_json }}
+        stdin_add_newline: true
+      register: bergen_ai_defaults_result_raw
+      changed_when: (bergen_ai_defaults_result_raw.stdout | from_json).CHANGED | bool
+      check_mode: false
+      no_log: true
+
+    - name: Decode bounded non-identifying result
+      ansible.builtin.set_fact:
+        bergen_ai_defaults_result: "{{ bergen_ai_defaults_result_raw.stdout | from_json }}"
+      changed_when: false
+      no_log: true
+
+    - name: Require application confirmation and allowed categories
+      ansible.builtin.assert:
+        that:
+          - bergen_ai_defaults_result.STATUS in [
+              'BASELINE_READY', 'BASELINE_ALREADY_RESTRICTED',
+              'BASELINE_APPLIED', 'ALREADY_COMPLIANT', 'BASELINE_ROLLED_BACK'
+            ]
+          - bergen_ai_defaults_result.CHANGED is boolean
+          - (bergen_ai_defaults_action != 'audit') or not bergen_ai_defaults_result.CHANGED
+          - (bergen_ai_defaults_action != 'apply') or
+            bergen_ai_defaults_result.STATUS in ['BASELINE_APPLIED', 'ALREADY_COMPLIANT']
+          - (bergen_ai_defaults_action != 'rollback') or
+            bergen_ai_defaults_result.STATUS == 'BASELINE_ROLLED_BACK'
+        fail_msg: "Incomplete or malformed application configuration change."
+      no_log: true
+
+    - name: Print only sanitized status and fingerprints
+      ansible.builtin.debug:
+        msg:
+          - "ACTION={{ bergen_ai_defaults_action | upper }}"
+          - "STATUS={{ bergen_ai_defaults_result.STATUS }}"
+          - "CHANGED={{ bergen_ai_defaults_result.CHANGED }}"
+          - "CURRENT_SHA256={{ bergen_ai_defaults_result.CURRENT_SHA256 | default('N/A') }}"
+          - "TARGET_SHA256={{ bergen_ai_defaults_result.TARGET_SHA256 | default('N/A') }}"
+          - "CONFIG_SHA256={{ bergen_ai_defaults_result.CONFIG_SHA256 | default('N/A') }}"
+          - "ROLLBACK_SELECTOR={{ bergen_ai_defaults_result.ROLLBACK_SELECTOR | default('N/A') }}"
+          - "BACKUP_STORED={{ bergen_ai_defaults_result.BACKUP_STORED | default('N/A') }}"
+          - "PERSISTENT_CONFIG={{ bergen_ai_defaults_result.PERSISTENT_CONFIG | default('N/A') }}"
+          - "STORAGE={{ bergen_ai_defaults_result.STORAGE | default('N/A') }}"
+          - "MEMBERSHIPS={{ bergen_ai_defaults_result.MEMBERSHIPS | default('N/A') }}"
+          - "DEFAULT_WEB_SEARCH={{ bergen_ai_defaults_result.DEFAULT_WEB_SEARCH | default('N/A') }}"
+          - "DEFAULT_IMAGE_GENERATION={{ bergen_ai_defaults_result.DEFAULT_IMAGE_GENERATION | default('N/A') }}"
+          - "DEFAULT_CODE_INTERPRETER={{ bergen_ai_defaults_result.DEFAULT_CODE_INTERPRETER | default('N/A') }}"
+          - "DEFAULT_FILE_UPLOAD={{ bergen_ai_defaults_result.DEFAULT_FILE_UPLOAD | default('N/A') }}"
