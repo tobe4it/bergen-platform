@@ -74,11 +74,16 @@ vars from the existing audit in the original main checkout.
       origin/feat/nextcloud-consistent-nfs-backup-20261018
     cd "$HOME/bergen-platform-nextcloud-backup"
 
-Confirm reviewed NFS variables in Git-ignored
-$BASE/ansible/vars/nextcloud-backup.local.yml:
+Create a Git-ignored NFS config *in this separate worktree*:
 
+    umask 077
+    cat > ansible/vars/nextcloud-backup.local.yml <<'EOF'
+    ---
     nextcloud_backup_nfs_source: 192.168.6.11:/volume1/nextcloud-backup
     nextcloud_backup_mount: /mnt/nextcloud-backup
+    EOF
+    chmod 600 ansible/vars/nextcloud-backup.local.yml
+    git check-ignore -q ansible/vars/nextcloud-backup.local.yml
 
 The following **single deployment** executes the actual first full backup
 and verifies the committed remote snapshot before enabling the timer:
@@ -89,7 +94,7 @@ and verifies the committed remote snapshot before enabling the timer:
       ansible/playbooks/deploy-nextcloud-consistent-backup.yml \
       -e @"$BASE/ansible/vars/mail-tls.local.yml" \
       -e @"$BASE/ansible/vars/mail-nextcloud-stack.local.yml" \
-      -e @"$BASE/ansible/vars/nextcloud-backup.local.yml"
+      -e @ansible/vars/nextcloud-backup.local.yml
 
 Expect NEXTCLOUD_BACKUP_REMOTE_COMMITTED=YES, timer
 ENABLED_04_30_LOCAL and NEXTCLOUD_ONLINE=YES. If a first run fails,
