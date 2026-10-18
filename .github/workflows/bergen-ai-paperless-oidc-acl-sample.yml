@@ -1,0 +1,33 @@
+name: Bergen-AI Paperless OIDC linked ACL sample
+
+on:
+  pull_request:
+    paths:
+      - 'ansible/files/paperless/audit_oidc_acl_sample.py'
+      - 'ansible/playbooks/audit-bergen-ai-paperless-oidc-acl-sample-readonly.yml'
+      - 'tests/test_bergen_ai_paperless_oidc_acl.py'
+      - 'docs/BERGEN-AI-PAPERLESS-OIDC-ACL-SAMPLE.md'
+      - '.github/workflows/bergen-ai-paperless-oidc-acl-sample.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'ansible/files/paperless/audit_oidc_acl_sample.py'
+      - 'ansible/playbooks/audit-bergen-ai-paperless-oidc-acl-sample-readonly.yml'
+      - 'tests/test_bergen_ai_paperless_oidc_acl.py'
+
+jobs:
+  sampled-acl-safety:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install isolated preflight test dependencies
+        run: python -m pip install 'ansible-core>=2.16,<2.18' 'PyYAML>=6,<7'
+      - name: Verify identity-bound Guardian and DRF policy tests without live access
+        run: python -m unittest discover -s tests -p 'test_bergen_ai_paperless_oidc_acl.py' -v
+      - name: Validate layered read-only Ansible syntax
+        run: ansible-playbook -i ansible/inventory.yml ansible/playbooks/audit-bergen-ai-paperless-oidc-acl-sample-readonly.yml --syntax-check
