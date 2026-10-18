@@ -28,6 +28,12 @@ def fixture_functions():
                                   "authorize_examples")]
     scope = {"hmac": hmac, "hashlib": hashlib, "re": re,
              "HEX64": re.compile(r"^[0-9a-f]{64}$")}
+    states = next(node for node in tree.body
+                  if isinstance(node, ast.Assign) and any(
+                      isinstance(t, ast.Name) and t.id == "SAFE_ACTOR_STATES"
+                      for t in node.targets
+                  ))
+    scope["SAFE_ACTOR_STATES"] = frozenset(ast.literal_eval(states.value.args[0]))
     exec(compile(ast.Module(body=selected, type_ignores=[]),
                  str(PROBE), "exec"), scope)
     return scope
@@ -259,6 +265,47 @@ class Tests(unittest.TestCase):
         self.assertNotIn("a@example.invalid", json.dumps({
             "matched": len(actors), "provider": manager.selected_provider
         }))
+
+    def test_wrong_paperless_username_reports_only_actor_alias(self):
+        # Paperless username may be a local short name, while the user's
+        # Synology sign-in value is a realm-qualified identifier.
+        FakeSocialAccount.objects = FakeManager([
+            FakeLink(FakeUser("parent_a", "a@example.invalid"), uid="subject-a"),
+            FakeLink(FakeUser("parent_b", "b@example.invalid"), uid="subject-b"),
+        ])
+        LIB["bind_users"].__globals__["SocialAccount"] = FakeSocialAccount
+        LIB["bind_users"].__globals__["User"] = FakeUser
+        with self.assertRaises(LIB["AuditError"]) as failure:
+            LIB["bind_users"](
+                {"parent_a", "parent_b@bergen.invalid"},
+                ai_rows(), KEY, "synology-synthetic",
+                ["parent_a", "parent_b@bergen.invalid"]
+            )
+        self.assertEqual(str(failure.exception), "IDENTITY_UNLINKED")
+        self.assertEqual(failure.exception.actor_states, {
+            "A": "MATCHED", "B": "NO_CONFIGURED_OIDC_LINK"
+        })
+        self.assertNotIn("parent_b@bergen.invalid",
+                         str(failure.exception.actor_states))
+        play = PLAY.read_text()
+        self.assertIn("MATRIX_ACCOUNT_A_LINK", play)
+        self.assertIn("MATRIX_ACCOUNT_B_LINK", play)
+
+    def test_wrong_oidc_subject_is_classified_without_identifiers(self):
+        FakeSocialAccount.objects = FakeManager([
+            FakeLink(FakeUser("parent_a", "a@example.invalid"), uid="wrong-sub"),
+            FakeLink(FakeUser("parent_b", "b@example.invalid"), uid="subject-b"),
+        ])
+        LIB["bind_users"].__globals__["SocialAccount"] = FakeSocialAccount
+        LIB["bind_users"].__globals__["User"] = FakeUser
+        with self.assertRaises(LIB["AuditError"]) as failure:
+            LIB["bind_users"](
+                {"parent_a", "parent_b"}, ai_rows(), KEY,
+                "synology-synthetic", ["parent_a", "parent_b"]
+            )
+        self.assertEqual(failure.exception.actor_states, {
+            "A": "SUBJECT_MISMATCH", "B": "MATCHED"
+        })
 
     def test_same_email_wrong_sub_cannot_bind(self):
         FakeSocialAccount.objects = FakeManager([
