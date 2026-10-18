@@ -154,6 +154,16 @@ class IdentityBoundaryTests(unittest.TestCase):
         plays = yaml.safe_load(PLAY_FILE.read_text())
         self.assertEqual(len(plays), 1)
         self.assertEqual(plays[0]["hosts"], "localhost")
+        # A play-level local connection could redirect delegated remote API
+        # checks to bp-controller's own loopback port 3000.
+        self.assertNotIn("connection", plays[0])
+        tasks_by_name = {task.get("name"): task for task in plays[0]["tasks"]}
+        hostname_check = tasks_by_name["Read target hostname from delegated Bergen-AI guest"]
+        self.assertEqual(hostname_check["delegate_to"], "{{ oidc_identity_ai_host }}")
+        self.assertTrue(hostname_check["no_log"])
+        assert_task = tasks_by_name["Refuse AI host identity mismatch before HTTP or identity reads"]
+        self.assertTrue(assert_task["no_log"])
+        self.assertIn("oidc_identity_ai_hostname.stdout", str(assert_task))
         allowed = {
             "ansible.builtin.assert", "ansible.builtin.uri",
             "ansible.builtin.command", "ansible.builtin.set_fact",
