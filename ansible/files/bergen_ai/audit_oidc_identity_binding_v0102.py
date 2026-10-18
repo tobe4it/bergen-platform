@@ -67,6 +67,11 @@ def read_rows(dbpath, secret, provider):
             account = json.loads(oauth) if isinstance(oauth, str) else oauth
         except (ValueError, TypeError):
             raise Unsafe("OAUTH_JSON_INVALID") from None
+        # SQLAlchemy's JSON column stores Python None as JSON text "null"
+        # by default. An account without an OIDC link is not malformed.
+        # Accept only actual JSON null here; arrays/scalars still fail closed.
+        if account is None:
+            continue
         if not isinstance(account, dict):
             raise Unsafe("OAUTH_SHAPE_INVALID")
         if provider not in account:
