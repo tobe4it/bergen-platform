@@ -1,0 +1,323 @@
+---
+# Read-only adoption of the already-running production Nextcloud/Collabora host.
+# Never install packages, change crypto policy, replace configuration, or restart.
+# All deployment-specific identities and paths come from Git-ignored local vars.
+- name: Register the approved mail-host Nextcloud stack
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  tasks:
+    - name: Require site-reviewed target and stack identity
+      ansible.builtin.assert:
+        that:
+          - mail_tls_source_address is defined
+          - mail_tls_source_ssh_user is defined
+          - nextcloud_stack_host_fqdn is defined
+          - nextcloud_stack_host_fqdn is match('^[a-z0-9][a-z0-9.-]*[a-z0-9]$')
+          - nextcloud_stack_cloud_name is defined
+          - nextcloud_stack_cloud_name is match('^[a-z0-9][a-z0-9.-]*[a-z0-9]$')
+          - nextcloud_stack_office_name is defined
+          - nextcloud_stack_office_name is match('^[a-z0-9][a-z0-9.-]*[a-z0-9]$')
+          - nextcloud_stack_cloud_name != nextcloud_stack_office_name
+          - nextcloud_stack_root is defined
+          - nextcloud_stack_root is match('^/[A-Za-z0-9/._-]+$')
+          - nextcloud_stack_office_vhost is defined
+          - nextcloud_stack_office_vhost is match('^/etc/nginx/conf[.]d/[a-z0-9.-]+[.]conf$')
+          - nextcloud_stack_cert_lineage is defined
+          - nextcloud_stack_cert_lineage is match('^[A-Za-z0-9._-]+$')
+          - nextcloud_stack_cloud_hook is defined
+          - nextcloud_stack_cloud_hook is match('^/etc/letsencrypt/renewal-hooks/deploy/[A-Za-z0-9._-]+$')
+          - nextcloud_stack_collabora_image is defined
+          - nextcloud_stack_collabora_image is match('^docker[.]io/collabora/code@sha256:[0-9a-f]{64}$')
+          - nextcloud_stack_collabora_subnet is defined
+          - nextcloud_stack_collabora_subnet is match('^[0-9.]+/[0-9]+$')
+          - nextcloud_stack_collabora_gateway is defined
+          - nextcloud_stack_collabora_gateway is match('^[0-9.]+$')
+          - nextcloud_stack_collabora_ip is defined
+          - nextcloud_stack_collabora_ip is match('^[0-9.]+$')
+          - nextcloud_stack_collabora_ca_chain is defined
+          - nextcloud_stack_collabora_ca_chain is match('^/[A-Za-z0-9/._-]+$')
+          - nextcloud_stack_collabora_aliasgroup is defined
+          - nextcloud_stack_collabora_aliasgroup is match('^https://[A-Za-z0-9.\\\\-]+$')
+          - not ansible_check_mode
+        fail_msg: Supply reviewed host-specific Nextcloud stack values in ignored local YAML.
+      no_log: true
+
+    - name: Register only the approved target
+      ansible.builtin.add_host:
+        name: selected-nextcloud-mail-host
+        groups: selected_nextcloud_mail_hosts
+        ansible_host: "{{ mail_tls_source_address }}"
+        ansible_user: "{{ mail_tls_source_ssh_user }}"
+        ansible_python_interpreter: /usr/bin/python3
+      changed_when: false
+
+- name: Audit the adopted production Nextcloud and Collabora stack
+  hosts: selected_nextcloud_mail_hosts
+  gather_facts: false
+  become: true
+  any_errors_fatal: true
+  vars:
+    quadlet_dir: /etc/containers/systemd
+    cert_dir: "/etc/letsencrypt/live/{{ nextcloud_stack_cert_lineage }}"
+    cron_line: "*/5 * * * * /bin/php -f {{ nextcloud_stack_root }}/cron.php"
+    php_required: [ldap, sodium, igbinary, msgpack, imagick, smbclient]
+  tasks:
+    - name: Read host identity and system crypto policy
+      ansible.builtin.command:
+        argv: "{{ item }}"
+      loop:
+        - [hostname, -f]
+        - [update-crypto-policies, --show]
+      register: target_identity
+      changed_when: false
+
+    - name: Require exactly the reviewed server and FUTURE crypto policy
+      ansible.builtin.assert:
+        that:
+          - target_identity.results[0].stdout == nextcloud_stack_host_fqdn
+          - target_identity.results[1].stdout == 'FUTURE'
+
+    - name: Check that the existing services are active
+      ansible.builtin.command:
+        argv: [systemctl, is-active, --quiet, "{{ item }}"]
+      loop: [nginx, php-fpm, crond, bergen-collabora.service]
+      changed_when: false
+
+    - name: Inspect PHP version and loaded CLI and FPM extensions
+      ansible.builtin.command:
+        argv: "{{ item }}"
+      loop:
+        - [php, -r, 'echo PHP_MAJOR_VERSION,".",PHP_MINOR_VERSION;']
+        - [php, -m]
+        - [php-fpm, -m]
+      register: php_inspect
+      changed_when: false
+
+    - name: Require PHP 8.3 and all migration modules in CLI and FPM
+      ansible.builtin.assert:
+        that:
+          - php_inspect.results[0].stdout == '8.3'
+          - php_required | difference(php_inspect.results[1].stdout_lines | map('lower') | list) | length == 0
+          - php_required | difference(php_inspect.results[2].stdout_lines | map('lower') | list) | length == 0
+
+    - name: Confirm installed Imagick and SMB packages
+      ansible.builtin.command:
+        argv: [rpm, -q, "{{ item }}"]
+      loop: [php-pecl-imagick, php-smbclient]
+      changed_when: false
+
+    - name: Confirm SMB compatibility alias belongs to an installed RPM
+      ansible.builtin.command:
+        argv: [rpm, -q, --whatprovides, php-libsmbclient]
+      changed_when: false
+
+    - name: Read Apache crontab without rewriting unrelated jobs
+      ansible.builtin.command:
+        argv: [crontab, -u, apache, -l]
+      register: apache_cron
+      changed_when: false
+
+    - name: Require one five-minute background job and no duplicate
+      ansible.builtin.assert:
+        that:
+          - apache_cron.stdout_lines | select('equalto', cron_line) | list | length == 1
+          - apache_cron.stdout_lines | select('search', 'cron[.]php') | list | length == 1
+          - "'MAILTO=\"\"' in apache_cron.stdout_lines"
+
+    - name: Inspect Nextcloud background mode, last cron completion and WOPI
+      ansible.builtin.command:
+        argv: "{{ item }}"
+      loop:
+        - [sudo, -u, apache, php, "{{ nextcloud_stack_root }}/occ", config:app:get, core, backgroundjobs_mode]
+        - [sudo, -u, apache, php, "{{ nextcloud_stack_root }}/occ", config:app:get, core, lastcron]
+        - [sudo, -u, apache, php, "{{ nextcloud_stack_root }}/occ", config:app:get, richdocuments, wopi_allowlist]
+      register: nextcloud_config
+      changed_when: false
+      no_log: true
+
+    - name: Verify cron mode and fixed-IP-only WOPI allowlist
+      ansible.builtin.assert:
+        that:
+          - nextcloud_config.results[0].stdout == 'cron'
+          - nextcloud_config.results[1].stdout is match('^[1-9][0-9]+$')
+          - nextcloud_config.results[2].stdout == nextcloud_stack_collabora_ip
+        fail_msg: "Cron/WOPI configuration drift: inspect the host manually."
+
+    - name: Inspect rootful Collabora Quadlet filesystem entries
+      ansible.builtin.stat:
+        path: "{{ quadlet_dir }}/{{ item }}"
+        follow: false
+      loop: [bergen-collabora.network, bergen-collabora.container]
+      register: quadlet_stat
+
+    - name: Refuse missing, symlinked or non-root-owned Quadlet files
+      ansible.builtin.assert:
+        that:
+          - quadlet_stat.results | map(attribute='stat.isreg') | list == [true, true]
+          - quadlet_stat.results | map(attribute='stat.islnk') | list == [false, false]
+          - quadlet_stat.results | map(attribute='stat.pw_name') | list == ['root', 'root']
+
+    - name: Read deployed rootful Quadlet files privately
+      ansible.builtin.slurp:
+        src: "{{ quadlet_dir }}/{{ item }}"
+      loop: [bergen-collabora.network, bergen-collabora.container]
+      register: quadlet_content
+      no_log: true
+
+    - name: Require exact image, bridge, mount and systemd baseline
+      ansible.builtin.assert:
+        that:
+          - (quadlet_content.results[0].content | b64decode) == lookup('template', '../templates/mail-nextcloud-stack/bergen-collabora.network.j2')
+          - (quadlet_content.results[1].content | b64decode) == lookup('template', '../templates/mail-nextcloud-stack/bergen-collabora.container.j2')
+        fail_msg: Existing Quadlets differ from the adopted production baseline.
+      no_log: true
+
+    - name: Inspect live Collabora container, not only its Quadlet
+      ansible.builtin.command:
+        argv: [podman, inspect, bergen-collabora]
+      register: container_inspect
+      changed_when: false
+      no_log: true
+
+    - name: Require running container on its reviewed fixed IP
+      ansible.builtin.assert:
+        that:
+          - >-
+            ((container_inspect.stdout | from_json | first).NetworkSettings.Networks
+             | dict2items | map(attribute='value.IPAddress') | list)
+            == [nextcloud_stack_collabora_ip]
+          - (container_inspect.stdout | from_json | first).State.Running | bool
+
+    - name: Inspect Collabora's effective Nextcloud hostname resolution
+      ansible.builtin.command:
+        argv: [podman, exec, bergen-collabora, getent, ahostsv4, "{{ nextcloud_stack_cloud_name }}"]
+      register: container_dns
+      changed_when: false
+
+    - name: Require Nextcloud to resolve exclusively to the bridge gateway
+      ansible.builtin.assert:
+        that:
+          - container_dns.stdout_lines | length > 0
+          - container_dns.stdout_lines | map('split') | map('first') | unique | list == [nextcloud_stack_collabora_gateway]
+
+    - name: Verify Collabora-to-Nextcloud HTTPS without TLS exceptions
+      ansible.builtin.command:
+        argv:
+          - podman
+          - exec
+          - bergen-collabora
+          - curl
+          - --noproxy
+          - '*'
+          - -fsS
+          - --connect-timeout
+          - '5'
+          - --max-time
+          - '15'
+          - -o
+          - /dev/null
+          - -w
+          - '%{http_code} %{ssl_verify_result}'
+          - "https://{{ nextcloud_stack_cloud_name }}/status.php"
+      register: collabora_cloud_https
+      changed_when: false
+
+    - name: Require Nextcloud status 200 with trusted certificate
+      ansible.builtin.assert:
+        that: ["collabora_cloud_https.stdout == '200 0'"]
+
+    - name: Check Office Nginx file is regular and root-owned
+      ansible.builtin.stat:
+        path: "{{ nextcloud_stack_office_vhost }}"
+        follow: false
+      register: office_vhost_stat
+
+    - name: Refuse symlinks or unknown Office Nginx config target
+      ansible.builtin.assert:
+        that:
+          - office_vhost_stat.stat.isreg | default(false)
+          - not (office_vhost_stat.stat.islnk | default(false))
+          - office_vhost_stat.stat.pw_name == 'root'
+
+    - name: Read effective Nginx configuration (also validates syntax)
+      ansible.builtin.command:
+        argv: [nginx, -T]
+      register: nginx_effective
+      changed_when: false
+      no_log: true
+
+    - name: Inspect the Office VHost and existing renewal hook privately
+      ansible.builtin.slurp:
+        src: "{{ item }}"
+      loop:
+        - "{{ nextcloud_stack_office_vhost }}"
+        - "{{ nextcloud_stack_cloud_hook }}"
+      register: nginx_files
+      no_log: true
+
+    - name: Require shared wildcard paths, 100M and unchanged reload hook
+      ansible.builtin.assert:
+        that:
+          - "(nginx_files.results[0].content | b64decode).count(cert_dir ~ '/fullchain.pem') == 1"
+          - "(nginx_files.results[0].content | b64decode).count(cert_dir ~ '/privkey.pem') == 1"
+          - "(nginx_files.results[0].content | b64decode) is search('(?m)^\\s*client_max_body_size\\s+100M\\s*;')"
+          - "nginx_effective.stdout.count(cert_dir ~ '/fullchain.pem') >= 2"
+          - "nginx_effective.stdout.count(cert_dir ~ '/privkey.pem') >= 2"
+          - "nginx_effective.stdout is search('(?m)^# configuration file ' ~ (nextcloud_stack_office_vhost | regex_escape) ~ ':$')"
+          - "('/etc/letsencrypt/live/' ~ nextcloud_stack_office_name ~ '/') not in nginx_effective.stdout"
+          - "('RENEWED_LINEAGE' in (nginx_files.results[1].content | b64decode))"
+          - "(nginx_files.results[1].content | b64decode).count('/etc/letsencrypt/live/' ~ nextcloud_stack_cert_lineage) >= 1"
+          - "('/usr/sbin/nginx -t' in (nginx_files.results[1].content | b64decode))"
+          - "('/usr/bin/systemctl reload nginx' in (nginx_files.results[1].content | b64decode))"
+        fail_msg: Nginx Office certificate, body size or lineage hook drifted.
+      no_log: true
+
+    - name: Verify wildcard certificate covers both server names
+      ansible.builtin.command:
+        argv: [openssl, x509, -in, "{{ cert_dir }}/fullchain.pem", -noout, -checkhost, "{{ item }}"]
+      loop: ["{{ nextcloud_stack_cloud_name }}", "{{ nextcloud_stack_office_name }}"]
+      register: wildcard_names
+      changed_when: false
+
+    - name: Refuse certificates which do not match either requested hostname
+      ansible.builtin.assert:
+        that:
+          - wildcard_names.results | map(attribute='stdout') | select('search', 'does match certificate') | list | length == 2
+
+    - name: Require at least 30 days of certificate validity
+      ansible.builtin.command:
+        argv: [openssl, x509, -in, "{{ cert_dir }}/fullchain.pem", -noout, -checkend, '2592000']
+      changed_when: false
+
+    - name: Check Office discovery on Nginx localhost with trusted TLS
+      ansible.builtin.command:
+        argv:
+          - curl
+          - --noproxy
+          - '*'
+          - -fsS
+          - --resolve
+          - "{{ nextcloud_stack_office_name }}:443:127.0.0.1"
+          - -o
+          - /dev/null
+          - -w
+          - '%{http_code} %{ssl_verify_result}'
+          - "https://{{ nextcloud_stack_office_name }}/hosting/discovery"
+      register: office_discovery
+      changed_when: false
+
+    - name: Require healthy Collabora discovery and TLS verification
+      ansible.builtin.assert:
+        that: ["office_discovery.stdout == '200 0'"]
+
+    - name: Report reviewed and drift-free adopted production configuration
+      ansible.builtin.debug:
+        msg:
+          status: ADOPTED_READ_ONLY
+          cloud_host: "{{ nextcloud_stack_cloud_name }}"
+          office_host: "{{ nextcloud_stack_office_name }}"
+          collabora_ip: "{{ nextcloud_stack_collabora_ip }}"
+          files_changed: false
+          services_restarted: false
+          nginx_reloaded: false

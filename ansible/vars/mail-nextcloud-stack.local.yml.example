@@ -1,0 +1,21 @@
+---
+# Copy to ansible/vars/mail-nextcloud-stack.local.yml (Git-ignored).
+# Real hostnames, IPs, paths and pinned image digest belong ONLY in that local file.
+# Also supply existing ansible/vars/mail-tls.local.yml (SSH identity).
+nextcloud_stack_host_fqdn: mail.example.invalid
+nextcloud_stack_cloud_name: cloud.example.invalid
+nextcloud_stack_office_name: office.example.invalid
+nextcloud_stack_root: /srv/nextcloud/CHANGE_ME/html
+nextcloud_stack_office_vhost: /etc/nginx/conf.d/office.example.invalid.conf
+nextcloud_stack_cert_lineage: CHANGE_ME_CERTBOT_LINEAGE
+nextcloud_stack_cloud_hook: /etc/letsencrypt/renewal-hooks/deploy/CHANGE_ME_HOOK
+
+# Retain precisely the already working rootful Quadlet network / image.
+nextcloud_stack_collabora_image: docker.io/collabora/code@sha256:REPLACE_WITH_64_HEX_DIGEST
+nextcloud_stack_collabora_subnet: 10.200.77.0/29
+nextcloud_stack_collabora_gateway: 10.200.77.1
+nextcloud_stack_collabora_ip: 10.200.77.2
+nextcloud_stack_collabora_ca_chain: /opt/collabora/code/etc/coolwsd/ca-chain.cert.pem
+# Exact value from the effective Environment=aliasgroup1 line in the running Quadlet.
+# Keep each backslash literally; YAML single quotes do not interpret backslash escapes.
+nextcloud_stack_collabora_aliasgroup: 'https://cloud\\.example\\.invalid'
