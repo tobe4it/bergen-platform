@@ -112,6 +112,10 @@ class FailedApplyDiagnosisTests(unittest.TestCase):
         self.assertNotIn("DELETE FROM", source)
         self.assertNotIn("UPDATE config", source)
         self.assertIn("Config.get", source)
+        self.assertIn("initialize_existing_secret", source)
+        self.assertIn("from open_webui.models.config import Config", source)
+        self.assertNotIn("from open_webui.config import Config", source)
+        self.assertNotIn("WEBUI_AUTH=False", source)
         self.assertNotIn("vault_open_webui_admin_token", PLAY.read_text())
 
 
