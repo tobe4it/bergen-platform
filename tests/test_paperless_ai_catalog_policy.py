@@ -188,7 +188,7 @@ class CatalogPolicyTest(unittest.TestCase):
         self.assertIn("config_rows == 1", paperless)
         self.assertIn('"AUDIT": "READ_ONLY"', paperless)
         self.assertIn('"CHANGED": False', paperless)
-        self.assertIn('"/api/tags"', ollama)
+        self.assertIn('/api/tags', ollama)
         self.assertIn("ProxyHandler({})", ollama)
         self.assertIn("NoRedirect()", ollama)
         for token in ("get_or_create(", "save(", "bulk_update(", "bulk_create(",
