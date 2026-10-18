@@ -153,6 +153,7 @@
           - python
           - /usr/src/paperless/src/manage.py
           - shell
+          - --verbosity=0
           - -c
           - "{{ lookup('ansible.builtin.file', playbook_dir ~ '/../files/paperless/audit_oidc_identity_binding.py') }}"
         stdin: >-
@@ -171,7 +172,6 @@
     - name: Read private fingerprint inventories into in-memory facts
       ansible.builtin.set_fact:
         oidc_identity_ai: "{{ oidc_identity_ai_raw.stdout | from_json }}"
-        oidc_identity_paperless: "{{ oidc_identity_paperless_raw.stdout | from_json }}"
       changed_when: false
       no_log: true
 
@@ -183,7 +183,7 @@
           - "{{ lookup('ansible.builtin.file', playbook_dir ~ '/../files/bergen_ai/compare_oidc_subject_fingerprints.py') }}"
         stdin: >-
           {{ {'ai': oidc_identity_ai,
-              'paperless': oidc_identity_paperless} | to_json }}
+              'paperless_stdout': oidc_identity_paperless_raw.stdout} | to_json }}
         stdin_add_newline: true
       register: oidc_identity_compared_raw
       changed_when: false
