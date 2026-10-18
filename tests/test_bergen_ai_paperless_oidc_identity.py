@@ -1,5 +1,7 @@
 """No-live-service security tests for sealed Paperless/Bergen-AI identity JOIN."""
 import importlib.util
+import contextlib
+import io
 import json
 from pathlib import Path
 import sqlite3
@@ -149,6 +151,53 @@ class IdentityBoundaryTests(unittest.TestCase):
             db.commit()
             self.assertEqual(AI.read_rows(file, KEY, "oidc"), [])
             db.close()
+
+    def test_failed_closed_diagnostic_is_enumerated_and_never_echoes_private_data(self):
+        for code in ("OAUTH_SUBJECT_INVALID", "DATABASE_MISSING",
+                     "DB_READ_ERROR", "UNEXPECTED_INTERNAL_ERROR"):
+            output = io.StringIO()
+            with contextlib.redirect_stdout(output):
+                AI.report_failure(code)
+            result = json.loads(output.getvalue())
+            self.assertEqual(result, {"AUDIT": "FAILED_CLOSED", "CODE": code})
+
+        output = io.StringIO()
+        with contextlib.redirect_stdout(output):
+            AI.report_failure("sensitive-user@example.invalid")
+        self.assertEqual(json.loads(output.getvalue())["CODE"],
+                         "UNEXPECTED_INTERNAL_ERROR")
+        self.assertNotIn("sensitive-user", output.getvalue())
+
+    def test_unexpected_oauth_shape_is_rejected_without_leaking_data(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            file = Path(tmp) / "webui.db"
+            db = sqlite3.connect(file)
+            db.execute("CREATE TABLE user (email TEXT, role TEXT, oauth TEXT)")
+            db.execute("INSERT INTO user VALUES (?,?,?)", (
+                "secret@example.invalid", "user",
+                json.dumps({"oidc": {"not-sub": "token-should-not-leak"}})))
+            db.commit()
+            with self.assertRaisesRegex(AI.Unsafe, "^OAUTH_SUBJECT_INVALID$"):
+                AI.read_rows(file, KEY, "oidc")
+            db.close()
+
+    def test_failed_helper_is_stopped_before_any_paperless_access(self):
+        tasks = yaml.safe_load(PLAY_FILE.read_text())[0]["tasks"]
+        names = [task.get("name") for task in tasks]
+        ai_name = "Read sealed Bergen-AI OIDC linkage from SQLite without writes"
+        gate_name = "Fail closed before Paperless access if AI identity inventory is invalid"
+        paperless_name = "Require existing confined Paperless guest hostname"
+        self.assertLess(names.index(ai_name), names.index(gate_name))
+        self.assertLess(names.index(gate_name), names.index(paperless_name))
+        audit = tasks[names.index(ai_name)]
+        self.assertFalse(audit["failed_when"])
+        self.assertTrue(audit["no_log"])
+        self.assertIn("oidc_identity_ai_raw.rc == 0",
+                      str(tasks[names.index(gate_name)]))
+        diagnostic_name = "Publish only allowlisted diagnostic category, not private failure data"
+        self.assertLess(names.index(diagnostic_name), names.index(gate_name))
+        self.assertIn("UNCLASSIFIED_FAILURE",
+                      str(tasks[names.index(diagnostic_name)]))
 
     def test_playbook_has_no_mutations_and_guards_all_secret_outputs(self):
         plays = yaml.safe_load(PLAY_FILE.read_text())
