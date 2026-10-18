@@ -136,6 +136,30 @@ class Tests(unittest.TestCase):
         )
         self.assertEqual(MATRIX.ALLOWED_FILE, "paperless-ai-acl.local.yml")
 
+    def test_no_private_b_profile_three_documents_and_limited_coverage(self):
+        cases = MATRIX.build_cases(["a", "b"], [41, 42, 43], "no-private-b")
+        self.assertEqual(len(cases), 6)
+        self.assertEqual([c["allow"] for c in cases],
+                         [True, False, True, True, True, True])
+        actors, docs, allowed, denied = LIB["verify_cases"](cases, "no-private-b")
+        self.assertEqual(actors, {"a", "b"})
+        self.assertEqual(docs, {41, 42, 43})
+        self.assertEqual((allowed, denied), (5, 1))
+        rendered = MATRIX.render_matrix(cases, "no-private-b")
+        self.assertIn("paperless_oidc_acl_profile: no-private-b", rendered)
+        self.assertEqual(rendered.count("document_id:"), 6)
+
+    def test_partial_coverage_cannot_be_mislabeled_symmetric(self):
+        cases = MATRIX.build_cases(["a", "b"], [41, 42, 43], "no-private-b")
+        with self.assertRaises(LIB["AuditError"]):
+            LIB["verify_cases"](cases, "balanced")
+        with self.assertRaises(LIB["AuditError"]):
+            LIB["verify_cases"]([dict(c, allow=True) for c in cases],
+                                "no-private-b")
+        self.assertIn("ONE_ACTOR_UNTESTED", PLAY.read_text())
+        self.assertIn("OIDC_LINKED_PAPERLESS_ACL_SAMPLE_LIMITED",
+                      PROBE.read_text())
+
     def test_operator_matrix_refuses_duplicate_and_invalid_values(self):
         valid_users = ["alpha", "beta"]
         docs = [1001, 1002, 1003, 1004]
