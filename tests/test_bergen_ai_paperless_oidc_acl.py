@@ -1,5 +1,9 @@
 """Offline security contracts for sampled OIDC-linked Paperless Guardian/DRF ACLs."""
 import ast
+import importlib.util
+import os
+import stat
+import tempfile
 import hashlib
 import hmac
 import json
@@ -102,7 +106,81 @@ class FakeSocialAccount:
     objects = None
 
 
+def load_matrix_builder():
+    location = ROOT / "ansible/scripts/prepare_paperless_oidc_acl_matrix.py"
+    spec = importlib.util.spec_from_file_location("private_matrix_builder", location)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+MATRIX = load_matrix_builder()
+
+
 class Tests(unittest.TestCase):
+    def test_operator_matrix_is_policy_based_and_ignored_by_main_repo(self):
+        cases = MATRIX.build_cases(
+            ["real_a", "real_b"], [1001, 1002, 1003, 1004]
+        )
+        expected = (
+            (True, False), (False, True), (True, True), (True, True)
+        )
+        self.assertEqual(len(cases), 8)
+        for idx, pair in enumerate(expected):
+            self.assertEqual(cases[idx * 2]["allow"], pair[0])
+            self.assertEqual(cases[idx * 2 + 1]["allow"], pair[1])
+        self.assertEqual(LIB["verify_cases"](cases)[2:], (6, 2))
+        self.assertIn(
+            "ansible/vars/paperless*.local.yml",
+            (ROOT / ".gitignore").read_text()
+        )
+        self.assertEqual(MATRIX.ALLOWED_FILE, "paperless-ai-acl.local.yml")
+
+    def test_operator_matrix_refuses_duplicate_and_invalid_values(self):
+        valid_users = ["alpha", "beta"]
+        docs = [1001, 1002, 1003, 1004]
+        for users, documents in (
+            (["same", "same"], docs),
+            (["", "beta"], docs),
+            (["alpha", "user\ninjected"], docs),
+            (valid_users, [1, 1, 3, 4]),
+            (valid_users, [1, 2, True, 4]),
+            (valid_users, [1, 2, 3, -4]),
+        ):
+            with self.subTest(users=users, documents=documents):
+                with self.assertRaises(MATRIX.InvalidMatrix):
+                    MATRIX.build_cases(users, documents)
+
+    def test_private_matrix_file_is_0600_and_cannot_be_overwritten(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            parent = Path(tmp) / "vars"
+            parent.mkdir()
+            path = parent / MATRIX.ALLOWED_FILE
+            content = MATRIX.render_matrix(
+                MATRIX.build_cases(["alpha", "beta"], [1001, 1002, 1003, 1004])
+            )
+            MATRIX.write_private(path, content)
+            self.assertEqual(stat.S_IMODE(path.stat().st_mode), 0o600)
+            self.assertEqual(path.read_text(), content)
+            with self.assertRaises(MATRIX.InvalidMatrix):
+                MATRIX.write_private(path, "altered")
+            self.assertEqual(path.read_text(), content)
+            self.assertIn("allow: false", content)
+            self.assertIn("allow: true", content)
+            self.assertIn("paperless_oidc_acl_audit_approved: true", content)
+
+    def test_policy_builder_never_reads_live_acl_or_secrets(self):
+        source = (
+            ROOT / "ansible/scripts/prepare_paperless_oidc_acl_matrix.py"
+        ).read_text()
+        self.assertNotIn("import requests", source)
+        self.assertNotIn("import sqlite3", source)
+        self.assertNotIn("import django", source)
+        self.assertNotIn("subprocess", source)
+        self.assertNotIn("APIClient", source)
+        self.assertIn("os.O_EXCL", source)
+        self.assertIn("os.O_NOFOLLOW", source)
+
     def test_8_cases_cover_two_accounts_with_allow_and_deny(self):
         users, docs, allowed, denied = LIB["verify_cases"](case_matrix())
         self.assertEqual(users, {"parent_a", "parent_b"})
