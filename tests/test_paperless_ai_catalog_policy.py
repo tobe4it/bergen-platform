@@ -178,6 +178,33 @@ class CatalogPolicyTest(unittest.TestCase):
         timer_spec = (ROOT / "ansible/files/paperless/bergen-ai-catalog.timer").read_text()
         self.assertIn("OnCalendar=*:0/5", timer_spec)
 
+    def test_runtime_preflight_is_readonly_and_nonidentifying(self):
+        paperless = (ROOT / "ansible/files/paperless/audit_ai_catalog_paperless_readonly.py").read_text()
+        ollama = (ROOT / "ansible/files/paperless/audit_ai_catalog_ollama_readonly.py").read_text()
+        audit = (ROOT / "ansible/playbooks/audit-paperless-ai-catalog-runtime-readonly.yml")
+        ast.parse(paperless)
+        ast.parse(ollama)
+        self.assertIn("ApplicationConfiguration.objects.count()", paperless)
+        self.assertIn("config_rows == 1", paperless)
+        self.assertIn('"AUDIT": "READ_ONLY"', paperless)
+        self.assertIn('"CHANGED": False', paperless)
+        self.assertIn('"/api/tags"', ollama)
+        self.assertIn("ProxyHandler({})", ollama)
+        self.assertIn("NoRedirect()", ollama)
+        for token in ("get_or_create(", "save(", "bulk_update(", "bulk_create(",
+                      "assign_perm(", "openai.com", "http://8.8.8.8"):
+            self.assertNotIn(token, paperless)
+            self.assertNotIn(token, ollama)
+        play = yaml.safe_load(audit.read_text())[0]
+        self.assertEqual(play["hosts"], "venombox")
+        self.assertTrue(play["become"])
+        cmd = [t for t in play["tasks"] if "ansible.builtin.command" in t]
+        self.assertTrue(cmd)
+        self.assertTrue(all(t.get("no_log") is True for t in cmd))
+        self.assertTrue(all(t["changed_when"] is False for t in cmd))
+        self.assertIn("BERGEN_AI_CATALOG_PREFLIGHT_PAPERLESS_V1:", audit.read_text())
+        self.assertIn("BERGEN_AI_CATALOG_PREFLIGHT_OLLAMA_V1:", audit.read_text())
+
     def test_pending_inbox_cannot_starve_new_documents(self):
         runner = RUNNER.read_text()
         self.assertIn('scan_count > 2000', runner)
