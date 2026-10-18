@@ -94,6 +94,45 @@ Confirm the produced file exists and has restricted permissions with
 `stat -c '%a %n' "$HOME/bergen-platform/ansible/vars/paperless-ai-acl.local.yml"`.
 Do not paste its contents into chat or GitHub.
 
+## Partial profile when account B has no private document
+
+Observed on 18 October 2026: account B has **no private documents**.
+Do not create or reclassify a production document merely for this test.
+The controller's previous private matrix is absent; the guided builder
+was interrupted at the impossible B-private document ID.
+
+The builder now supports the explicit option `--profile no-private-b`.
+This selects three independently verified, existing documents:
+
+1. Private account A document: A allowed, B denied.
+2. Shared adult/Eltern document: A and B allowed.
+3. Shared Familie document: A and B allowed.
+
+The resulting matrix has 2 users × 3 documents = **6 sample pairs**;
+the Paperless Guardian and DRF checks therefore total **12**, with
+**5 expected allow, 1 expected deny**. Account A's ability to be denied
+on another person's private document is **not exercised**. The status
+`OIDC_LINKED_PAPERLESS_ACL_SAMPLE_LIMITED` and the coverage marker
+`PER_ACTOR_DENY_COVERAGE=ONE_ACTOR_UNTESTED` explicitly state this gap.
+It must **not** be presented as a complete negative ACL or RAG release test.
+
+Use the existing worktree (do not repeat `git worktree add`):
+
+    cd "$HOME/bergen-platform-ai-paperless-acl"
+    git fetch origin feat/bergen-ai-paperless-oidc-acl-audit-20261018
+    git switch --detach FETCH_HEAD
+    python3 ansible/scripts/prepare_paperless_oidc_acl_matrix.py \
+      --base "$HOME/bergen-platform" \
+      --profile no-private-b
+
+Only enter existing, independently verified IDs. The tool never
+reads current object permissions to decide its expected policy and
+writes only one new, git-ignored 0600 matrix after local confirmation.
+The ACL audit can be executed later with the unchanged command below.
+
+Do not share the users or document IDs in chat or GitHub. Do not
+enable the Paperless AI integration on this partial result.
+
 ## Controller execution
 
 Create a new worktree for the branch feat/bergen-ai-paperless-oidc-acl-audit-20261018
