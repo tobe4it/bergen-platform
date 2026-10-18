@@ -20,6 +20,7 @@ import socket
 import sqlite3
 import sys
 from urllib.parse import urlsplit
+from urllib.request import Request, ProxyHandler, HTTPRedirectHandler, build_opener
 
 from django.contrib.auth.models import Group
 from django.db import transaction
@@ -78,6 +79,34 @@ def dns_is_private(endpoint):
         return False
 
 
+class NoRedirect(HTTPRedirectHandler):
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        return None
+
+
+def ollama_model_available(endpoint, expected_model):
+    """Read Ollama's local model list only, never follow redirects or a proxy."""
+    if not safe_endpoint(endpoint) or not dns_is_private(endpoint):
+        return False
+    opener = build_opener(ProxyHandler({}), NoRedirect())
+    try:
+        req = Request(endpoint.rstrip("/") + "/api/tags",
+                      headers={"Accept": "application/json"}, method="GET")
+        with opener.open(req, timeout=5) as resp:
+            if resp.status != 200:
+                return False
+            payload = resp.read(256001)
+        if len(payload) > 256000:
+            return False
+        models = json.loads(payload).get("models", [])
+        if not isinstance(models, list) or len(models) > 300:
+            return False
+        return any(isinstance(m, dict) and m.get("name") == expected_model
+                   for m in models)
+    except (OSError, ValueError, TypeError, KeyError):
+        return False
+
+
 def ensure_config(request, *, apply):
     demand(__full_version_str__ == "3.3.0", "PAPERLESS_VERSION_UNREVIEWED")
     demand(isinstance(request, dict)
@@ -113,12 +142,14 @@ def ensure_config(request, *, apply):
     ai_ready = bool(config.ai_enabled and config.llm_backend == "ollama"
                     and endpoint == expected and config.llm_model == model
                     and not config.llm_embedding_backend)
+    model_ready = bool(ai_ready and ollama_model_available(endpoint, model))
     if apply:
         demand(request.get("approved") is True, "APPROVAL_REQUIRED")
         demand(ai_ready, "AI_CONFIG_NOT_READY")
         demand(dns_is_private(endpoint), "OLLAMA_NETWORK_NOT_PRIVATE")
+        demand(model_ready, "OLLAMA_MODEL_UNAVAILABLE")
         demand(limit > 0 or bool(samples), "WATERMARK_REQUIRED")
-    return ai_ready, groups.first(), count, samples, config
+    return model_ready, groups.first(), count, samples, config
 
 
 def eligible(doc, group, min_id, pilot):
@@ -357,7 +388,7 @@ def run():
             "DATA_MOUNT_NOT_READY", "JOURNAL_UNSAFE", "DOCUMENT_NOT_ELIGIBLE",
             "PILOT_BATCH_INVALID", "INBOX_REMOVED", "SNAPSHOT_INVALID",
             "ROLLBACK_UNAVAILABLE", "ROLLBACK_REVIEW_REQUIRED",
-            "INBOX_TAG_REMOVED", "APP_CONFIG_MISSING",
+            "INBOX_TAG_REMOVED", "APP_CONFIG_MISSING", "OLLAMA_MODEL_UNAVAILABLE",
         }
         code = str(exc) if str(exc) in allowed else "POLICY_REJECTED"
         report(AUDIT="FAILED_CLOSED", CODE=code, CHANGED=False)
