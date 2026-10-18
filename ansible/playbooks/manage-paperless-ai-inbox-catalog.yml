@@ -103,6 +103,25 @@
       changed_when: false
       no_log: true
 
+    - name: Report only a reviewed, non-identifying error classification
+      ansible.builtin.debug:
+        msg: >-
+          PAPERLESS_AI_CATALOG_ERROR={{
+            bp_catalog_result.CODE if bp_catalog_result.CODE | default('') in [
+              'PAPERLESS_VERSION_UNREVIEWED', 'INPUT_INVALID', 'MODE_INVALID',
+              'GROUP_UNREVIEWED', 'WATERMARK_INVALID', 'BATCH_INVALID',
+              'PILOT_INVALID', 'ENDPOINT_NOT_APPROVED', 'MODEL_UNREVIEWED',
+              'APPROVAL_REQUIRED', 'AI_CONFIG_NOT_READY',
+              'OLLAMA_NETWORK_NOT_PRIVATE', 'WATERMARK_REQUIRED',
+              'DATA_MOUNT_NOT_READY', 'JOURNAL_UNSAFE',
+              'DOCUMENT_NOT_ELIGIBLE', 'PILOT_BATCH_INVALID',
+              'INBOX_REMOVED', 'SNAPSHOT_INVALID', 'ROLLBACK_UNAVAILABLE',
+              'ROLLBACK_REVIEW_REQUIRED', 'INBOX_TAG_REMOVED',
+              'APP_CONFIG_MISSING', 'UNCLASSIFIED_RUNTIME_FAILURE'
+            ] else 'UNCLASSIFIED_FAILURE'
+          }}
+      when: bp_catalog_raw.rc != 0
+
     - name: Fail closed if runtime rejected a configuration or write attempt
       ansible.builtin.assert:
         that:
@@ -130,3 +149,4 @@
           - "ALREADY_RECORDED={{ bp_catalog_result.ALREADY_RECORDED | default(0) }}"
           - "ROLLED_BACK={{ bp_catalog_result.ROLLED_BACK | default(0) }}"
           - "CHANGED={{ bp_catalog_result.CHANGED }}"
+      changed_when: bp_catalog_apply and bp_catalog_result.CHANGED | bool
