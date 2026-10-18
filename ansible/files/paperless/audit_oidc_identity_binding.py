@@ -10,6 +10,7 @@ import json
 import sys
 
 from django.contrib.auth.models import User
+from django.conf import settings
 from allauth.socialaccount.models import SocialAccount
 
 
@@ -20,6 +21,49 @@ RESULT_FRAME = "BERGEN_PAPERLESS_OIDC_AUDIT_V1:"
 
 class Unsafe(Exception):
     pass
+
+
+# Allauth OpenID Connect is a multi-provider facade. Its SocialAccount.provider
+# equals the configured provider_id, not necessarily "openid_connect".
+PROVIDER_FAILURE_CODES = frozenset({
+    "OIDC_CONFIG_MISSING", "OIDC_CONFIG_AMBIGUOUS",
+    "OIDC_CONFIG_INVALID", "OIDC_SELECTOR_INVALID",
+})
+
+
+def selected_oidc_provider(providers, requested):
+    # Never enumerate arbitrary SocialAccount.provider values or select an
+    # unknown identity provider merely because it has a matching email/sub.
+    if not isinstance(providers, dict):
+        raise Unsafe("OIDC_CONFIG_MISSING")
+    oidc = providers.get("openid_connect")
+    if not isinstance(oidc, dict):
+        raise Unsafe("OIDC_CONFIG_MISSING")
+    apps = oidc.get("APPS")
+    if not isinstance(apps, list) or not 1 <= len(apps) <= 10:
+        raise Unsafe("OIDC_CONFIG_MISSING")
+    ids = []
+    for app in apps:
+        if not isinstance(app, dict):
+            raise Unsafe("OIDC_CONFIG_INVALID")
+        # An explicitly configured app without provider_id uses the allauth
+        # provider type as a legacy fallback; never infer from user rows.
+        provider_id = app.get("provider_id") or "openid_connect"
+        if (not isinstance(provider_id, str)
+            or not 1 <= len(provider_id) <= 200
+            or not all(c.isascii() and (c.isalnum() or c in "._:-")
+                       for c in provider_id)):
+            raise Unsafe("OIDC_CONFIG_INVALID")
+        ids.append(provider_id)
+    if len(ids) != len(set(ids)):
+        raise Unsafe("OIDC_CONFIG_AMBIGUOUS")
+    if requested == "auto":
+        if len(ids) != 1:
+            raise Unsafe("OIDC_CONFIG_AMBIGUOUS")
+        return ids[0]
+    if not isinstance(requested, str) or requested not in ids:
+        raise Unsafe("OIDC_SELECTOR_INVALID")
+    return requested
 
 
 def seal(key, item):
@@ -72,12 +116,23 @@ def run():
         key = req.get("key") if isinstance(req, dict) else None
         if not isinstance(key, str) or len(key) < 48 or len(key) > 120:
             raise Unsafe("Invalid ephemeral key")
-        records = read_rows(key, req.get("provider"))
+        # Select exactly one OIDC app declared in the live Django runtime
+        # config, not any arbitrary SocialAccount or a guessed generic type.
+        selector = req.get("provider", "auto")
+        selected = selected_oidc_provider(
+            getattr(settings, "SOCIALACCOUNT_PROVIDERS", None), selector
+        )
+        records = read_rows(key, selected)
         print(RESULT_FRAME + json.dumps({"AUDIT": "READ_ONLY", "SYSTEM": "PAPERLESS",
+                          "PROVIDER_SELECTION": "CONFIGURED_OIDC_APP",
                           "ACCOUNTS": records, "COUNT": len(records)},
                          sort_keys=True))
+    except Unsafe as e:
+        code = str(e) if str(e) in PROVIDER_FAILURE_CODES else "OIDC_INSPECTOR_INVALID"
+        print(RESULT_FRAME + json.dumps({"AUDIT": "FAILED_CLOSED", "CODE": code}))
+        raise SystemExit(2)
     except Exception:
-        print(RESULT_FRAME + '{"AUDIT":"FAILED_CLOSED"}')
+        print(RESULT_FRAME + '{"AUDIT":"FAILED_CLOSED","CODE":"OIDC_INSPECTOR_INTERNAL"}')
         raise SystemExit(2)
 
 
