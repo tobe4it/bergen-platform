@@ -12,4 +12,4 @@ UMask=0077
 ExecStart=/usr/local/libexec/bergen-ai-catalog-run
 TimeoutStartSec=900
 StandardOutput=journal
-StandardError=journal
+StandardError=null
