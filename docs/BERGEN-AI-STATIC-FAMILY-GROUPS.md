@@ -18,6 +18,65 @@ a Bergen-AI group. For v0.12.3, default to **three top-level groups**
 rather than nested groups; child-inherits-parent access must not be
 accidentally introduced.
 
+## Multi-installation namespace contract
+
+The logical roles `family`, `adults` and `children` are **stable
+semantic keys**, not directory group names. Every household / deployment
+has its **own** LDAP base DN, OIDC issuer/tenant and group namespace.
+There is no fixed `@...` suffix, shared LDAP domain, naming convention,
+claim-value format or universal group UUID.
+
+Three separate identifiers must not be conflated:
+
+1. **Logical role**: `family`, `adults`, `children` (product-internal
+   meaning independent of deployment).
+2. **IdP/LDAP group identity**: an environment-specific DN, group name,
+   UUID or exact OIDC claim value, validated in that tenant. This is
+   *not* resolved by the inventory playbook.
+3. **Open WebUI group name/ID**: the exact locally existing Open WebUI
+   group to which a role is administratively assigned. This is what
+   `bergen_ai_family_group_expected` matches using exact string equality.
+
+**Example A, installation with qualified Open WebUI names**
+(illustrative non-routable domain, not a Bergen site identifier):
+
+```yaml
+bergen_ai_family_group_expected:
+  family: "Familie@home-a.invalid"
+  adults: "Eltern@home-a.invalid"
+  children: "Kinder@home-a.invalid"
+```
+
+**Example B, independent installation with neutral local names:**
+
+```yaml
+bergen_ai_family_group_expected:
+  family: "Shared"
+  adults: "Parents"
+  children: "Kids"
+```
+
+The Identity Provider for B might instead return a DN such as
+`cn=Parents,ou=Groups,dc=home-b,dc=invalid`. That is **not** the
+Open WebUI group name `Parents`, and this audit must not pretend
+they have been synchronized. In another environment the IdP claim
+might be a UUID. Group names may even belong to different
+namespaces within a single installation.
+
+Keep the OIDC issuer, expected LDAP/SSO claim identifiers, exact
+Open WebUI group mapping and all hostnames in site-local protected
+inventory/Vault. Do not derive an LDAP/OIDC mapping merely by
+appending or stripping a domain. Do not enable native group
+synchronization to reconcile a name mismatch. A mismatched qualified
+name is reported as `MISSING`, **never matched on the short prefix**.
+
+Future installers can collect these independent per-site identifiers
+during setup and verify the intended relationships; they must not
+hardcode a specific household's LDAP domain into common roles or
+provisioning defaults. IdP authorization, issuer validation, user
+membership and Open WebUI resource access still need independent E2E
+checks.
+
 ## Read-only inventory
 
 New playbook:
