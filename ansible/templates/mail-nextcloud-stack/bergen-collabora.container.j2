@@ -1,0 +1,26 @@
+[Unit]
+Description=Bergen Collabora Online
+
+[Container]
+Image={{ nextcloud_stack_collabora_image }}
+Pull=never
+ContainerName=bergen-collabora
+
+Network=bergen-collabora.network
+AddHost={{ nextcloud_stack_cloud_name }}:{{ nextcloud_stack_collabora_gateway }}
+IP={{ nextcloud_stack_collabora_ip }}
+PublishPort=127.0.0.1:9980:9980
+
+Volume={{ nextcloud_stack_collabora_ca_chain }}:/etc/coolwsd/ca-chain.cert.pem:ro
+
+Environment=aliasgroup1={{ nextcloud_stack_collabora_aliasgroup }}
+Environment=ssl.enable=false
+Environment=ssl.termination=true
+
+[Service]
+Restart=always
+RestartSec=10
+TimeoutStartSec=180
+
+[Install]
+WantedBy=multi-user.target
