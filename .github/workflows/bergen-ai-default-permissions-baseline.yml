@@ -1,0 +1,42 @@
+name: Bergen-AI controlled default permissions baseline
+
+on:
+  pull_request:
+    paths:
+      - 'ansible/files/bergen_ai/manage_default_permissions_v0102.py'
+      - 'ansible/playbooks/manage-bergen-ai-default-permissions.yml'
+      - 'tests/test_bergen_ai_default_permission_baseline.py'
+      - 'docs/BERGEN-AI-DEFAULT-PERMISSIONS-BASELINE.md'
+      - 'ansible/files/bergen_ai/diagnose_default_permissions_v0102.py'
+      - 'ansible/playbooks/diagnose-bergen-ai-default-permissions-readonly.yml'
+      - 'tests/test_bergen_ai_default_permissions_diagnostic.py'
+      - 'ansible/roles/open_webui/defaults/main.yml'
+      - 'ansible/roles/open_webui/templates/open-webui.container.j2'
+      - '.github/workflows/bergen-ai-default-permissions-baseline.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'ansible/files/bergen_ai/manage_default_permissions_v0102.py'
+      - 'ansible/playbooks/manage-bergen-ai-default-permissions.yml'
+      - 'tests/test_bergen_ai_default_permission_baseline.py'
+
+jobs:
+  baseline-security-contract:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install offline validation tools
+        run: python -m pip install 'ansible-core>=2.16,<2.18' 'PyYAML>=6,<7'
+      - name: Synthetic config, backup, rollback and fail-closed tests
+        run: |
+          python -m unittest discover -s tests -p 'test_bergen_ai_default_permission_baseline.py' -v
+          python -m unittest discover -s tests -p 'test_bergen_ai_default_permissions_diagnostic.py' -v
+      - name: Syntax-check isolated Ansible playbook
+        run: |
+          ansible-playbook -i ansible/inventory.yml ansible/playbooks/manage-bergen-ai-default-permissions.yml --syntax-check
+          ansible-playbook -i ansible/inventory.yml ansible/playbooks/diagnose-bergen-ai-default-permissions-readonly.yml --syntax-check

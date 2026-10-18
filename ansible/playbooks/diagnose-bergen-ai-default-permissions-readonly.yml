@@ -1,0 +1,116 @@
+---
+# Classify an incomplete default-permissions apply without a second write.
+- name: Diagnose Bergen-AI default-rights failure without mutations
+  hosts: "{{ bergen_ai_family_audit_host | default('__no_selected_family_host__') }}"
+  gather_facts: false
+  serial: 1
+  tasks:
+    - name: Require approved one-host read-only diagnosis and previous fingerprint
+      ansible.builtin.assert:
+        that:
+          - bergen_ai_family_audit_host is defined
+          - inventory_hostname == bergen_ai_family_audit_host
+          - ansible_play_hosts_all | length == 1
+          - bergen_ai_family_audit_approved | default(false) | bool
+          - bergen_ai_defaults_previous_sha256 is defined
+          - bergen_ai_defaults_previous_sha256 is string
+          - bergen_ai_defaults_previous_sha256 | length == 64
+        fail_msg: "Use the existing site approval and pre-apply SHA-256; no writes allowed."
+      no_log: true
+
+    - name: Read running application version via loopback
+      ansible.builtin.uri:
+        url: http://127.0.0.1:3000/api/version
+        method: GET
+        status_code: 200
+        use_proxy: false
+        follow_redirects: none
+        return_content: false
+        timeout: 10
+      register: bergen_ai_diagnose_version
+      changed_when: false
+      check_mode: false
+      no_log: true
+
+    - name: Reject unsupported versions
+      ansible.builtin.assert:
+        that:
+          - bergen_ai_diagnose_version.json is mapping
+          - bergen_ai_diagnose_version.json.version == '0.10.2'
+        fail_msg: "Unsupported Open WebUI version for read-only diagnosis."
+      no_log: true
+
+    - name: Diagnose backup and application ORM independently without writes
+      ansible.builtin.command:
+        argv:
+          - python3
+          - -c
+          - "{{ lookup('ansible.builtin.file', playbook_dir ~ '/../files/bergen_ai/diagnose_default_permissions_v0102.py') }}"
+        stdin: "{{ {'version': bergen_ai_diagnose_version.json.version, 'previous_sha256': bergen_ai_defaults_previous_sha256} | to_json }}"
+        stdin_add_newline: true
+      register: bergen_ai_diagnose_raw
+      changed_when: false
+      check_mode: false
+      no_log: true
+
+    - name: Decode sanitized diagnosis
+      ansible.builtin.set_fact:
+        bergen_ai_diagnose_result: "{{ bergen_ai_diagnose_raw.stdout | from_json }}"
+      no_log: true
+      changed_when: false
+
+    - name: Require read-only diagnostic result
+      ansible.builtin.assert:
+        that:
+          - bergen_ai_diagnose_result.STATUS == 'DIAGNOSTIC_COMPLETE'
+          - bergen_ai_diagnose_result.AUDIT == 'READ_ONLY'
+          - bergen_ai_diagnose_result.CHANGED == false
+          - bergen_ai_diagnose_result.STATE in ['UNCHANGED', 'DIFFERENT']
+          - bergen_ai_diagnose_result.BACKUP_FOR_PREVIOUS_STATE in [
+              'NOT_FOUND', 'VERIFIED', 'UNSAFE', 'INVALID', 'UNREADABLE'
+            ]
+          - bergen_ai_diagnose_result.APP_ORM_READ in [
+              'READ_CONFIRMED', 'IMPORT_FAILED', 'PERSISTENCE_DISABLED',
+              'CONFIG_INVALID', 'CONFIG_MISMATCH', 'DATABASE_READ_FAILED',
+              'TIMEOUT', 'EXEC_FAILED', 'UNCLASSIFIED_FAILURE',
+              'SECRET_UNAVAILABLE'
+            ]
+          - bergen_ai_diagnose_result.APP_STAGE in [
+              'ORM_READ_OK', 'ORM_READ_FAILED', 'ORM_CONFIG_MISMATCH',
+              'IMPORT_OK', 'IMPORT_FAILED', 'PYTHON_STARTED', 'SECRET_UNAVAILABLE',
+              'PROCESS_NOT_STARTED', 'PROCESS_TIMEOUT', 'PROCESS_LAUNCH_FAILED'
+            ]
+          - bergen_ai_diagnose_result.APP_PACKAGE in ['PRESENT', 'MISSING', 'UNVERIFIED', None]
+          - bergen_ai_diagnose_result.APP_SECRET_SOURCE in [
+              'ENV', 'EXISTING_FILE', 'UNAVAILABLE', 'UNVERIFIED'
+            ]
+          - bergen_ai_diagnose_result.APP_STDERR_CLASS in [
+              'CONTAINER_NOT_FOUND', 'PERMISSION_DENIED', 'PYTHON_BINARY_NOT_FOUND',
+              'MODULE_NOT_FOUND', 'IMPORT_ERROR', 'DATABASE_ERROR',
+              'PYTHON_EXCEPTION', 'OTHER_ERROR', 'NONE'
+            ]
+          - bergen_ai_diagnose_result.APP_ERROR_CLASS in [
+              'ModuleNotFoundError', 'ImportError', 'PermissionError',
+              'OperationalError', 'RuntimeError', 'AttributeError',
+              'TypeError', 'ValueError', 'KeyError', 'OSError', 'SystemExit',
+              'FileNotFoundError', 'AssertionError', 'OTHER', 'NONE'
+            ]
+        fail_msg: "Invalid or incomplete read-only diagnostic output."
+      no_log: true
+
+    - name: Print categories and non-sensitive fingerprints only
+      ansible.builtin.debug:
+        msg:
+          - "STATUS={{ bergen_ai_diagnose_result.STATUS }}"
+          - "AUDIT={{ bergen_ai_diagnose_result.AUDIT }}"
+          - "CHANGED={{ bergen_ai_diagnose_result.CHANGED }}"
+          - "STATE={{ bergen_ai_diagnose_result.STATE }}"
+          - "CURRENT_SHA256={{ bergen_ai_diagnose_result.CURRENT_SHA256 }}"
+          - "BACKUP_FOR_PREVIOUS_STATE={{ bergen_ai_diagnose_result.BACKUP_FOR_PREVIOUS_STATE }}"
+          - "APP_ORM_READ={{ bergen_ai_diagnose_result.APP_ORM_READ }}"
+          - "APP_STAGE={{ bergen_ai_diagnose_result.APP_STAGE }}"
+          - "APP_PACKAGE={{ bergen_ai_diagnose_result.APP_PACKAGE | default('UNVERIFIED') }}"
+          - "APP_SECRET_SOURCE={{ bergen_ai_diagnose_result.APP_SECRET_SOURCE | default('UNVERIFIED') }}"
+          - "APP_ERROR_CLASS={{ bergen_ai_diagnose_result.APP_ERROR_CLASS }}"
+          - "APP_STDERR_CLASS={{ bergen_ai_diagnose_result.APP_STDERR_CLASS }}"
+          - "APP_EXIT={{ bergen_ai_diagnose_result.APP_EXIT | default('UNVERIFIED') }}"

@@ -15,6 +15,9 @@ open_webui_port: 3000
 open_webui_ollama_base_url: http://127.0.0.1:11434
 
 open_webui_auth_enabled: true
+# DB-backed user.permissions must remain enabled after Ansible redeploy.
+# Keep OAuth persistence separately disabled in the Open WebUI application.
+open_webui_persistent_config: true
 open_webui_signup_enabled: true
 
 open_webui_restart_policy: always
