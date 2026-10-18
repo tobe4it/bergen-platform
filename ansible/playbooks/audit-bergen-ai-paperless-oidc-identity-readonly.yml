@@ -3,7 +3,6 @@
 # Does not authenticate a live user or grant access to Paperless knowledge.
 - name: Compare existing Bergen-AI and Paperless OIDC identity links without writes
   hosts: localhost
-  connection: local
   gather_facts: false
   vars:
     oidc_identity_ai_host: bergen-ai
@@ -30,6 +29,23 @@
       ansible.builtin.set_fact:
         oidc_identity_ephemeral_hmac: "{{ lookup('ansible.builtin.password', '/dev/null length=64 chars=ascii_letters,digits') }}"
       changed_when: false
+      no_log: true
+
+    - name: Read target hostname from delegated Bergen-AI guest
+      ansible.builtin.command:
+        argv: [/bin/hostname, -s]
+      delegate_to: "{{ oidc_identity_ai_host }}"
+      register: oidc_identity_ai_hostname
+      changed_when: false
+      check_mode: false
+      no_log: true
+
+    - name: Refuse AI host identity mismatch before HTTP or identity reads
+      ansible.builtin.assert:
+        that:
+          - oidc_identity_ai_hostname.rc == 0
+          - oidc_identity_ai_hostname.stdout | trim == 'bergen-ai'
+        fail_msg: "Incorrect delegated guest identity; no audit data was read."
       no_log: true
 
     - name: Read Bergen-AI running version using loopback GET
