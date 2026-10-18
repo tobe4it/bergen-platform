@@ -23,6 +23,9 @@ PARSER_ERRORS = frozenset({
     "PAPERLESS_FRAME_DUPLICATE",
     "PAPERLESS_FRAME_JSON_INVALID",
     "PAPERLESS_FRAME_SCHEMA_INVALID",
+    "OIDC_CONFIG_MISSING", "OIDC_CONFIG_AMBIGUOUS",
+    "OIDC_CONFIG_INVALID", "OIDC_SELECTOR_INVALID",
+    "OIDC_INSPECTOR_INVALID", "OIDC_INSPECTOR_INTERNAL",
 })
 
 
@@ -42,11 +45,17 @@ def parse_paperless_stdout(raw):
         data = json.loads(frames[0])
     except (ValueError, TypeError):
         raise Unsafe("PAPERLESS_FRAME_JSON_INVALID") from None
+    # Only the fixed allowlisted failure category can leave the no_log scope.
+    # Never print the raw Django shell stdout or third-party provider labels.
+    if isinstance(data, dict) and data.get("AUDIT") == "FAILED_CLOSED":
+        code = data.get("CODE")
+        raise Unsafe(code if code in PARSER_ERRORS else "PAPERLESS_FRAME_SCHEMA_INVALID")
     # Validate the canonical envelope before the existing per-account
     # fingerprint checks in compare(). A FAIL_CLOSED result is not accepted.
     if (not isinstance(data, dict)
         or data.get("AUDIT") != "READ_ONLY"
-        or data.get("SYSTEM") != "PAPERLESS"):
+        or data.get("SYSTEM") != "PAPERLESS"
+        or data.get("PROVIDER_SELECTION") != "CONFIGURED_OIDC_APP"):
         raise Unsafe("PAPERLESS_FRAME_SCHEMA_INVALID")
     return data, len(lines) - 1
 
@@ -89,6 +98,8 @@ def rows(value, source):
 
 def compare(ai, paperless):
     ai_rows = rows(ai, "BERGEN_AI")
+    if paperless.get("PROVIDER_SELECTION") != "CONFIGURED_OIDC_APP":
+        raise Unsafe("PAPERLESS_FRAME_SCHEMA_INVALID")
     p_rows = rows(paperless, "PAPERLESS")
     matched = 0
     inactive = 0
@@ -123,6 +134,7 @@ def compare(ai, paperless):
         "AUDIT": "READ_ONLY",
         "AI_OIDC_ACCOUNTS": len(ai_rows),
         "PAPERLESS_OIDC_ACCOUNTS": len(p_rows),
+        "PAPERLESS_PROVIDER_SELECTION": "CONFIGURED_OIDC_APP",
         "MATCHED_ACTIVE_EMAIL_AND_SUBJECT": matched,
         "PAPERLESS_LINK_MISSING": paperless_missing,
         "SUBJECT_MISMATCH_SAME_EMAIL": subject_mismatch,
