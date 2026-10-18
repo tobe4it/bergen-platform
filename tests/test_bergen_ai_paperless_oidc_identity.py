@@ -1,0 +1,189 @@
+"""No-live-service security tests for sealed Paperless/Bergen-AI identity JOIN."""
+import importlib.util
+import json
+from pathlib import Path
+import sqlite3
+import tempfile
+import unittest
+
+import yaml
+
+ROOT = Path(__file__).resolve().parents[1]
+AI_FILE = ROOT / "ansible/files/bergen_ai/audit_oidc_identity_binding_v0102.py"
+PAPERLESS_FILE = ROOT / "ansible/files/paperless/audit_oidc_identity_binding.py"
+JOIN_FILE = ROOT / "ansible/files/bergen_ai/compare_oidc_subject_fingerprints.py"
+PLAY_FILE = ROOT / "ansible/playbooks/audit-bergen-ai-paperless-oidc-identity-readonly.yml"
+
+
+def load_file(path, name):
+    spec = importlib.util.spec_from_file_location(name, path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+AI = load_file(AI_FILE, "oidc_bridge_ai")
+JOIN = load_file(JOIN_FILE, "oidc_bridge_join")
+KEY = "K" * 64
+
+
+def ai_row(email, sub, role="USER"):
+    return {"email": AI.seal(KEY, email), "subject": AI.seal(KEY, sub), "role": role}
+
+
+def p_row(email, sub=None, uid=None, active=True):
+    return {"email": AI.seal(KEY, email),
+            "sub": AI.seal(KEY, sub) if sub else None,
+            "uid": AI.seal(KEY, uid) if uid else None,
+            "active": active, "staff": False}
+
+
+def inputs(a, b):
+    return (
+        {"AUDIT": "READ_ONLY", "SYSTEM": "BERGEN_AI", "ACCOUNTS": a, "COUNT": len(a)},
+        {"AUDIT": "READ_ONLY", "SYSTEM": "PAPERLESS", "ACCOUNTS": b, "COUNT": len(b)},
+    )
+
+
+class IdentityBoundaryTests(unittest.TestCase):
+    def test_positive_identity_subject_and_email_match(self):
+        a, p = inputs(
+            [ai_row("parent@example.invalid", "random-subject")],
+            [p_row("parent@example.invalid", sub="random-subject", uid="prefixed:random-subject")],
+        )
+        result = JOIN.compare(a, p)
+        self.assertEqual(result["STATUS"], "LINK_CANDIDATES_PRESENT")
+        self.assertEqual(result["MATCHED_ACTIVE_EMAIL_AND_SUBJECT"], 1)
+        self.assertEqual(result["ISSUER_EQUALITY"], "NOT_PROVEN")
+        self.assertEqual(result["LIVE_USER_DELEGATION"], "NOT_PROVEN")
+        self.assertEqual(result["PAPERLESS_DOCUMENT_ACL"], "NOT_PROVEN")
+        self.assertEqual(result["AUTOMATIC_GROUP_SYNC_SAFE"], "NO")
+
+    def test_normalized_emails_match_without_exposing_them(self):
+        self.assertEqual(
+            AI.seal(KEY, "parent@example.invalid"),
+            AI.seal(KEY, "parent@example.invalid"),
+        )
+        self.assertNotIn("parent@example.invalid", json.dumps(JOIN.compare(
+            *inputs([ai_row("parent@example.invalid", "s")],
+                    [p_row("parent@example.invalid", sub="s")]))))
+
+    def test_correct_email_wrong_subject_fails_review(self):
+        result = JOIN.compare(*inputs(
+            [ai_row("child@example.invalid", "child-sub")],
+            [p_row("child@example.invalid", uid="parent-sub")],
+        ))
+        self.assertEqual(result["SUBJECT_MISMATCH_SAME_EMAIL"], 1)
+        self.assertEqual(result["MATCHED_ACTIVE_EMAIL_AND_SUBJECT"], 0)
+        self.assertEqual(result["STATUS"], "REQUIRES_IDENTITY_REVIEW")
+
+    def test_same_subject_other_email_requires_review(self):
+        result = JOIN.compare(*inputs(
+            [ai_row("before@example.invalid", "same-sub")],
+            [p_row("after@example.invalid", sub="same-sub")],
+        ))
+        self.assertEqual(result["SUBJECT_MATCH_EMAIL_DRIFT"], 1)
+        self.assertEqual(result["STATUS"], "REQUIRES_IDENTITY_REVIEW")
+
+    def test_disabled_paperless_account_never_counts_as_matched(self):
+        result = JOIN.compare(*inputs(
+            [ai_row("parent@example.invalid", "s")],
+            [p_row("parent@example.invalid", sub="s", active=False)],
+        ))
+        self.assertEqual(result["INACTIVE_PAPERLESS_IDENTITY"], 1)
+        self.assertEqual(result["MATCHED_ACTIVE_EMAIL_AND_SUBJECT"], 0)
+
+    def test_missing_paperless_link(self):
+        result = JOIN.compare(*inputs(
+            [ai_row("a@example.invalid", "a")], []))
+        self.assertEqual(result["PAPERLESS_LINK_MISSING"], 1)
+
+    def test_same_subject_mapped_to_two_paperless_accounts_fails_closed(self):
+        with self.assertRaises(JOIN.Unsafe):
+            JOIN.compare(*inputs(
+                [ai_row("a@example.invalid", "a")],
+                [p_row("a@example.invalid", sub="a"),
+                 p_row("b@example.invalid", sub="a")]
+            ))
+
+    def test_duplicate_email_or_malformed_fingerprint_fails_closed(self):
+        same = ai_row("same@example.invalid", "x")
+        with self.assertRaises(JOIN.Unsafe):
+            JOIN.compare(*inputs([same, same], []))
+        bad = dict(same, subject="test")
+        with self.assertRaises(JOIN.Unsafe):
+            JOIN.compare(*inputs([bad], []))
+
+    def test_hmac_changes_with_ephemeral_key(self):
+        self.assertNotEqual(AI.seal(KEY, "subject"), AI.seal("X" * 64, "subject"))
+        self.assertNotEqual(AI.seal(KEY, "subject"), AI.seal(KEY, "other-subject"))
+
+    def test_ai_db_inventory_exposes_only_fingerprints_and_is_select_only(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            file = Path(tmp) / "webui.db"
+            db = sqlite3.connect(file)
+            db.execute("CREATE TABLE user (email TEXT, role TEXT, oauth TEXT)")
+            db.execute("INSERT INTO user VALUES (?,?,?)", (
+                "parent@example.invalid", "user",
+                json.dumps({"oidc": {"sub": "separate-provider-sub"}})))
+            db.execute("INSERT INTO user VALUES (?,?,?)", (
+                "local-admin@example.invalid", "admin", None))
+            db.commit()
+            before = file.read_bytes()
+            data = AI.read_rows(file, KEY, "oidc")
+            self.assertEqual(before, file.read_bytes())
+            self.assertEqual(len(data), 1)
+            self.assertNotIn("parent@example.invalid", json.dumps(data))
+            self.assertNotIn("separate-provider-sub", json.dumps(data))
+            self.assertEqual(data[0]["role"], "USER")
+            db.close()
+
+    def test_wrong_provider_is_not_conflated_with_oidc(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            file = Path(tmp) / "webui.db"
+            db = sqlite3.connect(file)
+            db.execute("CREATE TABLE user (email TEXT, role TEXT, oauth TEXT)")
+            db.execute("INSERT INTO user VALUES (?,?,?)", (
+                "somebody@example.invalid", "user",
+                json.dumps({"other-provider": {"sub": "same-value"}})))
+            db.commit()
+            self.assertEqual(AI.read_rows(file, KEY, "oidc"), [])
+            db.close()
+
+    def test_playbook_has_no_mutations_and_guards_all_secret_outputs(self):
+        plays = yaml.safe_load(PLAY_FILE.read_text())
+        self.assertEqual(len(plays), 1)
+        self.assertEqual(plays[0]["hosts"], "localhost")
+        allowed = {
+            "ansible.builtin.assert", "ansible.builtin.uri",
+            "ansible.builtin.command", "ansible.builtin.set_fact",
+            "ansible.builtin.debug",
+        }
+        tasks = plays[0]["tasks"]
+        for t in tasks:
+            modules = [k for k in t if k.startswith("ansible.builtin.")]
+            self.assertEqual(len(modules), 1)
+            self.assertIn(modules[0], allowed)
+            if modules[0] in {"ansible.builtin.command", "ansible.builtin.set_fact"}:
+                self.assertIs(t["no_log"], True)
+                self.assertFalse(t.get("changed_when", False))
+            if modules[0] == "ansible.builtin.command":
+                self.assertIs(t["check_mode"], False)
+        source = AI_FILE.read_text()
+        paperless = PAPERLESS_FILE.read_text()
+        playtext = PLAY_FILE.read_text()
+        self.assertIn("mode=ro", source)
+        self.assertIn("PRAGMA query_only=ON", source)
+        self.assertIn("SocialAccount.objects.filter", paperless)
+        self.assertIn("oidc_identity_ephemeral_hmac", playtext)
+        self.assertIn("stdin:", playtext)
+        for s in (source, paperless, JOIN_FILE.read_text()):
+            self.assertNotIn("Config.upsert", s)
+            self.assertNotIn("UPDATE user", s)
+            self.assertNotIn(".save(", s)
+            self.assertNotIn("print(account", s)
+            self.assertNotIn("print(email", s)
+
+
+if __name__ == "__main__":
+    unittest.main()
