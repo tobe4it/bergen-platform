@@ -26,6 +26,7 @@ from django.db import transaction
 from documents.models import Correspondent, Document, DocumentType, Tag
 from documents.workflows.ai import resolve_object, resolve_tags
 from paperless.config import AIConfig
+from paperless.models import ApplicationConfiguration
 from paperless.version import __full_version_str__
 from paperless_ai.ai_classifier import get_ai_document_classification
 from paperless_ai.matching import (
@@ -97,6 +98,9 @@ def ensure_config(request, *, apply):
            and len(samples) == len(set(samples))
            and all(type(i) is int and i > 0 for i in samples),
            "PILOT_INVALID")
+    # AIConfig._get_config_instance() creates a singleton row when absent.
+    # A READ_ONLY audit must never trigger that implicit write.
+    demand(ApplicationConfiguration.objects.exists(), "APP_CONFIG_MISSING")
     config = AIConfig()
     endpoint = config.llm_endpoint
     expected = request.get("expected_endpoint")
@@ -222,6 +226,11 @@ def process_one(doc_id, group, minimum, pilot, db):
                 correspondent.pk if correspondent else None,
                 kind.pk if kind else None,
             )
+            if (changes["title"] is None
+                and changes["correspondent_id"] is None
+                and changes["document_type_id"] is None
+                and not changes["add_tag_ids"]):
+                raise PolicyError("NO_APPLICABLE_SUGGESTIONS")
             if changes["title"] is not None:
                 current_doc.title = changes["title"]
             if changes["correspondent_id"] is not None:
@@ -348,7 +357,7 @@ def run():
             "DATA_MOUNT_NOT_READY", "JOURNAL_UNSAFE", "DOCUMENT_NOT_ELIGIBLE",
             "PILOT_BATCH_INVALID", "INBOX_REMOVED", "SNAPSHOT_INVALID",
             "ROLLBACK_UNAVAILABLE", "ROLLBACK_REVIEW_REQUIRED",
-            "INBOX_TAG_REMOVED",
+            "INBOX_TAG_REMOVED", "APP_CONFIG_MISSING",
         }
         code = str(exc) if str(exc) in allowed else "POLICY_REJECTED"
         report(AUDIT="FAILED_CLOSED", CODE=code, CHANGED=False)
