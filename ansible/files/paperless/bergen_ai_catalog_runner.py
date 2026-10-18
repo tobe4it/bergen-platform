@@ -248,7 +248,7 @@ def process_one(doc_id, group, minimum, pilot, db):
         suggestions = get_ai_document_classification(doc, doc.owner, None)
         tags, correspondent, kind = resolve_choices(suggestions, doc.owner)
         with transaction.atomic():
-            current_doc = Document.objects.select_for_update().select_related("owner").get(pk=doc_id)
+            current_doc = Document.objects.select_for_update().get(pk=doc_id)
             demand(eligible(current_doc, group, minimum, pilot), "DOCUMENT_CHANGED")
             demand(stable_snapshot(snapshot(current_doc)) == before_json,
                    "DOCUMENT_CHANGED")
@@ -305,7 +305,7 @@ def rollback_one(doc_id, group, db):
     demand(row and row[0] == "APPLIED" and row[2], "ROLLBACK_UNAVAILABLE")
     before, after, changes = json.loads(row[1]), row[2], json.loads(row[3])
     with transaction.atomic():
-        doc = Document.objects.select_for_update().select_related("owner").get(pk=doc_id)
+        doc = Document.objects.select_for_update().get(pk=doc_id)
         demand(eligible(doc, group, 0, True), "ROLLBACK_REVIEW_REQUIRED")
         demand(stable_snapshot(snapshot(doc)) == after, "ROLLBACK_REVIEW_REQUIRED")
         # Only the recorded metadata is reverted; no document/ACL/storage edits.
