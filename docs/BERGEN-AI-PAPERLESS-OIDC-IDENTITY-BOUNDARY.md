@@ -57,6 +57,13 @@ the established unprivileged Paperless LXC **126** with its existing
 - Both processes return **HMAC fingerprints**, not identifiers. Their
   results and the challenge are held in `no_log` Ansible variables;
   the controller compares the fingerprints in memory.
+- Paperless's Django management shell can print a startup line (for example
+  an automatically imported model count) before the audit result.
+  The command runs with `--verbosity=0` and the Paperless inspector
+  emits one uniquely marked JSON line. The controller validates the
+  marker and JSON envelope before comparing fingerprints; zero or
+  multiple marked lines fail closed. Only the **count** of suppressed
+  shell status lines is reported, never the lines themselves.
 - Only aggregate counts/classifications are printed. An equal email
   alone **never** counts as a match; both a stable subject candidate and
   the same email must match and the Paperless user must be active.
