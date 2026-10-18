@@ -43,6 +43,48 @@ class FamilyInventory(unittest.TestCase):
             self.assertEqual(result["EXISTING_SESSIONS_REVOKED"], "NO")
             self.assertEqual(result["GROUPS_OR_PERMISSIONS_CHANGED"], "NO")
 
+    def test_group_names_are_exact_and_installation_scoped(self):
+        # Two unrelated homes may use different LDAP/SSO domains, different
+        # Open WebUI group names, or no domain suffix at all.
+        installations = [
+            {"family": "Familie@house-a.invalid",
+             "adults": "Eltern@house-a.invalid",
+             "children": "Kinder@house-a.invalid"},
+            {"family": "Shared@house-b.invalid",
+             "adults": "Adults@house-b.invalid",
+             "children": "Young@house-b.invalid"},
+            {"family": "Shared",
+             "adults": "Adults",
+             "children": "Children"},
+            {"family": "cn=Family,ou=Groups,dc=house-c,dc=invalid",
+             "adults": "cn=Parents,ou=Groups,dc=house-c,dc=invalid",
+             "children": "cn=Children,ou=Groups,dc=house-c,dc=invalid"},
+        ]
+        for expected in installations:
+            with self.subTest(installation=expected["family"]):
+                rows = groups()
+                for index, role in enumerate(("family", "adults", "children")):
+                    rows[index]["name"] = expected[role]
+                result = self.check(gs=rows, expected=expected)
+                self.assertEqual(result["STATUS"], "INVENTORY_PRESENT_ONLY")
+                self.assertEqual(result["FAMILY_GROUP"], "PRESENT_ROOT")
+                # No site-specific group identifiers must escape the audit.
+                for private_group in expected.values():
+                    self.assertNotIn(private_group, str(result))
+
+        # Domain-only differences MUST NOT silently match. Never strip the
+        # '@domain', infer a common suffix, or use a generic base name.
+        a = installations[0]
+        b = {key: value.replace("house-a.invalid", "house-b.invalid")
+             for key, value in a.items()}
+        rows = groups()
+        for index, role in enumerate(("family", "adults", "children")):
+            rows[index]["name"] = a[role]
+        result = self.check(gs=rows, expected=b)
+        self.assertEqual(result["STATUS"], "MANUAL_REVIEW_REQUIRED")
+        for role in ("FAMILY_GROUP", "ADULTS_GROUP", "CHILDREN_GROUP"):
+            self.assertEqual(result[role], "MISSING")
+
     def test_missing_duplicate_nested_and_unverified_hierarchy(self):
         gs = groups()
         self.assertEqual(self.check(gs[:-1])["CHILDREN_GROUP"], "MISSING")
