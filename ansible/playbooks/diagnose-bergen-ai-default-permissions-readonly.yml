@@ -72,14 +72,18 @@
           - bergen_ai_diagnose_result.APP_ORM_READ in [
               'READ_CONFIRMED', 'IMPORT_FAILED', 'PERSISTENCE_DISABLED',
               'CONFIG_INVALID', 'CONFIG_MISMATCH', 'DATABASE_READ_FAILED',
-              'TIMEOUT', 'EXEC_FAILED', 'UNCLASSIFIED_FAILURE'
+              'TIMEOUT', 'EXEC_FAILED', 'UNCLASSIFIED_FAILURE',
+              'SECRET_UNAVAILABLE'
             ]
           - bergen_ai_diagnose_result.APP_STAGE in [
               'ORM_READ_OK', 'ORM_READ_FAILED', 'ORM_CONFIG_MISMATCH',
-              'IMPORT_OK', 'IMPORT_FAILED', 'PYTHON_STARTED',
+              'IMPORT_OK', 'IMPORT_FAILED', 'PYTHON_STARTED', 'SECRET_UNAVAILABLE',
               'PROCESS_NOT_STARTED', 'PROCESS_TIMEOUT', 'PROCESS_LAUNCH_FAILED'
             ]
           - bergen_ai_diagnose_result.APP_PACKAGE in ['PRESENT', 'MISSING', 'UNVERIFIED', None]
+          - bergen_ai_diagnose_result.APP_SECRET_SOURCE in [
+              'ENV', 'EXISTING_FILE', 'UNAVAILABLE', 'UNVERIFIED'
+            ]
           - bergen_ai_diagnose_result.APP_STDERR_CLASS in [
               'CONTAINER_NOT_FOUND', 'PERMISSION_DENIED', 'PYTHON_BINARY_NOT_FOUND',
               'MODULE_NOT_FOUND', 'IMPORT_ERROR', 'DATABASE_ERROR',
@@ -106,6 +110,7 @@
           - "APP_ORM_READ={{ bergen_ai_diagnose_result.APP_ORM_READ }}"
           - "APP_STAGE={{ bergen_ai_diagnose_result.APP_STAGE }}"
           - "APP_PACKAGE={{ bergen_ai_diagnose_result.APP_PACKAGE | default('UNVERIFIED') }}"
+          - "APP_SECRET_SOURCE={{ bergen_ai_diagnose_result.APP_SECRET_SOURCE | default('UNVERIFIED') }}"
           - "APP_ERROR_CLASS={{ bergen_ai_diagnose_result.APP_ERROR_CLASS }}"
           - "APP_STDERR_CLASS={{ bergen_ai_diagnose_result.APP_STDERR_CLASS }}"
           - "APP_EXIT={{ bergen_ai_diagnose_result.APP_EXIT | default('UNVERIFIED') }}"
