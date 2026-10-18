@@ -1,0 +1,114 @@
+---
+# Version-pinned SQLite inventory of Open WebUI family groups. No admin API key.
+# No database writes, group creation, user updates, or service restarts.
+- name: Inspect existing Bergen-AI family groups without API credentials
+  hosts: "{{ bergen_ai_family_audit_host | default('__no_selected_family_host__') }}"
+  gather_facts: false
+  serial: 1
+  tasks:
+    - name: Require explicit single-host, read-only approval and private group mapping
+      ansible.builtin.assert:
+        that:
+          - bergen_ai_family_audit_host is defined
+          - inventory_hostname == bergen_ai_family_audit_host
+          - ansible_play_hosts_all | length == 1
+          - bergen_ai_family_audit_approved | default(false) | bool
+          - bergen_ai_family_group_expected is defined
+          - bergen_ai_family_group_expected is mapping
+          - (bergen_ai_family_group_expected.keys() | list | sort) == ['adults', 'children', 'family']
+        fail_msg: "Require exact inventory target, approved read-only audit and private role mapping."
+      no_log: true
+
+    - name: Determine the running version via non-mutating loopback GET
+      ansible.builtin.uri:
+        url: http://127.0.0.1:3000/api/version
+        method: GET
+        status_code: 200
+        use_proxy: false
+        follow_redirects: none
+        return_content: false
+        timeout: 10
+      register: bergen_family_version
+      changed_when: false
+      check_mode: false
+      no_log: true
+
+    - name: Refuse unreviewed database layout or malformed version response
+      ansible.builtin.assert:
+        that:
+          - bergen_family_version.json is mapping
+          - bergen_family_version.json.version is defined
+          - bergen_family_version.json.version == '0.10.2'
+        fail_msg: "SQLite audit supports only reviewed Open WebUI 0.10.2; no live changes attempted."
+      no_log: true
+
+    - name: Classify groups, group grants and effective default source from SQLite
+      ansible.builtin.command:
+        argv:
+          - python3
+          - -c
+          - "{{ lookup('ansible.builtin.file', playbook_dir ~ '/../files/bergen_ai/audit_sqlite_family_groups.py') }}"
+        stdin: "{{ {'version': bergen_family_version.json.version, 'expected': bergen_ai_family_group_expected} | to_json }}"
+        stdin_add_newline: true
+      register: bergen_family_db_stdout
+      changed_when: false
+      check_mode: false
+      no_log: true
+
+    - name: Retain only a bounded sanitized status object
+      ansible.builtin.set_fact:
+        bergen_family_db_result: "{{ bergen_family_db_stdout.stdout | from_json }}"
+      changed_when: false
+      no_log: true
+
+    - name: Require positive proof of read-only audit completion
+      ansible.builtin.assert:
+        that:
+          - bergen_family_db_result.AUDIT == 'READ_ONLY'
+          - bergen_family_db_result.VERSION_REVIEWED == 'V0_10_2'
+          - bergen_family_db_result.GROUPS_OR_PERMISSIONS_CHANGED == 'NO'
+        fail_msg: "SQLite family inventory failed closed."
+      no_log: true
+
+    - name: Report only static category labels and counts, never identity or claims
+      ansible.builtin.debug:
+        msg:
+          - "STATUS={{ bergen_family_db_result.STATUS }}"
+          - "VERSION_REVIEWED={{ bergen_family_db_result.VERSION_REVIEWED }}"
+          - "GROUP_COUNT={{ bergen_family_db_result.GROUP_COUNT }}"
+          - "OTHER_GROUPS_PRESENT={{ bergen_family_db_result.OTHER_GROUPS_PRESENT }}"
+          - "TOTAL_MEMBERSHIPS={{ bergen_family_db_result.TOTAL_MEMBERSHIPS }}"
+          - "API_KEY_COUNT={{ bergen_family_db_result.API_KEY_COUNT }}"
+          - "PUBLIC_READ_GRANTS={{ bergen_family_db_result.PUBLIC_READ_GRANTS }}"
+          - "PERSISTENT_CONFIG={{ bergen_family_db_result.PERSISTENT_CONFIG }}"
+          - "DEFAULT_SOURCE={{ bergen_family_db_result.DEFAULT_SOURCE }}"
+          - "DEFAULT_WEB_SEARCH={{ bergen_family_db_result.DEFAULT_WEB_SEARCH }}"
+          - "DEFAULT_IMAGE_GENERATION={{ bergen_family_db_result.DEFAULT_IMAGE_GENERATION }}"
+          - "DEFAULT_CODE_INTERPRETER={{ bergen_family_db_result.DEFAULT_CODE_INTERPRETER }}"
+          - "DEFAULT_FILE_UPLOAD={{ bergen_family_db_result.DEFAULT_FILE_UPLOAD }}"
+          - "DEFAULT_API_KEYS={{ bergen_family_db_result.DEFAULT_API_KEYS }}"
+          - "DEFAULT_DIRECT_TOOLS={{ bergen_family_db_result.DEFAULT_DIRECT_TOOLS }}"
+          - "DEFAULT_WORKSPACE_TOOLS={{ bergen_family_db_result.DEFAULT_WORKSPACE_TOOLS }}"
+          - "FAMILY={{ bergen_family_db_result.FAMILY }}"
+          - "FAMILY_SHARE={{ bergen_family_db_result.FAMILY_SHARE }}"
+          - "FAMILY_MEMBERS={{ bergen_family_db_result.FAMILY_MEMBERS }}"
+          - "FAMILY_RESOURCE_GRANTS={{ bergen_family_db_result.FAMILY_RESOURCE_GRANTS }}"
+          - "FAMILY_OWNER_ADMIN={{ bergen_family_db_result.FAMILY_OWNER_ADMIN }}"
+          - "ADULTS={{ bergen_family_db_result.ADULTS }}"
+          - "ADULTS_SHARE={{ bergen_family_db_result.ADULTS_SHARE }}"
+          - "ADULTS_MEMBERS={{ bergen_family_db_result.ADULTS_MEMBERS }}"
+          - "ADULTS_RESOURCE_GRANTS={{ bergen_family_db_result.ADULTS_RESOURCE_GRANTS }}"
+          - "ADULTS_OWNER_ADMIN={{ bergen_family_db_result.ADULTS_OWNER_ADMIN }}"
+          - "CHILDREN={{ bergen_family_db_result.CHILDREN }}"
+          - "CHILDREN_SHARE={{ bergen_family_db_result.CHILDREN_SHARE }}"
+          - "CHILDREN_MEMBERS={{ bergen_family_db_result.CHILDREN_MEMBERS }}"
+          - "CHILDREN_RESOURCE_GRANTS={{ bergen_family_db_result.CHILDREN_RESOURCE_GRANTS }}"
+          - "CHILDREN_OWNER_ADMIN={{ bergen_family_db_result.CHILDREN_OWNER_ADMIN }}"
+          - "CHILDREN_WEB_SEARCH={{ bergen_family_db_result.CHILDREN_WEB_SEARCH }}"
+          - "CHILDREN_IMAGE_GENERATION={{ bergen_family_db_result.CHILDREN_IMAGE_GENERATION }}"
+          - "CHILDREN_CODE_INTERPRETER={{ bergen_family_db_result.CHILDREN_CODE_INTERPRETER }}"
+          - "CHILDREN_FILE_UPLOAD={{ bergen_family_db_result.CHILDREN_FILE_UPLOAD }}"
+          - "MEMBERSHIP_SEPARATION_PROVEN={{ bergen_family_db_result.MEMBERSHIP_SEPARATION_PROVEN }}"
+          - "RESOURCE_ACL_SEPARATION_PROVEN={{ bergen_family_db_result.RESOURCE_ACL_SEPARATION_PROVEN }}"
+          - "REVOCATION_PROVEN={{ bergen_family_db_result.REVOCATION_PROVEN }}"
+          - "GROUPS_OR_PERMISSIONS_CHANGED={{ bergen_family_db_result.GROUPS_OR_PERMISSIONS_CHANGED }}"
