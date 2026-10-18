@@ -17,7 +17,28 @@ import asyncio
 import hashlib
 import json
 import os
+from pathlib import Path
 import sys
+
+def initialize_existing_secret():
+    # start.sh injects WEBUI_SECRET_KEY only into its uvicorn child.
+    # A separate podman exec process must load the same existing key.
+    if os.getenv("WEBUI_SECRET_KEY") or os.getenv("WEBUI_JWT_SECRET_KEY"):
+        return "ENV"
+    name = os.getenv("WEBUI_SECRET_KEY_FILE", ".webui_secret_key")
+    path = Path(name)
+    if not path.is_absolute():
+        path = Path("/app/backend") / path
+    if path.is_symlink() or not path.is_file():
+        return "MISSING"
+    try:
+        existing = path.read_text().strip()
+    except (OSError, UnicodeError):
+        return "UNREADABLE"
+    if not existing:
+        return "EMPTY"
+    os.environ["WEBUI_SECRET_KEY"] = existing
+    return "EXISTING_FILE"
 
 ERROR_CLASSES = {
     "ModuleNotFoundError", "ImportError", "PermissionError",
@@ -35,8 +56,14 @@ def safe_error(exc):
 
 mark("PYTHON_STARTED")
 mark("BACKEND_PACKAGE_PRESENT" if os.path.isdir("/app/backend/open_webui") else "BACKEND_PACKAGE_MISSING")
+secret_source = initialize_existing_secret()
+mark("SECRET_" + secret_source)
+if secret_source in ("MISSING", "UNREADABLE", "EMPTY"):
+    mark("SECRET_UNAVAILABLE")
+    raise SystemExit(2)
 try:
-    from open_webui.config import Config
+    from open_webui.models.config import Config
+    Config.configure(defaults={}, enable_persistent=True, enable_oauth_persistent=False)
 except BaseException as exc:
     safe_error(exc)
     mark("IMPORT_FAILED")
@@ -138,15 +165,19 @@ def probe_app(current_sha):
         )
     except subprocess.TimeoutExpired:
         return {"APP_ORM_READ": "TIMEOUT", "APP_STAGE": "PROCESS_TIMEOUT",
+                "APP_SECRET_SOURCE": "UNVERIFIED",
                 "APP_ERROR_CLASS": "NONE", "APP_STDERR_CLASS": "NONE"}
     except Exception:
         return {"APP_ORM_READ": "EXEC_FAILED", "APP_STAGE": "PROCESS_LAUNCH_FAILED",
+                "APP_SECRET_SOURCE": "UNVERIFIED",
                 "APP_ERROR_CLASS": "NONE", "APP_STDERR_CLASS": "NONE"}
 
     # Whitelist only exact stage markers and known Python exception class names.
     stages = {
         "PYTHON_STARTED", "BACKEND_PACKAGE_PRESENT", "BACKEND_PACKAGE_MISSING",
-        "IMPORT_OK", "IMPORT_FAILED", "PERSISTENCE_DISABLED", "CONFIG_INVALID",
+        "IMPORT_OK", "IMPORT_FAILED", "SECRET_ENV", "SECRET_EXISTING_FILE",
+        "SECRET_MISSING", "SECRET_UNREADABLE", "SECRET_EMPTY", "SECRET_UNAVAILABLE",
+        "PERSISTENCE_DISABLED", "CONFIG_INVALID",
         "CONFIG_MISMATCH", "READ_CONFIRMED", "DATABASE_READ_FAILED",
     }
     error_classes = {
@@ -169,13 +200,15 @@ def probe_app(current_sha):
         stage = "IMPORT_OK"
     elif "IMPORT_FAILED" in markers:
         stage = "IMPORT_FAILED"
+    elif "SECRET_UNAVAILABLE" in markers:
+        stage = "SECRET_UNAVAILABLE"
     elif "PYTHON_STARTED" in markers:
         stage = "PYTHON_STARTED"
     else:
         stage = "PROCESS_NOT_STARTED"
 
     accepted = {
-        "IMPORT_FAILED", "PERSISTENCE_DISABLED", "CONFIG_INVALID",
+        "IMPORT_FAILED", "SECRET_UNAVAILABLE", "PERSISTENCE_DISABLED", "CONFIG_INVALID",
         "CONFIG_MISMATCH", "READ_CONFIRMED", "DATABASE_READ_FAILED",
     }
     terminal = [m for m in markers if m in accepted]
@@ -196,6 +229,11 @@ def probe_app(current_sha):
         "APP_PACKAGE": (
             "PRESENT" if "BACKEND_PACKAGE_PRESENT" in markers else
             "MISSING" if "BACKEND_PACKAGE_MISSING" in markers else "UNVERIFIED"
+        ),
+        "APP_SECRET_SOURCE": (
+            "ENV" if "SECRET_ENV" in markers else
+            "EXISTING_FILE" if "SECRET_EXISTING_FILE" in markers else
+            "UNAVAILABLE" if "SECRET_UNAVAILABLE" in markers else "UNVERIFIED"
         ),
         "APP_ERROR_CLASS": errors[0] if len(errors) == 1 else "NONE",
         "APP_STDERR_CLASS": classify_stderr(result.stderr),
