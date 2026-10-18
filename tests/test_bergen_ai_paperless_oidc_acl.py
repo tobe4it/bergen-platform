@@ -331,9 +331,13 @@ class Tests(unittest.TestCase):
                 ])
                 LIB["bind_users"].__globals__["SocialAccount"] = FakeSocialAccount
                 LIB["bind_users"].__globals__["User"] = FakeUser
-                with self.assertRaisesRegex(LIB["AuditError"], "IDENTITY_PRIVILEGED"):
+                with self.assertRaisesRegex(LIB["AuditError"], "IDENTITY_UNLINKED") as error:
                     LIB["bind_users"]({"parent_a", "parent_b"}, ai_rows(),
-                                      KEY, "synology-synthetic")
+                                      KEY, "synology-synthetic",
+                                      ["parent_a", "parent_b"])
+                self.assertEqual(error.exception.actor_states, {
+                    "A": "INACTIVE_OR_PRIVILEGED", "B": "MATCHED"
+                })
 
     def test_reused_subject_or_duplicate_socialaccount_fails_closed(self):
         FakeSocialAccount.objects = FakeManager([
