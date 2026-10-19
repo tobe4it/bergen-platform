@@ -16,6 +16,7 @@ on:
       - 'ansible/playbooks/inspect-nextcloud-restore-701-offline-runtime.yml'
       - 'ansible/playbooks/inspect-nextcloud-restore-701-running-readonly.yml'
       - 'ansible/playbooks/audit-nextcloud-restore-offline-package-sources.yml'
+      - 'ansible/playbooks/audit-rocky-9-lxc-template-builder-readonly.yml'
       - 'ansible/files/nextcloud/inspect_restore_rpm_inventory.py'
       - 'tests/test_nextcloud_restore_701_iface_count.py'
       - 'docs/NEXTCLOUD-ISOLATED-RESTORE-701.md'
@@ -68,6 +69,9 @@ jobs:
             ansible/playbooks/audit-nextcloud-restore-offline-package-sources.yml \
             --syntax-check
           python3 -m py_compile ansible/files/nextcloud/inspect_restore_rpm_inventory.py
+          ansible-playbook -i localhost, \
+            ansible/playbooks/audit-rocky-9-lxc-template-builder-readonly.yml \
+            --syntax-check
       - name: Verify offline-only initial provisioning
         run: |
           python3 - <<'PY'
@@ -154,5 +158,24 @@ jobs:
           assert 'network_changes": False' in source_inventory
           assert 'rpm", "-qa"' in source_inventory
           assert 'ALLOWED_ID' in source_inventory
+          builder = yaml.safe_load(Path("ansible/playbooks/audit-rocky-9-lxc-template-builder-readonly.yml").read_text())
+          assert len(builder) == 1 and builder[0]["hosts"] == "venombox"
+          tasks_builder = builder[0]["tasks"]
+          assert not any(any(key in t for key in (
+              "ansible.builtin.shell", "ansible.builtin.script",
+              "ansible.builtin.raw", "ansible.builtin.copy",
+              "ansible.builtin.template", "ansible.builtin.file",
+              "ansible.builtin.dnf", "ansible.builtin.yum",
+              "ansible.builtin.systemd", "ansible.builtin.service",
+          )) for t in tasks_builder)
+          assert not any(t.get("ansible.builtin.command", {}).get("argv", [])[:2] in (
+              ["pct", "create"], ["pct", "set"], ["pct", "start"],
+              ["pct", "stop"], ["pct", "destroy"], ["pct", "template"],
+              ["pct", "clone"], ["pct", "push"], ["pveam", "download"],
+              ["pvesm", "alloc"],
+          ) for t in tasks_builder)
+          assert "ROCKY_9_8_LXC_TEMPLATE_BUILDER_READ_ONLY_READY" in Path(
+              "ansible/playbooks/audit-rocky-9-lxc-template-builder-readonly.yml"
+          ).read_text()
           print("NEXTCLOUD_701_OFFLINE_STATIC_BOUNDARIES=PASS")
           PY
