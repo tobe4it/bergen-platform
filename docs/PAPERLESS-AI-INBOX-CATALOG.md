@@ -117,6 +117,65 @@ reviewed parent group/domain (keep flags false by default).
 The current config fingerprint must be re-observed at the
 moment of separately authorized native LLM settings apply.
 Global Paperless AI/UI and embeddings/RAG remain OFF.
+## Private Paperless → Ollama connectivity verified; firewall review outstanding
+
+On 2026-10-19, the operator successfully ran
+`audit-paperless-ai-ollama-private-path-readonly.yml`:
+`ok=7 changed=0 failed=0`. The verified LXC126 Paperless Podman
+application reached the existing LXC110 Ollama server on its unique
+private IPv4 address and observed the exact installed
+`qwen2.5:14b-instruct-q4_K_M` tag. No documents, settings or
+model files changed. Important classifications:
+
+    STATUS=PAPERLESS_PRIVATE_PATH_READY
+    PRIVATE_IPV4_CANDIDATES=ONE
+    QWEN14_FROM_PAPERLESS_PODMAN=MODEL_PRESENT
+    OLLAMA_LISTENER=WILDCARD
+    NETWORK_EXPOSURE_REVIEW=REQUIRED
+
+**A working private route does not demonstrate that outsiders or
+unapproved local clients cannot reach Ollama.** In particular,
+a wildcard listener with unauthenticated Ollama API port 11434
+must have verified access controls. PVE and UniFi policies are
+not yet proven; same-VLAN traffic may bypass UniFi routing rules.
+Never assume that membership of RFC1918 IP space or a PVE
+firewall config file provides isolation.
+
+### Next: read-only Proxmox firewall *configuration* inventory
+
+PR #114 contains a bounded audit of CT110 NIC `firewall=1`
+flags, host and cluster firewall config flags, CT firewall rule
+file existence and firewall daemon active states. It never
+prints IPs, actual rules, or other guest identifiers and it
+**always** reports `EXPOSURE_GATE=REVIEW_REQUIRED` because
+configuration presence does not establish effective packet
+filtering or UniFi policy.
+
+~~~bash
+(
+set -euo pipefail
+BASE="$HOME/bergen-platform"
+cd "$HOME/bergen-platform-paperless-ai-catalog"
+git fetch origin feat/paperless-native-ai-inbox-catalog-20261018
+git switch --detach origin/feat/paperless-native-ai-inbox-catalog-20261018
+"$BASE/.venv/bin/ansible-playbook" \
+  -i ansible/inventory.yml \
+  -i "$BASE/ansible/inventory.local.yml" \
+  ansible/playbooks/audit-paperless-ai-ollama-firewall-readonly.yml \
+  --vault-id ai@prompt
+)
+~~~
+
+After the inventory, separately inspect the current Proxmox
+filtering rules as well as UniFi/firewall policy for IoT, guest,
+DMZ and internal VLANs; verify explicitly that unexpected
+clients cannot connect to LXC110:11434. If multiple trusted
+guests need Ollama, document exact allowed sources. A UCG rule
+does not necessarily control same-VLAN clients. Only after
+network isolation and backup/fingerprint gates are approved
+may the native Paperless LLM backend/model/endpoint be configured
+using its protected, separately approved playbook. No global
+Paperless AI, embeddings, RAG or timer activation is authorized.
 ## Target behaviour
 
 Only **new**, OCR-complete, unreviewed inbox documents belonging to active,
