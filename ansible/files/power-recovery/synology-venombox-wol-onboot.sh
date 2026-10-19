@@ -3,6 +3,17 @@
 # Sends Magic Packets only. Never changes NAS/host network or firmware.
 set -eu
 
+# Fail closed unless a deliberate operation was selected.
+# --check never sends packets and never sleeps/reconfigures anything.
+case "${1:-}" in
+    --check) MODE=check ;;
+    --send) MODE=send ;;
+    *)
+        echo 'Usage: synology-venombox-wol-onboot.sh --check|--send' >&2
+        exit 2
+        ;;
+esac
+
 WAKE_IF=eth0
 SYNONET=/usr/syno/sbin/synonet
 MAC_FILE=/volume1/bergen-recovery/venombox-wol.mac
@@ -11,14 +22,24 @@ if [ "$(id -u)" != "0" ]; then
     echo 'ERROR: run as root via DSM Task Scheduler' >&2
     exit 1
 fi
-if [ ! -x "$SYNONET" ] || [ ! -r "$MAC_FILE" ]; then
-    echo 'ERROR: synonet or protected MAC file unavailable' >&2
+if [ ! -x "$SYNONET" ] || [ ! -r "$MAC_FILE" ] ||
+   [ ! -f "$MAC_FILE" ] || [ -L "$MAC_FILE" ]; then
+    echo 'ERROR: synonet or protected regular MAC file unavailable' >&2
+    exit 1
+fi
+if [ "$(wc -l < "$MAC_FILE")" -ne 1 ]; then
+    echo 'ERROR: target MAC file must contain exactly one newline-terminated line' >&2
     exit 1
 fi
 TARGET_MAC=$(head -n 1 "$MAC_FILE")
 if ! printf '%s\n' "$TARGET_MAC" | grep -Eiq '^([[:xdigit:]]{2}:){5}[[:xdigit:]]{2}$'; then
     echo 'ERROR: invalid target MAC format' >&2
     exit 1
+fi
+
+if [ "$MODE" = check ]; then
+    echo 'WOL_PREFLIGHT_OK; interface=eth0; packet_send=NONE; reboot=NONE'
+    exit 0
 fi
 
 # A NAS may complete boot before the switch has recovered from an outage.
