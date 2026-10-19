@@ -512,6 +512,36 @@ documented as a smoke test and is **not** directly comparable with
 the forthcoming longer-run throughput. Runtime GPU allocation via
 `/api/ps` is reported again. If the synthetic task ends under 64
 tokens, the playbook fails conservatively without trying again.
+### Second Qwen14B GPU test – longer synthetic output (2026-10-19)
+
+User-operated `benchmark-bergen-ai-ollama-gpu-synthetic.yml` at branch
+`02ac5551660a228fc924b38e621cdb446978c408` finished successfully:
+
+    STATUS=SYNTHETIC_COMPLETED
+    EVAL_TOKENS=127
+    TOKENS_PER_SECOND=7.3
+    LOAD_SECONDS=2.27
+    GPU_PLACEMENT=GPU_ALLOCATION_OBSERVED
+    GPU_ALLOCATED_GIB=8.44
+    MODEL_INFERENCE_COMPLETED=YES
+    PAPERLESS_CHANGED=NO
+    PVE_CONFIG_CHANGED=NO
+    RECAP ok=7 changed=1 failed=0
+
+Implied token generation wall time is 127/7.3 ≈ 17.4 seconds;
+load time adds ≈2.27 seconds, excluding input prompt evaluation,
+API overhead and any other latency. This is the first useful
+throughput datapoint, not a full performance distribution. The
+previous 14.3 tokens/s from two output tokens is retained only
+as a successful smoke test. Ollama's 8.44 GiB `size_vram` shows
+reported GPU allocation on the shared-memory Radeon 890M, not
+a measurement of exclusive GPU execution or dedicated VRAM.
+
+Before selecting a Paperless cataloging model, compare Mistral Nemo
+12B with the same synthetic workload in an independently gated
+single-model test. The final decision also requires real cataloging
+quality and human approval of tags/types/correspondents, not just
+tokens/sec. Paperless AI and RAG remain disabled.
 ## Step 2 – audit model download needs, still ZERO writes
 
     (
