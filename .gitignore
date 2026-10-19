@@ -57,3 +57,7 @@ ansible/group_vars/all/bergen-paperless.yml
 
 # Private Nextcloud and Collabora production baseline
 ansible/vars/mail-nextcloud-stack.local.yml
+
+# Private Synology recovery site settings
+ansible/vars/synology-wol.local.yml
+ansible/vars/synology-wol.local.yml*
