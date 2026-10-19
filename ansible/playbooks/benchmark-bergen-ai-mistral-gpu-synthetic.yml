@@ -1,6 +1,6 @@
 ---
 # Explicit, bounded model inference benchmark, NOT a read-only audit.
-# Loopback only, existing Qwen2.5 14B, synthetic text; no documents or RAG.
+# Loopback only, existing Mistral Nemo 12B, synthetic text; no documents or RAG.
 # Requires separate approval and a moment with no other Ollama models loaded.
 - name: Bench isolated Ollama MistralNemo12B GPU allocation on Bergen-AI LXC110
   hosts: venombox
@@ -59,7 +59,8 @@
           - bergen_ai_gpu_benchmark.STATUS == 'SYNTHETIC_COMPLETED'
           - bergen_ai_gpu_benchmark.MODEL == 'mistral-nemo:12b'
           - bergen_ai_gpu_benchmark.PROMPT_KIND == 'SYNTHETIC_NO_DOCUMENTS'
-          - bergen_ai_gpu_benchmark.EVAL_TOKENS | int > 0
+          - bergen_ai_gpu_benchmark.EVAL_TOKENS | int >= 64
+          - bergen_ai_gpu_benchmark.EVAL_TOKENS | int <= 192
           - bergen_ai_gpu_benchmark.TOKENS_PER_SECOND | float > 0
           - bergen_ai_gpu_benchmark.GPU_PLACEMENT in ['GPU_ALLOCATION_OBSERVED','CPU_ONLY_REPORTED','UNKNOWN']
           - not bergen_ai_gpu_benchmark.CONFIGURATION_CHANGED
