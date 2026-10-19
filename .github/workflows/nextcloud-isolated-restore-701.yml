@@ -14,6 +14,7 @@ on:
       - 'tests/test_nextcloud_restore_archive_symlink_audit.py'
       - 'ansible/playbooks/audit-nextcloud-restore-archive-readonly.yml'
       - 'ansible/playbooks/inspect-nextcloud-restore-701-offline-runtime.yml'
+      - 'ansible/playbooks/inspect-nextcloud-restore-701-running-readonly.yml'
       - 'docs/NEXTCLOUD-ISOLATED-RESTORE-701.md'
       - '.github/workflows/nextcloud-isolated-restore-701.yml'
   push:
@@ -55,6 +56,9 @@ jobs:
             --syntax-check
           ansible-playbook -i localhost, \
             ansible/playbooks/inspect-nextcloud-restore-701-offline-runtime.yml \
+            --syntax-check
+          ansible-playbook -i localhost, \
+            ansible/playbooks/inspect-nextcloud-restore-701-running-readonly.yml \
             --syntax-check
       - name: Verify offline-only initial provisioning
         run: |
@@ -119,5 +123,11 @@ jobs:
           assert "nextcloud_restore_701_start" in start_tasks[0]["when"]
           assert not any(any(key in t for key in ("ansible.builtin.shell", "ansible.builtin.template", "ansible.builtin.file", "ansible.builtin.copy")) for t in tasks_boot)
           assert "NON_LOOPBACK_DEVICES=0" in Path("ansible/playbooks/inspect-nextcloud-restore-701-offline-runtime.yml").read_text()
+          running = yaml.safe_load(Path("ansible/playbooks/inspect-nextcloud-restore-701-running-readonly.yml").read_text())
+          assert len(running) == 1 and running[0]["hosts"] == "venombox"
+          running_tasks = running[0]["tasks"]
+          assert not any(t.get("ansible.builtin.command",{}).get("argv",[])[:2] in (["pct","start"],["pct","stop"],["pct","set"],["pct","mount"]) for t in running_tasks)
+          assert not any(any(key in t for key in ("ansible.builtin.shell","ansible.builtin.template","ansible.builtin.file","ansible.builtin.copy")) for t in running_tasks)
+          assert "NON_LOOPBACK_DEVICES=0" in Path("ansible/playbooks/inspect-nextcloud-restore-701-running-readonly.yml").read_text()
           print("NEXTCLOUD_701_OFFLINE_STATIC_BOUNDARIES=PASS")
           PY
