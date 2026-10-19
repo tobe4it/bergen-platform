@@ -850,3 +850,92 @@ separate, später freizugebende Tests validiert werden.
 `net1`, Ollama-Binding, Paperless-Konfiguration, Systemd-Timern,
 Proxmox-Backuplaufplänen, Retention/Pruning, Host-Neustarts oder
 irgendeine Bereinigung vorhandener Archive.
+
+
+### Phase 0f – Live-Ergebnis: korrekt blockiert (19.10.2026)
+
+Der Operator hat zunächst den CT110-Oneoff-Preflight und anschließend
+das genehmigte Einmalsicherungs-Playbook ausgeführt. Beide haben
+den gleichen Sicherheitsbefund geliefert:
+
+```text
+AUDIT=READ_ONLY
+STATUS=REVIEW_REQUIRED
+CT110_IDENTITY=EXTRA_MOUNTS_REQUIRE_REVIEW
+WEBUI_DATA=UNVERIFIED
+GUEST_MOUNTS=UNVERIFIED
+BACKUP_TARGET=NFS_ACTIVE_WITH_FREE_SPACE
+TEMP_SPACE=LOCAL_TMP_SPACE_OK
+ARCHIVE_STATE=NO_CT110_ARCHIVE_ON_SELECTED_STORAGE
+SAFE_TO_ATTEMPT_SINGLE_BACKUP=False
+BACKUP_EXECUTED=False
+ROLLBACK_CLEARANCE=NOT_PROVEN
+APPLY_AUTHORIZED=False
+```
+
+Bei der genehmigten Einmalsicherung war das zusätzliche
+Approval-Gate erfolgreich, das anschließende
+`CT110_BACKUP_PREFLIGHT_REVIEW_REQUIRED` hat aber den
+`vzdump`-Schritt **vorher** blockiert. `changed=0`, `failed=1`
+bedeutet hier die erwartete fail-closed Sperre. **Keine**
+Sicherung, kein Backup-Retry, kein Gast-Neustart.
+
+Der ältere PVE-Backup-Policy-Audit meldete `CT110_EXTRA_MOUNTS=NONE`;
+dieser ältere Scope zählt aber nur `mpN`-Zeilen. Der
+Oneoff-Preflight sperrt vorsichtshalber auch
+`lxc.mount.auto` und `lxc.mount.entry`. Insbesondere
+`lxc.mount.auto` **kann** gewöhnliche virtuelle
+Systemdateisysteme (proc/sys/cgroup) definieren, ohne eine
+zusätzliche persistente Datenquelle zu bezeichnen. Es gibt
+aber **noch keinen Beleg**, welcher Fall auf dem realen CT110
+zutrifft.
+
+### Phase 0f.1 – präzise Mount-Diagnose, read-only
+
+`audit-bergen-ai-ct110-mount-directives-readonly.yml`
+liest nur `pct config 110`, den CT110-Status und prüft die
+bekannte Open-WebUI-Datenverzeichnis-Zuordnung **ohne** Inhalte,
+Pfadnamen, Quellmounts oder andere Betriebsdetails auszugeben.
+Es unterscheidet in Zustandskategorien:
+
+- Proxmox-`mpN`-Direktiven vorhanden/fehlend;
+- `lxc.mount.auto`: Standard-Pseudodateisysteme oder unbekannte Werte;
+- `lxc.mount.entry`: Geräte-/Systemziele gegenüber sonstigen Zielorten;
+- sonstige Hooks/Excludes vorhanden/fehlend;
+- bekanntes persistentes Open-WebUI-Verzeichnis: Gast-Rootfs
+  oder anderes Gast-Mount.
+
+Die Ausgabe ist **Diagnostik, keine Freigabe**.
+Auch bei Standard-Pseudomounts ist die reale Abdeckung
+von Open WebUI, Ollama-Modellen, Podman-Volumes und
+zusätzlichen Dateisystemen gesondert nachzuweisen.
+Keine automatische Lockerung der Oneoff-Backup-Gates.
+
+Auf bp-controller:
+
+```bash
+(
+set -euo pipefail
+BASE="$HOME/bergen-platform"
+WT="$HOME/bergen-platform-ai-private-bridge"
+git -C "$WT" fetch origin feat/bergen-ai-private-bridge-20261019
+git -C "$WT" switch --detach origin/feat/bergen-ai-private-bridge-20261019
+cd "$WT"
+
+"$BASE/.venv/bin/ansible-playbook" \
+  -i ansible/inventory.yml \
+  -i "$BASE/ansible/inventory.local.yml" \
+  ansible/playbooks/audit-bergen-ai-ct110-mount-directives-readonly.yml \
+  --syntax-check
+
+"$BASE/.venv/bin/ansible-playbook" \
+  -i ansible/inventory.yml \
+  -i "$BASE/ansible/inventory.local.yml" \
+  ansible/playbooks/audit-bergen-ai-ct110-mount-directives-readonly.yml \
+  --vault-id ai@prompt
+)
+```
+
+**Bis zur Bewertung:** `backup-bergen-ai-ct110-once.yml` **nicht
+erneut starten**. Alle Backup-, Timer-, Netzwerk- und
+Inference-/Paperless-Apply-Gates bleiben gesperrt.
