@@ -162,9 +162,11 @@
         fail_msg: "Wake-on-LAN did not remain enabled; inspect systemd journal and NIC driver"
       when: not ansible_check_mode
 
-    - name: Report approved deployment result
+    - name: Report explicitly approved operation or simulated change
       ansible.builtin.debug:
         msg:
-          - "Systemd WoL unit installed/enabled only when approved"
-          - "Current Wake-on=g must still be tested through planned normal shutdown"
-          - "Recovery after complete AC power loss remains unproven"
+          - "MODE={{ 'CHECK_ONLY_NO_WRITE' if ansible_check_mode else 'APPROVED_APPLY' }}"
+          - "Systemd unit: {{ 'would be rendered' if ansible_check_mode else 'installed and enabled' }}"
+          - "Physical NIC state: {{ 'unchanged by check mode' if ansible_check_mode else 'verified Wake-on=g' }}"
+          - "AC loss G3 recovery=UNPROVEN"
+          - "No host reboot or bridge/network reload"
