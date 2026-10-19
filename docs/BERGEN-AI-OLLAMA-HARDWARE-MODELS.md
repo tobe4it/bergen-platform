@@ -123,6 +123,61 @@ does not enable Paperless, embeddings, RAG or any new network listener.
 
 Native PVE device passthrough is documented at:
 https://github.com/proxmox/pve-docs/blob/master/generated/pct.1-synopsis.adoc
+## Post-stage incident: 2026-10-19, exact verification repaired
+
+The operator applied the dedicated GPU/32-GiB staging playbook to LXC 110.
+The protected preimage was created, native PVE dev0/dev1 values were written
+and memory limit increased. The **old final assertion failed** only because
+it expected `dev0: /dev/dri/renderD128` while `pct config 110` actually renders
+`dev0: path=/dev/dri/renderD128,uid=999,gid=992,mode=0660`.
+
+Read-only proof supplied by the operator:
+
+    cores: 18
+    dev0: path=/dev/dri/renderD128,uid=999,gid=992,mode=0660
+    dev1: path=/dev/kfd,uid=999,gid=992,mode=0660
+    hostname: bergen-ai
+    memory: 32768
+    swap: 2048
+    unprivileged: 1
+
+The original protected config retains memory 16384, 18 cores, 2048 swap,
+unprivileged=1 and no dev0/dev1. The **Stage playbook is not repeatable**
+after the protected preimage exists. NEVER rerun it just to get a green recap.
+
+The fixed Stage assertion now validates the actual full Proxmox device lines
+including `path=`, uid 999, gid 992 and mode 0660. A new standalone
+read-only `audit-bergen-ai-gpu-staged-readonly.yml` verifies the **complete**
+actual LXC config against the 0600 preimage. The comparison fails closed
+if any unplanned field has changed, or either GPU device has the wrong
+path/uid/gid/mode. It also verifies the guest is running.
+
+Before any restart, on bp-controller refresh the separate hardware worktree
+and run only the new read-only poststage audit:
+
+    (
+    set -euo pipefail
+    BASE="$HOME/bergen-platform"
+    cd "$HOME/bergen-platform-ollama-hardware"
+    git fetch origin feat/bergen-ai-ollama-hardware-models-20261019
+    git switch --detach origin/feat/bergen-ai-ollama-hardware-models-20261019
+    "$BASE/.venv/bin/ansible-playbook" \
+      -i ansible/inventory.yml \
+      -i "$BASE/ansible/inventory.local.yml" \
+      ansible/playbooks/audit-bergen-ai-gpu-staged-readonly.yml \
+      --vault-id ai@prompt
+    )
+
+Expected: `AUDIT=READ_ONLY`, `STATUS=EXACT_STAGE_ONLY`,
+`LXC110_OTHER_CONFIG=UNCHANGED_FROM_PREIMAGE`, `CHANGED=False`,
+`RESTART_PERFORMED=NO` and no failures. If not, stop and inspect manually.
+
+**Only after a passing audit and separate outage approval:** coordinate a
+restart of LXC 110 (interrupts Open WebUI and Ollama), verify both device
+nodes exist with correct ownership inside the guest and Ollama local API
+is healthy, then run bounded synthetic inference and inspect Ollama's
+GPU/CPU placement. Merely mounting devices does not prove GPU execution.
+Paperless and other LXCs must not be restarted as part of this change.
 ## Step 2 – audit model download needs, still ZERO writes
 
     (
