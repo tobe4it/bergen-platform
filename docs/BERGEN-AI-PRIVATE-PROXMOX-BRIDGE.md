@@ -380,3 +380,106 @@ Service-Identitäten vorgesehen.
   bestehender Daten-/Internetpfad dürfen nicht unterbrochen werden.
 - `bergen-syslog` und andere künftige KI-Clients werden **nicht**
   schon bei der Paperless-Einführung freigeschaltet.
+
+
+## Phase 0c – externe Netzbereiche und Rollback-Belege (read-only)
+
+Der weitere, **nicht schreibende** Preflight
+`ansible/playbooks/audit-bergen-ai-private-bridge-external-gates-readonly.yml`
+hat zwei unabhängig begrenzte Teile:
+
+1. **Auf dem bp-controller (localhost):** Ein ausschließlich lokal gehaltenes,
+   manuell aus der UniFi-Konfiguration, allen WireGuard-/Site-to-Site-/
+   Remote-VPN-Konfigurationen und den übrigen Hosts/Hypervisoren/NAS
+   zusammengestelltes CIDR-Inventar wird gegen `172.30.110.0/28` geprüft.
+   `0.0.0.0/0` als Full-Tunnel-`AllowedIPs` wird als Sonderfall zur
+   Prüfung klassifiziert, nicht als eindeutige Netzbelegung. Es gibt **keine**
+   UniFi-API-Abfrage, keine VPN-Anmeldung und keine Netzwerkverbindung.
+2. **Auf venombox:** Lesbarkeit der Netzwerkquellen und der bisherigen
+   `pct config`-Bestände 110/126, lokale WireGuard-`AllowedIPs` (falls
+   `wg` verfügbar), NFS-Mount-Metadaten und allenfalls vorhandene aktuelle
+   `vzdump-lxc-110/126`-Dateimetadaten. Es werden **keine** Backup-Inhalte
+   gelesen, Sicherungen erzeugt, Geräte konfiguriert oder Pakete versendet.
+
+Ein solches Host-Inventar kann keine externen VPN-Netze, keine PBS-Backups,
+keinen funktionierenden Restore und keinen Konsolenzugriff bescheinigen.
+Daher bleiben **`FULL_NETWORK_CLEARANCE=NOT_PROVEN`**,
+**`ROLLBACK_CLEARANCE=NOT_PROVEN`** und
+**`APPLY_AUTHORIZED=False`** bei **jedem** Ergebnis.
+
+### Lokales Netz-Inventar vorbereiten
+
+Die lokale Datei wird nicht eingecheckt. Die drei Kategorien müssen
+vollständig geprüft werden, bevor `complete` in der jeweiligen Kategorie
+auf `true` gesetzt wird:
+
+- `unifi`: alle UniFi-Netze, VLANs sowie relevante Controller-Routen;
+- `vpn`: alle Tunnelnetze, WireGuard-AllowedIPs und Site-to-Site-Routen,
+  auch auf anderen Geräten als venombox;
+- `other_hosts`: andere Hypervisoren, VMs, NAS, Container-Overlays,
+  statische Routen und bekannte zukünftige reservierte Subnetze.
+
+Leere Listen mit `complete: true` sind eine reine **Operator-Erklärung**,
+kein unabhängiger Beweis. Zusätzliche Netze im Eigentümerbereich sind
+einschließlich Supernetzen anzugeben. Die Datei darf **keine Tokens,
+Passwörter, privaten Schlüssel oder Konfigurationsdumps** enthalten.
+
+Auf `bp-controller` im **bestehenden** Worktree:
+
+```bash
+(
+set -euo pipefail
+BASE="$HOME/bergen-platform"
+WT="$HOME/bergen-platform-ai-private-bridge"
+cd "$WT"
+git fetch origin feat/bergen-ai-private-bridge-20261019
+git switch --detach origin/feat/bergen-ai-private-bridge-20261019
+
+install -m 0600 docs/examples/bergen-ai-bridge-ipam.local.json.example \
+  "$BASE/ansible/vars/bergen-ai-bridge-ipam.local.json"
+# Die Datei anschließend im Editor vervollständigen.
+# ACHTUNG: Quelle ist gitignored im BASE, nicht Teil des Worktrees.
+"$BASE/.venv/bin/python3" -m unittest discover -s tests \
+  -p 'test_bergen_ai_private_bridge_external_gates.py' -v
+"$BASE/.venv/bin/ansible-playbook" \
+  -i ansible/inventory.yml -i "$BASE/ansible/inventory.local.yml" \
+  ansible/playbooks/audit-bergen-ai-private-bridge-external-gates-readonly.yml \
+  --syntax-check
+)
+```
+
+**Wichtig: Worktree und Basis-Checkout haben unterschiedliche
+`ansible/vars`-Verzeichnisse.** Die Vorlage wird bewusst in `$BASE`
+installiert; deshalb beim Live-Lauf den lokalen Dateipfad per
+`-e` übergeben:
+
+```bash
+(
+set -euo pipefail
+BASE="$HOME/bergen-platform"
+WT="$HOME/bergen-platform-ai-private-bridge"
+cd "$WT"
+"$BASE/.venv/bin/ansible-playbook" \
+  -i ansible/inventory.yml -i "$BASE/ansible/inventory.local.yml" \
+  ansible/playbooks/audit-bergen-ai-private-bridge-external-gates-readonly.yml \
+  -e "private_bridge_ipam_path=$BASE/ansible/vars/bergen-ai-bridge-ipam.local.json" \
+  --vault-id ai@prompt
+)
+```
+
+Die Beispielvorlage beginnt bewusst mit drei unbestätigten Bereichen.
+`IPAM_STATUS=NO_OVERLAP_IN_DECLARED_RANGES` bedeutet **nur**, dass
+die eingegebenen CIDRs sich nicht schneiden.
+`SCOPE_COVERAGE=OPERATOR_DECLARED_COMPLETE` ist eine
+Selbsterklärung zur Erfassungsabdeckung, keine Freigabe.
+
+Für einen späteren Change sind weiterhin **separate** Nachweise erforderlich:
+konsistente, verschlüsselt verwahrte Kopien der PVE-Netzwerk-Konfiguration,
+`pct config` 110/126, Ollama-/Open-WebUI-Verbindungsparameter,
+**wiederherstellbare** Sicherungen von LXC110/126 einschließlich persistenter
+Daten, getesteter Restore und unabhängig funktionierender
+Out-of-band-/Konsolenzugriff. Weder die Existenz einer `vzdump`-Datei
+noch eine lesbare aktuelle Konfiguration erfüllen diese Gates. Keine
+Bridge-/NIC-/Firewall-/Ollama-Änderung wird in diesem Schritt durchgeführt.
+
+**Separate Freigabe vor produktivem Apply erforderlich.**
