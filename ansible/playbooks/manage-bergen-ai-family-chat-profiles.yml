@@ -19,6 +19,22 @@
       token: "{{ vault_open_webui_admin_token }}"
       child_prompt: "{{ lookup('ansible.builtin.file', playbook_dir ~ '/../files/bergen_ai/prompts/learning_companion_de_v1.md') }}"
   tasks:
+    - name: Report non-secret prerequisites before protected gate
+      ansible.builtin.debug:
+        msg:
+          - "PREFLIGHT=AUDIT_ONLY_SAFE_DIAGNOSTICS"
+          - "TARGET_MATCH={{ (bergen_ai_family_audit_host | default('')) == inventory_hostname }}"
+          - "ONE_HOST={{ ansible_play_hosts_all | length == 1 }}"
+          - "FAMILY_AUDIT_APPROVED={{ bergen_ai_family_audit_approved | default(false) | bool }}"
+          - "THREE_GROUP_NAMES={{ bergen_ai_family_group_expected is mapping and ((bergen_ai_family_group_expected.keys() | list | sort) == ['adults', 'children', 'family']) }}"
+          - "VAULT_ADMIN_TOKEN_DEFINED={{ vault_open_webui_admin_token is defined }}"
+          - "VAULT_ADMIN_TOKEN_MIN_LENGTH_OK={{ (vault_open_webui_admin_token | default('') | length) >= 20 }}"
+          - "MODEL_OPERATION={{ bp_family_model_mode }}"
+          - "WRITE_APPROVED={{ not bp_family_model_mutating or (bergen_ai_family_model_approved | default(false) | bool) }}"
+          - "WRITE_BACKUP_VERIFIED={{ not bp_family_model_mutating or (bergen_ai_family_model_backup_verified | default(false) | bool) }}"
+          - "WRITE_FINGERPRINT_PRESENT={{ not bp_family_model_mutating or ((bergen_ai_family_model_expected_sha256 | default('') | length) == 64) }}"
+      changed_when: false
+
     - name: Require approved target and independent per-model release gates
       ansible.builtin.assert:
         that:
