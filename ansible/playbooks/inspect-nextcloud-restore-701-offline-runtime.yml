@@ -1,0 +1,153 @@
+---
+# Default readonly; optionally start only existing stopped, networkless LXC 701.
+- name: Audit and optionally boot isolated Nextcloud restore guest
+  hosts: venombox
+  gather_facts: false
+  become: true
+  any_errors_fatal: true
+  tasks:
+    - name: Confirm exact host identity
+      ansible.builtin.command:
+        argv: [hostname, -s]
+      register: guest_host
+      changed_when: false
+
+    - name: Assert exact host identity
+      ansible.builtin.assert:
+        that:
+          - inventory_hostname == 'venombox'
+          - guest_host.stdout == 'venombox'
+
+    - name: Read stopped state of dedicated guest
+      ansible.builtin.command:
+        argv: [pct, status, '701']
+      changed_when: false
+      register: guest_state
+
+    - name: Read existing dedicated guest configuration
+      ansible.builtin.command:
+        argv: [pct, config, '701']
+      changed_when: false
+      register: guest_config
+
+    - name: Refuse unexpected guest or networking configuration
+      ansible.builtin.assert:
+        that:
+          - "'status: stopped' in guest_state.stdout"
+          - "'hostname: nextcloud-restore-701' in guest_config.stdout"
+          - "'unprivileged: 1' in guest_config.stdout"
+          - "'onboot: 0' in guest_config.stdout"
+          - "'protection: 1' in guest_config.stdout"
+          - "'ostype: centos' in guest_config.stdout"
+          - "guest_config.stdout is search('(?m)^rootfs: local-zfs:')"
+          - "not (guest_config.stdout is search('(?m)^(?:net[0-9]+|mp[0-9]+|dev[0-9]+|lxc\\.mount\\.entry):'))"
+        fail_msg: This is not the approved protected, stopped, networkless guest.
+
+    - name: Check local pinned archive is unchanged in size and permissions
+      ansible.builtin.stat:
+        path: /var/lib/vz/nextcloud-restore-test/nextcloud-20261019T043001Z-3349088.tar.gz
+        follow: false
+      register: guest_archive
+
+    - name: Require previously SHA-verified root-only archive still present
+      ansible.builtin.assert:
+        that:
+          - guest_archive.stat.isreg | default(false)
+          - not (guest_archive.stat.islnk | default(false))
+          - guest_archive.stat.pw_name == 'root'
+          - guest_archive.stat.mode == '0600'
+          - guest_archive.stat.size | int == 4728779072
+
+    - name: Report no-write guest start preflight
+      ansible.builtin.debug:
+        msg:
+          status: NEXTCLOUD_RESTORE_701_OFFLINE_START_PREFLIGHT_READY
+          guest_start_requested: "{{ nextcloud_restore_701_start | default(false) | bool }}"
+          network: NO_NIC
+          archive_extracted: false
+          sql_imported: false
+
+    - name: Start only explicitly approved restored test guest
+      ansible.builtin.command:
+        argv: [pct, start, '701']
+      changed_when: true
+      when: nextcloud_restore_701_start | default(false) | bool
+
+    - name: Assert guest is running after approved start
+      ansible.builtin.command:
+        argv: [pct, status, '701']
+      register: guest_started_state
+      changed_when: false
+      when: nextcloud_restore_701_start | default(false) | bool
+
+    - name: Confirm dedicated guest is running
+      ansible.builtin.assert:
+        that:
+          - "'status: running' in guest_started_state.stdout"
+      when: nextcloud_restore_701_start | default(false) | bool
+
+    - name: Inspect Rocky release, guest devices and selected installed packages
+      ansible.builtin.command:
+        argv:
+          - pct
+          - exec
+          - '701'
+          - --
+          - /bin/sh
+          - -ec
+          - |
+            . /etc/os-release
+            printf 'OS_ID=%s\n' "$ID"
+            printf 'OS_VERSION=%s\n' "$VERSION_ID"
+            devices="$(find /sys/class/net -mindepth 1 -maxdepth 1 ! -name lo -printf '.' | wc -c)"
+            printf 'NON_LOOPBACK_DEVICES=%s\n' "$devices"
+            test "$ID" = rocky
+            case "$VERSION_ID" in 9|9.*) : ;; *) exit 72 ;; esac
+            test "$devices" -eq 0
+            for package in php-cli php-fpm php-mysqlnd mariadb-server mariadb nginx httpd tar gzip rsync python3 openssl; do
+              if rpm -q "$package" >/dev/null 2>&1; then
+                printf 'RPM_%s=INSTALLED\n' "$package"
+              else
+                printf 'RPM_%s=ABSENT\n' "$package"
+              fi
+            done
+            printf 'RESTORE_GUEST_RUNTIME_INVENTORY_COMPLETE=YES\n'
+      changed_when: false
+      register: guest_inventory
+      no_log: true
+      when: nextcloud_restore_701_start | default(false) | bool
+
+    - name: Require verified Rocky 9 and zero guest network interfaces
+      ansible.builtin.assert:
+        that:
+          - guest_inventory.rc == 0
+          - "'OS_ID=rocky' in guest_inventory.stdout_lines"
+          - "guest_inventory.stdout is search('(?m)^OS_VERSION=9(?:\\.[0-9]+)?$')"
+          - "'NON_LOOPBACK_DEVICES=0' in guest_inventory.stdout_lines"
+          - "'RESTORE_GUEST_RUNTIME_INVENTORY_COMPLETE=YES' in guest_inventory.stdout_lines"
+        fail_msg: Runtime identity or network isolation not proven.
+      no_log: true
+      when: nextcloud_restore_701_start | default(false) | bool
+
+    - name: Report sanitized offline guest package inventory
+      ansible.builtin.debug:
+        msg:
+          status: NEXTCLOUD_RESTORE_701_OFFLINE_RUNTIME_INVENTORY_READY
+          guest: RUNNING_NO_NETWORK
+          package_state: "{{ guest_inventory.stdout_lines | select('match', '^RPM_[a-zA-Z0-9_-]+=(?:INSTALLED|ABSENT)$') | list }}"
+          archive_extracted: false
+          sql_imported: false
+          mx1_changed: false
+          mx2_changed: false
+      when: nextcloud_restore_701_start | default(false) | bool
+
+    - name: Report unchanged guest on default execution
+      ansible.builtin.debug:
+        msg:
+          status: NEXTCLOUD_RESTORE_701_START_READ_ONLY_READY
+          guest: STOPPED
+          archive_extracted: false
+          sql_imported: false
+          mx1_changed: false
+          mx2_changed: false
+      when: not (nextcloud_restore_701_start | default(false) | bool)
