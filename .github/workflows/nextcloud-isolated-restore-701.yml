@@ -1,0 +1,57 @@
+name: Isolated Nextcloud restore 701 preflight
+
+on:
+  pull_request:
+    paths:
+      - 'ansible/playbooks/prepare-nextcloud-isolated-restore-701.yml'
+      - 'docs/NEXTCLOUD-ISOLATED-RESTORE-701.md'
+      - '.github/workflows/nextcloud-isolated-restore-701.yml'
+  push:
+    branches: [feat/nextcloud-isolated-restore-701-20261019]
+
+jobs:
+  offline-guest-boundaries:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install Ansible
+        run: python3 -m pip install 'ansible-core>=2.16,<2.21'
+      - name: Syntax
+        run: |
+          ansible-playbook -i localhost, \
+            ansible/playbooks/prepare-nextcloud-isolated-restore-701.yml \
+            --syntax-check
+      - name: Verify offline-only initial provisioning
+        run: |
+          python3 - <<'PY'
+          import yaml
+          from pathlib import Path
+          source = Path("ansible/playbooks/prepare-nextcloud-isolated-restore-701.yml").read_text()
+          plays = yaml.safe_load(source)
+          assert len(plays) == 1
+          assert plays[0]["hosts"] == "venombox"
+          tasks = plays[0]["tasks"]
+          create = [t for t in tasks if t.get("name", "").startswith("Create expressly approved")]
+          assert len(create) == 1
+          argv = create[0]["ansible.builtin.command"]["argv"]
+          assert argv[:2] == ["pct", "create"]
+          assert "--net0" not in argv and "--net1" not in argv
+          for key, expected in [
+              ("--unprivileged", "1"), ("--onboot", "0"),
+              ("--start", "0"), ("--protection", "1"),
+          ]:
+              assert argv[argv.index(key)+1] == expected
+          assert "nextcloud_restore_701_apply" in create[0]["when"]
+          forbidden = {
+              "ansible.builtin.shell", "ansible.builtin.script",
+              "ansible.builtin.raw", "ansible.builtin.template",
+              "ansible.builtin.systemd", "ansible.builtin.service",
+          }
+          assert not any(any(k in forbidden for k in t) for t in tasks)
+          print("NEXTCLOUD_701_OFFLINE_STATIC_BOUNDARIES=PASS")
+          PY
