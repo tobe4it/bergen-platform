@@ -42,6 +42,35 @@ class CT110MountDiagnosisTest(TestCase):
             "/dev/fuse dev/fuse none bind,create=file 0 0"]),
             "DEVICE_OR_PSEUDO_TARGETS_PRESENT")
 
+    def test_device_bind_requires_identical_allowlisted_source_and_options(self):
+        self.assertEqual(diag.classify_entry_device_origin([
+            "/dev/fuse dev/fuse none bind,optional,create=file 0 0"
+        ]), "EXACT_FUSE_DEVICE_BIND")
+        self.assertEqual(diag.classify_entry_device_origin([
+            "/dev/net/tun dev/net/tun none bind,create=file 0 0"
+        ]), "EXACT_TUN_DEVICE_BIND")
+        self.assertEqual(diag.classify_entry_device_origin([
+            "/dev/dri dev/dri none bind,optional,create=dir 0 0"
+        ]), "EXACT_DRI_DEVICE_BIND")
+        for entry in (
+            "/mnt/secret dev/fuse none bind,create=file 0 0",
+            "/dev/fuse dev/fuse none rbind,create=file 0 0",
+            "/dev/fuse dev/fuse none bind,create=file,unknown 0 0",
+            "/dev/fuse dev/fuse none bind,create=file 0 1",
+            "/dev/fuse data none bind,create=file 0 0",
+        ):
+            self.assertNotIn(diag.classify_entry_device_origin([entry]),
+                             {"EXACT_FUSE_DEVICE_BIND", "EXACT_TUN_DEVICE_BIND",
+                              "EXACT_DRI_DEVICE_BIND"})
+        self.assertEqual(diag.classify_entry_device_origin([]), "ABSENT")
+        self.assertEqual(diag.classify_entry_device_origin([
+            "/dev/fuse dev/fuse none bind,create=file 0 0",
+            "/dev/net/tun dev/net/tun none bind,create=file 0 0"
+        ]), "MULTIPLE_ENTRIES_REVIEW")
+        config = BASE + "lxc.mount.entry: /dev/fuse dev/fuse none bind,create=file 0 0\\n"
+        self.assertEqual(diag.classify_config(config)["LXC_MOUNT_ENTRY_DEVICE_ORIGIN"],
+                         "EXACT_FUSE_DEVICE_BIND")
+
     def test_pve_mp_and_hook_appear_only_as_categories(self):
         report = diag.classify_config(BASE +
             "mp0: /private/customer-folder,mp=/data,backup=0\n"
