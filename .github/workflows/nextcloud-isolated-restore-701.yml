@@ -11,6 +11,7 @@ on:
       - 'ansible/files/nextcloud/diagnose_restore_archive_member_types.py'
       - 'ansible/playbooks/diagnose-nextcloud-restore-archive-types-readonly.yml'
       - 'tests/test_nextcloud_restore_archive_type_diagnostic.py'
+      - 'tests/test_nextcloud_restore_archive_symlink_audit.py'
       - 'ansible/playbooks/audit-nextcloud-restore-archive-readonly.yml'
       - 'docs/NEXTCLOUD-ISOLATED-RESTORE-701.md'
       - '.github/workflows/nextcloud-isolated-restore-701.yml'
@@ -47,6 +48,7 @@ jobs:
             ansible/playbooks/diagnose-nextcloud-restore-archive-types-readonly.yml \
             --syntax-check
           python3 -m unittest discover -s tests -p 'test_nextcloud_restore_archive_type_diagnostic.py'
+          python3 -m unittest discover -s tests -p 'test_nextcloud_restore_archive_symlink_audit.py'
           ansible-playbook -i localhost, \
             ansible/playbooks/audit-nextcloud-restore-archive-readonly.yml \
             --syntax-check
@@ -94,6 +96,9 @@ jobs:
           assert 'DUPLICATE_ARCHIVE_MEMBER' in archive
           assert 'SQL_DATABASE_NOT_CONFIRMED' in archive
           assert 'tarfile.open(archive, "r:gz")' in archive
+          assert 'validate_symbolic_links(seen, links)' in archive
+          assert 'SYMLINK_CHAIN_ESCAPE' in archive
+          assert 'DANGLING_SYMLINK_TARGET' in archive
           diag = Path("ansible/files/nextcloud/diagnose_restore_archive_member_types.py").read_text()
           assert 'DIAGNOSTIC_FAILED=' in diag
           assert 'tarfile.open(archive, "r:gz")' in diag
