@@ -37,7 +37,7 @@
           - not data_scope.ALL_PERSISTENT_DATA_PROVEN
           - ct110_preflight.CT110_IDENTITY == 'RUNNING_ROOTFS_ONLY'
           - ct110_preflight.WEBUI_DATA == 'IN_GUEST_ROOTFS'
-          - ct110_preflight.GUEST_MOUNTS == 'NO_EXTERNAL_MOUNTS_DETECTED'
+          - ct110_preflight.GUEST_MOUNTS == 'ROOTFS_INTERNAL_RUNTIME_ONLY'
           - ct110_preflight.BACKUP_TARGET == 'NFS_ACTIVE_WITH_FREE_SPACE'
           - ct110_preflight.TEMP_SPACE == 'LOCAL_TMP_SPACE_OK'
           - ct110_preflight.ARCHIVE_STATE == 'NO_CT110_ARCHIVE_ON_SELECTED_STORAGE'
