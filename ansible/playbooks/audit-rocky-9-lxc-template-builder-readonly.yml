@@ -1,0 +1,149 @@
+---
+# Read-only preflight for a reusable Rocky Linux 9.8 LXC template builder.
+# Never creates guests, attaches networking, downloads RPMs, or modifies CT701.
+- name: Audit proposed Rocky 9.8 LXC template build boundary
+  hosts: venombox
+  become: true
+  gather_facts: false
+  any_errors_fatal: true
+  vars:
+    rocky_base_template_id: 790
+    rocky_runtime_template_id: 791
+    rocky_restore_candidate_id: 702
+    rocky_origin_template_path: /var/lib/vz/template/cache/rockylinux-9-default_20240912_amd64.tar.xz
+  tasks:
+    - name: Read exact Proxmox hostname
+      ansible.builtin.command:
+        argv: [hostname, -s]
+      changed_when: false
+      register: rocky_hostname
+
+    - name: Read Proxmox release
+      ansible.builtin.command:
+        argv: [pveversion]
+      changed_when: false
+      register: rocky_pve_version
+
+    - name: Refuse unexpected host or Proxmox major
+      ansible.builtin.assert:
+        that:
+          - inventory_hostname == 'venombox'
+          - rocky_hostname.stdout == 'venombox'
+          - rocky_pve_version.stdout is match('^pve-manager/9[.]')
+          - rocky_base_template_id == 790
+          - rocky_runtime_template_id == 791
+          - rocky_restore_candidate_id == 702
+
+    - name: Read cluster-wide VM and CT identities
+      ansible.builtin.command:
+        argv: [pvesh, get, /cluster/resources, --type, vm, --output-format, json]
+      changed_when: false
+      register: rocky_cluster
+
+    - name: Require all proposed VMIDs unallocated throughout PVE cluster
+      ansible.builtin.assert:
+        that:
+          - >-
+            ((rocky_cluster.stdout | from_json)
+             | selectattr('vmid', 'in', [702, 790, 791]) | list | length) == 0
+        fail_msg: One of the proposed 702, 790 or 791 IDs is already in use.
+
+    - name: Read original downloaded template without changing it
+      ansible.builtin.stat:
+        path: "{{ rocky_origin_template_path }}"
+        follow: false
+        get_checksum: true
+        checksum_algorithm: sha256
+      register: rocky_origin_template
+
+    - name: Require exact non-symlink Rocky 9 PVE archive
+      ansible.builtin.assert:
+        that:
+          - rocky_origin_template.stat.isreg | default(false)
+          - not (rocky_origin_template.stat.islnk | default(false))
+          - rocky_origin_template.stat.size | int > 50 * 1024 * 1024
+          - rocky_origin_template.stat.checksum is match('^[0-9a-f]{64}$')
+        fail_msg: Local Rocky 9 template is absent or unverified.
+
+    - name: Read network configuration of existing nonproduction controller
+      ansible.builtin.command:
+        argv: [pct, config, '100']
+      changed_when: false
+      register: rocky_controller_config
+      no_log: true
+
+    - name: Verify only candidate bridge identity without changing network
+      ansible.builtin.assert:
+        that:
+          - rocky_controller_config.stdout is search('(?m)^net0: .*bridge=vmbr2,')
+          - rocky_controller_config.stdout is search('(?m)^net0: .*firewall=1,')
+        fail_msg: Controller network differs from the observed candidate bridge.
+
+    - name: Read candidate bridge operational state
+      ansible.builtin.command:
+        argv: [ip, -br, link, show, dev, vmbr2]
+      changed_when: false
+      register: rocky_bridge
+
+    - name: Require existing active candidate bridge
+      ansible.builtin.assert:
+        that:
+          - rocky_bridge.stdout is search('^vmbr2\\s+UP\\s+')
+        fail_msg: Candidate bridge vmbr2 is absent or down.
+
+    - name: Inspect protected existing Nextcloud guest without changing it
+      ansible.builtin.command:
+        argv: [pct, config, '701']
+      changed_when: false
+      register: rocky_701_config
+      no_log: true
+
+    - name: Require CT701 still protected and disconnected
+      ansible.builtin.assert:
+        that:
+          - "'hostname: nextcloud-restore-701' in rocky_701_config.stdout"
+          - "'protection: 1' in rocky_701_config.stdout"
+          - "'unprivileged: 1' in rocky_701_config.stdout"
+          - "'onboot: 0' in rocky_701_config.stdout"
+          - "not (rocky_701_config.stdout is search('(?m)^(?:net[0-9]+|lxc\\.net):'))"
+        fail_msg: CT701 isolation changed; do not build or restore.
+
+    - name: Read storage availability
+      ansible.builtin.command:
+        argv: [pvesm, status]
+      changed_when: false
+      register: rocky_storage
+
+    - name: Require available local and local-zfs storage
+      ansible.builtin.assert:
+        that:
+          - rocky_storage.stdout is search('(?m)^local\\s+dir\\s+active\\s+')
+          - rocky_storage.stdout is search('(?m)^local-zfs\\s+zfspool\\s+active\\s+')
+
+    - name: Confirm storage pool health
+      ansible.builtin.command:
+        argv: [zpool, status, -x]
+      changed_when: false
+      register: rocky_zpool
+
+    - name: Refuse degraded ZFS pool
+      ansible.builtin.assert:
+        that:
+          - rocky_zpool.stdout is search('all pools are healthy')
+
+    - name: Report only immutable build-planning evidence
+      ansible.builtin.debug:
+        msg:
+          result: ROCKY_9_8_LXC_TEMPLATE_BUILDER_READ_ONLY_READY
+          proposed_base_template_vmid: 790
+          proposed_nextcloud_runtime_template_vmid: 791
+          proposed_restore_candidate_vmid: 702
+          origin_template_sha256: "{{ rocky_origin_template.stat.checksum }}"
+          candidate_bridge: vmbr2
+          firewall_required: true
+          network_egress_authorized: false
+          network_rules_reviewed: false
+          existing_restore_guest_changed: false
+          package_downloads_or_installs: false
+          new_guest_created: false
+          next_gate: Review vmbr2 policy and plan separate explicitly approved build.
