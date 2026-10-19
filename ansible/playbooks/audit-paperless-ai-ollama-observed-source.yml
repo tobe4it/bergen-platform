@@ -65,7 +65,7 @@
           - bp_ai_observed_source.OLLAMA_CONFIG_CHANGED == 'NO'
           - bp_ai_observed_source.FIREWALL_CHANGED == 'NO'
           - bp_ai_observed_source.NETWORK_EXPOSURE_GATE == 'REVIEW_REQUIRED'
-          - bp_ai_observed_source.CONNECTION_CLASS | default('UNVERIFIED') in ['MATCHES_LXC126_PRIVATE_ADDRESS','MATCHES_LXC126_ROUTE_SOURCE','MATCHES_PODMAN_LOCAL_ROUTE','DIFFERENT_PRIVATE_PEER','UNVERIFIED']
+          - bp_ai_observed_source.CONNECTION_CLASS | default('UNVERIFIED') in ['MATCHES_LXC126_ROUTE_SOURCE','MATCHES_PODMAN_LOCAL_ROUTE','DIFFERENT_PRIVATE_PEER','UNVERIFIED']
         fail_msg: BERGEN_AI_PAPERLESS_SOURCE_RESULT_INVALID
       no_log: true
 
