@@ -52,6 +52,18 @@ Preferred solution: In a scheduled maintenance window with a physically attached
 
 For physical model confirmation without sending serial numbers, the CPU model can be read locally with `lscpu`. Do **not** flash firmware images based on a generic `F8BSC` board name or an AI X1 Pro article.
 
+## Remote-only paths while no physical console is available
+
+**Hard constraint:** A headless host must never be rebooted into UEFI Setup using `systemctl reboot --firmware-setup` or `efibootmgr` without a working independent KVM/video path. It may remain unreachable indefinitely.
+
+1. **AMI Setup Control Environment (AMISCE / SCELNX_64):** AMI offers a utility that can export or import firmware HII setup variables directly from Linux/EFI on *compatible* Aptio firmware, independently of the kernel `firmware-attributes` sysfs class. Intel provides AMISCE for its **own** M10JNP2SB board, not as a tested driver for F8BSC. Compatibility depends on firmware-integrated AMI modules (e.g., `SmiVariable`), so **do not execute unsigned/unverified third-party firmware binaries or perform imports on this headless production host**. Request a model- and BIOS-version-approved method from Minisforum; evaluate a read-only export only after validating provenance, compatibility, logging and a rollback/recovery procedure.
+   - https://www.intel.com/content/www/us/en/download/19551/amisce-ami-setup-control-environment-utility-for-m10jnp2sb.html
+   - https://device.report/m/ccdcec75ea8df1dab05cf35cb7d8643b3ad9c7bf6c1df9b738dc01397c413237
+2. **Wake-on-LAN fallback:** the extended audit checks physical NIC names and their `ethtool` `Supports Wake-on` / `Wake-on` values without modifying them. `Wake-on: g` means Linux has armed magic-packet wake in the current configuration, **not** proof of startup after full mains failure (G3). An independent always-on network device (e.g. NAS/router) would be needed to transmit packets after a power outage. Test across a planned cold start before relying on it; changing WoL is an independently gated change. `bp-controller` is hosted by `venombox` and cannot wake its own powered-off host.
+3. **External power-button controller:** a remotely managed relay across the physical power-button pins can solve this reliably even when the BIOS has no AC recovery option, but needs a **one-time on-site installation**. A remotely controlled AC socket alone cannot press the power button and is insufficient when AC recovery is disabled.
+
+**No software-only path is guaranteed to recover the host after full AC loss** until either the exact BIOS recovery policy is confirmed or Wake-on-LAN recovery across G3 is empirically demonstrated.
+
 ## Decision after audit
 
 - **fwupd supports an AC-recovery key:** establish the precise setting name and firmware-accepted `Power On` value; introduce a separately approved idempotent setter.
