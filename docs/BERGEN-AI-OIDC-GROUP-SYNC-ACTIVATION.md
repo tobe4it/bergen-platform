@@ -181,6 +181,65 @@ zusätzliches `-e @/pfad/zu/approval.local.yml` hinzufügen.
 effektiven API-Apply. Anschließend im AUDIT-Modus und durch echte
 Neuanmeldungen die Gruppenzuordnung prüfen.
 
+## Nach Live-Aktivierung: Zuordnung ist noch leer (Betreiberlog)
+
+Der Betreiber hat den tokenlosen Quadlet-Apply erfolgreich abgeschlossen:
+`STATUS=GROUP_SYNC_ENABLED`, `ok=16 changed=3 failed=0`,
+HTTP-App bereit und Flag im Container bestätigt.
+
+Beim anschließenden read-only Familienmodell-Audit blieben dennoch
+`FAMILY_MEMBERS=0`, `ADULT_MEMBERS=0`, `CHILD_MEMBERS=0`
+bei vier lokalen Accounts und drei gespeicherten OAuth-Verknüpfungen.
+
+**Gezielte, tokenfreie Diagnose:** Der neue
+`audit-bergen-ai-oidc-effective-runtime-readonly.yml` startet ausschließlich
+einen read-only Python-Check im laufenden Container über
+`get_oauth_runtime_config()`, exakt den Resolver aus dem
+v0.10.2-OIDC-Callback. Er meldet nur effektiven Gruppen-Schalter,
+`OAUTH_GROUPS_CLAIM`, Rollen-/Gruppenerstellungsflags und ggf. eine
+konfigurierte Blockliste. Weder Benutzer noch echte Claims werden
+abgerufen oder ausgegeben.
+
+Im bereits angelegten Worktree `~/bergen-platform-oidc-sync`:
+
+~~~bash
+(
+set -euo pipefail
+BASE="$HOME/bergen-platform"
+WT="$HOME/bergen-platform-oidc-sync"
+BR="feat/bergen-ai-oidc-group-sync-20261020"
+git -C "$BASE" fetch origin "$BR"
+test -z "$(git -C "$WT" status --porcelain)"
+git -C "$WT" switch --detach "origin/$BR"
+cd "$WT"
+"$BASE/.venv/bin/ansible-playbook" \
+  -i ansible/inventory.yml \
+  -i "$BASE/ansible/inventory.local.yml" \
+  ansible/playbooks/audit-bergen-ai-oidc-effective-runtime-readonly.yml \
+  --vault-id ai@prompt
+)
+~~~
+
+Soll für die Konfiguration:
+`GROUP_MANAGEMENT_ENV=ON`,
+`GROUP_MANAGEMENT_EFFECTIVE=ON`,
+`GROUP_CREATION_EFFECTIVE=OFF`,
+`ROLE_MANAGEMENT_EFFECTIVE=OFF`,
+`PERSISTENT_OAUTH_CONFIG=OFF`,
+`GROUP_CLAIM=GROUPS`,
+`DEFAULT_USER_ROLE=PENDING`.
+
+**Danach erst** prüfen, ob seit dem Apply eine vollständig neue
+Anmeldung über die Synology-SSO-Schaltfläche erfolgt ist. Ein normaler
+Tab-Refresh oder die bestehende WebUI-Sitzung führt nicht zum
+`update_user_groups`-Code. Nach einem belegten SSO-Callback müssen
+die Gruppen-Strings aus dem erhaltenen `groups`-Claim *genau*
+den lokal angelegten Gruppenbezeichnungen entsprechen.
+Das kann intern ohne Weitergabe der Roh-Claims geprüft werden.
+Die Gruppenlieferung an Paperless ist davon unabhängig bereits bestätigt.
+Bei weiterhin null Mitgliedschaften kein automatisches Erzeugen neuer
+Gruppen und keine Public-Modellfreigabe als Workaround.
+
 ## Bekannte Einschränkung in Open WebUI 0.10.2
 
 Der upstream geprüfte `update_user_groups`-Code entfernt lokale Gruppen
