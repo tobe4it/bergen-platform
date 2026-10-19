@@ -1129,3 +1129,84 @@ setzen. Erst Live-Befund, Review und gezielt revidierter
 Oneoff-Preflight (mit den bestehenden Geräte-/Datenkontrollen)
 ermöglichen den ursprünglich genehmigten einmaligen
 `vzdump`. Der mutierende Backup-Befehl bleibt bis dahin gesperrt.
+
+
+### Phase 0f.2 – Live-Befund: bekannte Ollama-/Podman-Daten im LXC-Rootfs (19.10.2026, 21:47)
+
+Auf `venombox` ausgeführt: `ok=7 changed=0 failed=0`.
+
+```text
+STATUS=KNOWN_DATA_PATHS_IN_ROOTFS
+OLLAMA_CONFIG=EXPECTED_MODELS_LOCATION
+OLLAMA_MODELS_MOUNT=GUEST_ROOTFS
+WEBUI_PODMAN_BIND=EXACT_WEBUI_DATA_BIND
+WEBUI_DATA_MOUNT=GUEST_ROOTFS
+PODMAN_GRAPH_MOUNT=GUEST_ROOTFS
+PODMAN_CONTAINERS=ONLY_OPEN_WEBUI
+PODMAN_NAMED_VOLUMES=NONE
+ALL_PERSISTENT_DATA_PROVEN=False
+BACKUP_STARTED=False
+BACKUP_AUTHORIZED=False
+RESTORE_TEST=NOT_ATTESTED
+ROLLBACK_CLEARANCE=NOT_PROVEN
+APPLY_AUTHORIZED=False
+```
+
+Damit sind die bekannten Ollama-Modelle, Open-WebUI-Anwendungsdaten
+und der rootverwaltete Podman-Graphroot auf dem CT110-Gast-Rootfs
+nachgewiesen. Der vorherige Live-Audit identifizierte genau einen
+`/dev/fuse`-Gerätebind mit vier Feldern, keine gesonderten
+Proxmox-`mpN`-Datenträger und keine `lxc.mount.auto`-Direktiven.
+Eine vollständige Dateninventur sämtlicher Rootless-/sonstiger
+Services und ein Restore-Test bleiben ausdrücklich außerhalb
+dieses engen Belegs.
+
+### Phase 0f.3 – Oneoff-Preflight präzisiert (noch nicht live ausgeführt)
+
+Die zuvor zu grobe Sperre für **jede** `lxc.mount.entry` wurde
+durch eine **exakte**, auf die Live-Befunde abgestimmte Prüfung
+ersetzt. Der Backup-Preflight verlangt jetzt die eine zuvor
+verifizierte `/dev/fuse`-nach-`/dev/fuse`-Bind-Direktive mit
+geprüften `bind`/`create=file`-Optionen, keine zusätzlichen
+`mpN`-/`lxc.mount.auto`-/sonstigen Hooks/Excludes und
+alle ursprünglichen NFS-/Temporär-/Backup-Metadaten-Gates.
+
+Er importiert im **gleichen** Ansible-Lauf zudem die aktuelle
+Ollama-/Podman-Read-only-Dateninventur. `SAFE_TO_ATTEMPT_SINGLE_BACKUP=True`
+wird ausschließlich ausgewiesen, wenn **beide** getrennten
+Prüfer durchgelaufen sind und die untenstehenden Kategorien live
+wieder bestätigt haben. Das mutierende Oneoff-Playbook prüft die
+Bedingungen nochmals mit Ansible-`assert`, bevor `vzdump`
+gestartet wird. Eine alte separate Audit-Ausgabe wird nicht
+als Ersatz verwendet.
+
+**Sicherungsmodus:** `--mode snapshot`, `--remove 0`,
+`--prune-backups keep-all=1`, `--storage bergen-synology-backup`,
+genau CT110, kein Timer, kein `pct stop`/`pct start`.
+Der Snapshot-Modus kann den Container für die Snapshot-Erstellung
+kurz suspendieren und benötigt Snapshot-Fähigkeit des
+Rootfs-Storages. Die einmalige Sicherung ist vom Betreiber
+genehmigt. Erst wenn der operative Preflight erfolgreich
+ist, darf diese separate Einmalaktion tatsächlich laufen.
+Weder Archivintegrität noch Restore-Fähigkeit werden dadurch
+automatisch attestiert.
+
+Auf `bp-controller` nach aktuellem Branch-Fetch und
+`--syntax-check` das einmalige Einmal-Backup-Playbook mit dem
+bereits vereinbarten Approval-Wert starten:
+
+```bash
+"$BASE/.venv/bin/ansible-playbook" \
+  -i ansible/inventory.yml \
+  -i "$BASE/ansible/inventory.local.yml" \
+  ansible/playbooks/backup-bergen-ai-ct110-once.yml \
+  -e bergen_ai_ct110_oneoff_approval=APPROVE_CT110_SNAPSHOT_BACKUP_ONCE \
+  --vault-id ai@prompt
+```
+
+Der mutierende Befehl ist **nicht** idempotent und darf nicht
+blind wiederholt werden: Nach erfolgreichem Durchlauf muss das
+Archiv zuerst geprüft werden; bei Fehlern läuft nur die manuelle
+Ursachenanalyse, kein automatischer Retry oder Gast-Neustart.
+Das bestehende Paperless-Backup, alle regelmäßigen Jobs und
+sämtliche Netzwerk-Gates bleiben unverändert.
