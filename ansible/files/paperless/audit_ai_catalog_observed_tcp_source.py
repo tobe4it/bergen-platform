@@ -143,9 +143,11 @@ def main():
             or not state or state.strip()!="status: running"):
             emit(STATUS="GUEST_IDENTITY_UNVERIFIED")
             return
+    # The outer Paperless LXC may itself have Podman bridge addresses.
+    # Do not require exactly one LXC126 interface address; instead
+    # determine its kernel-selected egress source toward actual Ollama.
     dst=guest_address("110")
-    ct126=guest_address("126")
-    if not dst or not ct126:
+    if not dst:
         emit(STATUS="TARGET_OR_SOURCE_UNVERIFIED")
         return
     lxcroute=route("126",dst)
@@ -195,9 +197,7 @@ def main():
         emit(STATUS="TCP_PEER_UNEXPECTED",CONNECTION_CLASS="UNVERIFIED")
         return
     observed_ip=str(peer)
-    if observed_ip==ct126:
-        category="MATCHES_LXC126_PRIVATE_ADDRESS"
-    elif observed_ip==lxcroute:
+    if observed_ip==lxcroute:
         category="MATCHES_LXC126_ROUTE_SOURCE"
     elif observed_ip==podroute:
         category="MATCHES_PODMAN_LOCAL_ROUTE"
