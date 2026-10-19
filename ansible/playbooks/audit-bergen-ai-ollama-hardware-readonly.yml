@@ -1,0 +1,92 @@
+---
+# No writes. Exact target LXC110 and LXC126 on known venombox.
+# Do not modify cgroups, idmaps, storage, RAM, drivers, Ollama or models here.
+- name: Inspect venombox resource and AMD GPU readiness before LLM downloads
+  hosts: venombox
+  become: true
+  gather_facts: false
+  tasks:
+    - name: Restrict audit to the single expected Proxmox host
+      ansible.builtin.assert:
+        that:
+          - inventory_hostname == 'venombox'
+
+    - name: Run bounded host-and-guest read-only inventory
+      ansible.builtin.command:
+        argv:
+          - python3
+          - -c
+          - "{{ lookup('ansible.builtin.file', playbook_dir ~ '/../files/bergen_ai/audit_ollama_hardware_readonly.py', rstrip=False) }}"
+      register: bergen_ai_hardware_raw
+      changed_when: false
+      failed_when: false
+      check_mode: false
+      no_log: true
+
+    - name: Extract unique bounded inventory frame
+      ansible.builtin.set_fact:
+        bergen_ai_hardware_frames: >-
+          {{ bergen_ai_hardware_raw.stdout_lines |
+             select('match', '^BERGEN_AI_MODEL_PREFLIGHT_V1:') | list }}
+      no_log: true
+
+    - name: Reject failed or multiple hardware inventories
+      ansible.builtin.assert:
+        that:
+          - bergen_ai_hardware_raw.rc == 0
+          - bergen_ai_hardware_frames | length == 1
+          - bergen_ai_hardware_frames[0] | length < 10000
+        fail_msg: BERGEN_AI_HARDWARE_AUDIT_INCOMPLETE
+      no_log: true
+
+    - name: Decode bounded non-identifying inventory
+      ansible.builtin.set_fact:
+        bergen_ai_hw: >-
+          {{ (bergen_ai_hardware_frames[0] |
+             regex_replace('^BERGEN_AI_MODEL_PREFLIGHT_V1:', '')) | from_json }}
+      no_log: true
+
+    - name: Require supported safe inventory categories
+      ansible.builtin.assert:
+        that:
+          - bergen_ai_hw.AUDIT == 'READ_ONLY'
+          - bergen_ai_hw.CHANGED is boolean
+          - not bergen_ai_hw.CHANGED
+          - bergen_ai_hw.LXC110_UNPRIVILEGED == 'YES'
+          - bergen_ai_hw.LXC126_UNPRIVILEGED == 'YES'
+          - bergen_ai_hw.OLLAMA in ['LOOPBACK_OK', 'UNREACHABLE', 'UNVERIFIED']
+          - bergen_ai_hw.HOST_MEMORY_MIB is number
+          - bergen_ai_hw.HOST_AVAILABLE_MIB is number
+          - bergen_ai_hw.LXC110_MEMORY_MIB is number
+          - bergen_ai_hw.LXC126_MEMORY_MIB is number
+          - bergen_ai_hw.MODELS is sequence
+          - bergen_ai_hw.MODELS is not string
+        fail_msg: BERGEN_AI_HARDWARE_INVENTORY_INVALID
+      no_log: true
+
+    - name: Report only hardware classifications without network identities or document data
+      ansible.builtin.debug:
+        msg:
+          - "AUDIT={{ bergen_ai_hw.AUDIT }}"
+          - "CHANGED={{ bergen_ai_hw.CHANGED }}"
+          - "EXPECTED_CPU={{ bergen_ai_hw.PVE_CPU_EXPECTED_HX370 }}"
+          - "HOST_MEMORY_MIB={{ bergen_ai_hw.HOST_MEMORY_MIB }}"
+          - "HOST_AVAILABLE_MIB={{ bergen_ai_hw.HOST_AVAILABLE_MIB }}"
+          - "LXC110_MEMORY_MIB={{ bergen_ai_hw.LXC110_MEMORY_MIB }}"
+          - "LXC110_SWAP_MIB={{ bergen_ai_hw.LXC110_SWAP_MIB }}"
+          - "LXC110_CORES={{ bergen_ai_hw.LXC110_CORES }}"
+          - "LXC110_UNPRIVILEGED={{ bergen_ai_hw.LXC110_UNPRIVILEGED }}"
+          - "LXC110_GPU_CONFIG_PRESENT={{ bergen_ai_hw.LXC110_GPU_CONFIG_PRESENT }}"
+          - "LXC126_MEMORY_MIB={{ bergen_ai_hw.LXC126_MEMORY_MIB }}"
+          - "LXC126_CORES={{ bergen_ai_hw.LXC126_CORES }}"
+          - "LXC126_UNPRIVILEGED={{ bergen_ai_hw.LXC126_UNPRIVILEGED }}"
+          - "HOST_RENDER={{ bergen_ai_hw.HOST_RENDER | to_json }}"
+          - "HOST_KFD={{ bergen_ai_hw.HOST_KFD | to_json }}"
+          - "LXC110_RENDER={{ bergen_ai_hw.GUEST_RENDER | to_json }}"
+          - "LXC110_KFD={{ bergen_ai_hw.GUEST_KFD | to_json }}"
+          - "OLLAMA_API={{ bergen_ai_hw.OLLAMA }}"
+          - "MODEL_DISK_FREE_GIB={{ bergen_ai_hw.MODEL_DISK_FREE_GIB }}"
+          - "GUEST_ROOT_FREE_GIB={{ bergen_ai_hw.GUEST_ROOT_FREE_GIB }}"
+          - "CURRENT_MODELS={{ bergen_ai_hw.MODELS | join(',') }}"
+          - "GPU_INFERENCE_PROVEN={{ bergen_ai_hw.GPU_INFERENCE_PROVEN }}"
+          - "PAPERLESS_CONNECTIVITY_PROVEN={{ bergen_ai_hw.PAPERLESS_CONNECTIVITY_PROVEN }}"
