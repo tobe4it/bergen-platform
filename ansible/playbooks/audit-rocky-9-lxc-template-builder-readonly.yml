@@ -117,8 +117,8 @@
     - name: Require available local and local-zfs storage
       ansible.builtin.assert:
         that:
-          - rocky_storage.stdout is search('(?m)^local\\s+dir\\s+active\\s+')
-          - rocky_storage.stdout is search('(?m)^local-zfs\\s+zfspool\\s+active\\s+')
+          - "rocky_storage.stdout is search('(?m)^local[ ]+dir[ ]+active[ ]+')"
+          - "rocky_storage.stdout is search('(?m)^local-zfs[ ]+zfspool[ ]+active[ ]+')"
 
     - name: Confirm storage pool health
       ansible.builtin.command:
