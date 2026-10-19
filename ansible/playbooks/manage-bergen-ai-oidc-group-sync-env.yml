@@ -1,0 +1,237 @@
+---
+# Tokenless Open WebUI 0.10.2 group sync through existing Ansible-owned
+# Quadlet EnvironmentFile. All OAuth client credentials are preserved.
+# No auth API token, DB write, new group or model is required.
+- name: Audit or switch existing Bergen-AI OIDC group sync via Quadlet
+  hosts: bergen-ai
+  become: true
+  gather_facts: false
+  vars:
+    bp_sync_mode: "{{ bergen_ai_oidc_env_group_mode | default('audit') }}"
+    bp_sync_mutate: "{{ bp_sync_mode in ['apply', 'rollback'] }}"
+    bp_sync_file: /etc/bergen-platform/open-webui-oidc.env
+    bp_sync_backup: /etc/bergen-platform/open-webui-oidc.env.before-group-sync
+    bp_sync_dropin: /etc/containers/systemd/open-webui.container.d/90-oidc.conf
+  tasks:
+    - name: Require exact target and separate group sync approval for modifications
+      ansible.builtin.assert:
+        that:
+          - inventory_hostname == 'bergen-ai'
+          - ansible_play_hosts_all | length == 1
+          - bp_sync_mode in ['audit', 'apply', 'rollback']
+          - not bp_sync_mutate or not ansible_check_mode
+          - not bp_sync_mutate or (bergen_ai_oidc_env_group_approved | default(false) | bool)
+          - not bp_sync_mutate or (bergen_ai_oidc_env_backup_verified | default(false) | bool)
+          - not bp_sync_mutate or (bergen_ai_oidc_env_expected_sha256 | default('') | length == 64)
+          - bp_sync_mode != 'rollback' or (bergen_ai_oidc_env_rollback_approved | default(false) | bool)
+        fail_msg: OIDC_GROUP_ENV_RELEASE_NOT_APPROVED
+      no_log: true
+
+    - name: Stat existing Ansible-owned OIDC environment without reading secrets
+      ansible.builtin.stat:
+        path: "{{ bp_sync_file }}"
+        checksum_algorithm: sha256
+        follow: false
+      register: bp_sync_stat
+      changed_when: false
+      no_log: true
+
+    - name: Refuse wrong OIDC file ownership, symlink or permissions
+      ansible.builtin.assert:
+        that:
+          - bp_sync_stat.stat.isreg | default(false)
+          - not (bp_sync_stat.stat.islnk | default(false))
+          - bp_sync_stat.stat.pw_name == 'root'
+          - bp_sync_stat.stat.mode == '0600'
+        fail_msg: OIDC_FILE_IDENTITY_CHANGED
+      no_log: true
+
+    - name: Inspect the current OIDC environment strictly confidentially
+      ansible.builtin.slurp:
+        src: "{{ bp_sync_file }}"
+      register: bp_sync_secret
+      changed_when: false
+      no_log: true
+
+    - name: Inspect existing Quadlet drop-in without exposing any content
+      ansible.builtin.slurp:
+        src: "{{ bp_sync_dropin }}"
+      register: bp_sync_quadlet
+      changed_when: false
+      no_log: true
+
+    - name: Require unchanged provider and least-privilege flags
+      ansible.builtin.assert:
+        that:
+          - (bp_sync_secret.content | b64decode).startswith('# Managed by Ansible.')
+          - (bp_sync_secret.content | b64decode).count('ENABLE_OAUTH_GROUP_MANAGEMENT=') == 1
+          - "'OAUTH_SCOPES=openid email groups' in (bp_sync_secret.content | b64decode).splitlines()"
+          - "'OAUTH_GROUPS_CLAIM=groups' in (bp_sync_secret.content | b64decode).splitlines()"
+          - "'DEFAULT_USER_ROLE=pending' in (bp_sync_secret.content | b64decode).splitlines()"
+          - "'ENABLE_OAUTH_ROLE_MANAGEMENT=false' in (bp_sync_secret.content | b64decode).splitlines()"
+          - "'ENABLE_OAUTH_PERSISTENT_CONFIG=false' in (bp_sync_secret.content | b64decode).splitlines()"
+          - "'ENABLE_OAUTH_GROUP_CREATION=true' not in (bp_sync_secret.content | b64decode).splitlines()"
+          - "'ENABLE_OAUTH_GROUP_MANAGEMENT=false' in (bp_sync_secret.content | b64decode).splitlines() or 'ENABLE_OAUTH_GROUP_MANAGEMENT=true' in (bp_sync_secret.content | b64decode).splitlines()"
+          - "'EnvironmentFile=/etc/bergen-platform/open-webui-oidc.env' in (bp_sync_quadlet.content | b64decode).splitlines()"
+        fail_msg: OIDC_GROUP_ENV_POLICY_DRIFT
+      no_log: true
+
+    - name: Report sanitized OIDC environment status and exact change fingerprint
+      ansible.builtin.debug:
+        msg:
+          - "AUDIT=READ_ONLY"
+          - "STATUS={{ 'ENABLED' if 'ENABLE_OAUTH_GROUP_MANAGEMENT=true' in (bp_sync_secret.content | b64decode).splitlines() else 'DISABLED' }}"
+          - "CONFIG_SHA256={{ bp_sync_stat.stat.checksum }}"
+          - "GROUP_CLAIM=groups"
+          - "GROUP_CREATION=OFF"
+          - "ROLE_MANAGEMENT=OFF"
+          - "DEFAULT_ROLE=pending"
+          - "OAUTH_SOURCE=ANSIBLE_QUADLET_ENV"
+          - "ADMIN_API_TOKEN_REQUIRED=NO"
+          - "CHANGED=False"
+      when: bp_sync_mode == 'audit'
+
+    - name: Require live fingerprint and exact current group sync transition
+      ansible.builtin.assert:
+        that:
+          - bp_sync_stat.stat.checksum == bergen_ai_oidc_env_expected_sha256
+          - bp_sync_mode != 'apply' or 'ENABLE_OAUTH_GROUP_MANAGEMENT=false' in (bp_sync_secret.content | b64decode).splitlines()
+          - bp_sync_mode != 'rollback' or 'ENABLE_OAUTH_GROUP_MANAGEMENT=true' in (bp_sync_secret.content | b64decode).splitlines()
+        fail_msg: OIDC_GROUP_ENV_FINGERPRINT_OR_STATE_CHANGED
+      no_log: true
+      when: bp_sync_mutate
+
+    - name: Check for existing protected original preimage
+      ansible.builtin.stat:
+        path: "{{ bp_sync_backup }}"
+        follow: false
+      register: bp_sync_backup_stat
+      changed_when: false
+      no_log: true
+      when: bp_sync_mutate
+
+    - name: Refuse to overwrite an earlier backup or roll back without one
+      ansible.builtin.assert:
+        that:
+          - bp_sync_mode != 'apply' or not (bp_sync_backup_stat.stat.exists | default(false))
+          - bp_sync_mode != 'rollback' or (bp_sync_backup_stat.stat.isreg | default(false))
+          - bp_sync_mode != 'rollback' or (bp_sync_backup_stat.stat.pw_name | default('')) == 'root'
+          - bp_sync_mode != 'rollback' or (bp_sync_backup_stat.stat.mode | default('')) == '0600'
+        fail_msg: OIDC_GROUP_ENV_BACKUP_REVIEW_REQUIRED
+      no_log: true
+      when: bp_sync_mutate
+
+    - name: Read protected preimage before authorized rollback
+      ansible.builtin.slurp:
+        src: "{{ bp_sync_backup }}"
+      register: bp_sync_backup_secret
+      changed_when: false
+      no_log: true
+      when: bp_sync_mode == 'rollback'
+
+    - name: Require rollback restores exactly the previous configuration
+      ansible.builtin.assert:
+        that:
+          - (bp_sync_backup_secret.content | b64decode).replace('ENABLE_OAUTH_GROUP_MANAGEMENT=false', 'ENABLE_OAUTH_GROUP_MANAGEMENT=true') == (bp_sync_secret.content | b64decode)
+        fail_msg: ROLLBACK_ENVIRONMENT_DRIFT_REQUIRES_REVIEW
+      no_log: true
+      when: bp_sync_mode == 'rollback'
+
+    - name: Preserve exact secret OIDC environment before change
+      ansible.builtin.copy:
+        src: "{{ bp_sync_file }}"
+        dest: "{{ bp_sync_backup }}"
+        remote_src: true
+        owner: root
+        group: root
+        mode: '0600'
+      no_log: true
+      when: bp_sync_mode == 'apply'
+
+    - name: Turn on only existing native OIDC group mapping
+      ansible.builtin.lineinfile:
+        path: "{{ bp_sync_file }}"
+        regexp: '^ENABLE_OAUTH_GROUP_MANAGEMENT=false$'
+        line: ENABLE_OAUTH_GROUP_MANAGEMENT=true
+        backrefs: true
+        owner: root
+        group: root
+        mode: '0600'
+        backup: false
+      no_log: true
+      notify: Restart existing Open WebUI service
+      when: bp_sync_mode == 'apply'
+
+    - name: Restore exact previous root-only OIDC environment after approval
+      ansible.builtin.copy:
+        src: "{{ bp_sync_backup }}"
+        dest: "{{ bp_sync_file }}"
+        remote_src: true
+        owner: root
+        group: root
+        mode: '0600'
+      no_log: true
+      notify: Restart existing Open WebUI service
+      when: bp_sync_mode == 'rollback'
+
+    - name: Restart only after a real OIDC configuration change
+      ansible.builtin.meta: flush_handlers
+
+    - name: Require healthy existing application after permitted restart
+      ansible.builtin.uri:
+        url: http://127.0.0.1:3000/api/version
+        method: GET
+        use_proxy: false
+        follow_redirects: none
+        status_code: 200
+        timeout: 10
+      register: bp_sync_health
+      until: bp_sync_health.status | default(0) == 200
+      retries: 30
+      delay: 5
+      changed_when: false
+      no_log: true
+      when: bp_sync_mutate
+
+    - name: Verify effective managed OIDC flag inside restarted container
+      ansible.builtin.command:
+        argv:
+          - podman
+          - exec
+          - open-webui
+          - python3
+          - -c
+          - "import os,sys; expected=sys.argv[1]; sys.exit(0 if os.getenv('ENABLE_OAUTH_GROUP_MANAGEMENT')==expected and os.getenv('ENABLE_OAUTH_ROLE_MANAGEMENT')=='false' and os.getenv('ENABLE_OAUTH_PERSISTENT_CONFIG')=='false' else 8)"
+          - "{{ 'true' if bp_sync_mode == 'apply' else 'false' }}"
+      register: bp_sync_runtime
+      changed_when: false
+      no_log: true
+      when: bp_sync_mutate
+
+    - name: Require requested runtime state confirmed
+      ansible.builtin.assert:
+        that:
+          - bp_sync_runtime.rc == 0
+        fail_msg: OIDC_GROUP_SYNC_EFFECTIVE_ENV_NOT_CONFIRMED
+      no_log: true
+      when: bp_sync_mutate
+
+    - name: Report only verified service transition and known revocation caveat
+      ansible.builtin.debug:
+        msg:
+          - "AUDIT=CONTROLLED"
+          - "STATUS={{ 'GROUP_SYNC_ENABLED' if bp_sync_mode == 'apply' else 'GROUP_SYNC_DISABLED' }}"
+          - "GROUP_CREATION=OFF"
+          - "ROLE_MANAGEMENT=OFF"
+          - "ADMIN_API_TOKEN_REQUIRED=NO"
+          - "RESTARTED_SERVICE=open-webui.service"
+          - "MISSING_OR_EMPTY_GROUP_CLAIM_REVOKE=NOT_PROVEN_ON_0_10_2"
+          - "CHANGED=True"
+      when: bp_sync_mutate
+
+  handlers:
+    - name: Restart existing Open WebUI service
+      ansible.builtin.systemd_service:
+        name: open-webui.service
+        daemon_reload: true
+        state: restarted
