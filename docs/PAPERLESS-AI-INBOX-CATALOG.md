@@ -231,6 +231,52 @@ evidence and backup verification. Do not invoke the protected
 native ORM LLM `apply` or AI cataloguing pilot as a side effect
 of this inventory. All global AI, embeddings, RAG and automatic
 timers remain OFF.
+## Future local Ollama consumers — architecture reservation (2026-10-19)
+
+The operator confirmed that, besides Paperless and local Open WebUI,
+**bergen-syslog (existing LXC 120)** should later use Bergen-AI
+for analysis of collected infrastructure logs. Other conceivable
+consumers include Proxmox operations, the mail stack, isolated IBM
+MQ lab diagnostics, BookStack knowledge retrieval, and EVCC/InfluxDB
+trend analysis. These are **ideas only**, not active permissions,
+deployments, model jobs or approvals.
+
+**Network and identity policy:**
+
+- In the immediate Paperless trial, allow only the exact verified
+  Paperless application source to contact Ollama TCP/11434, after
+  negative reachability tests, IPv4/IPv6 and firewall exposure review.
+  Open WebUI already co-resides with Ollama and may use loopback.
+- Reserve LXC 120 as a *future* client; do not add its source address,
+  VLAN or any entire subnet to the current firewall allowlist.
+- For additional clients prefer a **dedicated authenticated internal
+  inference API gateway** in front of Ollama, with per-workload
+  service accounts, rate/compute limits, audit event metadata
+  without prompt logging, scoped model permissions and private
+  network source restrictions. These controls do not currently
+  exist and cannot be inferred from an LLM HTTP listener.
+- Do not grant a generic inference endpoint direct access to
+  Paperless documents, log files, BookStack pages or their indexes.
+  The authorized client retrieves only records allowed by its
+  underlying owner/application ACL and sends a bounded request.
+  Family wiki and Paperless retrieval must retain per-user ACL
+  boundaries; embeddings/RAG remain separately disabled.
+- For logs: introduce a separate read-only, explicitly scoped
+  syslog analyzer, bounded time-window queries, deterministic
+  sanitization of secrets/tokens and sensitive identifiers,
+  sampling/deduplication and no automatic command execution.
+  Never ingest the complete unreviewed log stream or let LLM
+  suggestions mutate infrastructure.
+- For approved future clients, review source identity, runtime
+  authorization, retention, concurrency/memory budgeting and
+  negative network tests separately. `OLLAMA_LISTENER=WILDCARD`
+  remains an **outstanding exposure gate** now.
+
+Thus the Paperless-native AI configuration, one-document metadata
+pilot and future syslog use are independent releases; this PR
+does not implement a central proxy or authorize any non-Paperless
+consumer. Preserve the inbox tag; global Paperless AI UI,
+embeddings and RAG remain OFF.
 ## Target behaviour
 
 Only **new**, OCR-complete, unreviewed inbox documents belonging to active,
