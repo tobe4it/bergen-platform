@@ -97,7 +97,8 @@ jobs:
           assert 'SQL_DATABASE_NOT_CONFIRMED' in archive
           assert 'tarfile.open(archive, "r:gz")' in archive
           assert 'validate_symbolic_links(seen, links)' in archive
-          assert 'SYMLINK_CHAIN_ESCAPE' in archive
+          assert 'SYMLINK_CHAIN_DEPTH_EXCEEDED' in archive
+          assert 'SYMLINK_ESCAPE' in archive
           assert 'DANGLING_SYMLINK_TARGET' in archive
           diag = Path("ansible/files/nextcloud/diagnose_restore_archive_member_types.py").read_text()
           assert 'DIAGNOSTIC_FAILED=' in diag
