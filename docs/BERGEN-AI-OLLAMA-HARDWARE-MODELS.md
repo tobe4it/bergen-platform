@@ -462,6 +462,42 @@ without attempting a reboot, model download or device reconfiguration.
 Report `GPU_PLACEMENT`, `GPU_ALLOCATED_GIB`, `TOKENS_PER_SECOND` and
 the final play recap. Only then consider changes to GPU runtime or
 Paperless-AI integrations. BGE-M3 availability does not enable RAG.
+## First live Qwen14B GPU offload smoke test PASSED (2026-10-19)
+
+Operator reports clean fixed postboot audit:
+`STATUS=READY_FOR_SYNTHETIC_INFERENCE`, `LXC110_RUNNING=YES`,
+`GPU_DEVICES_ACCESSIBLE=YES`, `LXC110_HOST_CGROUP_LIMIT_32G=YES`,
+`OLLAMA_LOCAL_API=OK`, `ALL_THREE_ADDITIONAL_MODELS=PRESENT`.
+
+Then the independently approved synthetic Qwen2.5 14B run completed:
+
+    STATUS=SYNTHETIC_COMPLETED
+    MODEL=QWEN2_5_14B_INSTRUCT_Q4_K_M
+    TOKENS_PER_SECOND=14.3
+    LOAD_SECONDS=7.53
+    EVAL_TOKENS=2
+    GPU_PLACEMENT=GPU_ALLOCATION_OBSERVED
+    GPU_ALLOCATED_GIB=8.44
+    MODEL_INFERENCE_COMPLETED=YES
+    PAPERLESS_CHANGED=NO
+    PVE_CONFIG_CHANGED=NO
+    RECAP ok=7 changed=1 failed=0
+
+Ollama `/api/ps` therefore reported positive GPU memory allocation
+while a local, document-free prompt was successfully generated.
+This establishes **GPU offload allocation**, not necessarily exclusive
+execution on GPU. In particular, integrated Radeon 890M uses
+shared system memory rather than 8.44 GiB dedicated VRAM.
+The 14.3 tokens/sec result is **not a reliable sustained throughput
+figure** because only two output tokens were generated. Before
+claiming performance or choosing a default classifier, run an
+independently approved longer synthetic prompt (at least ~100
+generated tokens), compare with Mistral Nemo and observe model
+residency/offload under known load.
+
+Do not reboot, re-stage, roll back or change Paperless for this
+successful smoke test. Keep RAG/indexing and document AI activation
+behind the separate Issue #113 / Draft PR #114 review gates.
 ## Step 2 – audit model download needs, still ZERO writes
 
     (
