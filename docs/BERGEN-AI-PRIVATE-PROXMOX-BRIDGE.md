@@ -436,9 +436,9 @@ git fetch origin feat/bergen-ai-private-bridge-20261019
 git switch --detach origin/feat/bergen-ai-private-bridge-20261019
 
 install -m 0600 docs/examples/bergen-ai-bridge-ipam.local.json.example \
-  "$BASE/ansible/vars/bergen-ai-bridge-ipam.local.json"
+  "$WT/ansible/vars/bergen-ai-bridge-ipam.local.json"
 # Die Datei anschließend im Editor vervollständigen.
-# ACHTUNG: Quelle ist gitignored im BASE, nicht Teil des Worktrees.
+# Der Standort ist ausschließlich im Feature-Worktree gitignored.
 "$BASE/.venv/bin/python3" -m unittest discover -s tests \
   -p 'test_bergen_ai_private_bridge_external_gates.py' -v
 "$BASE/.venv/bin/ansible-playbook" \
@@ -448,10 +448,8 @@ install -m 0600 docs/examples/bergen-ai-bridge-ipam.local.json.example \
 )
 ```
 
-**Wichtig: Worktree und Basis-Checkout haben unterschiedliche
-`ansible/vars`-Verzeichnisse.** Die Vorlage wird bewusst in `$BASE`
-installiert; deshalb beim Live-Lauf den lokalen Dateipfad per
-`-e` übergeben:
+Der Live-Lauf liest die lokale Datei standardmäßig relativ zum
+aktuellen Worktree, ohne einen Dateipfad per `-e` zu übergeben:
 
 ```bash
 (
@@ -462,7 +460,6 @@ cd "$WT"
 "$BASE/.venv/bin/ansible-playbook" \
   -i ansible/inventory.yml -i "$BASE/ansible/inventory.local.yml" \
   ansible/playbooks/audit-bergen-ai-private-bridge-external-gates-readonly.yml \
-  -e "private_bridge_ipam_path=$BASE/ansible/vars/bergen-ai-bridge-ipam.local.json" \
   --vault-id ai@prompt
 )
 ```
