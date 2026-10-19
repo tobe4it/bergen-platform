@@ -590,3 +590,34 @@ Netzwerk-Change weiter zu verifizieren.
 `FULL_NETWORK_CLEARANCE=NOT_PROVEN`,
 `ROLLBACK_CLEARANCE=NOT_PROVEN`. Kein Merge nach `main`
 und kein produktiver Proxmox-/Ollama-/Paperless-Apply.
+
+
+### Phase 0d Live-Befund – 19.10.2026, 20:46 (Europe/Berlin)
+
+Operator-Ausführung auf `venombox`: Syntaxprüfung erfolgreich;
+Live-Read-only-Audit `ok=7 changed=0 failed=0 unreachable=0`.
+
+```text
+STATUS=VISIBLE_STORAGES_SCANNED
+STORAGE_COVERAGE=VISIBLE_ONLY
+ACTIVE_BACKUP_STORAGES=2
+CT110_BACKUPS=NONE_IN_SCANNED_STORAGES
+CT126_BACKUPS=RECENT_METADATA_ONLY
+BACKUP_INTEGRITY=NOT_TESTED
+MOUNT_COVERAGE=NOT_ATTESTED
+RESTORE_TEST=NOT_ATTESTED
+ROLLBACK_CLEARANCE=NOT_PROVEN
+APPLY_AUTHORIZED=False
+```
+
+**Bewertung:** In den zwei sichtbaren, abgefragten Proxmox-Backup-Storages
+wurde kein `vzdump-lxc-110-*.tar.*`-Archiv gefunden. Ein aktuelles
+klassisches LXC126-Archiv erscheint in den Metadaten. PBS-
+Backupobjekte (`backup/ct/...`), alternative Dateinamen, externe
+Systeme und nicht sichtbare Storages werden durch die eingeschränkte
+Archivnamen-Erkennung nicht ausgeschlossen. **Keine** Aussage über
+Vollständigkeit/Integrität von CT126-Mounts oder Restore-Fähigkeit.
+
+LXC110 gilt bis zu einem überprüften Sicherungs-/Restore-Nachweis als
+**Rollback-Gate offen**. Ein künftiger Sicherungsjob oder einmaliger
+`vzdump` benötigt einen eigenen, expliziten Betreiberentscheid.
