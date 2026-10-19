@@ -1,6 +1,6 @@
 ---
 # Zero-write Bergen-AI private Linux bridge discovery.
-# This is not an apply and never creates vmbr10 or a second CT interface.
+# This is not an apply and never creates vmbr90 or a second CT interface.
 - name: Audit proposed Bergen-AI isolated Proxmox bridge without changes
   hosts: venombox
   become: true
