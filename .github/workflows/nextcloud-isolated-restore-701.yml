@@ -71,5 +71,8 @@ jobs:
           assert '/var/lib/vz/nextcloud-restore-test' in transfer
           assert '20261019T' not in transfer
           assert '--apply' in transfer
+          assert 'TARGET_ARCHIVE_SHA256_VERIFIED=YES' in transfer
+          assert 'NEXTCLOUD_RESTORE_ARCHIVE_ALREADY_VERIFIED=YES' in transfer
+          assert 'NEXTCLOUD_RESTORE_ARCHIVE_RECEIPT_RECOVERED=YES' in transfer
           print("NEXTCLOUD_701_OFFLINE_STATIC_BOUNDARIES=PASS")
           PY
