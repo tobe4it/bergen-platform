@@ -5,10 +5,10 @@
 
 # Exact real Paperless Django group, not a universal domain name.
 paperless_ai_catalog_allowed_group: "Eltern@YOUR-DIRECTORY-DOMAIN"
-paperless_ai_catalog_model: "qwen2.5:7b"
+paperless_ai_catalog_model: "qwen2.5:14b-instruct-q4_K_M"
 paperless_ai_catalog_endpoint: "http://192.168.0.100:11434"
 
-# Trial: select one or two independently reviewed *existing inbox* IDs.
+# Model routing (decision 2026-10-19):\n# - Paperless classification = qwen2.5:14b-instruct-q4_K_M\n# - multilingual evaluation = mistral-nemo:12b (NOT a production fallback)\n# - embeddings / future ACL-safe RAG = bge-m3:latest (NOT enabled)\n# Runtime /api/tags must confirm the exact catalog model on the Ollama\n# endpoint reachable by the Paperless container before any apply.\n\n# Trial: select one or two independently reviewed *existing inbox* IDs.
 # Never select already-reviewed documents. The operator supplies real IDs locally.
 paperless_ai_catalog_pilot_ids: []
 paperless_ai_catalog_batch_size: 1
