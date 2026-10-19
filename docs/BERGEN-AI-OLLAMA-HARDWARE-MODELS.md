@@ -394,6 +394,74 @@ No restart or resource changes are necessary. Re-run the read-only
 host-memory playbook above and review the result before relaxing any
 postboot gate or initiating inference.
 
+## Host cgroup proven and postboot verification repaired (2026-10-19)
+
+After two script-level failures the operator directly inspected the
+host with read-only Ansible shell. Output:
+
+    pct status 110 -> status: running
+    pct config 110 -> memory: 32768, cores: 18, swap: 2048, unprivileged: 1
+    CGROUP_V2=YES
+    /sys/fs/cgroup/lxc/110/memory.max -> 34359738368
+    lxc-info -n 110 -p -H -> numeric host PID
+
+Thus the exact Proxmox LXC110 memory cgroup has a hard 32-GiB
+`memory.max` bound. The earlier missing proof came from a
+**test implementation defect**: it traversed to the cgroup-v2
+filesystem **root** and demanded `/sys/fs/cgroup/memory.max` there.
+Under Linux cgroup v2 the root cgroup need not expose memory.max;
+that resource-control file belongs to non-root cgroups. The fixed
+host audit stops at root instead of demanding a root memory.max.
+Regression tests cover missing root memory.max, a leaf reporting max
+with finite parent, and real above/below/absent bounds.
+
+The existing postboot audit is also repaired. It now checks the
+**actual host** `/sys/fs/cgroup/lxc/110/memory.max` as the memory
+enforcement gate instead of mistaking the guest cgroup namespace's
+`memory.max=max` for unlimited physical memory. The runtime
+readiness classification reports the provenance
+`MEMORY_CHECK_SOURCE=PVE_HOST_LXC_110_CGROUP`.
+
+### First synthetic Qwen 14B GPU-offload benchmark
+
+Do this only after confirming service/device readiness and at an
+operator-approved time with no other Ollama model loaded. The
+separate `ansible/playbooks/benchmark-bergen-ai-ollama-gpu-synthetic.yml`
+is **not** a read-only audit: it temporarily loads and executes the
+already-installed Qwen2.5 14B model in LXC110. It does not modify
+container settings, network listeners, files, tags or Paperless.
+Input is a short synthetic German instruction; output text is
+discarded. It uses `/api/generate` with `num_predict=40`,
+`num_ctx=2048`, and `keep_alive=45s`. An `/api/ps` follow-up
+reports `size_vram`; positive GPU allocation constitutes evidence
+of offload, while zero means CPU-only as reported by Ollama.
+Token speed and load time are recorded without exposing content.
+The model unloads by its 45s keep-alive (no persistent pinning).
+
+After operator approval on bp-controller:
+
+    (
+    set -euo pipefail
+    BASE="$HOME/bergen-platform"
+    cd "$HOME/bergen-platform-ollama-hardware"
+    git fetch origin feat/bergen-ai-ollama-hardware-models-20261019
+    git switch --detach origin/feat/bergen-ai-ollama-hardware-models-20261019
+    "$BASE/.venv/bin/ansible-playbook" \
+      -i ansible/inventory.yml \
+      -i "$BASE/ansible/inventory.local.yml" \
+      ansible/playbooks/benchmark-bergen-ai-ollama-gpu-synthetic.yml \
+      --vault-id ai@prompt \
+      -e bergen_ai_gpu_benchmark_approved=true \
+      -e bergen_ai_gpu_benchmark_window_approved=true
+    )
+
+If `/api/ps` already shows any model loaded, the script aborts
+rather than interrupting concurrent Open WebUI/Ollama usage.
+If inference is too slow or a driver is missing, it aborts
+without attempting a reboot, model download or device reconfiguration.
+Report `GPU_PLACEMENT`, `GPU_ALLOCATED_GIB`, `TOKENS_PER_SECOND` and
+the final play recap. Only then consider changes to GPU runtime or
+Paperless-AI integrations. BGE-M3 availability does not enable RAG.
 ## Step 2 – audit model download needs, still ZERO writes
 
     (
