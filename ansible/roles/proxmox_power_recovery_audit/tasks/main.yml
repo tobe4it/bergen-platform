@@ -120,6 +120,21 @@
   failed_when: false
   when: power_recovery_ipmitool_path.rc == 0
 
+- name: Query local IPMI power restore policy options
+  check_mode: false
+  ansible.builtin.command:
+    argv:
+      - "{{ power_recovery_ipmitool_path.stdout | trim }}"
+      - -I
+      - open
+      - chassis
+      - policy
+      - list
+  register: power_recovery_ipmi_policy
+  changed_when: false
+  failed_when: false
+  when: power_recovery_ipmitool_path.rc == 0
+
 - name: Report supported remote-management surfaces without changing settings
   ansible.builtin.debug:
     msg:
@@ -133,5 +148,6 @@
       - "fwupd diagnostic: {{ power_recovery_fwupd_settings.stderr_lines | default([]) }}"
       - "ipmitool available: {{ power_recovery_ipmitool_path.rc == 0 }} (query rc: {{ power_recovery_ipmi_status.rc | default('not-run') }})"
       - "IPMI chassis status: {{ power_recovery_ipmi_status.stdout_lines | default([]) }}"
+      - "IPMI restore policies: {{ power_recovery_ipmi_policy.stdout_lines | default([]) }}"
       - "IPMI diagnostic: {{ power_recovery_ipmi_status.stderr_lines | default([]) }}"
       - "No firmware setting, guest boot order, or host state was changed."
