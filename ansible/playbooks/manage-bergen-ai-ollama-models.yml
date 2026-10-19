@@ -8,7 +8,7 @@
   gather_facts: false
   vars:
     bergen_ai_models_action: "{{ bergen_ai_models_mode | default('audit') }}"
-    bergen_ai_models_requested: "{{ bergen_ai_ollama_requested_models | default(['qwen2.5:14b-instruct-q4_K_M', 'mistral-nemo:12b']) }}"
+    bergen_ai_models_requested: "{{ bergen_ai_ollama_requested_models | default(['qwen2.5:14b-instruct-q4_K_M', 'mistral-nemo:12b', 'bge-m3:latest']) }}"
     bergen_ai_models_input:
       protocol: v1
       models: "{{ bergen_ai_models_requested }}"
