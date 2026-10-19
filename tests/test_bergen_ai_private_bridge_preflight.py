@@ -12,6 +12,8 @@ SCRIPT = ROOT / "ansible/files/bergen_ai/audit_private_bridge_preflight.py"
 PLAY = ROOT / "ansible/playbooks/audit-bergen-ai-private-bridge-readonly.yml"
 EXTENDED_SCRIPT = ROOT / "ansible/files/bergen_ai/audit_private_bridge_extended_networks.py"
 EXTENDED_PLAY = ROOT / "ansible/playbooks/audit-bergen-ai-private-bridge-extended-readonly.yml"
+WG_SCRIPT = ROOT / "ansible/files/bergen_ai/audit_private_bridge_wg_prefixes_readonly.py"
+WG_PLAY = ROOT / "ansible/playbooks/audit-bergen-ai-private-bridge-wg-readonly.yml"
 
 spec = importlib.util.spec_from_file_location("bergen_ai_private_bridge_preflight", SCRIPT)
 bridge = importlib.util.module_from_spec(spec)
@@ -147,3 +149,56 @@ class ExtendedBridgeAuditTest(TestCase):
         self.assertIn("FULL_NETWORK_CLEARANCE=NOT_PROVEN", text)
         self.assertIn("not extended_report.APPLY_AUTHORIZED", text)
         self.assertIn("NETWORKS", text)
+
+spec_wg = importlib.util.spec_from_file_location("bergen_ai_private_wg", WG_SCRIPT)
+wg = importlib.util.module_from_spec(spec_wg)
+spec_wg.loader.exec_module(wg)
+
+
+class WireGuardPrefixAuditTest(TestCase):
+    def test_wg_source_is_readonly_and_does_not_log_peers(self):
+        src = WG_SCRIPT.read_text()
+        ast.parse(src, filename=str(WG_SCRIPT))
+        self.assertEqual(str(wg.CANDIDATE), "172.30.110.0/28")
+        self.assertIn('["wg","show","all","allowed-ips"]', src)
+        self.assertIn('FULL_NETWORK_CLEARANCE="NOT_PROVEN"', src)
+        self.assertIn('APPLY_AUTHORIZED=False', src)
+        self.assertIn('INACTIVE_WG_TUNNELS="NOT_INSPECTED"', src)
+        for forbidden in ("wg set", "wg-quick up", "wg-quick down", "PrivateKey",
+                          "nft add", "iptables -A", "pct set", "pct reboot",
+                          "ip link add", "/api/generate", "ollama run"):
+            self.assertNotIn(forbidden, src)
+
+    def test_wg_result_requires_complete_scoped_read(self):
+        self.assertEqual(wg.summarize(["NOT_INSTALLED", "NO_ACTIVE_PEER_PREFIXES"]),
+                         "NO_OVERLAP_IN_INSPECTED_LIVE_WG_PEERS")
+        self.assertEqual(wg.summarize(["NO_OVERLAP_IN_ACTIVE_PEERS", "UNVERIFIED"]),
+                         "INCOMPLETE")
+        self.assertEqual(wg.summarize(["UNVERIFIED", "OVERLAP_FOUND"]),
+                         "OVERLAP_FOUND")
+        self.assertEqual(wg.parse_frame(
+            'BERGEN_AI_WG_GUEST_V1:{"state":"OVERLAP_FOUND"}'),
+            "OVERLAP_FOUND")
+        self.assertEqual(wg.parse_frame(
+            'BERGEN_AI_WG_GUEST_V1:{"state":"MALFORMED"}'),
+            "UNVERIFIED")
+        self.assertEqual(wg.parse_frame(
+            'BERGEN_AI_WG_GUEST_V1:{"state":"NO_ACTIVE_PEER_PREFIXES"}\n'
+            'BERGEN_AI_WG_GUEST_V1:{"state":"NO_ACTIVE_PEER_PREFIXES"}'),
+            "UNVERIFIED")
+
+    def test_wg_playbook_keeps_gateway_and_auth_out_of_scope(self):
+        content = WG_PLAY.read_text()
+        doc = yaml.safe_load(content)[0]
+        self.assertEqual(doc["hosts"], "venombox")
+        self.assertFalse(doc["gather_facts"])
+        self.assertIn("FULL_NETWORK_CLEARANCE=NOT_PROVEN", content)
+        self.assertIn("INACTIVE_WG_TUNNELS=NOT_INSPECTED", content)
+        commands = [t for t in doc["tasks"] if "ansible.builtin.command" in t]
+        self.assertEqual(len(commands), 1)
+        self.assertFalse(commands[0]["changed_when"])
+        self.assertFalse(commands[0]["failed_when"])
+        self.assertTrue(commands[0]["no_log"])
+        for task in doc["tasks"]:
+            for cond in task.get("ansible.builtin.assert", {}).get("that", []):
+                self.assertIsInstance(cond, str)
