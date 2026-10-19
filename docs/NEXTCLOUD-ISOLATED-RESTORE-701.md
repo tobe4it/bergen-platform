@@ -213,3 +213,32 @@ The result NEXTCLOUD_ARCHIVE_TYPE_DIAGNOSTIC_READ_ONLY_COMPLETE is
 safety first, then design a type-aware extraction process bound to the
 isolated guest and explicitly reject unsafe records. Never extract the
 backup directly into the PVE host filesystem.
+
+
+## Phase 3C: strict safe-internal-symlink audit
+
+Archive classification confirmed that all 162 non-regular members are symbolic
+links; no hardlinks, devices or FIFOs, and none of the link targets directly
+point outside html. The strict archive audit now permits only symbolic links
+that resolve through every link hop inside the html namespace to existing
+archived entries. It rejects escaping links, loops, dangling links, and any
+archive member stored underneath a symlink. Resolution processes each
+relative path component in filesystem order; it never collapses .. before
+resolving an earlier symlink. No extraction occurs.
+
+Run the existing read-only audit again after updating the restore worktree:
+
+    BASE="$HOME/bergen-platform"
+    cd "$HOME/bergen-platform-nextcloud-restore"
+    git fetch origin feat/nextcloud-isolated-restore-701-20261019
+    git switch --detach origin/feat/nextcloud-isolated-restore-701-20261019
+
+    ansible-playbook       -i "$BASE/ansible/inventory.yml"       -i "$BASE/ansible/inventory.local.yml"       ansible/playbooks/audit-nextcloud-restore-archive-readonly.yml       --vault-id infra@prompt
+
+Expected on success:
+NEXTCLOUD_RESTORE_ARCHIVE_READ_ONLY_VERIFIED
+and verified_symbolic_link_count: 162, changed=0 and failed=0.
+
+This only clears the integrity and path gate. Before any extraction,
+prepare an independent, constrained, guest-only extraction procedure
+without restoring production credentials/cron/network services.
