@@ -435,8 +435,12 @@ cd "$WT"
 git fetch origin feat/bergen-ai-private-bridge-20261019
 git switch --detach origin/feat/bergen-ai-private-bridge-20261019
 
-install -m 0600 docs/examples/bergen-ai-bridge-ipam.local.json.example \
-  "$WT/ansible/vars/bergen-ai-bridge-ipam.local.json"
+IPAM="$WT/ansible/vars/bergen-ai-bridge-ipam.local.json"
+test ! -L "$IPAM"
+if test ! -e "$IPAM"; then
+  install -m 0600 docs/examples/bergen-ai-bridge-ipam.local.json.example "$IPAM"
+fi
+# Eine bestehende lokale Datei niemals überschreiben.
 # Die Datei anschließend im Editor vervollständigen.
 # Der Standort ist ausschließlich im Feature-Worktree gitignored.
 "$BASE/.venv/bin/python3" -m unittest discover -s tests \
