@@ -185,3 +185,31 @@ After success, independently inspect the offline guest base OS packages
 before approving extraction or SQL import. The test guest must never share
 a production MariaDB, mail endpoint or trusted Cloud hostname. No cleanup
 of mx1 is authorized yet.
+
+
+## TAR special-member classification after strict audit failure
+
+The strict restore archive audit refused a member that is neither an
+ordinary file nor a directory, reporting NON_REGULAR_ARCHIVE_MEMBER.
+GNU tar can represent symlinks and hardlinks; neither can be blindly treated
+as safe. The SHA-256 hash was checked independently against the NAS archive.
+
+First classify the complete archive in a **read-only** fashion:
+
+    BASE="$HOME/bergen-platform"
+    cd "$HOME/bergen-platform-nextcloud-restore"
+    git fetch origin feat/nextcloud-isolated-restore-701-20261019
+    git switch --detach origin/feat/nextcloud-isolated-restore-701-20261019
+
+    ansible-playbook       -i "$BASE/ansible/inventory.yml"       -i "$BASE/ansible/inventory.local.yml"       ansible/playbooks/diagnose-nextcloud-restore-archive-types-readonly.yml       --vault-id infra@prompt
+
+Successful diagnosis displays numeric counts of regular files, directories,
+hardlinks, symlinks, FIFO/device records and other types. It also groups link
+targets into inside-html, outside-html and absolute/unsupported categories.
+No member names, account paths or link targets are printed.
+
+The result NEXTCLOUD_ARCHIVE_TYPE_DIAGNOSTIC_READ_ONLY_COMPLETE is
+**not** authorization to extract or import. Review the counts and target
+safety first, then design a type-aware extraction process bound to the
+isolated guest and explicitly reject unsafe records. Never extract the
+backup directly into the PVE host filesystem.
