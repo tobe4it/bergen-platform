@@ -385,3 +385,66 @@ proven SHA-256 archive may itself contain production credentials; keep
 the test guest permanently isolated and disable scheduled jobs, outgoing
 notifications, background syncs, external services and login integrations
 before any functional testing.
+
+
+## Phase 5A accepted: reviewed RPM source/guest inventory (2026-10-19)
+
+The operator provided the completed read-only package inventory from
+Bergen-Mail. Ansible recap: localhost=2, venombox=7 and source=6 tasks;
+changed=0, failed=0 on every host.
+
+**mx2**: Rocky Linux 9.8, PHP 8.3.35 using Remi module
+php:remi-8.3, MariaDB 10.11.18 using Rocky AppStream module
+mariadb:10.11; Redis 6.2.24, installed nginx 1.20.1 and httpd 2.4.62.
+Both webservers installed does NOT establish which serves Nextcloud.
+Installed PHP extensions include intl, gd, ldap, imagick, mbstring,
+bcmath, zip, redis, apcu, smbclient and mysqlnd.
+Enabled repo IDs: appstream, baseos, crb, epel,
+epel-cisco-openh264, extras, remi-modular, remi-safe, rspamd.
+mx2 RPM cache has zero files.
+
+**LXC 701**: Rocky Linux 9.4; enabled repos appstream, baseos,
+extras; no enabled module streams. RPM, dnf, Python 3, gzip and
+OpenSSL available. PHP, MariaDB, webservers, tar and rsync absent.
+Guest RPM cache has zero files. Only loopback networking.
+
+Version compatibility gate: The guest base release is 9.4 whereas
+mx2 is 9.8. Supplying only PHP and MariaDB RPMs from 9.8 can create
+inconsistent or missing dependency sets. A controlled, complete,
+signed, offline 9.8 base-alignment transaction is necessary before
+using the restored environment for meaningful functionality checks.
+
+## Phase 5B design: networked non-production builder, offline guest
+
+This is a **design only**: no downloads, installs, extraction, imports,
+guest networking or production changes are authorized yet.
+
+1. Establish a separate, disposable, networked non-production builder
+   matching Rocky Linux 9.8 x86_64. Do not make mx2 the builder.
+2. Verify actual webserver usage and required extensions read-only
+   before choosing the minimal Nextcloud package set.
+3. Configure trusted Rocky baseos/appstream/crb, EPEL and Remi with
+   PHP stream remi-8.3 and MariaDB stream 10.11. Do not assume the
+   exact archived RPM versions are still available; report missing
+   NEVRAs instead of automatically substituting newer versions.
+4. Resolve the **full** 9.4-to-9.8 offline RPM transaction, including
+   RPM dependencies and module metadata. Verify upstream GPG signatures
+   with independently trusted keys, and pin sha256 and NEVRA for each RPM.
+5. Test the transaction in an expendable offline rehearsal environment.
+   Check venombox staging free space and actual free capacity in the
+   48 GiB guest rootfs before staging or installing anything.
+6. After separate operator approval, stage an immutable root-only
+   bundle on venombox. Pass packages into LXC 701 only by explicitly
+   scoped Proxmox local copy operations. Keep VMID 701 with zero NICs.
+7. Require an offline-only dnf transaction (all external repositories
+   disabled) and package signature checks; re-check guest network
+   before and after the installation. Do not enable cron, LDAP/OIDC,
+   notification services or external storage.
+8. Separately approve safe, guest-confined archive extraction,
+   scrub external endpoints and production secrets before launching
+   the app, import SQL into the guest-only DB and test Nextcloud
+   via loopback. Keep both mx1 and mx2 unchanged throughout.
+
+The source inventory lists only selected package prefixes, not
+the full RPM dependency closure. The module/repo names alone do
+not prove downloads or package compatibility.
