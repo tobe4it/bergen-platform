@@ -376,6 +376,24 @@ limit before making any further configuration changes. Only after
 a positive live host-side reading may the strict postboot acceptance
 gate be revised to use real enforcement rather than the guest namespace
 view, and then synthetic GPU-offload inference can be tested.
+### First host cgroup audit failed before classification (2026-10-19)
+
+The original host cgroup audit was run read-only and returned
+`GPU_HOST_MEMORY_CGROUP_UNVERIFIED` (`ok=3 changed=0 failed=1`).
+This did **not** establish absent host RAM enforcement. Its first
+implementation required standalone `lxc-info -n 110 -p -H` PID
+discovery; that approach can fail with Proxmox's managed LXC runtime.
+
+The updated audit FIRST inspects the exact Proxmox cgroup v2 path
+`/sys/fs/cgroup/lxc/110/memory.max` and its ancestor chain,
+after confirming `pct config 110` and `pct status 110`.
+Only if that expected cgroup is not present will it try PID discovery
+as a secondary path. The result identifies `CGROUP_SOURCE` and
+`CGROUP_LIMIT_STATUS` without exposing a host PID or raw paths.
+No restart or resource changes are necessary. Re-run the read-only
+host-memory playbook above and review the result before relaxing any
+postboot gate or initiating inference.
+
 ## Step 2 – audit model download needs, still ZERO writes
 
     (
