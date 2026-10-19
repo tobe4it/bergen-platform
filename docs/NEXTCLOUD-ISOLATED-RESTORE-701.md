@@ -242,3 +242,43 @@ and verified_symbolic_link_count: 162, changed=0 and failed=0.
 This only clears the integrity and path gate. Before any extraction,
 prepare an independent, constrained, guest-only extraction procedure
 without restoring production credentials/cron/network services.
+
+
+## Phase 4A: offline Rocky 9 runtime inventory (no restore writes)
+
+The pinned archive passed sha256, gzip SQL, manifest, entry-path and all
+162 symlink chain checks on 19 October 2026:
+NEXTCLOUD_RESTORE_ARCHIVE_READ_ONLY_VERIFIED, changed=0, failed=0.
+The archive is not yet extracted. This is a prerequisite, not a functioning
+recovery of Nextcloud.
+
+Prepare one local, offline guest inventory. The existing protected VMID 701
+has no network interface and host autostart disabled. Never attach a NIC just
+to install RPM packages.
+
+From bp-controller in the isolated worktree:
+
+    BASE="$HOME/bergen-platform"
+    cd "$HOME/bergen-platform-nextcloud-restore"
+    git fetch origin feat/nextcloud-isolated-restore-701-20261019
+    git switch --detach origin/feat/nextcloud-isolated-restore-701-20261019
+
+Default read-only preflight:
+
+    ansible-playbook       -i "$BASE/ansible/inventory.yml"       -i "$BASE/ansible/inventory.local.yml"       ansible/playbooks/inspect-nextcloud-restore-701-offline-runtime.yml       --vault-id infra@prompt
+
+Expected NEXTCLOUD_RESTORE_701_START_READ_ONLY_READY, changed=0 and
+failed=0. The root-only archive must still have the expected byte count.
+
+After explicitly approving a guest startup, run the same command with:
+    -e nextcloud_restore_701_start=true
+
+Only VMID 701 is started. Then pct exec obtains operating system and
+bounded installed RPM status, verifying that only loopback exists. Expected:
+NEXTCLOUD_RESTORE_701_OFFLINE_RUNTIME_INVENTORY_READY, changed=1, failed=0.
+No RPM installation, SQL import, archive extraction, service activation
+or production host changes are performed.
+
+The startup playbook is intentionally single-use and requires the guest
+to be stopped. After a successful approved boot, do not blindly rerun
+this playbook: continue with a separate running-guest preflight.
