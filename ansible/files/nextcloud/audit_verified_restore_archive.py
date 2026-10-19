@@ -7,6 +7,7 @@ the guest, or connects to any production service.
 import gzip
 import hashlib
 import json
+import posixpath
 from pathlib import Path
 import re
 import socket
@@ -30,6 +31,51 @@ def require(cond, label):
         raise AuditError(label)
 
 
+def in_html(path):
+    return path == "html" or path.startswith("html/")
+
+
+def validate_symbolic_links(entries, links):
+    """Resolve link chains without touching the filesystem.
+
+    Member path names are always TAR-relative; linknames are resolved in
+    the link's parent directory. Reject escapes, dangling references,
+    loops and any stored entry nested beneath a symlink.
+    """
+    for path in entries:
+        pieces = path.split("/")
+        for i in range(1, len(pieces)):
+            require("/".join(pieces[:i]) not in links,
+                    "SYMLINK_USED_AS_ARCHIVE_PARENT")
+
+    for path, target in links.items():
+        require(target and not target.startswith("/") and "\\" not in target
+                and "\x00" not in target, "UNSAFE_SYMLINK_TARGET")
+        working = posixpath.normpath(posixpath.join(posixpath.dirname(path), target))
+        require(in_html(working), "SYMLINK_ESCAPE")
+        visited = {path}
+        for _ in range(40):
+            pieces = working.split("/")
+            prefix = next(("/".join(pieces[:i]) for i in range(1, len(pieces)+1)
+                           if "/".join(pieces[:i]) in links), None)
+            if prefix is None:
+                break
+            require(prefix not in visited, "SYMLINK_CYCLE")
+            visited.add(prefix)
+            replacement = posixpath.normpath(
+                posixpath.join(posixpath.dirname(prefix), links[prefix])
+            )
+            require(in_html(replacement), "SYMLINK_CHAIN_ESCAPE")
+            suffix = working[len(prefix):].lstrip("/")
+            working = posixpath.normpath(
+                posixpath.join(replacement, suffix)
+            ) if suffix else replacement
+            require(in_html(working), "SYMLINK_CHAIN_ESCAPE")
+        else:
+            raise AuditError("SYMLINK_CHAIN_DEPTH_EXCEEDED")
+        require(working in entries, "DANGLING_SYMLINK_TARGET")
+
+
 def inspect(archive, ident, digest):
     require(re.fullmatch(r"20\d{6}T\d{6}Z-\d+", ident), "INVALID_SNAPSHOT_ID")
     require(re.fullmatch(r"[0-9a-f]{64}", digest), "INVALID_DIGEST")
@@ -39,6 +85,7 @@ def inspect(archive, ident, digest):
     require(st.st_uid == 0 and stat.S_IMODE(st.st_mode) == 0o600,
             "ARCHIVE_PERMISSIONS_UNSAFE")
     seen = set()
+    links = {}
     regular_files = 0
     directories = 0
     total_content_bytes = 0
@@ -69,13 +116,17 @@ def inspect(archive, ident, digest):
                         "UNEXPECTED_ROOT_FILE_LOCATION")
                 require(path not in seen, "DUPLICATE_ARCHIVE_MEMBER")
                 require(len(seen) < MAX_MEMBERS, "TOO_MANY_ARCHIVE_ENTRIES")
-                require(item.isfile() or item.isdir(), "NON_REGULAR_ARCHIVE_MEMBER")
+                require(item.isfile() or item.isdir() or item.issym(),
+                        "NON_REGULAR_ARCHIVE_MEMBER")
                 require(not (item.mode & 0o6000), "SETUID_OR_SETGID_ARCHIVE_MEMBER")
+                if item.issym():
+                    require(in_html(path), "SYMLINK_OUTSIDE_HTML")
+                    links[path] = item.linkname
                 seen.add(path)
                 if item.isfile():
                     regular_files += 1
                     total_content_bytes += item.size
-                else:
+                elif item.isdir():
                     directories += 1
                 if path == "BACKUP-MANIFEST.txt":
                     require(item.isfile() and item.size < 4096, "INVALID_MANIFEST")
@@ -89,6 +140,7 @@ def inspect(archive, ident, digest):
                 "BACKUP-MANIFEST.txt",
             }
             require(required.issubset(seen), "REQUIRED_NEXTCLOUD_MEMBERS_MISSING")
+            validate_symbolic_links(seen, links)
             require(manifest_member is not None and sql_member is not None,
                     "REQUIRED_METADATA_MISSING")
 
@@ -126,6 +178,8 @@ def inspect(archive, ident, digest):
         "tar_catalog_safe": True,
         "regular_file_count": regular_files,
         "directory_count": directories,
+        "verified_symbolic_link_count": len(links),
+        "all_link_chains_within_html": True,
         "total_uncompressed_content_bytes": total_content_bytes,
         "sql_gzip_valid": True,
         "sql_uncompressed_bytes": sql_size,
