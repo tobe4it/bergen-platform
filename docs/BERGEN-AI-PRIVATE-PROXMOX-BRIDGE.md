@@ -939,3 +939,68 @@ cd "$WT"
 **Bis zur Bewertung:** `backup-bergen-ai-ct110-once.yml` **nicht
 erneut starten**. Alle Backup-, Timer-, Netzwerk- und
 Inference-/Paperless-Apply-Gates bleiben gesperrt.
+
+
+### Phase 0f.1 – Live-Befund und Präzisierung der Gerätequelle (19.10.2026)
+
+Der Operator hat `audit-bergen-ai-ct110-mount-directives-readonly.yml`
+erfolgreich mit `ok=7 changed=0 failed=0` auf `venombox` ausgeführt.
+
+```text
+CT110_CONFIG_IDENTITY=VERIFIED
+PVE_MP_DIRECTIVES=NONE
+PVE_MP_COUNT=0
+LXC_MOUNT_AUTO=ABSENT
+LXC_MOUNT_AUTO_COUNT=0
+LXC_MOUNT_ENTRY=DEVICE_OR_PSEUDO_TARGETS_PRESENT
+LXC_MOUNT_ENTRY_COUNT=1
+OTHER_MOUNT_OR_EXCLUDE_DIRECTIVES=NONE
+WEBUI_DATA_MOUNT=GUEST_ROOTFS
+BACKUP_EXECUTED=False
+BACKUP_AUTHORIZED=False
+ROLLBACK_CLEARANCE=NOT_PROVEN
+APPLY_AUTHORIZED=False
+```
+
+**Bewertung:** Das eine Mount-Ziel liegt in einem Geräte- oder
+Pseudo-Systemverzeichnis; der tatsächliche Host-Quellpfad und die
+Mount-Optionen waren im ersten Live-Audit **nicht** belegt. Das
+Open-WebUI-Datenverzeichnis liegt dagegen nachweislich auf dem
+Gast-Rootfs. Die vollständige Sicherbarkeit von Ollama-/Podman-Daten
+und der gerätebezogene Host-Mount müssen weiter geprüft werden.
+
+**Schärfung des bestehenden Read-only-Audits:** Der Bericht enthält jetzt
+zusätzlich `LXC_MOUNT_ENTRY_DEVICE_ORIGIN`. Dazu wird **die gesamte**
+Mount-Direktive geprüft und ausschließlich als exakt übereinstimmender
+FUSE-/TUN-/DRI-Geräte-Bind oder als nicht ausreichend verifizierter
+Mount eingeordnet. Insbesondere darf ein beliebiger Host-Quellpfad mit
+`/dev` als Ziel **keine** positive Klassifikation erhalten. Es
+werden keine Rohpfade oder Optionen ausgegeben, keine Änderungen
+vorgenommen und **keine Backup-Freigabe** erteilt.
+
+Auf `bp-controller` den aktuellen Code holen und nur das
+Read-only-Playbook erneut ausführen:
+
+```bash
+(
+set -euo pipefail
+BASE="$HOME/bergen-platform"
+WT="$HOME/bergen-platform-ai-private-bridge"
+git -C "$WT" fetch origin feat/bergen-ai-private-bridge-20261019
+git -C "$WT" switch --detach origin/feat/bergen-ai-private-bridge-20261019
+cd "$WT"
+
+"$BASE/.venv/bin/ansible-playbook" \
+  -i ansible/inventory.yml \
+  -i "$BASE/ansible/inventory.local.yml" \
+  ansible/playbooks/audit-bergen-ai-ct110-mount-directives-readonly.yml \
+  --vault-id ai@prompt
+)
+```
+
+Erst nach diesem Ergebnis darf die **separat** konservativ zu
+überarbeitende Sicherungs-Vorprüfung erneut erfolgen. Die bereits
+genehmigte Einmalsicherung ist nach dem bisherigen Stand weiterhin
+gesperrt: `SAFE_TO_ATTEMPT_SINGLE_BACKUP=False`.
+Das bestehende mutierende Playbook `backup-bergen-ai-ct110-once.yml`
+nicht erneut starten. Keine automatische Aufweichung der Gates.
