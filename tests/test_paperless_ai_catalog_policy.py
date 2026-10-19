@@ -188,9 +188,7 @@ class CatalogPolicyTest(unittest.TestCase):
         self.assertIn('["pct","config","110"]',source)
         self.assertIn('"/etc/pve/firewall/110.fw"',source)
         self.assertIn('"/etc/pve/firewall/cluster.fw"',source)
-        self.assertIn('"/host.fw"',source) if False else None
         self.assertIn('"host.fw"',source)
-        self.assertIn('["net0"]',source) if False else None
         self.assertIn('net[0-9]+',source)
         self.assertIn('"NOT_DEMONSTRATED"',source)
         self.assertIn('"NOT_INSPECTED"',source)
