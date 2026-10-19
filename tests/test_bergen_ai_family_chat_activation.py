@@ -147,14 +147,24 @@ class StageContract(TestCase):
     def test_playbook_gates_and_no_secret_output(self):
         play = yaml.safe_load(PLAY.read_text())[0]
         self.assertEqual(play["serial"], 1)
-        gates = str(play["tasks"][0]["ansible.builtin.assert"])
+        diagnostics = next(t for t in play["tasks"]
+                           if t.get("name") == "Report non-secret prerequisites before protected gate")
+        safe_debug = str(diagnostics["ansible.builtin.debug"])
+        self.assertIn("VAULT_ADMIN_TOKEN_DEFINED", safe_debug)
+        self.assertIn("VAULT_ADMIN_TOKEN_MIN_LENGTH_OK", safe_debug)
+        self.assertIn("THREE_GROUP_NAMES", safe_debug)
+        self.assertNotIn("Bearer ", safe_debug)
+        gates_task = next(t for t in play["tasks"]
+                          if "Require approved target and independent per-model release gates" in t.get("name", ""))
+        gates = str(gates_task["ansible.builtin.assert"])
         for name in ("bergen_ai_family_model_approved",
                      "bergen_ai_family_model_backup_verified",
                      "bergen_ai_family_model_expected_sha256",
                      "bergen_ai_family_model_rollback_approved",
                      "vault_open_webui_admin_token"):
             self.assertIn(name, gates)
-        cmd = play["tasks"][1]
+        cmd = next(t for t in play["tasks"]
+                   if "Run version-locked WebUI API audit" in t.get("name", ""))
         self.assertTrue(cmd.get("no_log"))
         self.assertIn("manage_family_chat_profiles_v0102.py",
                       str(cmd["ansible.builtin.command"]))
