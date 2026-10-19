@@ -1507,3 +1507,68 @@ cd "$WT"
   --vault-id ai@prompt
 )
 ```
+
+
+### Phase 0f.5 – Read-only Live-Befund 19.10.2026, 22:46
+
+Der Operator hat den erweiterten Runtime-Mount-Audit mit
+`ok=7 changed=0 failed=0` auf `venombox` ausgeführt.
+`PODMAN_INSPECT_RELATIONSHIP=EXACT_SINGLE_WEBUI_BIND`;
+`LXCFS_SYSTEM_MOUNT_COUNT=10`, `FUSE_OVERLAY_MOUNT_COUNT=1`.
+Der eine verbleibende Mount wurde nicht zugeordnet
+(`UNACCOUNTED_NONPSEUDO_MOUNT_COUNT=1`).
+
+**Wesentliche neue Erkenntnis:** `SOURCE_INODE_READ=AVAILABLE`,
+`MERGED_INODE_READ=AVAILABLE`,
+`PROCESS_ROOT_INODE_READ=AVAILABLE`,
+`CONTAINER_PID=RUNNING_AND_AVAILABLE`,
+`MERGED_INODE_RELATION=DIFFERENT`, aber
+`PROCESS_ROOT_INODE_RELATION=IDENTICAL`.
+Der tatsächlich laufende Open-WebUI-Prozess sieht somit
+am Zielpfad im eigenen Mount-Namespace exakt dieselbe
+Dateisystem-Objektidentität (`st_dev`/`st_ino`) wie
+das bekannte persistente Verzeichnis `/srv/ai/open-webui`
+im LXC-Rootfs. Der direkterweise unter `MergedDir`
+gelesene Inode weicht davon ab. Das allein ist kein
+Grund, einen externen Daten-Mount anzunehmen.
+
+**Separates ungelöstes Gate:**
+`BIND_TARGET=NOT_UNIQUE_OR_MISSING`; folglich
+`BIND_FSTYPE_RELATION=UNVERIFIED` und
+`BIND_SOURCE_RELATION=UNVERIFIED`. Das als zusätzlicher
+Block-/CoW-Dateisystem-Mount erkannte Gast-Ziel
+entspricht also nicht dem zuvor angenommenen exakten
+Pfad `MergedDir/app/backend/data`. Seine Quelle
+wurde noch nicht nachgewiesen. **Kein Backup gestartet**.
+
+Der bestehende Read-only-Audit wurde deshalb um eine
+streng begrenzte, **nicht autorisierende** Diagnose des
+einen bislang nicht erklärten Mounts ergänzt. Die neuen
+`UNRESOLVED_*`-Felder liefern nur enumerierte Klassen:
+
+- `UNRESOLVED_MOUNT_COUNT`: Anzahl ungeklärter
+  Nicht-Pseudo-Mounts;
+- `UNRESOLVED_TARGET_CLASS` / `UNRESOLVED_TARGET_ROLE`:
+  Podman-Graphroot-/Runtime-Unterbereich ohne
+  Container-ID oder echten Zielpfad;
+- `UNRESOLVED_SOURCE_CLASS`: Relation zu Rootfs-
+  Quellbezeichnung oder anderer Device-/Netzwerkquelle;
+- `UNRESOLVED_FS_RELATION` und
+  `UNRESOLVED_DEVICE_RELATION`: FSType und Gast-
+  Gerät-ID im Vergleich zu `/`, nur als gleiche/
+  andere/ungeklärte Kategorie.
+
+Ein passendes `SAME_DEVICE` alleine ist noch
+**kein** Beweis der `vzdump`-Abdeckung oder
+Datenintegrität. Unknown Sources und weitere
+Mounts bleiben gesperrt. Das Backup-Preflight-
+Playbook wurde **nicht** modifiziert;
+`backup-bergen-ai-ct110-once.yml` nicht ausführen,
+bis die Herkunft separat gewürdigt wurde.
+
+Auf `bp-controller` nach dem gewohnten Fetch erneut
+ausschließlich das bestehende read-only-Playbook
+`ansible/playbooks/audit-bergen-ai-ct110-runtime-mount-relationships-readonly.yml`
+ausführen. CI umfasst erneute Regressionen gegen
+externe Quellen, unbekannte Targets und unterschiedliche
+Mount-Geräte, zusätzlich Ansible-Syntax.
