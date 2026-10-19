@@ -26,8 +26,18 @@ raw models are invisible to non-admins; a separately registered custom
 alias with base_model_id set to the raw Ollama ID can have its own ACL.
 This is a proposed design to test, not a proven permission boundary.
 System prompts are pedagogical guidance, NOT access-control enforcement.
-The child learning prompt from the feature/bergen-ai-learning-companion
-work must be separately reviewed and deployed.
+Both child profiles MUST use the same explicit no-spoonfeeding baseline
+from `feat/bergen-ai-learning-companion-20261018`:
+`ansible/files/bergen_ai/prompts/learning_companion_de_v1.md`.
+It forbids providing ready-to-submit homework solutions, essays, translations
+or code even after requests such as "just the answer", role-play or a claimed
+teacher exception. It permits stepwise hints, feedback, factual answers,
+and answers to original practice exercises. This policy belongs in the
+effective **system prompt** of BOTH child alias models and cannot be silently
+overridden by the adult profiles. Use the versioned 10-case two-model
+acceptance matrix `docs/BERGEN-AI-CHILD-NO-SPOONFEEDING-E2E.md` from the
+learning-companion branch for E2E proof. This system prompt is only staged
+in GitHub; it is **not installed in Open WebUI** and is no technical ACL.
 
 ## Synology OIDC and children
 
@@ -107,8 +117,10 @@ three-group mapping. Outputs no user/group names or actual user IDs.
 2. Confirm actual private SSO roster and effective user roles; design and
    test automatic group provisioning AND revocation with existing sessions.
 3. Independently back up Open WebUI SQLite and demonstrate rollback.
-   Stage only four private group-scoped model aliases; bge-m3 stays hidden
-   from interactive chat and embedding index stays disabled.
+   Stage only four private group-scoped model aliases; both child aliases
+   MUST be provisioned with the no-spoonfeeding system policy from the
+   learning-companion branch; bge-m3 stays hidden from interactive chat
+   and embedding index stays disabled.
 4. E2E test child positive chat, direct denial of parent alias and raw
    underlying model ID, denied APIs for pending or revoked users, as well
    as adults being denied child-private data. Test both UI and REST paths.
