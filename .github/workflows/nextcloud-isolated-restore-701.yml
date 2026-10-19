@@ -5,6 +5,8 @@ on:
     paths:
       - 'ansible/playbooks/prepare-nextcloud-isolated-restore-701.yml'
       - 'ansible/playbooks/audit-nextcloud-restore-transfer-readonly.yml'
+      - 'ansible/playbooks/transfer-nextcloud-restore-archive.yml'
+      - 'ansible/files/nextcloud/stream_verified_restore_archive.py'
       - 'docs/NEXTCLOUD-ISOLATED-RESTORE-701.md'
       - '.github/workflows/nextcloud-isolated-restore-701.yml'
   push:
@@ -30,6 +32,10 @@ jobs:
           ansible-playbook -i localhost, \
             ansible/playbooks/audit-nextcloud-restore-transfer-readonly.yml \
             --syntax-check
+          ansible-playbook -i localhost, \
+            ansible/playbooks/transfer-nextcloud-restore-archive.yml \
+            --syntax-check
+          python3 -m py_compile ansible/files/nextcloud/stream_verified_restore_archive.py
       - name: Verify offline-only initial provisioning
         run: |
           python3 - <<'PY'
@@ -57,5 +63,13 @@ jobs:
               "ansible.builtin.systemd", "ansible.builtin.service",
           }
           assert not any(any(k in forbidden for k in t) for t in tasks)
+          transfer = Path("ansible/files/nextcloud/stream_verified_restore_archive.py").read_text()
+          assert 'StrictHostKeyChecking=yes' in transfer
+          assert 'ForwardAgent=no' in transfer
+          assert 'O_NOFOLLOW' in transfer
+          assert 'sha256' in transfer
+          assert '/var/lib/vz/nextcloud-restore-test' in transfer
+          assert '20261019T' not in transfer
+          assert '--apply' in transfer
           print("NEXTCLOUD_701_OFFLINE_STATIC_BOUNDARIES=PASS")
           PY
