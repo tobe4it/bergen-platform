@@ -542,6 +542,38 @@ Before selecting a Paperless cataloging model, compare Mistral Nemo
 single-model test. The final decision also requires real cataloging
 quality and human approval of tags/types/correspondents, not just
 tokens/sec. Paperless AI and RAG remain disabled.
+### Mistral Nemo 12B GPU comparison – separate approval
+
+To compare with the successfully measured 127-token Qwen14B test
+(7.3 tokens/s, 2.27s load, 8.44 GiB Ollama GPU allocation), PR #115
+now includes a **separate** `benchmark-bergen-ai-mistral-gpu-synthetic.yml`
+with matching German numbers-list task, 2048 context,
+192 generated tokens cap and minimum 64 tokens for acceptance.
+It runs only if the Ollama model cache is empty and the host 32 GiB
+LXC110 cgroup and 16 GiB available RAM checks still pass.
+
+Only at a quiet time, as ansible on bp-controller:
+
+    (
+    set -euo pipefail
+    BASE="$HOME/bergen-platform"
+    cd "$HOME/bergen-platform-ollama-hardware"
+    git fetch origin feat/bergen-ai-ollama-hardware-models-20261019
+    git switch --detach origin/feat/bergen-ai-ollama-hardware-models-20261019
+    "$BASE/.venv/bin/ansible-playbook" \
+      -i ansible/inventory.yml \
+      -i "$BASE/ansible/inventory.local.yml" \
+      ansible/playbooks/benchmark-bergen-ai-mistral-gpu-synthetic.yml \
+      --vault-id ai@prompt \
+      -e bergen_ai_gpu_mistral_benchmark_approved=true \
+      -e bergen_ai_gpu_mistral_benchmark_window_approved=true
+    )
+
+Report `EVAL_TOKENS`, `TOKENS_PER_SECOND`, `LOAD_SECONDS`,
+`GPU_PLACEMENT` and `GPU_ALLOCATED_GIB`. Comparison is approximate:
+different tokenizers mean output length and token semantics may vary.
+Do not run multiple model benchmarks concurrently or infer
+cataloging accuracy from synthetic throughput. Paperless remains OFF.
 ## Step 2 – audit model download needs, still ZERO writes
 
     (
