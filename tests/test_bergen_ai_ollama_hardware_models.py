@@ -29,6 +29,8 @@ GPU_HOST_MEMORY_AUDIT = ROOT / "ansible/playbooks/audit-bergen-ai-gpu-host-memor
 GPU_REBOOT_PLAY = ROOT / "ansible/playbooks/restart-bergen-ai-gpu-approved.yml"
 GPU_BENCH_SCRIPT = ROOT / "ansible/files/bergen_ai/benchmark_ollama_gpu_synthetic.py"
 GPU_BENCH_PLAY = ROOT / "ansible/playbooks/benchmark-bergen-ai-ollama-gpu-synthetic.yml"
+GPU_MISTRAL_BENCH_SCRIPT = ROOT / "ansible/files/bergen_ai/benchmark_ollama_mistral_gpu_synthetic.py"
+GPU_MISTRAL_BENCH_PLAY = ROOT / "ansible/playbooks/benchmark-bergen-ai-mistral-gpu-synthetic.yml"
 
 
 class OllamaHardwareTests(unittest.TestCase):
@@ -372,6 +374,37 @@ class OllamaHardwareTests(unittest.TestCase):
             if "ansible.builtin.assert" in item:
                 for check in item["ansible.builtin.assert"]["that"]:
                     self.assertIsInstance(check,str)
+
+    def test_mistral_nemo_gpu_benchmark_matches_qwen_workload_and_is_independently_gated(self):
+        src = GPU_MISTRAL_BENCH_SCRIPT.read_text()
+        qwen = GPU_BENCH_SCRIPT.read_text()
+        ast.parse(src,filename=str(GPU_MISTRAL_BENCH_SCRIPT))
+        self.assertIn('MODEL="mistral-nemo:12b"',src)
+        self.assertIn('MODEL="qwen2.5:14b-instruct-q4_K_M"',qwen)
+        for snippet in ('"num_predict":192','"num_ctx":2048','"keep_alive":"45s"',
+                        'count < 64', 'count > 192',
+                        'GPU_ALLOCATION_OBSERVED', 'von 1 bis 300'):
+            self.assertIn(snippet,src)
+            self.assertIn(snippet,qwen)
+        play = yaml.safe_load(GPU_MISTRAL_BENCH_PLAY.read_text())[0]
+        self.assertEqual(play["hosts"],"venombox")
+        text = GPU_MISTRAL_BENCH_PLAY.read_text()
+        self.assertIn("bergen_ai_gpu_mistral_benchmark_approved",text)
+        self.assertIn("bergen_ai_gpu_mistral_benchmark_window_approved",text)
+        self.assertNotIn("bergen_ai_gpu_benchmark_approved | default",text)
+        self.assertIn("benchmark_ollama_mistral_gpu_synthetic.py",text)
+        self.assertIn("BERGEN_AI_GPU_MISTRAL_BENCHMARK_V1:",text)
+        self.assertIn("EVAL_TOKENS | int >= 64",text)
+        for forbidden in ("pct reboot","pct set","ollama pull","/api/chat",
+                          "PAPERLESS_AI_ENABLED=true"):
+            self.assertNotIn(forbidden,src)
+        for task in play["tasks"]:
+            if "ansible.builtin.command" in task:
+                self.assertTrue(task["no_log"])
+                self.assertTrue(task["changed_when"])
+            if "ansible.builtin.assert" in task:
+                self.assertTrue(all(isinstance(cond,str)
+                                    for cond in task["ansible.builtin.assert"]["that"]))
 
     def test_restart_is_single_guest_explicit_downtime_with_preimage_gate(self):
         play = yaml.safe_load(GPU_REBOOT_PLAY.read_text())[0]
