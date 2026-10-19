@@ -54,6 +54,7 @@
           - bergen_ai_cgroup_host.LXC110_CONFIGURED_32GIB
           - bergen_ai_cgroup_host.LXC110_RUNNING
           - bergen_ai_cgroup_host.HOST_CGROUP_V2
+          - bergen_ai_cgroup_host.CGROUP_SOURCE in ['PVE_LXC_110_CGROUP','INIT_PROCESS_HOST_CGROUP']
           - bergen_ai_cgroup_host.CGROUP_LIMIT_STATUS in ['EFFECTIVE_32GIB','BELOW_32GIB','ABOVE_32GIB','NO_FINITE_CGROUP_LIMIT']
           - not bergen_ai_cgroup_host.GPU_INFERENCE_PROVEN
         fail_msg: GPU_HOST_MEMORY_CGROUP_FRAME_INVALID
@@ -67,6 +68,7 @@
           - LXC110_RUNNING=YES
           - LXC110_CONFIGURED_MEMORY=32768_MIB
           - HOST_CGROUP_V2=YES
+          - "CGROUP_SOURCE={{ bergen_ai_cgroup_host.CGROUP_SOURCE }}"
           - "CGROUP_LIMIT_STATUS={{ bergen_ai_cgroup_host.CGROUP_LIMIT_STATUS }}"
           - "LEAF_MEMORY_LIMIT={{ bergen_ai_cgroup_host.LEAF_MEMORY_LIMIT }}"
           - "FINITE_ANCESTOR_PRESENT={{ bergen_ai_cgroup_host.FINITE_ANCESTOR_PRESENT }}"
