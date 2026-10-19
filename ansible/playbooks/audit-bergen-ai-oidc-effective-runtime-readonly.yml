@@ -1,0 +1,108 @@
+---
+# Verify the *effective* Open WebUI v0.10.2 OAuth runtime values without an
+# admin API token. Environment checks alone are insufficient. Never print
+# IdP tokens, individual/group names, OAuth secrets, or user identifiers.
+- name: Audit effective Open WebUI OAuth group authorization in live container
+  hosts: bergen-ai
+  gather_facts: false
+  serial: 1
+  tasks:
+    - name: Require only the intended existing Bergen-AI host
+      ansible.builtin.assert:
+        that:
+          - inventory_hostname == 'bergen-ai'
+          - ansible_play_hosts_all | length == 1
+
+    - name: Verify running Open WebUI release over guest-local loopback
+      ansible.builtin.uri:
+        url: http://127.0.0.1:3000/api/version
+        method: GET
+        status_code: 200
+        use_proxy: false
+        follow_redirects: none
+        timeout: 10
+        return_content: false
+      register: bp_oidc_effective_version
+      changed_when: false
+      check_mode: false
+      no_log: true
+
+    - name: Require version matching audited OAuth callback implementation
+      ansible.builtin.assert:
+        that:
+          - bp_oidc_effective_version.json is mapping
+          - bp_oidc_effective_version.json.version in ['0.10.2', 'v0.10.2']
+        fail_msg: OPEN_WEBUI_OAUTH_RUNTIME_VERSION_UNREVIEWED
+      no_log: true
+
+    - name: Read same Open WebUI effective OAuth runtime resolver as the callback
+      ansible.builtin.command:
+        argv:
+          - podman
+          - exec
+          - open-webui
+          - python3
+          - -c
+          - "{{ lookup('ansible.builtin.file', playbook_dir ~ '/../files/bergen_ai/audit_oidc_effective_runtime_v0102.py') }}"
+      register: bp_oidc_effective_raw
+      changed_when: false
+      failed_when: false
+      check_mode: false
+      no_log: true
+
+    - name: Require unique bounded non-identifying effective OAuth frame
+      ansible.builtin.set_fact:
+        bp_oidc_effective_frames: >-
+          {{ bp_oidc_effective_raw.stdout_lines |
+             select('match', '^BERGEN_OIDC_EFFECTIVE_RUNTIME_V1:') | list }}
+      no_log: true
+      changed_when: false
+
+    - name: Reject failed imports, duplicate frames and unsafe output
+      ansible.builtin.assert:
+        that:
+          - bp_oidc_effective_raw.rc == 0
+          - bp_oidc_effective_frames | length == 1
+          - bp_oidc_effective_frames[0] | length < 1200
+        fail_msg: OPEN_WEBUI_RUNTIME_READONLY_AUDIT_UNAVAILABLE
+      no_log: true
+
+    - name: Decode only bounded OAuth runtime status
+      ansible.builtin.set_fact:
+        bp_oidc_effective: >-
+          {{ bp_oidc_effective_frames[0] |
+             regex_replace('^BERGEN_OIDC_EFFECTIVE_RUNTIME_V1:', '') |
+             from_json }}
+      no_log: true
+
+    - name: Require read-only status with non-secret allowlisted categories
+      ansible.builtin.assert:
+        that:
+          - bp_oidc_effective.AUDIT == 'READ_ONLY'
+          - bp_oidc_effective.CHANGED == false
+          - bp_oidc_effective.GROUP_MANAGEMENT_ENV in ['ON', 'OFF']
+          - bp_oidc_effective.GROUP_MANAGEMENT_EFFECTIVE in ['ON', 'OFF']
+          - bp_oidc_effective.GROUP_CREATION_EFFECTIVE in ['ON', 'OFF']
+          - bp_oidc_effective.ROLE_MANAGEMENT_EFFECTIVE in ['ON', 'OFF']
+          - bp_oidc_effective.GROUP_CLAIM in ['GROUPS', 'OTHER']
+          - bp_oidc_effective.BLOCKED_GROUPS in ['EMPTY', 'NONEMPTY', 'UNREVIEWED']
+          - bp_oidc_effective.DEFAULT_USER_ROLE in ['PENDING', 'OTHER']
+        fail_msg: OPEN_WEBUI_OAUTH_RUNTIME_STATUS_UNREVIEWED
+      no_log: true
+
+    - name: Report effective OAuth group status without credentials or identities
+      ansible.builtin.debug:
+        msg:
+          - "AUDIT=READ_ONLY"
+          - "CHANGED=False"
+          - "GROUP_MANAGEMENT_ENV={{ bp_oidc_effective.GROUP_MANAGEMENT_ENV }}"
+          - "GROUP_MANAGEMENT_EFFECTIVE={{ bp_oidc_effective.GROUP_MANAGEMENT_EFFECTIVE }}"
+          - "GROUP_CREATION_EFFECTIVE={{ bp_oidc_effective.GROUP_CREATION_EFFECTIVE }}"
+          - "ROLE_MANAGEMENT_EFFECTIVE={{ bp_oidc_effective.ROLE_MANAGEMENT_EFFECTIVE }}"
+          - "PERSISTENT_OAUTH_CONFIG={{ bp_oidc_effective.PERSISTENT_OAUTH_CONFIG }}"
+          - "GROUP_CLAIM={{ bp_oidc_effective.GROUP_CLAIM }}"
+          - "BLOCKED_GROUPS={{ bp_oidc_effective.BLOCKED_GROUPS }}"
+          - "DEFAULT_USER_ROLE={{ bp_oidc_effective.DEFAULT_USER_ROLE }}"
+          - "OIDC_CALLBACK_OBSERVED=NOT_MEASURED"
+          - "OIDC_GROUP_CLAIMS_OBSERVED=NOT_MEASURED"
+          - "MEMBERSHIP_WRITE_OBSERVED=NOT_MEASURED"
