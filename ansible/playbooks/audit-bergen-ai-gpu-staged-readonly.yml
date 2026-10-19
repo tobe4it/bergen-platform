@@ -1,0 +1,87 @@
+---
+# Read-only proof of EXACT staged GPU configuration against the protected
+# original LXC 110 preimage. Does NOT rollback, restart or edit anything.
+- name: Audit staged Bergen-AI GPU mapping before independently approved restart
+  hosts: venombox
+  become: true
+  gather_facts: false
+  tasks:
+    - name: Restrict exact-preimage verification to the known PVE host
+      ansible.builtin.assert:
+        that:
+          - inventory_hostname == 'venombox'
+
+    - name: Compare full normalized LXC configuration against saved original
+      ansible.builtin.command:
+        argv:
+          - python3
+          - -c
+          - "{{ lookup('ansible.builtin.file', playbook_dir ~ '/../files/bergen_ai/audit_ollama_gpu_rollback_readonly.py', rstrip=False) }}"
+      register: bergen_gpu_staged_audit_raw
+      changed_when: false
+      failed_when: false
+      check_mode: false
+      no_log: true
+
+    - name: Isolate only one bounded versioned audit result
+      ansible.builtin.set_fact:
+        bergen_gpu_staged_audit_frames: >-
+          {{ bergen_gpu_staged_audit_raw.stdout_lines |
+             select('match', '^BERGEN_AI_GPU_ROLLBACK_V1:') | list }}
+      no_log: true
+
+    - name: Refuse missing, multiple or failed preimage comparison
+      ansible.builtin.assert:
+        that:
+          - bergen_gpu_staged_audit_raw.rc == 0
+          - bergen_gpu_staged_audit_frames | length == 1
+          - bergen_gpu_staged_audit_frames[0] | length < 900
+        fail_msg: GPU_PRE_RESTART_AUDIT_INCOMPLETE
+      no_log: true
+
+    - name: Decode exact stage-only classification
+      ansible.builtin.set_fact:
+        bergen_gpu_staged_audit: >-
+          {{ (bergen_gpu_staged_audit_frames[0] |
+             regex_replace('^BERGEN_AI_GPU_ROLLBACK_V1:', '')) | from_json }}
+      no_log: true
+
+    - name: Require only intended 32-GiB limit and GPU devices differ from preimage
+      ansible.builtin.assert:
+        that:
+          - bergen_gpu_staged_audit.AUDIT == 'READ_ONLY'
+          - not bergen_gpu_staged_audit.CHANGED
+          - bergen_gpu_staged_audit.STATUS == 'EXACT_STAGE_ONLY'
+          - bergen_gpu_staged_audit.RESTORE_MEMORY_MIB == 16384
+          - bergen_gpu_staged_audit.DEVICES_TO_REMOVE == ['dev0','dev1']
+        fail_msg: GPU_UNEXPECTED_CONFIG_DRIFT
+      no_log: true
+
+    - name: Confirm existing Bergen-AI guest still running prior to restart
+      ansible.builtin.command:
+        argv: [pct, status, '110']
+      register: bergen_gpu_guest_runtime
+      changed_when: false
+      check_mode: false
+      no_log: true
+
+    - name: Refuse a non-running or wrong runtime target
+      ansible.builtin.assert:
+        that:
+          - bergen_gpu_guest_runtime.rc == 0
+          - bergen_gpu_guest_runtime.stdout | trim == 'status: running'
+        fail_msg: GPU_GUEST_NOT_RUNNING_BEFORE_RESTART
+      no_log: true
+
+    - name: Print safe pre-restart evidence only
+      ansible.builtin.debug:
+        msg:
+          - AUDIT=READ_ONLY
+          - CHANGED=False
+          - STATUS=EXACT_STAGE_ONLY
+          - LXC110_MEMORY_STAGED=32768_MiB
+          - LXC110_GPU_STAGED=RENDER_AND_KFD_WITH_UID_999_GID_992
+          - LXC110_OTHER_CONFIG=UNCHANGED_FROM_PREIMAGE
+          - LXC110_RUNNING=YES
+          - RESTART_PERFORMED=NO
+          - GPU_COMPUTE_VERIFIED=NO
