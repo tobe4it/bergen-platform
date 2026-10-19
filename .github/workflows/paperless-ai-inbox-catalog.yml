@@ -4,9 +4,11 @@ on:
   pull_request:
     paths:
       - 'ansible/files/paperless/bergen_ai_catalog_*.py'
+      - 'ansible/files/paperless/audit_ai_catalog_private_ollama_path_readonly.py'
       - 'ansible/playbooks/manage-paperless-ai-inbox-catalog.yml'
       - 'ansible/playbooks/manage-paperless-ai-local-ollama.yml'
       - 'ansible/playbooks/audit-paperless-ai-catalog-runtime-readonly.yml'
+      - 'ansible/playbooks/audit-paperless-ai-ollama-private-path-readonly.yml'
       - 'ansible/playbooks/deploy-paperless-ai-inbox-catalog-timer.yml'
       - 'ansible/files/paperless/bergen-ai-catalog-*'
       - 'tests/test_paperless_ai_catalog_policy.py'
@@ -17,9 +19,11 @@ on:
     branches: [main]
     paths:
       - 'ansible/files/paperless/bergen_ai_catalog_*.py'
+      - 'ansible/files/paperless/audit_ai_catalog_private_ollama_path_readonly.py'
       - 'ansible/playbooks/manage-paperless-ai-inbox-catalog.yml'
       - 'ansible/playbooks/manage-paperless-ai-local-ollama.yml'
       - 'ansible/playbooks/audit-paperless-ai-catalog-runtime-readonly.yml'
+      - 'ansible/playbooks/audit-paperless-ai-ollama-private-path-readonly.yml'
       - 'ansible/playbooks/deploy-paperless-ai-inbox-catalog-timer.yml'
       - 'ansible/files/paperless/bergen-ai-catalog-*'
       - 'tests/test_paperless_ai_catalog_policy.py'
@@ -43,4 +47,5 @@ jobs:
           ansible-playbook -i ansible/inventory.yml ansible/playbooks/manage-paperless-ai-inbox-catalog.yml --syntax-check
           ansible-playbook -i ansible/inventory.yml ansible/playbooks/manage-paperless-ai-local-ollama.yml --syntax-check
           ansible-playbook -i ansible/inventory.yml ansible/playbooks/audit-paperless-ai-catalog-runtime-readonly.yml --syntax-check
+          ansible-playbook -i ansible/inventory.yml ansible/playbooks/audit-paperless-ai-ollama-private-path-readonly.yml --syntax-check
           ansible-playbook -i ansible/inventory.yml ansible/playbooks/deploy-paperless-ai-inbox-catalog-timer.yml --syntax-check
