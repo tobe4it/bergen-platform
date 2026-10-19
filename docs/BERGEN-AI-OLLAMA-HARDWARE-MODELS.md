@@ -286,6 +286,52 @@ settings. In a failed guest-boot situation, recovery may require
 removing only the newly added GPU device nodes and returning the
 RAM limit to 16GiB, followed by a reviewed restart, but not an
 automatic blind rollback.
+## Incident: first GPU-enabled LXC110 reboot did not pass strict readiness
+
+19.10.2026, operator output after running the separate approved reboot
+playbook: the single `pct reboot 110` task reported a change, then
+all 24 strict postboot readiness retries failed; the subsequent
+`GPU_REBOOT_POSTBOOT_NOT_READY_MANUAL_RECOVERY_REQUIRED` assertion failed.
+Recap was `ok=10 changed=1 failed=1`. The output alone **cannot establish**
+whether the guest failed to start, a device was not created, Ollama was
+inactive, a model tag was missing or the strict memory.max test failed.
+The latter check compares `/sys/fs/cgroup/memory.max` to exactly
+34359738368 bytes; cgroup namespace views can vary and must be
+observed rather than guessed.
+
+**Incident instruction: Do NOT run the reboot playbook again; DO NOT
+run the pre-restart rollback script.** No blind recovery.
+
+Instead update this hardware worktree and run **only**:
+
+    (
+    set -euo pipefail
+    BASE="$HOME/bergen-platform"
+    cd "$HOME/bergen-platform-ollama-hardware"
+    git fetch origin feat/bergen-ai-ollama-hardware-models-20261019
+    git switch --detach origin/feat/bergen-ai-ollama-hardware-models-20261019
+    "$BASE/.venv/bin/ansible-playbook" \
+      -i ansible/inventory.yml \
+      -i "$BASE/ansible/inventory.local.yml" \
+      ansible/playbooks/diagnose-bergen-ai-gpu-postboot-readonly.yml \
+      --vault-id ai@prompt
+    )
+
+The incident diagnostic reports separately whether:
+- existing unprivileged guest config remains as staged;
+- LXC110 is running and `pct exec` can run a bounded guest probe;
+- each GPU node exists with correct major/minor and owner/group/mode;
+- Ollama systemd unit is active and its local /api/tags responds;
+- Qwen14/Mistral12/BGE-M3 are present;
+- memory.max inside the guest is exactly 32GiB, `max`, different or unreadable.
+
+No document IDs, document content, private IPs, raw journal lines, Ollama
+prompts or secrets are emitted. No reboots, downloads or writes are made.
+Do NOT conflate an Ansible task returning `ok` with postboot readiness:
+the previous strict probe explicitly used `failed_when: false` to
+keep retries alive and returned `NOT_READY` or `UNVERIFIED`.
+Once independent causes are known, design a targeted repair and a
+separate re-verification. No subsequent service restart without review.
 ## Step 2 – audit model download needs, still ZERO writes
 
     (
