@@ -5,7 +5,7 @@ This role implements **only wired NIC** Magic-Packet wake on the physically audi
 `Power On after AC Loss`. Proxmox guest autostart is a separate configuration.
 
 2026-10-19 audited hardware: F8BSC board / AMI BIOS 1.04, physical wired NIC
-`enp195s0`, driver-exposed `Supports Wake-on: pumbg`, current `Wake-on: d`,
+`enp195s0`, driver-exposed `Supports Wake-on: pumbg`, initially `Wake-on: d`,
 active 2.5 Gbit/s link. Wireless NIC `wlp194s0` is out of scope.
 
 ## Safety
@@ -60,4 +60,21 @@ ansible venombox -i ansible/inventory.yml -b -m command \
 
 The default read-only mode does not alter the system. Adding the unit and
 enabling it are separate from BIOS AC recovery and from Synology sending magic
-packets. A Synology wake schedule needs its own approval and validation.
+packets. The independently approved Synology receiver path and boot-time sender are described in [PROXMOX-SYNOLOGY-WOL.md](../../../docs/PROXMOX-SYNOLOGY-WOL.md). The packet was captured inbound at the running physical NIC. Firmware startup after full AC loss (G3) is still unverified.
+
+## Confirmed live adoption, 2026-10-19
+
+The operator ran the syntax-check and explicitly gated check/diff, then approved
+and executed the live apply. Ansible reported `ok=21 changed=2 failed=0
+skipped=1`. Subsequent NIC state was `Wake-on: g`, and the dedicated
+`bergen-venombox-wol.service` unit was installed and enabled. No Proxmox
+reboot, network reload, NIC down/up or firmware operation took place.
+
+The Synology delivery test independently captured an inbound tagged Ethernet
+Magic Packet (VLAN 3, EtherType 0x0842) at `enp195s0` while the host was
+running. This proves packet arrival only in the running state; it does not
+prove that the firmware will wake the host from S5 or G3.
+
+**Operating rule:** Never shut down or power-cycle the remotely inaccessible
+host merely to validate power recovery. A later physically supervised hardware
+AC-power policy review is a separate change.
