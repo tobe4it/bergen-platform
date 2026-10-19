@@ -1,0 +1,151 @@
+---
+# Run on bp-controller; copies only vetted sender + MAC to DSM.
+# Does NOT create DSM Task Scheduler entries, send packets, or reboot hosts.
+- name: Stage root-controlled Synology venombox Wake-on-LAN boot script
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  vars:
+    wol_source: "{{ playbook_dir }}/../files/power-recovery/synology-venombox-wol-onboot.sh"
+    wol_path: /volume1/bergen-recovery
+  tasks:
+    - name: Require an explicitly approved, tightly scoped NAS target and MAC
+      ansible.builtin.assert:
+        that:
+          - synology_admin is defined
+          - synology_admin is match('^[A-Za-z_][A-Za-z0-9_.-]*@[A-Za-z0-9][A-Za-z0-9.-]+$')
+          - synology_wol_mac is defined
+          - synology_wol_mac is match('^([0-9a-fA-F]{2}:){5}[0-9a-fA-F]{2}$')
+          - synology_wol_install_approved | default(false) | bool
+        fail_msg: "Supply ignored local NAS settings and -e synology_wol_install_approved=true"
+      no_log: true
+
+    - name: Hash tracked local sender
+      ansible.builtin.stat:
+        path: "{{ wol_source }}"
+        checksum_algorithm: sha256
+      register: wol_local
+      failed_when: >-
+        not (wol_local.stat.exists | default(false)) or
+        not (wol_local.stat.isreg | default(false)) or
+        (wol_local.stat.islnk | default(false))
+
+    - name: Read-only NAS identity, filesystem and sender preflight
+      check_mode: false
+      ansible.builtin.command:
+        argv:
+          - ssh
+          - -T
+          - -o
+          - BatchMode=yes
+          - -o
+          - StrictHostKeyChecking=yes
+          - -o
+          - ConnectTimeout=15
+          - "{{ synology_admin }}"
+          - sudo -n /bin/sh -s
+        stdin: |
+          set -eu
+          test "$(id -u)" = 0
+          test "$(hostname -s)" = MountainCloud
+          test -d /volume1
+          test -x /usr/syno/sbin/synonet
+          test -d /sys/class/net/eth0
+          D=/volume1/bergen-recovery
+          if test -e "$D" || test -L "$D"; then
+            test -d "$D" && test ! -L "$D"
+            test "$(stat -c '%u:%a' "$D")" = 0:700
+          fi
+          for F in "$D/venombox-wol-onboot.sh" "$D/venombox-wol.mac"; do
+            if test -e "$F" || test -L "$F"; then
+              test -f "$F" && test ! -L "$F"
+              test "$(stat -c '%u:%a' "$F" | cut -d: -f1)" = 0
+            fi
+          done
+          echo NAS_WOL_PREFLIGHT_OK
+      register: wol_nas_preflight
+      changed_when: false
+
+    - name: Require NAS preflight evidence
+      ansible.builtin.assert:
+        that:
+          - "'NAS_WOL_PREFLIGHT_OK' in wol_nas_preflight.stdout_lines"
+
+    - name: Deploy only the approved root-owned sender and private MAC
+      when: not ansible_check_mode
+      block:
+        - name: Install safely without overwriting unfamiliar files
+          ansible.builtin.command:
+            argv:
+              - ssh
+              - -T
+              - -o
+              - BatchMode=yes
+              - -o
+              - StrictHostKeyChecking=yes
+              - -o
+              - ConnectTimeout=15
+              - "{{ synology_admin }}"
+              - sudo -n /bin/sh -s
+            stdin: |
+              set -eu
+              umask 077
+              D=/volume1/bergen-recovery
+              H={{ wol_local.stat.checksum | quote }}
+              MAC={{ synology_wol_mac | lower | quote }}
+              if test ! -e "$D"; then
+                install -d -o root -g root -m 0700 "$D"
+              fi
+              test ! -L "$D" && test -d "$D"
+              test "$(stat -c '%u:%a' "$D")" = 0:700
+              SCRIPT="$D/venombox-wol-onboot.sh"
+              MACFILE="$D/venombox-wol.mac"
+              if test -e "$SCRIPT" || test -L "$SCRIPT"; then
+                test -f "$SCRIPT" && test ! -L "$SCRIPT"
+                test "$(stat -c '%u:%a' "$SCRIPT")" = 0:700
+                test "$(sha256sum "$SCRIPT" | cut -d' ' -f1)" = "$H"
+              else
+                TMP=$(mktemp "$D/.wol-code.XXXXXXXX")
+                trap 'rm -f "$TMP"' EXIT
+                printf '%s' {{ lookup('ansible.builtin.file', wol_source, rstrip=False) | b64encode | quote }} | base64 -d > "$TMP"
+                test "$(sha256sum "$TMP" | cut -d' ' -f1)" = "$H"
+                /bin/sh -n "$TMP"
+                install -o root -g root -m 0700 "$TMP" "$SCRIPT"
+                rm -f "$TMP"
+                trap - EXIT
+              fi
+              if test -e "$MACFILE" || test -L "$MACFILE"; then
+                test -f "$MACFILE" && test ! -L "$MACFILE"
+                test "$(stat -c '%u:%a' "$MACFILE")" = 0:600
+                test "$(cat "$MACFILE")" = "$MAC"
+                test "$(wc -l < "$MACFILE")" = 1
+              else
+                TMP=$(mktemp "$D/.wol-mac.XXXXXXXX")
+                trap 'rm -f "$TMP"' EXIT
+                printf '%s\n' "$MAC" > "$TMP"
+                install -o root -g root -m 0600 "$TMP" "$MACFILE"
+                rm -f "$TMP"
+                trap - EXIT
+              fi
+              /bin/sh -n "$SCRIPT"
+              /bin/sh "$SCRIPT" --check
+              echo NAS_WOL_FILES_READY_TASK_NOT_REGISTERED
+          register: wol_install_result
+          changed_when: false
+          no_log: true
+
+        - name: Confirm installation without exposing site-local MAC
+          ansible.builtin.assert:
+            that:
+              - "'NAS_WOL_FILES_READY_TASK_NOT_REGISTERED' in wol_install_result.stdout_lines"
+
+    - name: Report installation scope and mandatory DSM scheduler registration
+      ansible.builtin.debug:
+        msg:
+          - "NAS preflight: passed"
+          - "Files: {{ 'installed/validated' if not ansible_check_mode else 'not written (check mode)' }}"
+          - "DSM task: NOT CREATED OR ENABLED by this playbook"
+          - "Boot Task command: /bin/sh /volume1/bergen-recovery/venombox-wol-onboot.sh --send"
+          - "Host/NAS reboot: NONE"
+          - "Packet send: NONE"
+          - "AC G3 recovery: UNVERIFIED"
