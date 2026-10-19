@@ -225,6 +225,14 @@ class OllamaHardwareTests(unittest.TestCase):
                                 with self.assertRaises(ValueError):
                                     audit.main()
 
+    def test_postboot_memory_gate_uses_host_lxc_limit_not_guest_namespace(self):
+        source = GPU_POSTBOOT_SCRIPT.read_text()
+        self.assertIn('Path("/sys/fs/cgroup/lxc/110/memory.max")', source)
+        self.assertIn('"MEMORY_CHECK_SOURCE":"PVE_HOST_LXC_110_CGROUP"', source)
+        self.assertIn('and host_memory_ok)', source)
+        self.assertNotIn('data["memory_limit"] == expectedbytes', source)
+        self.assertNotIn('data["memory_limit"]==expectedbytes', source)
+
     def test_postboot_audit_does_not_execute_inference_or_mutate(self):
         source = GPU_POSTBOOT_SCRIPT.read_text()
         ast.parse(source, filename=str(GPU_POSTBOOT_SCRIPT))
@@ -302,7 +310,12 @@ class OllamaHardwareTests(unittest.TestCase):
             (root / "lxc" / "110" / "memory.max").write_text("34359738368")
             (guest / "memory.max").write_text("max")
             observed = h.hierarchy("/lxc/110/ns", root=root)
-            self.assertEqual(observed,[None,34359738368,None,None])
+            self.assertEqual(observed,[None,34359738368,None])
+            # Linux cgroup-v2 root has no memory.max control file:
+            # this must not invalidate an exact child cgroup limit.
+            (root / "memory.max").unlink()
+            observed = h.hierarchy("/lxc/110/ns", root=root)
+            self.assertEqual(observed,[None,34359738368,None])
             self.assertEqual(h.classify(observed),"EFFECTIVE_32GIB")
             (root / "lxc" / "110" / "memory.max").write_text("max")
             observed = h.hierarchy("/lxc/110/ns", root=root)
