@@ -36,12 +36,15 @@ def in_html(path):
 
 
 def validate_symbolic_links(entries, links):
-    """Resolve link chains without touching the filesystem.
+    """Safely resolve links in TAR namespace, without filesystem access.
 
-    Member path names are always TAR-relative; linknames are resolved in
-    the link's parent directory. Reject escapes, dangling references,
-    loops and any stored entry nested beneath a symlink.
+    Do not pre-normalize a link target: treating .. before resolving a
+    preceding symlink can incorrectly classify an escaping path as safe.
+    No archive member may have a symlink as a parent. All targets must
+    eventually resolve to an existing member inside the html tree.
     """
+    from collections import deque
+
     for path in entries:
         pieces = path.split("/")
         for i in range(1, len(pieces)):
@@ -51,29 +54,35 @@ def validate_symbolic_links(entries, links):
     for path, target in links.items():
         require(target and not target.startswith("/") and "\\" not in target
                 and "\x00" not in target, "UNSAFE_SYMLINK_TARGET")
-        working = posixpath.normpath(posixpath.join(posixpath.dirname(path), target))
-        require(in_html(working), "SYMLINK_ESCAPE")
-        visited = {path}
-        for _ in range(40):
-            pieces = working.split("/")
-            prefix = next(("/".join(pieces[:i]) for i in range(1, len(pieces)+1)
-                           if "/".join(pieces[:i]) in links), None)
-            if prefix is None:
-                break
-            require(prefix not in visited, "SYMLINK_CYCLE")
-            visited.add(prefix)
-            replacement = posixpath.normpath(
-                posixpath.join(posixpath.dirname(prefix), links[prefix])
-            )
-            require(in_html(replacement), "SYMLINK_CHAIN_ESCAPE")
-            suffix = working[len(prefix):].lstrip("/")
-            working = posixpath.normpath(
-                posixpath.join(replacement, suffix)
-            ) if suffix else replacement
-            require(in_html(working), "SYMLINK_CHAIN_ESCAPE")
-        else:
-            raise AuditError("SYMLINK_CHAIN_DEPTH_EXCEEDED")
-        require(working in entries, "DANGLING_SYMLINK_TARGET")
+        pending = deque(posixpath.dirname(path).split("/") + target.split("/"))
+        resolved = []
+        visited = set()
+        hops = 0
+        while pending:
+            piece = pending.popleft()
+            if piece in ("", "."):
+                continue
+            if piece == "..":
+                require(len(resolved) > 1, "SYMLINK_ESCAPE")
+                resolved.pop()
+                continue
+            resolved.append(piece)
+            require(resolved[0] == "html", "SYMLINK_ESCAPE")
+            prefix = "/".join(resolved)
+            if prefix in links:
+                hops += 1
+                require(hops <= 40, "SYMLINK_CHAIN_DEPTH_EXCEEDED")
+                require(prefix not in visited, "SYMLINK_CYCLE")
+                visited.add(prefix)
+                next_target = links[prefix]
+                require(next_target and not next_target.startswith("/")
+                        and "\\" not in next_target and "\x00" not in next_target,
+                        "UNSAFE_SYMLINK_TARGET")
+                resolved.pop()
+                pending.extendleft(reversed(next_target.split("/")))
+        final_target = "/".join(resolved)
+        require(in_html(final_target), "SYMLINK_ESCAPE")
+        require(final_target in entries, "DANGLING_SYMLINK_TARGET")
 
 
 def inspect(archive, ident, digest):
