@@ -84,7 +84,7 @@ def guest_config(raw, status):
     if any(row.startswith("lxc.mount.entry:") and
            not row.startswith("lxc.mount.entry: ") for row in rows):
         return "EXTRA_MOUNTS_REQUIRE_REVIEW"
-    if entries and not exact_fuse_device_mount(entries):
+    if not exact_fuse_device_mount(entries):
         return "EXTRA_MOUNTS_REQUIRE_REVIEW"
     if any(row.startswith(("exclude-path:", "lxc.hook.",
                            "lxc.apparmor.profile: unconfined",
