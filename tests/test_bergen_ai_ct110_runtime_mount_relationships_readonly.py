@@ -88,6 +88,50 @@ class RuntimeMountRelationshipTests(TestCase):
         with mock.patch.object(a, "guest", return_value=None):
             self.assertFalse(a.inode_identity("/srv/ai/open-webui", MERGED + "/app/backend/data"))
 
+    def test_diagnostics_distinguish_inaccessible_host_bind_and_container_namespace(self):
+        tree = sample_tree()
+        inspected = [{"State": {"Running": True, "Pid": 4123}}]
+        source = "13:42"
+        other = "13:43"
+        with mock.patch.object(a, "checked_inode", side_effect=[source, None, source]):
+            details = a.identity_details(inspected, tree, MERGED)
+        self.assertEqual(details["SOURCE_INODE_READ"], "AVAILABLE")
+        self.assertEqual(details["MERGED_INODE_READ"], "UNAVAILABLE")
+        self.assertEqual(details["PROCESS_ROOT_INODE_READ"], "AVAILABLE")
+        self.assertEqual(details["MERGED_INODE_RELATION"], "UNVERIFIED")
+        self.assertEqual(details["PROCESS_ROOT_INODE_RELATION"], "IDENTICAL")
+        self.assertEqual(details["BIND_TARGET"], "EXACT_MERGED_DATA_TARGET")
+        self.assertEqual(details["BIND_FSTYPE_RELATION"], "MATCHES_ROOT")
+        self.assertEqual(details["BIND_SOURCE_RELATION"], "MATCHES_ROOT_SOURCE")
+        with mock.patch.object(a, "checked_inode", side_effect=[source, other, other]):
+            details = a.identity_details(inspected, tree, MERGED)
+        self.assertEqual(details["MERGED_INODE_RELATION"], "DIFFERENT")
+        self.assertEqual(details["PROCESS_ROOT_INODE_RELATION"], "DIFFERENT")
+
+    def test_broken_or_spoofed_bind_cannot_be_accepted_by_diagnostic(self):
+        tree = sample_tree(bind_source="nas:/outside")
+        with mock.patch.object(a, "checked_inode", return_value=None):
+            details = a.identity_details([{"State": {"Running": True, "Pid": 4123}}], tree, MERGED)
+        self.assertEqual(details["BIND_SOURCE_RELATION"], "DIFFERS_FROM_ROOT_SOURCE")
+        self.assertEqual(details["MERGED_INODE_RELATION"], "UNVERIFIED")
+        self.assertEqual(details["PROCESS_ROOT_INODE_RELATION"], "UNVERIFIED")
+        tree = sample_tree()
+        tree[0]["children"] = [item for item in tree[0]["children"]
+                               if item["target"] != MERGED]
+        details = a.mounted_bind_characteristics(tree, MERGED)
+        self.assertEqual(details["BIND_TARGET"], "NOT_UNIQUE_OR_MISSING")
+        self.assertIsNone(a.running_podman_pid([{"State": {"Running": True, "Pid": -1}}]))
+        self.assertIsNone(a.running_podman_pid([{"State": {"Running": False, "Pid": 4123}}]))
+        self.assertIsNone(a.running_podman_pid([{"State": {"Running": True, "Pid": True}}]))
+
+    def test_inode_queries_return_only_fixed_status_no_raw_inode_or_pid(self):
+        with mock.patch.object(a, "guest", side_effect=["123:456\\n", "invalid"]):
+            self.assertEqual(a.checked_inode(a.SOURCE), "123:456")
+            self.assertIsNone(a.checked_inode(MERGED + a.DST))
+        self.assertEqual(a.comparison("5:6", "5:6"), "IDENTICAL")
+        self.assertEqual(a.comparison("5:6", "5:7"), "DIFFERENT")
+        self.assertEqual(a.comparison(None, "5:7"), "UNVERIFIED")
+
     def test_no_writes_or_hidden_authority_and_valid_ansible(self):
         source = SCRIPT.read_text()
         ast.parse(source)
