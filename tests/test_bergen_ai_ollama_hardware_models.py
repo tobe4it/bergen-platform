@@ -227,7 +227,7 @@ class OllamaHardwareTests(unittest.TestCase):
         self.assertIn('"dev0": "path=/dev/dri/renderD128,uid=999,gid=992,mode=0660"', source)
         self.assertIn('"dev1": "path=/dev/kfd,uid=999,gid=992,mode=0660"', source)
         self.assertIn('EXPECTED_MODELS', source)
-        self.assertIn('"memory", "32768"', source)
+        self.assertIn('("memory","32768")', source)
         for forbidden in ('pct set', 'pct reboot', 'ollama run',
                           '/api/generate', '/api/chat', 'PAPERLESS_AI_ENABLED=true'):
             self.assertNotIn(forbidden, source)
