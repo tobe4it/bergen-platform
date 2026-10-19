@@ -59,6 +59,45 @@
   changed_when: false
   failed_when: false
 
+- name: Read firmware vendor
+  check_mode: false
+  ansible.builtin.command:
+    argv: [dmidecode, -s, bios-vendor]
+  register: power_recovery_bios_vendor
+  changed_when: false
+  failed_when: false
+
+- name: Read installed firmware version
+  check_mode: false
+  ansible.builtin.command:
+    argv: [dmidecode, -s, bios-version]
+  register: power_recovery_bios_version
+  changed_when: false
+  failed_when: false
+
+- name: Read firmware release date
+  check_mode: false
+  ansible.builtin.command:
+    argv: [dmidecode, -s, bios-release-date]
+  register: power_recovery_bios_release_date
+  changed_when: false
+  failed_when: false
+
+- name: Check for active UEFI boot environment
+  ansible.builtin.stat:
+    path: /sys/firmware/efi
+  register: power_recovery_uefi
+
+- name: Check for native local IPMI kernel interface
+  ansible.builtin.stat:
+    path: /sys/class/ipmi
+  register: power_recovery_ipmi_kernel
+
+- name: Check for local IPMI character device
+  ansible.builtin.stat:
+    path: /dev/ipmi0
+  register: power_recovery_ipmi_device
+
 - name: Check for firmware attributes interface
   ansible.builtin.stat:
     path: /sys/class/firmware-attributes
@@ -141,6 +180,10 @@
       - "Proxmox node: {{ power_recovery_hostname.stdout | trim }} ({{ power_recovery_pveversion.stdout | trim }})"
       - "System: {{ power_recovery_manufacturer.stdout | default('unknown') | trim }} / {{ power_recovery_model.stdout | default('unknown') | trim }}"
       - "Mainboard: {{ power_recovery_board_vendor.stdout | default('unknown') | trim }} / {{ power_recovery_board_model.stdout | default('unknown') | trim }}"
+      - "BIOS: {{ power_recovery_bios_vendor.stdout | default('unknown') | trim }} / {{ power_recovery_bios_version.stdout | default('unknown') | trim }} ({{ power_recovery_bios_release_date.stdout | default('unknown') | trim }})"
+      - "UEFI boot: {{ power_recovery_uefi.stat.exists | default(false) }}"
+      - "Local IPMI kernel interface: {{ power_recovery_ipmi_kernel.stat.exists | default(false) }}"
+      - "Local IPMI character device: {{ power_recovery_ipmi_device.stat.exists | default(false) }}"
       - "Firmware sysfs interface: {{ power_recovery_firmware_attributes.stat.exists | default(false) }}"
       - "Exposed current_value paths: {{ power_recovery_firmware_paths.stdout_lines | default([]) }}"
       - "fwupdmgr available: {{ power_recovery_fwupd_path.rc == 0 }} (query rc: {{ power_recovery_fwupd_settings.rc | default('not-run') }})"
