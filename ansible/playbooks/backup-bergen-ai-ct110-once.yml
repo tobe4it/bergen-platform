@@ -24,6 +24,17 @@
         that:
           - ct110_preflight.STATUS == 'PRECHECK_PASSED'
           - ct110_preflight.SAFE_TO_ATTEMPT_SINGLE_BACKUP | bool
+          - ct110_backup_ready | bool
+          - data_scope.STATUS == 'KNOWN_DATA_PATHS_IN_ROOTFS'
+          - data_scope.OLLAMA_CONFIG == 'EXPECTED_MODELS_LOCATION'
+          - data_scope.OLLAMA_MODELS_MOUNT == 'GUEST_ROOTFS'
+          - data_scope.WEBUI_PODMAN_BIND == 'EXACT_WEBUI_DATA_BIND'
+          - data_scope.WEBUI_DATA_MOUNT == 'GUEST_ROOTFS'
+          - data_scope.PODMAN_GRAPH_MOUNT == 'GUEST_ROOTFS'
+          - data_scope.PODMAN_CONTAINERS == 'ONLY_OPEN_WEBUI'
+          - data_scope.PODMAN_NAMED_VOLUMES == 'NONE'
+          - not data_scope.BACKUP_AUTHORIZED
+          - not data_scope.ALL_PERSISTENT_DATA_PROVEN
           - ct110_preflight.CT110_IDENTITY == 'RUNNING_ROOTFS_ONLY'
           - ct110_preflight.WEBUI_DATA == 'IN_GUEST_ROOTFS'
           - ct110_preflight.GUEST_MOUNTS == 'NO_EXTERNAL_MOUNTS_DETECTED'
