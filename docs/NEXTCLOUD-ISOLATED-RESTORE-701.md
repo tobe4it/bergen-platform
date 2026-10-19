@@ -282,3 +282,37 @@ or production host changes are performed.
 The startup playbook is intentionally single-use and requires the guest
 to be stopped. After a successful approved boot, do not blindly rerun
 this playbook: continue with a separate running-guest preflight.
+
+
+## Phase 4B: guest started but initial package audit failed
+
+The operator explicitly booted VMID 701. Proxmox confirmed it running,
+but the immediately following pct-exec OS/network/package inventory
+exited nonzero and was concealed by no_log. This does not invalidate the
+already verified archive. DO NOT rerun the phase 4A start playbook, since
+it demands a stopped guest and has a gated pct start.
+
+Use the dedicated read-only running-guest diagnosis instead:
+
+    BASE="$HOME/bergen-platform"
+    cd "$HOME/bergen-platform-nextcloud-restore"
+    git fetch origin feat/nextcloud-isolated-restore-701-20261019
+    git switch --detach origin/feat/nextcloud-isolated-restore-701-20261019
+
+    ansible-playbook       -i "$BASE/ansible/inventory.yml"       -i "$BASE/ansible/inventory.local.yml"       ansible/playbooks/inspect-nextcloud-restore-701-running-readonly.yml       --vault-id infra@prompt
+
+The separate playbook first verifies host, stopped-only guest's now
+running state, guest config and no network device configuration. Then
+it probes pct exec independently and reads guest OS, actual interface
+count and installed RPM package statuses. All commands are read-only.
+It prints sanitized execution return codes and allowlisted package
+statuses, never raw guest stderr. It cannot restart the guest, install
+packages, extract data, open networking or import a database.
+
+Expected successful result:
+NEXTCLOUD_RESTORE_701_RUNNING_OFFLINE_INVENTORY_VERIFIED,
+changed=0, failed=0.
+
+On failure, stop and inspect the sanitized diagnostic status. Do not
+alter existing production hosts or reset the guest to bypass a failed
+isolation assertion.
