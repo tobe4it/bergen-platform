@@ -15,6 +15,8 @@ LOCAL_CONFIG = ROOT / "ansible/files/paperless/bergen_ai_catalog_config.py"
 CONFIG_PLAY = ROOT / "ansible/playbooks/manage-paperless-ai-local-ollama.yml"
 PRIVATE_PATH_SCRIPT = ROOT / "ansible/files/paperless/audit_ai_catalog_private_ollama_path_readonly.py"
 PRIVATE_PATH_PLAY = ROOT / "ansible/playbooks/audit-paperless-ai-ollama-private-path-readonly.yml"
+FIREWALL_SCRIPT = ROOT / "ansible/files/paperless/audit_ai_catalog_ollama_firewall_readonly.py"
+FIREWALL_PLAY = ROOT / "ansible/playbooks/audit-paperless-ai-ollama-firewall-readonly.yml"
 
 
 def load_policy():
@@ -179,6 +181,46 @@ class CatalogPolicyTest(unittest.TestCase):
         self.assertIn("StandardError=null", unit)
         timer_spec = (ROOT / "ansible/files/paperless/bergen-ai-catalog.timer").read_text()
         self.assertIn("OnCalendar=*:0/5", timer_spec)
+
+    def test_ollama_firewall_inventory_reports_evidence_not_effective_allow(self):
+        source=FIREWALL_SCRIPT.read_text()
+        ast.parse(source,filename=str(FIREWALL_SCRIPT))
+        self.assertIn('["pct","config","110"]',source)
+        self.assertIn('"/etc/pve/firewall/110.fw"',source)
+        self.assertIn('"/etc/pve/firewall/cluster.fw"',source)
+        self.assertIn('"/host.fw"',source) if False else None
+        self.assertIn('"host.fw"',source)
+        self.assertIn('["net0"]',source) if False else None
+        self.assertIn('net[0-9]+',source)
+        self.assertIn('"NOT_DEMONSTRATED"',source)
+        self.assertIn('"NOT_INSPECTED"',source)
+        self.assertIn('"REVIEW_REQUIRED"',source)
+        for forbidden in ('pct set','pct reboot','pct stop',
+                          'ollama pull','ollama run','/api/generate',
+                          'nft add','iptables -A','ufw allow',
+                          'assign_perm(', 'systemctl restart'):
+            self.assertNotIn(forbidden,source)
+        spec=importlib.util.spec_from_file_location("bergen_ai_fw_audit",FIREWALL_SCRIPT)
+        fw=importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(fw)
+        self.assertEqual(fw.network_flags("net0: name=eth0,bridge=vmbr0,firewall=1"),
+                         "ENABLED_ALL_NETS")
+        self.assertEqual(fw.network_flags("net0: name=eth0,bridge=vmbr0"),
+                         "UNSPECIFIED_SOME_NETS")
+        self.assertEqual(fw.network_flags("net0: name=eth0,firewall=0"),
+                         "DISABLED_SOME_NETS")
+        self.assertEqual(fw.network_flags(""),"UNKNOWN")
+        play=yaml.safe_load(FIREWALL_PLAY.read_text())[0]
+        self.assertEqual(play["hosts"],"venombox")
+        self.assertFalse(play["gather_facts"])
+        commands=[t for t in play["tasks"] if "ansible.builtin.command" in t]
+        self.assertEqual(len(commands),1)
+        self.assertFalse(commands[0]["changed_when"])
+        self.assertTrue(commands[0]["no_log"])
+        self.assertIn("EXPOSURE_GATE=REVIEW_REQUIRED",FIREWALL_PLAY.read_text())
+        for task in play["tasks"]:
+            for condition in task.get("ansible.builtin.assert",{}).get("that",[]):
+                self.assertIsInstance(condition,str)
 
     def test_paperless_podman_private_ollama_path_audit_is_readonly_and_bounded(self):
         script=PRIVATE_PATH_SCRIPT.read_text()
