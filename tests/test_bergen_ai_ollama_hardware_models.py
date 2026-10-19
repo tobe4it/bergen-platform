@@ -351,7 +351,7 @@ class OllamaHardwareTests(unittest.TestCase):
         self.assertIn("bergen_ai_gpu_benchmark_window_approved", playbook)
         for expected in (
             '/api/generate', '/api/ps', 'qwen2.5:14b-instruct-q4_K_M',
-            '"keep_alive":"45s"', '"num_predict":40', '"num_ctx":2048',
+            '"keep_alive":"45s"', '"num_predict":192', '"num_ctx":2048',
             "SYNTHETIC_NO_DOCUMENTS", "GPU_ALLOCATION_OBSERVED",
             "/sys/fs/cgroup/lxc/110/memory.max"):
             self.assertIn(expected,script)
@@ -363,6 +363,10 @@ class OllamaHardwareTests(unittest.TestCase):
         self.assertTrue(tasks[0]["no_log"])
         self.assertTrue(tasks[0]["changed_when"])
         self.assertIn("async", tasks[0])
+        self.assertIn("count < 64", script)
+        self.assertIn("count > 192", script)
+        self.assertIn("von 1 bis 300", script)
+        self.assertNotIn("Antworte ausschließlich mit dem Wort OK.", script)
         self.assertNotIn("GPU_INFERENCE_PROVEN_BY_MODEL_EXECUTION=YES",playbook)
         for item in play["tasks"]:
             if "ansible.builtin.assert" in item:
