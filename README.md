@@ -33,6 +33,7 @@ Current capabilities include:
 - Centralized configuration
 - Paperless-ngx Synology group scan transfer, verified import and protected original archival ([runbook](docs/PAPERLESS-GROUP-OPERATIONS.md))
 - Semantic Versioning
+- Documented headless Proxmox/Synology Wake-on-LAN recovery fallback (no G3 guarantee)
 - Complete project documentation
 
 ---
@@ -74,6 +75,8 @@ bergen-platform/
 |   +-- PIHOLE.md
 |   +-- ROADMAP.md
 |   +-- UPDATE.md
+- PROXMOX-POWER-RECOVERY.md
+- PROXMOX-SYNOLOGY-WOL.md
 |
 +-- ENGINEERING.md
 +-- README.md
@@ -229,9 +232,9 @@ The Bergen Platform follows Semantic Versioning.
 
 Current release:
 
-v0.10.0 — Internal reverse proxy and isolated Bergen-AI HTTPS access (2026-10-15)
+v0.14.0 — Headless Proxmox/Synology Wake-on-LAN recovery preparation (2026-10-19)
 
-See **docs/CHANGELOG.md** for release history.
+See **docs/CHANGELOG.md** for release history. The documented v0.14.0 baseline does **not** prove recovery after a full AC power loss, and the release/tag publishing status must be checked independently.
 
 ---
 
