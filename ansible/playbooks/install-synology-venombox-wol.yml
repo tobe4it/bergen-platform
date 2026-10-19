@@ -91,10 +91,12 @@
               set -eu
               umask 077
               D=/volume1/bergen-recovery
+              CHANGED=0
               H={{ wol_local.stat.checksum | quote }}
               MAC={{ synology_wol_mac | lower | quote }}
               if test ! -e "$D"; then
                 install -d -o root -g root -m 0700 "$D"
+                CHANGED=1
               fi
               test ! -L "$D" && test -d "$D"
               test "$(stat -c '%u:%a' "$D")" = 0:700
@@ -111,6 +113,7 @@
                 test "$(sha256sum "$TMP" | cut -d' ' -f1)" = "$H"
                 /bin/sh -n "$TMP"
                 install -o root -g root -m 0700 "$TMP" "$SCRIPT"
+                CHANGED=1
                 rm -f "$TMP"
                 trap - EXIT
               fi
@@ -124,14 +127,18 @@
                 trap 'rm -f "$TMP"' EXIT
                 printf '%s\n' "$MAC" > "$TMP"
                 install -o root -g root -m 0600 "$TMP" "$MACFILE"
+                CHANGED=1
                 rm -f "$TMP"
                 trap - EXIT
               fi
               /bin/sh -n "$SCRIPT"
               /bin/sh "$SCRIPT" --check
+              if test "$CHANGED" = 1; then
+                echo NAS_WOL_FILES_CHANGED
+              fi
               echo NAS_WOL_FILES_READY_TASK_NOT_REGISTERED
           register: wol_install_result
-          changed_when: false
+          changed_when: "'NAS_WOL_FILES_CHANGED' in wol_install_result.stdout_lines"
           no_log: true
 
         - name: Confirm installation without exposing site-local MAC
