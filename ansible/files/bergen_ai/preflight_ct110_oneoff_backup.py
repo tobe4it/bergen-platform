@@ -7,6 +7,7 @@ is exported. This is a point-in-time host/guest check, not a restore proof.
 import json
 import os
 import re
+import shlex
 import stat
 import subprocess
 from pathlib import Path
@@ -44,25 +45,52 @@ def json_object(argv):
         return None
 
 
+def exact_fuse_device_mount(entries):
+    """Permit only one proven FUSE *device*, never an arbitrary host bind."""
+    if len(entries) != 1:
+        return False
+    try:
+        parts = shlex.split(entries[0])
+    except ValueError:
+        return False
+    if len(parts) not in (4, 6):
+        return False
+    if (parts[0] != "/dev/fuse" or
+            "/" + parts[1].lstrip("/") != "/dev/fuse" or
+            parts[2] != "none" or
+            (len(parts) == 6 and parts[4:] != ["0", "0"])):
+        return False
+    opts = parts[3].split(",")
+    return (len(opts) == len(set(opts)) and "bind" in opts and
+            "create=file" in opts and
+            all(x in {"bind", "optional", "create=file", "ro"} for x in opts))
+
+
 def guest_config(raw, status):
     if not raw or not status or status.strip() != "status: running":
         return "UNVERIFIED"
     rows = raw.splitlines()
-    if (f"hostname: {GUEST_NAME}" not in rows
-            or "unprivileged: 1" not in rows
+    if (rows.count(f"hostname: {GUEST_NAME}") != 1
+            or rows.count("unprivileged: 1") != 1
             or len([row for row in rows if row.startswith("rootfs: ")]) != 1
             or not any(row.startswith("net0: ") for row in rows)):
         return "UNVERIFIED"
-    # An unknown external data/mount source must be reviewed before a full backup.
-    if any(re.match(r"^mp[0-9]+:\s", row) or
-           row.startswith(("lxc.mount.entry:", "lxc.mount.auto:"))
+    if any(re.match(r"^mp[0-9]+:\\s", row) or
+           row.startswith("lxc.mount.auto:")
            for row in rows):
         return "EXTRA_MOUNTS_REQUIRE_REVIEW"
-    if any(row.startswith(("exclude-path:", "lxc.hook.", "lxc.apparmor.profile: unconfined"))
-           for row in rows):
+    entries = [row.split(": ", 1)[1] for row in rows
+               if row.startswith("lxc.mount.entry: ")]
+    if any(row.startswith("lxc.mount.entry:") and
+           not row.startswith("lxc.mount.entry: ") for row in rows):
+        return "EXTRA_MOUNTS_REQUIRE_REVIEW"
+    if entries and not exact_fuse_device_mount(entries):
+        return "EXTRA_MOUNTS_REQUIRE_REVIEW"
+    if any(row.startswith(("exclude-path:", "lxc.hook.",
+                           "lxc.apparmor.profile: unconfined",
+                           "lxc.mount:")) for row in rows):
         return "EXCLUSION_OR_UNSAFE_GUEST_CONFIG"
     return "RUNNING_ROOTFS_ONLY"
-
 
 def persistent_data():
     isdir = command(["pct", "exec", TARGET, "--", "test", "-d", PERSISTENT])
