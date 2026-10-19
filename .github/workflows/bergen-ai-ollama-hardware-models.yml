@@ -10,6 +10,7 @@ on:
       - 'ansible/files/bergen_ai/audit_ollama_gpu_rollback_readonly.py'
       - 'ansible/files/bergen_ai/audit_ollama_gpu_postboot_readonly.py'
       - 'ansible/files/bergen_ai/diagnose_ollama_gpu_postboot_readonly.py'
+      - 'ansible/files/bergen_ai/audit_ollama_host_memory_readonly.py'
       - 'ansible/playbooks/audit-bergen-ai-ollama-hardware-readonly.yml'
       - 'ansible/playbooks/manage-bergen-ai-ollama-models.yml'
       - 'ansible/playbooks/audit-bergen-ai-gpu-stage-readonly.yml'
@@ -17,6 +18,7 @@ on:
       - 'ansible/playbooks/audit-bergen-ai-gpu-staged-readonly.yml'
       - 'ansible/playbooks/audit-bergen-ai-gpu-postboot-readonly.yml'
       - 'ansible/playbooks/diagnose-bergen-ai-gpu-postboot-readonly.yml'
+      - 'ansible/playbooks/audit-bergen-ai-gpu-host-memory-readonly.yml'
       - 'ansible/playbooks/restart-bergen-ai-gpu-approved.yml'
       - 'ansible/playbooks/rollback-bergen-ai-ollama-gpu-stage.yml'
       - 'tests/test_bergen_ai_ollama_hardware_models.py'
@@ -28,6 +30,7 @@ on:
       - 'ansible/files/bergen_ai/audit_ollama_gpu_rollback_readonly.py'
       - 'ansible/files/bergen_ai/audit_ollama_gpu_postboot_readonly.py'
       - 'ansible/files/bergen_ai/diagnose_ollama_gpu_postboot_readonly.py'
+      - 'ansible/files/bergen_ai/audit_ollama_host_memory_readonly.py'
       - 'ansible/playbooks/audit-bergen-ai-ollama-hardware-readonly.yml'
       - 'ansible/playbooks/manage-bergen-ai-ollama-models.yml'
       - 'ansible/playbooks/audit-bergen-ai-gpu-stage-readonly.yml'
@@ -35,6 +38,7 @@ on:
       - 'ansible/playbooks/audit-bergen-ai-gpu-staged-readonly.yml'
       - 'ansible/playbooks/audit-bergen-ai-gpu-postboot-readonly.yml'
       - 'ansible/playbooks/diagnose-bergen-ai-gpu-postboot-readonly.yml'
+      - 'ansible/playbooks/audit-bergen-ai-gpu-host-memory-readonly.yml'
       - 'ansible/playbooks/restart-bergen-ai-gpu-approved.yml'
       - 'ansible/playbooks/rollback-bergen-ai-ollama-gpu-stage.yml'
       - 'tests/test_bergen_ai_ollama_hardware_models.py'
@@ -64,5 +68,6 @@ jobs:
           ansible-playbook -i ansible/inventory.yml ansible/playbooks/audit-bergen-ai-gpu-staged-readonly.yml --syntax-check
           ansible-playbook -i ansible/inventory.yml ansible/playbooks/audit-bergen-ai-gpu-postboot-readonly.yml --syntax-check
           ansible-playbook -i ansible/inventory.yml ansible/playbooks/diagnose-bergen-ai-gpu-postboot-readonly.yml --syntax-check
+          ansible-playbook -i ansible/inventory.yml ansible/playbooks/audit-bergen-ai-gpu-host-memory-readonly.yml --syntax-check
           ansible-playbook -i ansible/inventory.yml ansible/playbooks/restart-bergen-ai-gpu-approved.yml --syntax-check
           ansible-playbook -i ansible/inventory.yml ansible/playbooks/rollback-bergen-ai-ollama-gpu-stage.yml --syntax-check
