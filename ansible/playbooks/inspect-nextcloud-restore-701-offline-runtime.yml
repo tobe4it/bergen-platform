@@ -99,7 +99,14 @@
             . /etc/os-release
             printf 'OS_ID=%s\n' "$ID"
             printf 'OS_VERSION=%s\n' "$VERSION_ID"
-            devices="$(find /sys/class/net -mindepth 1 -maxdepth 1 ! -name lo -printf '.' | wc -c)"
+            # Count actual netdevices only; bonding_masters is a
+            # sysfs control file, not a network interface.
+            test -L /sys/class/net/lo
+            devices=0
+            for entry in /sys/class/net/*; do
+              test -L "$entry" || continue
+              case "$entry" in */lo) ;; *) devices=$((devices + 1)) ;; esac
+            done
             printf 'NON_LOOPBACK_DEVICES=%s\n' "$devices"
             test "$ID" = rocky
             case "$VERSION_ID" in 9|9.*) : ;; *) exit 72 ;; esac
