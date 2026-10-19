@@ -4,7 +4,9 @@ on:
   pull_request:
     paths:
       - 'ansible/files/bergen_ai/audit_private_bridge_preflight.py'
+      - 'ansible/files/bergen_ai/audit_private_bridge_extended_networks.py'
       - 'ansible/playbooks/audit-bergen-ai-private-bridge-readonly.yml'
+      - 'ansible/playbooks/audit-bergen-ai-private-bridge-extended-readonly.yml'
       - 'docs/BERGEN-AI-PRIVATE-PROXMOX-BRIDGE.md'
       - 'tests/test_bergen_ai_private_bridge_preflight.py'
       - '.github/workflows/bergen-ai-private-bridge.yml'
@@ -12,7 +14,9 @@ on:
     branches: [main]
     paths:
       - 'ansible/files/bergen_ai/audit_private_bridge_preflight.py'
+      - 'ansible/files/bergen_ai/audit_private_bridge_extended_networks.py'
       - 'ansible/playbooks/audit-bergen-ai-private-bridge-readonly.yml'
+      - 'ansible/playbooks/audit-bergen-ai-private-bridge-extended-readonly.yml'
       - 'tests/test_bergen_ai_private_bridge_preflight.py'
 
 jobs:
@@ -33,3 +37,5 @@ jobs:
         run: |
           ansible-playbook -i ansible/inventory.yml \
             ansible/playbooks/audit-bergen-ai-private-bridge-readonly.yml --syntax-check
+          ansible-playbook -i ansible/inventory.yml \
+            ansible/playbooks/audit-bergen-ai-private-bridge-extended-readonly.yml --syntax-check
