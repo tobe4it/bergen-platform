@@ -611,3 +611,52 @@ restore archive to the build network. Never change host-wide
 firewall configuration during the restore project without a
 separately planned change window; such a change could affect
 production LXC workloads.
+
+
+## Alternative to any connected PVE build guest: vetted LXC rootfs
+
+Additional host evidence (2026-10-20):
+- systemctl is-active proxmox-firewall: active.
+- systemctl is-enabled proxmox-firewall: enabled.
+- nft list tables: no tables printed in that command output.
+  A running service **does not establish installed nft filter rules**.
+  Do not assume that a classic pve-firewall status of disabled/running
+  proves nftables disabled; both observations must be retained.
+- The main interface configuration has vmbr0 -> enp195s0 untagged,
+  vmbr2 -> enp195s0.2 VLAN 2 (DHCP and vlan-aware),
+  vmbr3 -> enp195s0.3 (inet manual) and
+  vmbr6 -> enp195s0.6 (inet manual).
+  There is no demonstrated safe temporary egress-only build segment.
+- No host-wide firewall change is approved.
+
+An external, separately tested LXC-ready Rocky Linux 9 amd64
+"default" rootfs.tar.xz is available at
+https://images.linuxcontainers.org/images/rockylinux/9/amd64/default/
+(recent distro-builder builds; public index includes compatibility
+for unprivileged LXC). The selected build directory includes
+SHA256SUMS and its SHA256SUMS.asc signature, plus individual
+rootfs.tar.xz.asc. The rootfs build reports only "9" in the public
+catalog; **confirm actual minor version as 9.8 by inspecting the
+archive's etc/os-release or etc/rocky-release, and later a booted
+guest, before publishing it as 9.8**. Unlike Rocky's independently
+published OCI image, this is a third-party LXC artifact and needs
+verified, independently trusted distributor signing keys.
+
+This makes it possible to acquire a root filesystem with the
+already-networked bp-controller and transfer it to the local PVE
+template cache with pinned hash and secure copy, without attaching
+a network adapter to a new build CT. Merely reading the public image
+index and verifying the source metadata is the next approved
+**read-only** step; downloads, staging, VMID allocation, guest
+creation, etc. still require separate, explicit approval and
+fail-closed playbooks. Review the image license/source, rootfs type,
+path safety, metadata, signature, file ownership and its boot
+compatibility in a disposable unprivileged networkless test CT
+prior to converting CT790 to a cloneable template.
+
+An already-available local PVE stock Rocky 9 archive remains the
+fallback if the alternative rootfs cannot pass validation. This
+does NOT eliminate the later need for a separately validated
+PHP/MariaDB RPM dependency supply chain to build the Nextcloud
+runtime template. Keep CT701 protected, with no NIC and without
+modifications; do not make a downloaded image part of its rootfs.
