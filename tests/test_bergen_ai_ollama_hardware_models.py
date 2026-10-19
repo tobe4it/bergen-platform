@@ -22,6 +22,8 @@ GPU_ROLLBACK_PLAY = ROOT / "ansible/playbooks/rollback-bergen-ai-ollama-gpu-stag
 GPU_STAGED_READONLY = ROOT / "ansible/playbooks/audit-bergen-ai-gpu-staged-readonly.yml"
 GPU_POSTBOOT_SCRIPT = ROOT / "ansible/files/bergen_ai/audit_ollama_gpu_postboot_readonly.py"
 GPU_POSTBOOT_AUDIT = ROOT / "ansible/playbooks/audit-bergen-ai-gpu-postboot-readonly.yml"
+GPU_POSTBOOT_DIAG_SCRIPT = ROOT / "ansible/files/bergen_ai/diagnose_ollama_gpu_postboot_readonly.py"
+GPU_POSTBOOT_DIAG_PLAY = ROOT / "ansible/playbooks/diagnose-bergen-ai-gpu-postboot-readonly.yml"
 GPU_REBOOT_PLAY = ROOT / "ansible/playbooks/restart-bergen-ai-gpu-approved.yml"
 
 
@@ -237,6 +239,34 @@ class OllamaHardwareTests(unittest.TestCase):
             if "ansible.builtin.command" in task:
                 self.assertFalse(task["changed_when"])
                 self.assertTrue(task["no_log"])
+
+    def test_incident_diagnostic_remains_readonly_and_reports_layers_separately(self):
+        script = GPU_POSTBOOT_DIAG_SCRIPT.read_text()
+        ast.parse(script, filename=str(GPU_POSTBOOT_DIAG_SCRIPT))
+        for forbidden in ("pct reboot", "pct set", "ollama run", "/api/chat",
+                          "/api/generate", "ollama pull", "pct stop", "systemctl restart"):
+            self.assertNotIn(forbidden, script)
+        for key in ("LXC110_CONFIG", "LXC110_RUNTIME", "RENDER_PRESENT",
+                    "KFD_PRESENT", "OLLAMA_SERVICE", "OLLAMA_API",
+                    "CGROUP_MEMORY_MAX", "GUEST_PROBE", "QWEN14_PRESENT",
+                    "GPU_INFERENCE_PROVEN"):
+            self.assertIn(key, script)
+        play = yaml.safe_load(GPU_POSTBOOT_DIAG_PLAY.read_text())[0]
+        self.assertEqual(play["hosts"], "venombox")
+        self.assertEqual(play["gather_facts"], False)
+        text = GPU_POSTBOOT_DIAG_PLAY.read_text()
+        self.assertIn("failed_when: false", text)
+        self.assertIn("changed_when: false", text)
+        self.assertNotIn("pct, reboot", text)
+        self.assertNotIn("pct, set", text)
+        self.assertNotIn("pct, stop", text)
+        for task in play["tasks"]:
+            if "ansible.builtin.command" in task:
+                self.assertTrue(task["no_log"])
+                self.assertFalse(task["changed_when"])
+            if "ansible.builtin.assert" in task:
+                for cond in task["ansible.builtin.assert"]["that"]:
+                    self.assertIsInstance(cond, str)
 
     def test_restart_is_single_guest_explicit_downtime_with_preimage_gate(self):
         play = yaml.safe_load(GPU_REBOOT_PLAY.read_text())[0]
