@@ -55,17 +55,92 @@ class BergenAiOneOffTest(TestCase):
         with mock.patch.object(a, "command", return_value=None):
             self.assertEqual(a.persistent_data(), "UNVERIFIED")
 
-    def test_guest_mount_scan_rejects_external_volume(self):
-        safe = {"filesystems": [{"target": "/", "fstype": "zfs",
-                                 "children": [{"target": "/dev/shm", "fstype": "tmpfs"}]}]}
-        external = {"filesystems": [{"target": "/", "fstype": "zfs",
-                                     "children": [{"target": "/data", "fstype": "nfs4"}]}]}
-        with mock.patch.object(a, "command", return_value=json.dumps(safe)):
-            self.assertEqual(a.guest_mounts(), "NO_EXTERNAL_MOUNTS_DETECTED")
-        with mock.patch.object(a, "command", return_value=json.dumps(external)):
+    @staticmethod
+    def snapshot_mount_tree():
+        # Verified CT110 baseline: root + 39 pseudo + 10 lxcfs + one overlay
+        # plus one same-rootfs internal Podman bind.
+        root = "rpool/data/subvol-110-disk-0"
+        merged = (a.GRAPHROOT + "/overlay/" + "b" * 64 + "/merged")
+        pseudo = [{"target": "/dev/null" + str(i), "fstype": "tmpfs",
+                   "source": "tmpfs"} for i in range(39)]
+        lxcfs = [{"target": "/proc/sample" + str(i), "fstype": "fuse.lxcfs",
+                  "source": "lxcfs[/proc/sample" + str(i) + "]"}
+                 for i in range(10)]
+        overlay = [{"target": merged, "fstype": "fuse.fuse-overlayfs",
+                    "source": "fuse-overlayfs"}]
+        internal = [{"target": a.GRAPHROOT + "/libpod/internal",
+                     "fstype": "zfs", "source": root + "[/runtime/subdir]"}]
+        return ({"filesystems": [{
+            "target": "/", "fstype": "zfs", "source": root,
+            "children": pseudo + lxcfs + overlay + internal
+        }]}, merged)
+
+    def test_guest_mount_fingerprint_accepts_only_rootfs_internal_podman_runtime(self):
+        tree, merged = self.snapshot_mount_tree()
+        with mock.patch.object(a, "guest_stat_inode", return_value="17:123"):
+            self.assertTrue(a.classify_rootfs_runtime_mounts(
+                tree["filesystems"], merged, "17:1", "17:222"))
+        children = tree["filesystems"][0]["children"]
+        children[-1]["source"] = "otherpool/foreign[/data]"
+        with mock.patch.object(a, "guest_stat_inode", return_value="17:123"):
+            self.assertFalse(a.classify_rootfs_runtime_mounts(
+                tree["filesystems"], merged, "17:1", "17:222"))
+        children[-1]["source"] = "rpool/data/subvol-110-disk-0[/runtime/subdir]"
+        children[-1]["target"] = "/mnt/external"
+        with mock.patch.object(a, "guest_stat_inode", return_value="17:123"):
+            self.assertFalse(a.classify_rootfs_runtime_mounts(
+                tree["filesystems"], merged, "17:1", "17:222"))
+        children[-1]["target"] = a.GRAPHROOT + "/libpod/internal"
+        with mock.patch.object(a, "guest_stat_inode", return_value="18:123"):
+            self.assertFalse(a.classify_rootfs_runtime_mounts(
+                tree["filesystems"], merged, "17:1", "17:222"))
+        with mock.patch.object(a, "guest_stat_inode", return_value="17:123"):
+            self.assertFalse(a.classify_rootfs_runtime_mounts(
+                tree["filesystems"], merged, "17:1", "18:222"))
+
+    def test_guest_mount_scan_requires_matching_inspect_inode_and_rootfs(self):
+        tree, merged = self.snapshot_mount_tree()
+        inspect = [{"Mounts": [{
+            "Source": a.PERSISTENT, "Destination": a.WEBUI_TARGET,
+            "Type": "bind"
+        }], "GraphDriver": {"Data": {"MergedDir": merged}},
+            "State": {"Running": True, "Pid": 1942}}]
+        info = {"store": {"graphRoot": a.GRAPHROOT}}
+        with (mock.patch.object(a, "guest_json",
+                                side_effect=[tree, info, inspect]),
+              mock.patch.object(a, "guest_stat_inode",
+                                return_value="17:123")):
+            self.assertEqual(a.guest_mounts(), "ROOTFS_INTERNAL_RUNTIME_ONLY")
+        with (mock.patch.object(a, "guest_json",
+                                side_effect=[tree, info, inspect]),
+              mock.patch.object(a, "guest_stat_inode",
+                                side_effect=["17:123", "17:456", "17:1"])):
             self.assertEqual(a.guest_mounts(), "EXTERNAL_OR_UNKNOWN_MOUNT")
-        with mock.patch.object(a, "command", return_value="not-json"):
+        foreign = {"filesystems": [{
+            "target": "/", "fstype": "zfs", "source": "rpool/root",
+            "children": [{"target": "/extra", "fstype": "nfs4",
+                          "source": "nas:/data"}]
+        }]}
+        with (mock.patch.object(a, "guest_json",
+                                side_effect=[foreign, info, inspect]),
+              mock.patch.object(a, "guest_stat_inode",
+                                return_value="17:123")):
+            self.assertEqual(a.guest_mounts(), "EXTERNAL_OR_UNKNOWN_MOUNT")
+        with mock.patch.object(a, "guest_json", return_value=None):
             self.assertEqual(a.guest_mounts(), "UNVERIFIED")
+
+    def test_pseudo_mounts_cannot_hide_app_data_or_external_overlays(self):
+        tree, merged = self.snapshot_mount_tree()
+        children = tree["filesystems"][0]["children"]
+        children[0]["target"] = "/srv/ai/open-webui/cache"
+        with mock.patch.object(a, "guest_stat_inode", return_value="17:100"):
+            self.assertFalse(a.classify_rootfs_runtime_mounts(
+                tree["filesystems"], merged, "17:1", "17:222"))
+        children[0]["target"] = "/dev/null0"
+        children[0]["fstype"] = "overlay"
+        with mock.patch.object(a, "guest_stat_inode", return_value="17:100"):
+            self.assertFalse(a.classify_rootfs_runtime_mounts(
+                tree["filesystems"], merged, "17:1", "17:222"))
 
     def test_script_no_write_and_does_not_authorize_network_changes(self):
         source = SCRIPT.read_text()
@@ -92,6 +167,7 @@ class BergenAiOneOffTest(TestCase):
         self.assertFalse(commands[0]["failed_when"])
         self.assertIn("BACKUP_EXECUTED=False", PREFLIGHT.read_text())
         self.assertIn("ct110_backup_ready:", PREFLIGHT.read_text())
+        self.assertIn("ROOTFS_INTERNAL_RUNTIME_ONLY", SCRIPT.read_text())
         self.assertIn("data_scope.STATUS == 'KNOWN_DATA_PATHS_IN_ROOTFS'", PREFLIGHT.read_text())
 
     def test_single_backup_has_explicit_separate_gates_and_no_prune(self):
@@ -106,6 +182,7 @@ class BergenAiOneOffTest(TestCase):
         self.assertIn("ct110_preflight.SAFE_TO_ATTEMPT_SINGLE_BACKUP", content)
         self.assertIn("ct110_backup_ready | bool", content)
         self.assertIn("data_scope.PODMAN_NAMED_VOLUMES == 'NONE'", content)
+        self.assertIn("ct110_preflight.GUEST_MOUNTS == 'ROOTFS_INTERNAL_RUNTIME_ONLY'", content)
         self.assertIn("SAFE_TO_ATTEMPT_SINGLE_BACKUP", content)
         self.assertIn("vzdump", content)
         self.assertIn("- snapshot", content)
