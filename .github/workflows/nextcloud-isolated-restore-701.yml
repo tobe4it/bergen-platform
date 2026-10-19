@@ -7,6 +7,8 @@ on:
       - 'ansible/playbooks/audit-nextcloud-restore-transfer-readonly.yml'
       - 'ansible/playbooks/transfer-nextcloud-restore-archive.yml'
       - 'ansible/files/nextcloud/stream_verified_restore_archive.py'
+      - 'ansible/files/nextcloud/audit_verified_restore_archive.py'
+      - 'ansible/playbooks/audit-nextcloud-restore-archive-readonly.yml'
       - 'docs/NEXTCLOUD-ISOLATED-RESTORE-701.md'
       - '.github/workflows/nextcloud-isolated-restore-701.yml'
   push:
@@ -36,6 +38,10 @@ jobs:
             ansible/playbooks/transfer-nextcloud-restore-archive.yml \
             --syntax-check
           python3 -m py_compile ansible/files/nextcloud/stream_verified_restore_archive.py
+          python3 -m py_compile ansible/files/nextcloud/audit_verified_restore_archive.py
+          ansible-playbook -i localhost, \
+            ansible/playbooks/audit-nextcloud-restore-archive-readonly.yml \
+            --syntax-check
       - name: Verify offline-only initial provisioning
         run: |
           python3 - <<'PY'
@@ -74,5 +80,11 @@ jobs:
           assert 'TARGET_ARCHIVE_SHA256_VERIFIED=YES' in transfer
           assert 'NEXTCLOUD_RESTORE_ARCHIVE_ALREADY_VERIFIED=YES' in transfer
           assert 'NEXTCLOUD_RESTORE_ARCHIVE_RECEIPT_RECOVERED=YES' in transfer
+          archive = Path("ansible/files/nextcloud/audit_verified_restore_archive.py").read_text()
+          assert 'PINNED_SHA256_MISMATCH' in archive
+          assert 'UNSAFE_ARCHIVE_SEGMENT' in archive
+          assert 'DUPLICATE_ARCHIVE_MEMBER' in archive
+          assert 'SQL_DATABASE_NOT_CONFIRMED' in archive
+          assert 'tarfile.open(archive, "r:gz")' in archive
           print("NEXTCLOUD_701_OFFLINE_STATIC_BOUNDARIES=PASS")
           PY
