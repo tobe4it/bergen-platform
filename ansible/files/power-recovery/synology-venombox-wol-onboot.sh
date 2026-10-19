@@ -18,6 +18,16 @@ WAKE_IF=eth0
 SYNONET=/usr/syno/sbin/synonet
 MAC_FILE=/volume1/bergen-recovery/venombox-wol.mac
 
+# DSM boot tasks can start before the data volume is ready.
+# Waiting is permitted only in the explicitly approved send mode.
+if [ "$MODE" = send ]; then
+    delay=0
+    while [ ! -r "$MAC_FILE" ] && [ "$delay" -lt 30 ]; do
+        sleep 10
+        delay=$((delay + 1))
+    done
+fi
+
 if [ "$(id -u)" != "0" ]; then
     echo 'ERROR: run as root via DSM Task Scheduler' >&2
     exit 1
