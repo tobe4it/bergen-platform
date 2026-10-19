@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""One explicitly approved synthetic Qwen14B inference benchmark in existing LXC110.
+"""One explicitly approved longer synthetic Qwen14B throughput benchmark in LXC110.
 
 This performs model inference, NOT a read-only audit. It never reads Paperless,
 modifies service configuration, downloads models or changes PVE resources.
@@ -43,17 +43,20 @@ if not isinstance(active,list) or len(active):
 
 body=api("/api/generate",{
     "model":MODEL,
-    "prompt":"Antworte ausschließlich mit dem Wort OK.",
+    # Sustained generation, not the earlier two-token smoke test.
+    # Always synthetic; the 192-token cap bounds resource usage.
+    "prompt":"Schreibe die natürlichen Zahlen von 1 bis 300 auf, "
+             "je eine Zahl pro Zeile, ohne Einleitung und ohne Auslassungen.",
     "stream":False,
     "keep_alive":"45s",
-    "options":{"num_predict":40,"num_ctx":2048,"temperature":0}
+    "options":{"num_predict":192,"num_ctx":2048,"temperature":0}
 },timeout=240)
 
 if body.get("model") != MODEL or body.get("done") is not True:
     raise ValueError("INFERENCE_NOT_COMPLETED")
 count=body.get("eval_count")
 duration=body.get("eval_duration")
-if (type(count) is not int or count < 1 or count > 40
+if (type(count) is not int or count < 64 or count > 192
     or type(duration) is not int or duration <= 0):
     raise ValueError("INVALID_INFERENCE_METRICS")
 
