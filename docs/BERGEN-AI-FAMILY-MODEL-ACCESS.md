@@ -68,8 +68,29 @@ The existing git-ignored local family audit YAML defines:
 
 Do not paste this site-specific YAML, secret tokens, user IDs or raw DB rows.
 
-Expected: AUDIT=READ_ONLY, CHANGED=False and aggregates of group membership,
-registered model rows, access grants, and direct raw model exposures.
+Live baseline 2026-10-19 (operator-provided), confirmed:
+  AUDIT=READ_ONLY
+  STATUS=INVENTORY_ONLY
+  FAMILY_MEMBERS=0
+  ADULT_MEMBERS=0
+  CHILD_MEMBERS=0
+  REGISTERED_MODELS=0
+  MODEL_GRANTS=0
+  PUBLIC_READ_GRANTS=0
+  CHILD_RAW_MODEL_READ_GRANTS=0
+  CHANGED=False
+  PLAY_RECAP=ok:9, changed:0, failed:0
+
+The follow-up audit adds private aggregate counts of all Open WebUI account
+roles and accounts with saved OAuth linkage. OAuth linkage proves only that
+an OAuth mapping was stored, NOT the current IDP group claim or the validity
+of the identity. Never infer an adult or child from an email address.
+Account group provisioning requires explicit trusted identity binding,
+negative tests and revocation with existing sessions.
+
+Expected: AUDIT=READ_ONLY, CHANGED=False and aggregates of account
+role/SSO linkage, group membership, registered model rows, access grants,
+and direct raw model exposures.
 STATUS=INVENTORY_ONLY is a narrow inventory, NOT a production clearance.
 Any overlap of child/adult membership, public grant, foreign/unmatched
 model grant or child direct raw model read causes REVIEW_REQUIRED.
