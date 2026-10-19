@@ -81,8 +81,8 @@ def read_db(path, expected):
             account_roles[account_role] += 1
             if raw_oauth is not None:
                 parsed = json.loads(raw_oauth) if isinstance(raw_oauth, str) else raw_oauth
-                demand(isinstance(parsed, dict))
-                oauth_linked += bool(parsed)
+                demand(parsed is None or isinstance(parsed, dict))
+                oauth_linked += isinstance(parsed, dict) and bool(parsed)
         model_rows = db.execute(
             'SELECT id, base_model_id, is_active FROM "model"').fetchall()
         registered = {model_id: (base_id, bool(active)) for
