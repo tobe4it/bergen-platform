@@ -2,9 +2,9 @@
 
 ## Purpose and verification boundary
 
-Prepare a separately approved DSM **Triggered Task -> Boot-up** to send bounded Magic Packets after MountainCloud boots from restored mains power. **Do not restart venombox, DSM, UniFi, or other infrastructure for validation; the whole exercise is preparation only.**
+Betriebsanleitung für einen freigegebenen DSM-**Ausgelöste Aufgabe → Hochfahren**-Sender: Nach Neustart der Synology werden begrenzt Magic Packets an venombox gesendet. **Keine Inbetriebnahme durch einen künstlichen Stromausfall; venombox, DSM und Netzwerkgeräte werden nicht für den Test neu gestartet.**
 
-Physical target: venombox, Proxmox 9.2.20, F8BSC / AMI 1.04; wired NIC `enp195s0`. The host NIC now runs with `Wake-on: g` under draft PR #120. The DS920+ is reported to start automatically once AC power returns.
+Physical target: venombox, Proxmox 9.2.20, F8BSC / AMI 1.04; wired NIC `enp195s0`. The host NIC now runs with `Wake-on: g` after an approved live Ansible apply (tracked in PR #120). The DS920+ is reported to start automatically once AC power returns.
 
 **Observed transport proof (2026-10-19):**
 - A manual `synonet --wake [target MAC] eth0` was sent from the NAS.
@@ -27,9 +27,9 @@ Source: `ansible/files/power-recovery/synology-venombox-wol-onboot.sh`
 - No firmware changes, NIC configuration, NAS routing/VLAN/firewall changes, service shutdown or Proxmox changes.
 - Return code and logs indicate packet-send requests only: actual host power-on cannot be inferred from script success.
 
-## Erstlauf-Blocker: fehlende SSH-Host-Key-Vertrauensstellung (19.10.2026)
+## Behebener Erstlauf-Blocker: SSH-Host-Key-Vertrauensstellung (19.10.2026)
 
-Der **tatsächliche** erste `bp-controller`-Installationslauf ist beim rein lesenden NAS-Preflight mit `rc=255` abgebrochen, bevor Dateien angelegt wurden: `No ED25519 host key is known ... StrictHostKeyChecking=yes`. Ansible: `ok=2 changed=0 failed=1`. Das ist eine gewollte Fail-Closed-Sicherheitsgrenze, keine Aufforderung, die SSH-Host-Key-Prüfung abzuschalten.
+Der **erste** `bp-controller`-Installationslauf ist beim rein lesenden NAS-Preflight mit `rc=255` abgebrochen, bevor Dateien angelegt wurden: `No ED25519 host key is known ... StrictHostKeyChecking=yes`. Ansible: `ok=2 changed=0 failed=1`. Das ist eine gewollte Fail-Closed-Sicherheitsgrenze, keine Aufforderung, die SSH-Host-Key-Prüfung abzuschalten.
 
 Vorgehensweise:
 1. Den **vertrauenswürdigen** SSH-ED25519-Host-Key-Fingerprint auf einer bestehenden, bereits authentifizierten DSM-Sitzung ermitteln:
@@ -42,11 +42,11 @@ Vorgehensweise:
 4. `ssh -T -o BatchMode=yes -o StrictHostKeyChecking=yes BENUTZER@NAS_SSH_IP 'hostname -s'` als Read-only-Test. Falls danach Public-Key-Authentifizierung oder `sudo -n` scheitert, separat und sicher behandeln. Keinen passwortbasierten Bypass und kein `StrictHostKeyChecking=no`.
 5. Danach zuerst das vorgesehene `--check` und erst dann den freigegebenen Installations-Apply erneut ausführen. **Keine** NAS/Host-Neustarts oder Paketsendetests erforderlich.
 
-Der Boot-up-Task auf DSM ist weiterhin **nicht** nachgewiesen eingerichtet oder aktiviert; er erfordert die separate native DSM-Aufgabenplaner-Bedienung nach erfolgreicher Bereitstellung.
+**Späterer Nachweis:** Die beiden SSH-ED25519-Fingerprints wurden auf NAS und bp-controller unabhängig und exakt verglichen; der Host-Key wurde in der lokalen `known_hosts` abgelegt. `ssh -T -o BatchMode=yes -o StrictHostKeyChecking=yes` gab den Hostnamen `MountainCloud` zurück. Der anschließende Ansible-Check und produktive Installationslauf waren erfolgreich.
 
-## Freigegebener Installationspfad, noch NICHT ausgeführt
+## Durchgeführte Dateiinstallation und DSM-Aufgabe
 
-Der Betreiber hat Installation und Aktivierung einer DSM-Boot-Aufgabe freigegeben, **ohne NAS-/Host-Neustart oder Stromausfalltest**. Dieses Git-Repository hat keinen direkten Zugang zur privaten Synology-DSM-Sitzung. Die folgenden Schritte sind auf dem vorhandenen bp-controller und danach im DSM-Aufgabenplaner auszuführen.
+Der Betreiber hat Installation und Aktivierung einer DSM-Boot-Aufgabe freigegeben, **ohne NAS-/Host-Neustart oder Stromausfalltest**. Die hier dokumentierte Dateiinstallation wurde durch den Betreiber auf `bp-controller` tatsächlich durchgeführt. Der DSM-Task wird ausschließlich im nativen DSM-Aufgabenplaner erstellt; seine Einstellungen sind nicht durch Ansible ausgelesen. Die Rückmeldung des Betreibers nach der DSM-Anleitung war „Ok“; das ist eine **Betreiberbestätigung**, keine unabhängige Status- oder Funktionsprüfung der DSM-Aufgabe.
 
 1. Auf bp-controller eine **gitignorierte** `ansible/vars/synology-wol.local.yml` mit folgenden Schlüsseln anlegen:
 
@@ -76,7 +76,7 @@ Der Betreiber hat Installation und Aktivierung einer DSM-Boot-Aufgabe freigegebe
      -e synology_wol_install_approved=true
    ```
 
-   Das Playbook prüft per bestehendem SSH-/sudo-Zugang die Hostidentität, legt bei Freigabe ausschließlich root-kontrollierte Dateien unter `/volume1/bergen-recovery/` an, verweigert fremde/abweichende Dateien und führt `/bin/sh -n` sowie `--check` aus. **Kein Paketversand und keine DSM-Task-Erstellung.** Die neue Installer-Rolle ist noch nicht live auf bp-controller geprüft.
+   Das Playbook prüft per bestehendem SSH-/sudo-Zugang die Hostidentität, legt bei Freigabe ausschließlich root-kontrollierte Dateien unter `/volume1/bergen-recovery/` an, verweigert fremde/abweichende Dateien und führt `/bin/sh -n` sowie `--check` aus. **Kein Paketversand und keine DSM-Task-Erstellung.** Der Installer wurde auf `bp-controller` live ausgeführt und meldete erfolgreich: `ok=7 changed=1 failed=0 skipped=0`.
 
 3. Im DSM-Aufgabenplaner unter **Systemsteuerung → Aufgabenplaner → Erstellen → Ausgelöste Aufgabe → Benutzerdefiniertes Skript** folgende Aufgabe anlegen:
 
@@ -92,7 +92,14 @@ Der Betreiber hat Installation und Aktivierung einer DSM-Boot-Aufgabe freigegebe
 
 4. Rücknahme: Nur diese dedizierte DSM-Aufgabe deaktivieren oder löschen, ohne NAS-/Host-Neustart. Die installierten Dateien dürfen für spätere Wartung verbleiben.
 
-**Stand dieser PR:** Code und Anleitung vorbereitet. **NAS-Dateien nicht nachgewiesen installiert; DSM-Job nicht nachgewiesen angelegt/aktiviert.** Keine Aussage über erfolgreiche Weckfähigkeit nach G3.
+**Stand vom 19.10.2026:** `--syntax-check` bestanden. Check-Modus: `ok=5 changed=0 failed=0 skipped=2`, ausdrücklich ohne Write. Live-Apply: `ok=7 changed=1 failed=0 skipped=0`, bestätigte Meldung `Files: installed/validated`; Installationslauf führte `/bin/sh -n` und Skript-`--check` aus, kein Wake-Paket, kein Reboot. DSM-Aktivierung: vom Betreiber im Dialog anschließend mit „Ok“ quittiert, **nicht unabhängig über DSM-CLI/UI ausgelesen**. Der NAS-Boot-Trigger wurde nicht probeweise gestartet. Verhalten aus S5/G3 bleibt ungeprüft.
+
+## Abnahme und nächste reguläre Kontrolle
+
+- Bei Gelegenheit in **DSM → Systemsteuerung → Aufgabenplaner** kontrollieren: genau eine Aufgabe `Bergen – venombox Wake-on-LAN`, Benutzer `root`, Trigger **Hochfahren**, aktiviert, Skript `/bin/sh /volume1/bergen-recovery/venombox-wol-onboot.sh --send`.
+- Ohne NAS-Neustart prüfen; **nicht** manuell starten. Die Installationsprüfung ist bereits erfolgreich, ein zusätzlicher Live-Sendetest ist nicht nötig.
+- Auf dem nächsten regulären DSM-Start den Task-Verlauf ansehen. Die Ausgabe `WOL_BOOT_SEND_COMPLETED` bestätigt **nur** erfolgreiche send requests, nicht, dass venombox tatsächlich aus ausgeschaltetem Zustand gestartet ist.
+- Falls der Task in DSM nicht auffindbar/aktiv ist, bleibt der operative Abschluss offen, bis die Aufgabe dort nachgewiesen ist.
 
 ## Rollback and limitations
 
