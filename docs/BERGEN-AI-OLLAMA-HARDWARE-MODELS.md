@@ -332,6 +332,50 @@ the previous strict probe explicitly used `failed_when: false` to
 keep retries alive and returned `NOT_READY` or `UNVERIFIED`.
 Once independent causes are known, design a targeted repair and a
 separate re-verification. No subsequent service restart without review.
+## Host-side memory validation after successful GPU postboot diagnosis
+
+Operator-run postboot diagnostic PASSED with `ok=7 changed=0 failed=0`: 
+the LXC110 config matches the staged settings; guest running; GPU
+renderD128 (226:128) and kfd (511:0) exist and are correctly owned
+UID=999, GID=992, mode 0660 and usable by Ollama. The service is
+`active`, its local API responds and Qwen2.5 14B/Mistral Nemo 12B/
+BGE-M3 are present.
+
+The **only** mismatch is guest `/sys/fs/cgroup/memory.max` reporting
+`max` instead of 34359738368 bytes. A cgroup-namespace view may
+not show the parent where the host actually enforces Proxmox's
+configured `memory: 32768`. Do not interpret that guest `max`
+alone as a missing limit and do not reboot or roll back.
+
+To validate actual host-side enforcement, run the separate read-only
+`audit-bergen-ai-gpu-host-memory-readonly.yml`. This uses
+`lxc-info -n 110 -p -H` to locate the guest init process's **host**
+PID, reads `/proc/<pid>/cgroup` and the cgroup-v2 `memory.max`
+from the leaf up through parent cgroups. Reports only whether the
+smallest finite ancestor limit is exactly 32 GiB, below, above
+or completely absent. It never changes a limit.
+
+On bp-controller:
+
+    (
+    set -euo pipefail
+    BASE="$HOME/bergen-platform"
+    cd "$HOME/bergen-platform-ollama-hardware"
+    git fetch origin feat/bergen-ai-ollama-hardware-models-20261019
+    git switch --detach origin/feat/bergen-ai-ollama-hardware-models-20261019
+    "$BASE/.venv/bin/ansible-playbook" \
+      -i ansible/inventory.yml \
+      -i "$BASE/ansible/inventory.local.yml" \
+      ansible/playbooks/audit-bergen-ai-gpu-host-memory-readonly.yml \
+      --vault-id ai@prompt
+    )
+
+Expected if correctly enforced: `CGROUP_LIMIT_STATUS=EFFECTIVE_32GIB`.
+If not, STOP and investigate the host-side cgroup location / active
+limit before making any further configuration changes. Only after
+a positive live host-side reading may the strict postboot acceptance
+gate be revised to use real enforcement rather than the guest namespace
+view, and then synthetic GPU-offload inference can be tested.
 ## Step 2 – audit model download needs, still ZERO writes
 
     (
