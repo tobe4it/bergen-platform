@@ -1284,3 +1284,67 @@ erneut ausführen, bis ein unabhängiger positiver Preflight vorliegt.
 Die Betreiberfreigabe für genau eine Sicherung bleibt sachlich bestehen,
 jedoch weiterhin technisch gesperrt. Netzwerk-/Rollback-/Restore-Gates
 unverändert offen. PR bleibt Draft.
+
+
+### Phase 0f.4 – Live-Befund: 12 Gast-Mount-Blocker (19.10.2026, 22:07)
+
+Der Operator-Audit
+`audit-bergen-ai-ct110-guest-mount-blockers-readonly.yml`
+meldete auf `venombox` `ok=7 changed=0 failed=0`:
+
+```text
+STATUS=CLASSIFIED_FOR_REVIEW
+TOTAL_MOUNTS=52
+PREVIOUS_PREFLIGHT_BLOCKER_COUNT=12
+BLOCKER_CLASSES=LXCFS_SYSTEM_TARGET,OTHER_CONTAINER_STORAGE,OTHER_PROC_OR_SYS
+LXCFS_SYSTEM_COUNT=8
+ETC_IDENTITY_COUNT=0
+OTHER_NONPSEUDO_COUNT=4
+PSEUDO_OR_OVERLAY_COUNT=39
+BACKUP_STARTED=False
+BACKUP_AUTHORIZED=False
+APPLY_AUTHORIZED=False
+```
+
+Die acht LXCFS-Systemziele sind als solche identifiziert.
+**Vier weitere** Dateisystem-Mounts sind noch nicht ausreichend
+beurteilt. Die Kategorien `OTHER_CONTAINER_STORAGE` und
+`OTHER_PROC_OR_SYS` unterscheiden die Zielregion, **nicht**
+deren FSType, Host-Quelle oder Backup-Abdeckung. Insbesondere
+ist ein Mount in einem Podman-Graphroot nicht allein wegen
+seines Zielorts als interner Overlay-Mount zu betrachten.
+Die bisherige Kategorie `PSEUDO_OR_OVERLAY_COUNT` umfasst
+ebenfalls Overlays und ist kein Integritätsnachweis.
+
+Zur gezielten Auflösung wurde der **gleiche Read-only-Audit**
+erweitert: `UNRESOLVED_PROFILES` enthält für die vier
+nicht zugeordneten Mounts nur aggregierte **fixe**
+Kategorien aus Zielbereich, Dateisystemtypgruppe,
+Mount-Quellgruppe und Anzahl. Hinzu kommt
+`OVERLAY_MOUNT_COUNT`. Weder reale Pfade noch Mount-Quellen,
+Optionen, Dateiinhalte oder geheimhaltungsbedürftige
+Hostnamen werden ausgegeben.
+
+Der alte und der neue Backup-Preflight bleiben unverändert
+sperrend. Dieser Diagnostikschritt **ändert niemals**
+`SAFE_TO_ATTEMPT_SINGLE_BACKUP` und erteilt keine
+`vzdump`-Freigabe. Unbekannte, externe, netzgebundene oder
+verschachtelte persistente Mounts müssen vor jeder
+Freigabe gesondert berücksichtigt werden. Erst den
+Read-only-Audit mit frischem Branch ausführen, kein
+erneuter mutierender Oneoff-Versuch.
+
+```bash
+(
+set -euo pipefail
+BASE="$HOME/bergen-platform"
+WT="$HOME/bergen-platform-ai-private-bridge"
+git -C "$WT" fetch origin feat/bergen-ai-private-bridge-20261019
+git -C "$WT" switch --detach origin/feat/bergen-ai-private-bridge-20261019
+cd "$WT"
+"$BASE/.venv/bin/ansible-playbook" \
+  -i ansible/inventory.yml -i "$BASE/ansible/inventory.local.yml" \
+  ansible/playbooks/audit-bergen-ai-ct110-guest-mount-blockers-readonly.yml \
+  --vault-id ai@prompt
+)
+```
