@@ -125,7 +125,7 @@ class RuntimeMountRelationshipTests(TestCase):
         self.assertIsNone(a.running_podman_pid([{"State": {"Running": True, "Pid": True}}]))
 
     def test_inode_queries_return_only_fixed_status_no_raw_inode_or_pid(self):
-        with mock.patch.object(a, "guest", side_effect=["123:456\\n", "invalid"]):
+        with mock.patch.object(a, "guest", side_effect=["123:456\n", "invalid"]):
             self.assertEqual(a.checked_inode(a.SOURCE), "123:456")
             self.assertIsNone(a.checked_inode(MERGED + a.DST))
         self.assertEqual(a.comparison("5:6", "5:6"), "IDENTICAL")
