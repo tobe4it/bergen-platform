@@ -271,6 +271,16 @@ class OllamaHardwareTests(unittest.TestCase):
                     self.assertIsInstance(cond, str)
 
 
+    def test_host_cgroup_prefers_native_pve_path_to_lxc_info(self):
+        script = GPU_HOST_MEMORY_SCRIPT.read_text()
+        self.assertIn('ROOT / "lxc" / "110"', script)
+        self.assertIn('limits = hierarchy("/lxc/110")', script)
+        self.assertIn('"CGROUP_SOURCE":source', script)
+        self.assertLess(script.index('ROOT / "lxc" / "110"'),
+                        script.index('checked(["lxc-info"'))
+        self.assertNotIn("pct set", script)
+        self.assertNotIn("pct reboot", script)
+
     def test_host_cgroup_memory_ancestor_limit_and_no_mutation(self):
         script = GPU_HOST_MEMORY_SCRIPT.read_text()
         ast.parse(script, filename=str(GPU_HOST_MEMORY_SCRIPT))
