@@ -45,6 +45,26 @@ This is intentionally safer than overwriting a possible human correction.
 The review user can update such titles manually. Unrecognized taxonomy
 values are not created, so a correspondent/type can remain unset.
 
+## Approved local model routing (2026-10-19)
+
+The operator selected the following **exact Ollama tags**, independent of
+model visibility for Open WebUI users:
+
+| Purpose | Exact Ollama model | Production use |
+|---|---|---|
+| Paperless inbox metadata classification | `qwen2.5:14b-instruct-q4_K_M` | Selected, awaiting one-document E2E |
+| Multilingual quality comparison | `mistral-nemo:12b` | Comparison only; no automatic fallback |
+| Future authorization-safe vector retrieval | `bge-m3:latest` | Explicitly **disabled** until separate RAG ACL approval |
+
+The initial LXC-110 inventory (2026-10-19 04:06) predates the later model
+installation report. **Recheck the actual Ollama model list and reachability
+from Paperless LXC 126** before configuring anything. The exact
+`qwen2.5:14b-instruct-q4_K_M` tag must be returned by the server which
+Paperless can reach. Do not silently switch to a model from an older inventory.
+Only one inference model should be loaded for the first E2E pilot to avoid
+unreviewed memory pressure. Using the selected qwen2.5 text-only model does
+not require embeddings and is compatible with the intended OCR-text route.
+
 ## Architecture
 
 - Paperless 3.3.0 remains the source of truth for documents, OCR, metadata
