@@ -1,0 +1,124 @@
+---
+- name: Require explicitly selected venombox inventory target
+  ansible.builtin.assert:
+    that:
+      - power_recovery_target is defined
+      - power_recovery_target == 'venombox'
+      - inventory_hostname == 'venombox'
+    fail_msg: "Select only venombox with -e power_recovery_target=venombox"
+
+- name: Read actual host identity
+  ansible.builtin.command:
+    argv: [hostname, -s]
+  register: power_recovery_hostname
+  changed_when: false
+
+- name: Refuse unexpected physical host
+  ansible.builtin.assert:
+    that:
+      - power_recovery_hostname.stdout | trim == 'venombox'
+    fail_msg: "The target reports a different hostname; refusing firmware inventory"
+
+- name: Confirm Proxmox node
+  ansible.builtin.command:
+    argv: [pveversion]
+  register: power_recovery_pveversion
+  changed_when: false
+
+- name: Read system manufacturer
+  ansible.builtin.command:
+    argv: [dmidecode, -s, system-manufacturer]
+  register: power_recovery_manufacturer
+  changed_when: false
+  failed_when: false
+
+- name: Read system model
+  ansible.builtin.command:
+    argv: [dmidecode, -s, system-product-name]
+  register: power_recovery_model
+  changed_when: false
+  failed_when: false
+
+- name: Read mainboard manufacturer
+  ansible.builtin.command:
+    argv: [dmidecode, -s, baseboard-manufacturer]
+  register: power_recovery_board_vendor
+  changed_when: false
+  failed_when: false
+
+- name: Read mainboard model
+  ansible.builtin.command:
+    argv: [dmidecode, -s, baseboard-product-name]
+  register: power_recovery_board_model
+  changed_when: false
+  failed_when: false
+
+- name: Check for firmware attributes interface
+  ansible.builtin.stat:
+    path: /sys/class/firmware-attributes
+  register: power_recovery_firmware_attributes
+
+- name: List exposed firmware setting value paths
+  ansible.builtin.command:
+    argv:
+      - find
+      - /sys/class/firmware-attributes
+      - -maxdepth
+      - "6"
+      - -name
+      - current_value
+  register: power_recovery_firmware_paths
+  changed_when: false
+  failed_when: false
+  when: power_recovery_firmware_attributes.stat.exists | default(false)
+
+- name: Find fwupd BIOS configuration interface
+  ansible.builtin.command:
+    argv: [/bin/sh, -c, "command -v fwupdmgr"]
+  register: power_recovery_fwupd_path
+  changed_when: false
+  failed_when: false
+
+- name: Query BIOS settings exposed by fwupd
+  ansible.builtin.command:
+    argv:
+      - "{{ power_recovery_fwupd_path.stdout | trim }}"
+      - get-bios-settings
+  register: power_recovery_fwupd_settings
+  changed_when: false
+  failed_when: false
+  when: power_recovery_fwupd_path.rc == 0
+
+- name: Find local IPMI command
+  ansible.builtin.command:
+    argv: [/bin/sh, -c, "command -v ipmitool"]
+  register: power_recovery_ipmitool_path
+  changed_when: false
+  failed_when: false
+
+- name: Query local IPMI chassis power policy
+  ansible.builtin.command:
+    argv:
+      - "{{ power_recovery_ipmitool_path.stdout | trim }}"
+      - -I
+      - open
+      - chassis
+      - status
+  register: power_recovery_ipmi_status
+  changed_when: false
+  failed_when: false
+  when: power_recovery_ipmitool_path.rc == 0
+
+- name: Report supported remote-management surfaces without changing settings
+  ansible.builtin.debug:
+    msg:
+      - "Proxmox node: {{ power_recovery_hostname.stdout | trim }} ({{ power_recovery_pveversion.stdout | trim }})"
+      - "System: {{ power_recovery_manufacturer.stdout | default('unknown') | trim }} / {{ power_recovery_model.stdout | default('unknown') | trim }}"
+      - "Mainboard: {{ power_recovery_board_vendor.stdout | default('unknown') | trim }} / {{ power_recovery_board_model.stdout | default('unknown') | trim }}"
+      - "Firmware sysfs interface: {{ power_recovery_firmware_attributes.stat.exists | default(false) }}"
+      - "Exposed current_value paths: {{ power_recovery_firmware_paths.stdout_lines | default([]) }}"
+      - "fwupdmgr available: {{ power_recovery_fwupd_path.rc == 0 }} (query rc: {{ power_recovery_fwupd_settings.rc | default('not-run') }})"
+      - "fwupd BIOS settings: {{ power_recovery_fwupd_settings.stdout_lines | default([]) }}"
+      - "ipmitool available: {{ power_recovery_ipmitool_path.rc == 0 }} (query rc: {{ power_recovery_ipmi_status.rc | default('not-run') }})"
+      - "IPMI chassis status: {{ power_recovery_ipmi_status.stdout_lines | default([]) }}"
+      - "No firmware setting, guest boot order, or host state was changed."
