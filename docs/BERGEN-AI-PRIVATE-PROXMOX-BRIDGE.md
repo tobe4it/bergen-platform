@@ -1430,3 +1430,80 @@ cd "$WT"
   --vault-id ai@prompt
 )
 ```
+
+
+### Phase 0f.5 – Live-Audit weiterhin gesperrt (19.10.2026, 22:37)
+
+Der Operator hat `audit-bergen-ai-ct110-runtime-mount-relationships-readonly.yml`
+auf `venombox` mit `ok=7 changed=0 failed=0` ausgeführt:
+
+```text
+STATUS=REVIEW_REQUIRED
+PODMAN_INSPECT_RELATIONSHIP=EXACT_SINGLE_WEBUI_BIND
+ROOTFS_BIND_INODE_IDENTITY=UNVERIFIED
+LXCFS_SYSTEM_MOUNT_COUNT=10
+FUSE_OVERLAY_MOUNT_COUNT=1
+WEBUI_ROOTFS_BIND_MOUNT_COUNT=0
+UNACCOUNTED_NONPSEUDO_MOUNT_COUNT=1
+RUNTIME_MOUNTS_MATCH_EXPECTATION=False
+BACKUP_EXECUTED=False
+BACKUP_AUTHORIZED=False
+RESTORE_TEST=NOT_ATTESTED
+APPLY_AUTHORIZED=False
+```
+
+Damit sind die zehn LXCFS-Systemmounts und der eine Podman-FUSE-
+Overlay-Mount bestätigt. Der einzige verbleibende Nicht-Pseudo-
+Mount konnte durch den ursprünglichen Vergleich von
+`stat -Lc %d:%i /srv/ai/open-webui` mit dem vom Rootfs-Namespace
+erreichbaren `MergedDir/app/backend/data` **nicht** identifiziert
+werden. `UNVERIFIED` bedeutete in der alten Prüfungslogik
+sowohl stat-Lesefehler als auch unterschiedliche Identitäten.
+
+**Kein** Nachweis eines externen Mounts, aber **auch kein**
+positiver Bind-/Backup-Nachweis. Es wurde keine Sicherung gestartet.
+
+Derselbe schreibgeschützte Audit erhält nun ausschließlich
+diagnostische und sanitisiert ausgegebene Felder:
+
+- `SOURCE_INODE_READ`, `MERGED_INODE_READ` – ob
+  `stat` für die beiden bekannten Pfade erfolgreich ist;
+- `CONTAINER_PID`, `PROCESS_ROOT_INODE_READ` – ob der
+  laufende Open-WebUI-Prozess und dessen
+  `/proc/<pid>/root/app/backend/data` im Gast lesbar sind;
+- `MERGED_INODE_RELATION` und
+  `PROCESS_ROOT_INODE_RELATION` – `IDENTICAL`,
+  `DIFFERENT` oder `UNVERIFIED`;
+- `BIND_TARGET`, `BIND_FSTYPE_RELATION`,
+  `BIND_SOURCE_RELATION` – ob `findmnt` den
+  **exakten** Zielpfad und Dateisystemtyp und die
+  Source-Familie des LXC-Rootfs bestätigt.
+
+Die numerischen Prozess-IDs, Mount-Quellen und Inodes werden
+**nicht ausgegeben**. Selbst ein identischer Inode-Vergleich
+erteilt **keine** automatische Backup-Freigabe. Die alte
+Prüflogik und `backup-bergen-ai-ct110-once.yml` bleiben
+unverändert; bei `DIFFERENT` oder abweichender Source
+muss die externe Datenherkunft vor einer Sicherung überprüft
+werden. GitHub-CI deckt den Namespace-Unterschied und
+nicht übereinstimmende Inodes mit Regressionstests ab.
+
+**Auf bp-controller ausschließlich den bekannten Read-only-Audit
+nach Git-Fetch erneut ausführen**, nicht das Einmalsicherungs-
+Playbook:
+
+```bash
+(
+set -euo pipefail
+BASE="$HOME/bergen-platform"
+WT="$HOME/bergen-platform-ai-private-bridge"
+git -C "$WT" fetch origin feat/bergen-ai-private-bridge-20261019
+git -C "$WT" switch --detach origin/feat/bergen-ai-private-bridge-20261019
+cd "$WT"
+"$BASE/.venv/bin/ansible-playbook" \
+  -i ansible/inventory.yml \
+  -i "$BASE/ansible/inventory.local.yml" \
+  ansible/playbooks/audit-bergen-ai-ct110-runtime-mount-relationships-readonly.yml \
+  --vault-id ai@prompt
+)
+```
