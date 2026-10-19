@@ -8,11 +8,14 @@ on:
       - 'ansible/files/bergen_ai/plan_ollama_models_readonly.py'
       - 'ansible/files/bergen_ai/audit_ollama_gpu_stage_readonly.py'
       - 'ansible/files/bergen_ai/audit_ollama_gpu_rollback_readonly.py'
+      - 'ansible/files/bergen_ai/audit_ollama_gpu_postboot_readonly.py'
       - 'ansible/playbooks/audit-bergen-ai-ollama-hardware-readonly.yml'
       - 'ansible/playbooks/manage-bergen-ai-ollama-models.yml'
       - 'ansible/playbooks/audit-bergen-ai-gpu-stage-readonly.yml'
       - 'ansible/playbooks/stage-bergen-ai-ollama-gpu-resources.yml'
       - 'ansible/playbooks/audit-bergen-ai-gpu-staged-readonly.yml'
+      - 'ansible/playbooks/audit-bergen-ai-gpu-postboot-readonly.yml'
+      - 'ansible/playbooks/restart-bergen-ai-gpu-approved.yml'
       - 'ansible/playbooks/rollback-bergen-ai-ollama-gpu-stage.yml'
       - 'tests/test_bergen_ai_ollama_hardware_models.py'
   pull_request:
@@ -21,11 +24,14 @@ on:
       - 'ansible/files/bergen_ai/plan_ollama_models_readonly.py'
       - 'ansible/files/bergen_ai/audit_ollama_gpu_stage_readonly.py'
       - 'ansible/files/bergen_ai/audit_ollama_gpu_rollback_readonly.py'
+      - 'ansible/files/bergen_ai/audit_ollama_gpu_postboot_readonly.py'
       - 'ansible/playbooks/audit-bergen-ai-ollama-hardware-readonly.yml'
       - 'ansible/playbooks/manage-bergen-ai-ollama-models.yml'
       - 'ansible/playbooks/audit-bergen-ai-gpu-stage-readonly.yml'
       - 'ansible/playbooks/stage-bergen-ai-ollama-gpu-resources.yml'
       - 'ansible/playbooks/audit-bergen-ai-gpu-staged-readonly.yml'
+      - 'ansible/playbooks/audit-bergen-ai-gpu-postboot-readonly.yml'
+      - 'ansible/playbooks/restart-bergen-ai-gpu-approved.yml'
       - 'ansible/playbooks/rollback-bergen-ai-ollama-gpu-stage.yml'
       - 'tests/test_bergen_ai_ollama_hardware_models.py'
       - '.github/workflows/bergen-ai-ollama-hardware-models.yml'
@@ -52,4 +58,6 @@ jobs:
           ansible-playbook -i ansible/inventory.yml ansible/playbooks/audit-bergen-ai-gpu-stage-readonly.yml --syntax-check
           ansible-playbook -i ansible/inventory.yml ansible/playbooks/stage-bergen-ai-ollama-gpu-resources.yml --syntax-check
           ansible-playbook -i ansible/inventory.yml ansible/playbooks/audit-bergen-ai-gpu-staged-readonly.yml --syntax-check
+          ansible-playbook -i ansible/inventory.yml ansible/playbooks/audit-bergen-ai-gpu-postboot-readonly.yml --syntax-check
+          ansible-playbook -i ansible/inventory.yml ansible/playbooks/restart-bergen-ai-gpu-approved.yml --syntax-check
           ansible-playbook -i ansible/inventory.yml ansible/playbooks/rollback-bergen-ai-ollama-gpu-stage.yml --syntax-check
