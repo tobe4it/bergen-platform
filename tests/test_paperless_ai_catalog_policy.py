@@ -188,7 +188,7 @@ class CatalogPolicyTest(unittest.TestCase):
         self.assertIn('"126","bergen-paperless"',script)
         self.assertIn('"bergen-paperless"',script)
         self.assertIn('EXPECTED_MODEL = "qwen2.5:14b-instruct-q4_K_M"',script)
-        self.assertIn('"/api/tags"',script)
+        self.assertIn('":11434/api/tags"',script)
         self.assertIn('ProxyHandler({})',script)
         self.assertIn('NoRedirect()',script)
         self.assertIn('CANDIDATE_PRIVATE_IPV4',script)
