@@ -1348,3 +1348,85 @@ cd "$WT"
   --vault-id ai@prompt
 )
 ```
+
+
+### Phase 0f.4 – Profile-Livebefund (19.10.2026, 22:16)
+
+Der Operator meldete für LXC 110 aus dem erweiterten
+`audit-bergen-ai-ct110-guest-mount-blockers-readonly.yml`
+(`ok=7 changed=0 failed=0`):
+
+```text
+TOTAL_MOUNTS=52
+PREVIOUS_PREFLIGHT_BLOCKER_COUNT=12
+LXCFS_SYSTEM_COUNT=8
+OTHER_NONPSEUDO_COUNT=4
+OVERLAY_MOUNT_COUNT=1
+UNRESOLVED_PROFILES=
+  PODMAN_GRAPH_TREE:BLOCK_OR_COW_FS:OTHER_SOURCE:1
+  PODMAN_GRAPH_TREE:FUSE_OVERLAYFS:OVERLAY_SOURCE:1
+  PROC_TREE:FUSE_LXCFS:OTHER_SOURCE:1
+  SYS_TREE:FUSE_LXCFS:OTHER_SOURCE:1
+BACKUP_STARTED=False
+BACKUP_AUTHORIZED=False
+```
+
+Somit entsprechen zehn der 12 Nicht-Pseudo-Mounts nach ihrer
+Dateisystemklasse LXCFS (`/proc`-/`/sys`-Systemmounts).
+Ein Mount entspricht der FUSE-Overlay-Laufzeit von Podman.
+Ein weiterer unter dem Podman-Graphroot hat einen Block-/CoW-
+FSType und eine bisher nicht identifizierte Source-Klasse. Die
+Zuordnung dieser beiden Podman-Mounts zu **einem konkreten**
+Open-WebUI-Container bzw. dessen gesichertem Datenverzeichnis
+bleibt unbewiesen. Das kann ein Bind auf Daten des
+LXC-Rootfs sein, **muss aber nicht**.
+
+### Phase 0f.5 – Dateisystemidentität statt weiterer Mount-Typ-Schätzung
+
+Das neue `audit-bergen-ai-ct110-runtime-mount-relationships-readonly.yml`
+verifiziert auf dem Gast ausschließlich lesend:
+
+1. Die live von `podman inspect open-webui` gemeldete
+   `MergedDir` liegt genau im geprüften rootverwalteten
+   Podman-Graphroot und nur **eine** erwartete Podman-Datenbindung
+   von `/srv/ai/open-webui` auf `/app/backend/data` existiert.
+2. Das FUSE-Overlay ist direkt auf diesem inspizierten
+   `MergedDir` gemountet und nicht an einem beliebigen
+   Speicherziel.
+3. Der Block-/CoW-Bind liegt genau unter diesem
+   `MergedDir/app/backend/data`; seine FSType/Quelle
+   entspricht der Gast-Rootfs-Basis, **und** sein Verzeichnis
+   bezeichnet dieselbe `st_dev`/`st_ino`-Identität wie
+   `/srv/ai/open-webui`.
+4. Genau zehn `fuse.lxcfs`-Mounts liegen im `/proc`-/`/sys`-
+   Systembereich. Alle weiteren Nicht-Pseudo-Mounts müssen
+   sich dadurch vollständig erklären lassen. Andernfalls:
+   `REVIEW_REQUIRED` oder `UNVERIFIED`.
+
+Die Ausgabe nennt nur fixe Zustandskategorien und Anzahlen,
+nicht die Podman-IDs, Daten, realen Mountpfade oder Quellen.
+Auch ein positiver Status ist **kein** Backup-/Restore-Proof:
+`BACKUP_AUTHORIZED=False`. Das Einmal-`vzdump`-Playbook
+und dessen aktuelle Sperre bleiben bis zum Live-Nachweis
+**unverändert**. Die zusätzliche Diagnostik wurde per
+Regressionstests und Ansible-Syntaxprüfung in GitHub CI
+geprüft.
+
+**Auf bp-controller:** Nach dem gewohnten Branch-Fetch nur
+das neue schreibgeschützte Playbook ausführen:
+
+```bash
+(
+set -euo pipefail
+BASE="$HOME/bergen-platform"
+WT="$HOME/bergen-platform-ai-private-bridge"
+git -C "$WT" fetch origin feat/bergen-ai-private-bridge-20261019
+git -C "$WT" switch --detach origin/feat/bergen-ai-private-bridge-20261019
+cd "$WT"
+"$BASE/.venv/bin/ansible-playbook" \
+  -i ansible/inventory.yml \
+  -i "$BASE/ansible/inventory.local.yml" \
+  ansible/playbooks/audit-bergen-ai-ct110-runtime-mount-relationships-readonly.yml \
+  --vault-id ai@prompt
+)
+```
