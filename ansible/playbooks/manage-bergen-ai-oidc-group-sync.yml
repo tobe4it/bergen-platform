@@ -1,0 +1,140 @@
+---
+# Existing OAuth/OIDC stays intact. This playbook changes ONLY automatic
+# group mapping via Open WebUI 0.10.2 admin config API (never direct SQL).
+# API key feature must first be enabled in the existing admin UI.
+- name: Audit or activate existing Open WebUI OIDC group synchronization
+  hosts: "{{ bergen_ai_family_audit_host | default('__no_approved_host__') }}"
+  gather_facts: false
+  serial: 1
+  vars:
+    bp_group_sync_mode: "{{ bergen_ai_group_sync_mode | default('audit') }}"
+    bp_group_sync_mutating: "{{ bp_group_sync_mode in ['apply', 'rollback'] }}"
+    bp_group_sync_payload:
+      protocol: group-sync-v1
+      mode: "{{ bp_group_sync_mode }}"
+      token: "{{ vault_open_webui_admin_token }}"
+      groups: "{{ bergen_ai_family_group_expected }}"
+      approved: "{{ bergen_ai_group_sync_approved | default(false) | bool }}"
+      backup_verified: "{{ bergen_ai_group_sync_backup_verified | default(false) | bool }}"
+      rollback_approved: "{{ bergen_ai_group_sync_rollback_approved | default(false) | bool }}"
+      expected_sha256: "{{ bergen_ai_group_sync_expected_sha256 | default('') }}"
+  tasks:
+    - name: Report only non-secret approval readiness
+      ansible.builtin.debug:
+        msg:
+          - "TARGET_MATCH={{ bergen_ai_family_audit_host | default('') == inventory_hostname }}"
+          - "THREE_GROUPS_CONFIGURED={{ bergen_ai_family_group_expected is mapping and ((bergen_ai_family_group_expected.keys() | list | sort) == ['adults','children','family']) }}"
+          - "VAULT_ADMIN_TOKEN_DEFINED={{ vault_open_webui_admin_token is defined }}"
+          - "VAULT_ADMIN_TOKEN_LENGTH_OK={{ vault_open_webui_admin_token | default('') | length >= 20 }}"
+          - "MODE={{ bp_group_sync_mode }}"
+          - "WRITE_APPROVED={{ not bp_group_sync_mutating or (bergen_ai_group_sync_approved | default(false) | bool) }}"
+          - "BACKUP_VERIFIED={{ not bp_group_sync_mutating or (bergen_ai_group_sync_backup_verified | default(false) | bool) }}"
+          - "FINGERPRINT_PRESENT={{ not bp_group_sync_mutating or (bergen_ai_group_sync_expected_sha256 | default('') | length == 64) }}"
+      changed_when: false
+
+    - name: Enforce reviewed single guest and write authorization
+      ansible.builtin.assert:
+        that:
+          - bergen_ai_family_audit_host is defined
+          - inventory_hostname == bergen_ai_family_audit_host
+          - ansible_play_hosts_all | length == 1
+          - bergen_ai_family_audit_approved | default(false) | bool
+          - bergen_ai_family_group_expected is mapping
+          - (bergen_ai_family_group_expected.keys() | list | sort) == ['adults','children','family']
+          - vault_open_webui_admin_token is defined
+          - vault_open_webui_admin_token | length >= 20
+          - bp_group_sync_mode in ['audit','apply','rollback']
+          - not bp_group_sync_mutating or not ansible_check_mode
+          - not bp_group_sync_mutating or (bergen_ai_group_sync_approved | default(false) | bool)
+          - not bp_group_sync_mutating or (bergen_ai_group_sync_backup_verified | default(false) | bool)
+          - not bp_group_sync_mutating or (bergen_ai_group_sync_expected_sha256 | default('') | length == 64)
+          - bp_group_sync_mode != 'rollback' or (bergen_ai_group_sync_rollback_approved | default(false) | bool)
+        fail_msg: OIDC_GROUP_SYNC_GATE_DENIED
+      no_log: true
+
+    - name: Execute protected Open WebUI version-pinned config API
+      ansible.builtin.command:
+        argv:
+          - python3
+          - -c
+          - "{{ lookup('ansible.builtin.file', playbook_dir ~ '/../files/bergen_ai/manage_oidc_group_sync_v0102.py') }}"
+        stdin: "{{ bp_group_sync_payload | to_json }}"
+        stdin_add_newline: true
+      register: bp_group_sync_raw
+      changed_when: false
+      failed_when: false
+      check_mode: false
+      no_log: true
+
+    - name: Extract one bounded non-identifying result
+      ansible.builtin.set_fact:
+        bp_group_sync_frames: >-
+          {{ bp_group_sync_raw.stdout_lines |
+             select('match', '^BERGEN_OIDC_GROUP_SYNC_V1:') | list }}
+      no_log: true
+
+    - name: Require exactly one sanitized result
+      ansible.builtin.assert:
+        that:
+          - bp_group_sync_frames | length == 1
+          - bp_group_sync_frames[0] | length < 1800
+        fail_msg: OIDC_GROUP_SYNC_RESULT_INVALID
+      no_log: true
+
+    - name: Parse reviewed status fields only
+      ansible.builtin.set_fact:
+        bp_group_sync_result: >-
+          {{ bp_group_sync_frames[0] |
+             regex_replace('^BERGEN_OIDC_GROUP_SYNC_V1:', '') |
+             from_json }}
+      no_log: true
+
+    - name: Print sanitized refusal reason
+      ansible.builtin.debug:
+        msg: >-
+          OIDC_GROUP_SYNC_ERROR={{
+            bp_group_sync_result.STATUS if bp_group_sync_result.STATUS | default('') in [
+                'VERSION_UNREVIEWED','ADMIN_API_UNAVAILABLE_OR_DENIED',
+                'ADMIN_API_KEYS_NOT_ENABLED','OIDC_GROUP_SCOPE_MISSING',
+                'OIDC_CLAIM_UNREVIEWED','EXACT_THREE_GROUPS_REQUIRED',
+                'DEFAULT_ROLE_MUST_REMAIN_PENDING',
+                'ROLE_OR_GROUP_CREATION_UNREVIEWED',
+                'PRIVATE_PROFILES_MISSING',
+                'INITIAL_MEMBERSHIP_NOT_EMPTY',
+                'CONFIG_FINGERPRINT_CHANGED',
+                'ALREADY_ENABLED','ALREADY_DISABLED',
+                'OAUTH_FLAGS_UNREVIEWED','UNEXPECTED_OAUTH_CHANGE',
+                'POSTCHECK_FAILED','UNCLASSIFIED_FAILURE'
+              ] else 'FAILED_CLOSED'
+          }}
+      when: bp_group_sync_raw.rc != 0
+
+    - name: Fail closed on unexpected live state or incomplete apply
+      ansible.builtin.assert:
+        that:
+          - bp_group_sync_raw.rc == 0
+          - bp_group_sync_result.AUDIT in ['READ_ONLY','CONTROLLED']
+          - bp_group_sync_result.STATUS in ['READY','PRIVATE_PROFILES_MISSING','ENABLED','GROUP_SYNC_ENABLED','GROUP_SYNC_DISABLED_MEMBERSHIP_REVIEW_REQUIRED']
+          - bp_group_sync_result.CHANGED is boolean
+          - bp_group_sync_mode != 'audit' or bp_group_sync_result.AUDIT == 'READ_ONLY'
+          - bp_group_sync_mode != 'audit' or not bp_group_sync_result.CHANGED
+          - bp_group_sync_mode != 'apply' or bp_group_sync_result.STATUS == 'GROUP_SYNC_ENABLED'
+          - bp_group_sync_mode != 'rollback' or bp_group_sync_result.STATUS == 'GROUP_SYNC_DISABLED_MEMBERSHIP_REVIEW_REQUIRED'
+        fail_msg: OIDC_GROUP_SYNC_CONFIG_FAILED
+      no_log: true
+
+    - name: Print only evidence of effective group sync and its revocation limitation
+      ansible.builtin.debug:
+        msg:
+          - "AUDIT={{ bp_group_sync_result.AUDIT }}"
+          - "STATUS={{ bp_group_sync_result.STATUS }}"
+          - "CONFIG_SHA256={{ bp_group_sync_result.CONFIG_SHA256 | default('N/A') }}"
+          - "PRIVATE_PROFILES_READY={{ bp_group_sync_result.PROFILES_PRIVATE_READY | default('N/A') }}"
+          - "LOCAL_GROUP_MEMBERS={{ bp_group_sync_result.MEMBER_COUNT | default('N/A') }}"
+          - "CLAIM={{ bp_group_sync_result.GROUP_CLAIM | default('N/A') }}"
+          - "GROUP_CREATION=OFF"
+          - "ROLE_MANAGEMENT=OFF"
+          - "EMPTY_OR_MISSING_CLAIM_REVOCATION=NOT_SUPPORTED_BY_V0_10_2"
+          - "SESSION_REVOCATION=NOT_PROVEN"
+          - "CHANGED={{ bp_group_sync_result.CHANGED }}"
+      changed_when: bp_group_sync_mutating and bp_group_sync_result.CHANGED | bool
