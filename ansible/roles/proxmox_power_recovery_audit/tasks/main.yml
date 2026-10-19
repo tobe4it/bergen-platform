@@ -207,6 +207,44 @@
   failed_when: false
   when: power_recovery_ethtool_path.rc == 0
 
+- name: Build compact per-adapter Wake-on-LAN status
+  ansible.builtin.set_fact:
+    power_recovery_wol_summary: >-
+      {{
+        power_recovery_wol_summary | default({}) | combine({
+          item.item: {
+            'query_rc': item.rc | default(-1),
+            'supported': (item.stdout | default('') | regex_findall('(?m)^[ \t]*Supports Wake-on:[ \t]*(\S+)') | first | default('UNKNOWN')),
+            'enabled': (item.stdout | default('') | regex_findall('(?m)^[ \t]*Wake-on:[ \t]*(\S+)') | first | default('UNKNOWN')),
+            'link': (item.stdout | default('') | regex_findall('(?m)^[ \t]*Link detected:[ \t]*(\S+)') | first | default('UNKNOWN'))
+          }
+        })
+      }}
+  loop: "{{ power_recovery_nic_wol.results | default([]) }}"
+  when: item.rc is defined
+  changed_when: false
+
+- name: Read driver identity for wired host adapter
+  check_mode: false
+  ansible.builtin.command:
+    argv:
+      - "{{ power_recovery_ethtool_path.stdout | trim }}"
+      - -i
+      - "{{ item }}"
+  loop: "{{ power_recovery_physical_interfaces.stdout_lines | select('match', '^en') | list }}"
+  register: power_recovery_ethernet_drivers
+  changed_when: false
+  failed_when: false
+  when: power_recovery_ethtool_path.rc == 0
+
+- name: Summarize wired host adapter drivers
+  ansible.builtin.debug:
+    msg: >-
+      {{ item.item }}:
+      {{ item.stdout_lines | default([]) | select('match', '^(driver:|version:|bus-info:)') | list }}
+  loop: "{{ power_recovery_ethernet_drivers.results | default([]) }}"
+  when: not (item.skipped | default(false))
+
 - name: Report Wake-on-LAN capability without changing device state
   ansible.builtin.debug:
     msg: >-
@@ -230,6 +268,7 @@
       - "Local IPMI character device: {{ power_recovery_ipmi_device.stat.exists | default(false) }}"
       - "Physical NIC interfaces (names only): {{ power_recovery_physical_interfaces.stdout_lines | default([]) }}"
       - "ethtool available: {{ power_recovery_ethtool_path.rc == 0 }}"
+      - "Wake-on-LAN capabilities (supported/enabled/link by adapter): {{ power_recovery_wol_summary | default({}) }}"
       - "Firmware sysfs interface: {{ power_recovery_firmware_attributes.stat.exists | default(false) }}"
       - "Exposed current_value paths: {{ power_recovery_firmware_paths.stdout_lines | default([]) }}"
       - "fwupdmgr available: {{ power_recovery_fwupd_path.rc == 0 }} (query rc: {{ power_recovery_fwupd_settings.rc | default('not-run') }})"
