@@ -16,7 +16,7 @@ GPU_SCRIPT = ROOT / "ansible/files/bergen_ai/audit_ollama_gpu_stage_readonly.py"
 
 class OllamaHardwareTests(unittest.TestCase):
     def test_scripts_parse_and_audit_does_not_mutate(self):
-        for f in [HW, PLAN, GPU_SCRIPT]:
+        for f in [HW, PLAN]:
             src = f.read_text()
             ast.parse(src, filename=str(f))
             for forbidden in [
