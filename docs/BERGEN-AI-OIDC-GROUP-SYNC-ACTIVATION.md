@@ -1,5 +1,83 @@
 # Bergen-AI – administrative API-Schlüssel und OIDC-Gruppensynchronisierung
 
+## Aktualisierung: Verwaltung ohne neuen API-Schlüssel (20.10.2026)
+
+**Bevorzugter Ansatz:** Die produktive Open-WebUI-OIDC-Konfiguration wird
+bereits durch das bestehende Ansible-Playbook
+`ansible/playbooks/configure-open-webui-oidc.yml` mit einer privaten
+Quadlet-Umgebungsdatei verwaltet. Weil `ENABLE_OAUTH_PERSISTENT_CONFIG=false`
+gesetzt ist, kann die Gruppensynchronisierung direkt über diesen vorhandenen
+Ansible-Pfad freigegeben werden. **Für den OIDC-Gruppenschalter ist deshalb
+kein Open-WebUI-Admin-API-Schlüssel erforderlich.** Ein manuell eingeschalteter
+API-Key-Schalter kann auf den vorigen Zustand zurückgesetzt werden, sofern
+kein anderer produktiver Dienst auf API-Schlüssel angewiesen ist.
+
+Der versionierte Source-of-Truth-Templatewert wird auf
+`ENABLE_OAUTH_GROUP_MANAGEMENT=true` gestellt.
+`ENABLE_OAUTH_GROUP_CREATION=false`,
+`ENABLE_OAUTH_ROLE_MANAGEMENT=false` und
+`DEFAULT_USER_ROLE=pending` bleiben erhalten. Bestehende Issuer,
+OIDC-Clientdaten, Redirect-URI, Scopes und Provider-Identität bleiben
+unverändert.
+
+**Read-only zuerst:**
+`ansible/playbooks/manage-bergen-ai-oidc-group-sync-env.yml`
+prüft auf `bergen-ai` die vorhandene root-only Umgebungsdatei,
+den Quadlet-Drop-in, die OIDC-Schutzwerte und deren SHA-256-Fingerprint.
+Default `bergen_ai_oidc_env_group_mode=audit`, ohne Änderungen und
+ohne admin token. Zusätzliche Variablen: nur die vorhandene
+Ansible/SSH-Inventarkonfiguration.
+
+~~~bash
+(
+set -euo pipefail
+BASE="$HOME/bergen-platform"
+WT="$HOME/bergen-platform-oidc-sync"
+BR="feat/bergen-ai-oidc-group-sync-20261020"
+git -C "$BASE" fetch origin "$BR"
+if test -e "$WT/.git"; then
+  test -z "$(git -C "$WT" status --porcelain)"
+  git -C "$WT" switch --detach "origin/$BR"
+else
+  test ! -e "$WT"
+  git -C "$BASE" worktree add --detach "$WT" "origin/$BR"
+fi
+cd "$WT"
+"$BASE/.venv/bin/ansible-playbook" \
+  -i ansible/inventory.yml \
+  -i "$BASE/ansible/inventory.local.yml" \
+  ansible/playbooks/manage-bergen-ai-oidc-group-sync-env.yml \
+  --vault-id ai@prompt
+)
+~~~
+
+Der **separat freigegebene Apply** erfordert die expliziten lokalen Variablen
+`bergen_ai_oidc_env_group_mode=apply`,
+`bergen_ai_oidc_env_group_approved=true`,
+`bergen_ai_oidc_env_backup_verified=true` und
+`bergen_ai_oidc_env_expected_sha256` gleich dem unmittelbar zuvor
+beobachteten Fingerprint. In einer 0600-lokalen YAML-Datei hinterlegen,
+nicht im Git. Erst dann dasselbe Playbook mit `-e @DATEI` ausführen.
+
+Das Playbook erstellt eine root-only 0600 Preimage-Kopie der
+OIDC-Umgebungsdatei, ändert nur die eine Gruppenmanagement-Zeile, startet
+**den bestehenden** `open-webui.service` neu, prüft den HTTP-Healthcheck
+und die effektive Variable im laufenden Container. Der Schutzpfad verweigert
+jede unbekannte Konfiguration. Für Rollback gelten gesonderte Approval- und
+Fingerprint-Gates; vor dem Rücksetzen prüft es, dass außer der einen
+Gruppenmanagement-Zeile keine OIDC-Werte geändert wurden. **Die bekannte
+Open-WebUI-0.10.2-Einschränkung beim Entfernen von Gruppen durch leere Claims
+bleibt bestehen.** Bestehende Web-Sessions werden nicht automatisch widerrufen.
+
+**Abgrenzung:** Das frühere REST-API-Playbook
+`manage-bergen-ai-oidc-group-sync.yml` ist für diesen Host nicht nötig und
+soll hier **nicht** benutzt werden. Der separate PR #123 Modell-Installer
+verwendet noch Admin-API-Authentifizierung; die tokenlose Ausführung
+des OIDC-Gruppenschalters allein ersetzt dessen Modell-API nicht.
+Privatberechtigungen und Kinderlernregel müssen weiterhin separat
+abgenommen werden.
+
+---
 **Betreiberfreigabe am 20.10.2026:** Admin-API-Schlüssel aktivieren und die
 vorhandenen OIDC-Gruppen automatisch bei Anmeldung zuordnen. Synology/OIDC
 ist bereits per Ansible eingerichtet und wurde in Paperless als
