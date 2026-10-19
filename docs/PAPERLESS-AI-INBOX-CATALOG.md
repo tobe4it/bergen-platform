@@ -236,10 +236,16 @@ timers remain OFF.
 The operator confirmed that, besides Paperless and local Open WebUI,
 **bergen-syslog (existing LXC 120)** should later use Bergen-AI
 for analysis of collected infrastructure logs. Other conceivable
-consumers include Proxmox operations, the mail stack, isolated IBM
-MQ lab diagnostics, BookStack knowledge retrieval, and EVCC/InfluxDB
-trend analysis. These are **ideas only**, not active permissions,
-deployments, model jobs or approvals.
+consumers include Proxmox operations, isolated IBM MQ lab
+diagnostics, BookStack knowledge retrieval, and EVCC/InfluxDB
+trend analysis. **Mail/Postfix/Dovecot belongs to the central
+syslog data sources, not to a separate future LLM consumer**:
+the existing `bootstrap-mail-backend.yml` includes `remote_syslog`,
+and `docs/MAIL.md` documents queued TCP forwarding to
+bergen-syslog. Verify actual receipt from each currently active
+mail gateway/backend separately; configuration alone is not
+end-to-end evidence. These are architectural options only,
+not active LLM permissions, deployments, jobs or approvals.
 
 **Network and identity policy:**
 
@@ -261,12 +267,18 @@ deployments, model jobs or approvals.
   underlying owner/application ACL and sends a bounded request.
   Family wiki and Paperless retrieval must retain per-user ACL
   boundaries; embeddings/RAG remain separately disabled.
-- For logs: introduce a separate read-only, explicitly scoped
-  syslog analyzer, bounded time-window queries, deterministic
-  sanitization of secrets/tokens and sensitive identifiers,
-  sampling/deduplication and no automatic command execution.
-  Never ingest the complete unreviewed log stream or let LLM
-  suggestions mutate infrastructure.
+- For logs: extend the **existing** `bergen-syslog-analyzer`
+  (currently focused on WLAN WPA/EAPOL event types) with a
+  separate read-only Postfix/Dovecot detection/correlation module;
+  do not create a second log collector. Sources arrive under
+  `/var/log/remote/<sender-ip>.log` in LXC120. Use bounded
+  time-window queries, deterministic sanitization of secrets,
+  mailbox identifiers and other sensitive data, sampling/
+  deduplication and no automatic command execution. Verify
+  that logs from all relevant current mail gateways and backends
+  truly arrive, rather than inferring this from configured
+  forwarding. Never ingest the complete unreviewed log stream
+  or let LLM suggestions mutate infrastructure.
 - For approved future clients, review source identity, runtime
   authorization, retention, concurrency/memory budgeting and
   negative network tests separately. `OLLAMA_LISTENER=WILDCARD`
