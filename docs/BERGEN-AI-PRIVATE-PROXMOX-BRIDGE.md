@@ -484,3 +484,45 @@ noch eine lesbare aktuelle Konfiguration erfüllen diese Gates. Keine
 Bridge-/NIC-/Firewall-/Ollama-Änderung wird in diesem Schritt durchgeführt.
 
 **Separate Freigabe vor produktivem Apply erforderlich.**
+
+
+### Live-Befund Phase 0c (19.10.2026, erster Lauf)
+
+Auf `bp-controller` ausgeführt: localhost `ok=6 changed=0 failed=0`,
+`venombox ok=7 changed=0 failed=0`.
+
+```text
+IPAM_STATUS=NO_OVERLAP_IN_DECLARED_RANGES
+IPAM_SCOPE_COVERAGE=OPERATOR_DECLARED_INCOMPLETE
+IPAM_SOURCE_QUALITY=MANUAL_INPUT_NOT_INDEPENDENTLY_VERIFIED
+HOST_STATUS=REVIEW_INCOMPLETE
+HOST_NETWORK_CONFIG=READABLE_SOURCE_ONLY
+CT110_CONFIG=UNVERIFIED
+CT126_CONFIG=UNVERIFIED
+BACKUP_MOUNT=NFS_MOUNT_PRESENT_ONLY
+CT110_BACKUP=NO_RECENT_FILE_METADATA
+CT126_BACKUP=RECENT_FILE_METADATA_ONLY
+PVE_LOCAL_WG=NO_OVERLAP_IN_LOCAL_WG_ALLOWED_IPS
+CONFIG_BACKUP=NOT_ATTESTED
+OLLAMA_WEBUI_CONFIG_BACKUP=NOT_ATTESTED
+RESTORE_TEST=NOT_ATTESTED
+OOB_CONSOLE=NOT_ATTESTED
+ROLLBACK_CLEARANCE=NOT_PROVEN
+APPLY_AUTHORIZED=False
+```
+
+**Ein Audit-Bug wurde danach identifiziert:** Die erste Version hatte
+`r"^net0:\\s"` anstelle von `r"^net0:\s"`; das kann eine
+normale `pct config`-Zeile `net0: name=…` nicht erkennen.
+Die CT110-/CT126-`UNVERIFIED`-Werte aus diesem ersten Lauf sind daher
+**kein Hinweis auf tatsächlich fehlende Netzinterfaces**. Korrektur und
+Regressionstest sind im Feature-Branch, GitHub-CI erfolgreich. Der
+**korrigierte Live-Lauf steht noch aus**.
+
+Das Backup-Ergebnis für LXC110 betrifft ausschließlich die auf dem
+angegebenen NFS-Mount unter `dump/` in den letzten sieben Tagen
+erkannten `vzdump-lxc-110-*.tar.*`-Dateimetadaten. Es schließt ältere,
+anders benannte oder extern gespeicherte Backups nicht aus. LXC126-
+Dateimetadaten sind weder ein Integritäts- noch ein Restorebeweis.
+Externe UniFi-/VPN-/Off-Host-Netze sind weiterhin unvollständig.
+**Keine Apply-Erlaubnis.**
