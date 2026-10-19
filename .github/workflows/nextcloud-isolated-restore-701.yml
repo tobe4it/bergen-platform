@@ -161,6 +161,11 @@ jobs:
           builder = yaml.safe_load(Path("ansible/playbooks/audit-rocky-9-lxc-template-builder-readonly.yml").read_text())
           assert len(builder) == 1 and builder[0]["hosts"] == "venombox"
           tasks_builder = builder[0]["tasks"]
+          assert all(
+              isinstance(condition, str)
+              for task in tasks_builder
+              for condition in task.get("ansible.builtin.assert", {}).get("that", [])
+          ), "All Ansible assert conditions must be strings, not YAML mappings"
           assert not any(any(key in t for key in (
               "ansible.builtin.shell", "ansible.builtin.script",
               "ansible.builtin.raw", "ansible.builtin.copy",
