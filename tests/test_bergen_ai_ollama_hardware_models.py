@@ -1,6 +1,11 @@
 """Offline safety tests for the venombox GPU and local Ollama model rollout."""
 import ast
+import contextlib
+import importlib.util
+import io
+import tempfile
 from pathlib import Path
+from unittest import mock
 import unittest
 import yaml
 
@@ -14,6 +19,7 @@ GPU_STAGE = ROOT / "ansible/playbooks/stage-bergen-ai-ollama-gpu-resources.yml"
 GPU_SCRIPT = ROOT / "ansible/files/bergen_ai/audit_ollama_gpu_stage_readonly.py"
 GPU_ROLLBACK_SCRIPT = ROOT / "ansible/files/bergen_ai/audit_ollama_gpu_rollback_readonly.py"
 GPU_ROLLBACK_PLAY = ROOT / "ansible/playbooks/rollback-bergen-ai-ollama-gpu-stage.yml"
+GPU_STAGED_READONLY = ROOT / "ansible/playbooks/audit-bergen-ai-gpu-staged-readonly.yml"
 
 
 class OllamaHardwareTests(unittest.TestCase):
@@ -128,6 +134,61 @@ class OllamaHardwareTests(unittest.TestCase):
         self.assertIn("[pct, set, '110', --memory, '16384']", text)
         self.assertNotIn("pct, reboot", text)
         self.assertNotIn("pct, stop", text)
+
+    def test_staged_verification_accepts_real_pct_path_equals_format(self):
+        stage = GPU_STAGE.read_text()
+        self.assertIn("dev0: path=/dev/dri/renderD128,uid=", stage)
+        self.assertIn("dev1: path=/dev/kfd,uid=", stage)
+        self.assertNotIn("'dev0: /dev/dri/renderD128'", stage)
+        self.assertNotIn("'dev1: /dev/kfd'", stage)
+        checked = yaml.safe_load(GPU_STAGED_READONLY.read_text())[0]
+        self.assertEqual(checked["hosts"], "venombox")
+        for task in checked["tasks"]:
+            if "ansible.builtin.command" in task:
+                self.assertIs(task["changed_when"], False)
+                self.assertTrue(task["no_log"])
+
+    def test_exact_preimage_compare_accepts_only_expected_gpu_stage(self):
+        spec = importlib.util.spec_from_file_location(
+            "bergen_gpu_preimage_audit", GPU_ROLLBACK_SCRIPT
+        )
+        audit = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(audit)
+        backup_lines = [
+            "arch: amd64", "cores: 18", "hostname: bergen-ai",
+            "memory: 16384", "swap: 2048", "unprivileged: 1",
+        ]
+        stage_lines = [
+            "arch: amd64", "cores: 18",
+            "dev0: path=/dev/dri/renderD128,uid=999,gid=992,mode=0660",
+            "dev1: path=/dev/kfd,uid=999,gid=992,mode=0660",
+            "hostname: bergen-ai", "memory: 32768", "swap: 2048",
+            "unprivileged: 1",
+        ]
+        with tempfile.TemporaryDirectory() as d:
+            b = Path(d) / "original.conf"
+            c = Path(d) / "staged.conf"
+            b.write_text("\n".join(backup_lines) + "\n")
+            b.chmod(0o600)
+            with mock.patch.object(audit, "BACKUP", b), mock.patch.object(audit, "CURRENT", c):
+                for mutation, should_pass in [
+                    (stage_lines, True),
+                    ([x.replace("gid=992", "gid=44") for x in stage_lines], False),
+                    ([x.replace("uid=999", "uid=0") for x in stage_lines], False),
+                    ([x.replace("mode=0660", "mode=0666") for x in stage_lines], False),
+                    (stage_lines + ["cores: 8"], False),
+                    ([x.replace("memory: 32768", "memory: 24576") for x in stage_lines], False),
+                ]:
+                    with self.subTest(mutation=mutation):
+                        c.write_text("\n".join(mutation) + "\n")
+                        output = io.StringIO()
+                        with contextlib.redirect_stdout(output):
+                            if should_pass:
+                                audit.main()
+                                self.assertIn('"STATUS": "EXACT_STAGE_ONLY"', output.getvalue())
+                            else:
+                                with self.assertRaises(ValueError):
+                                    audit.main()
 
     def test_embedding_tag_is_canonical_and_default_but_rag_stays_off(self):
         planner = PLAN.read_text()
