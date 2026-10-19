@@ -38,7 +38,7 @@
       ansible.builtin.assert:
         that:
           - model_audit_version.json is mapping
-          - model_audit_version.json.version | regex_search('^v?0[.]10[.]2$')
+          - model_audit_version.json.version in ['0.10.2', 'v0.10.2']
         fail_msg: MODEL_VERSION_UNREVIEWED
       no_log: true
 
