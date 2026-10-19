@@ -616,6 +616,38 @@ metadata-quality comparison against known answers (title,
 correspondent, document type, tags) with no real family documents.
 Preserve the Paperless inbox tag and existing parent-only ACL
 gates; embeddings/RAG remain OFF.
+### Third / repeated pair: Qwen vs Mistral (2026-10-19)
+
+Fresh operator-confirmed execution of both synthetic benchmarks:
+
+| Metric | Qwen2.5 14B rerun | Mistral Nemo 12B rerun |
+| --- | ---: | ---: |
+| Generated tokens | 127 | 192 |
+| Decode speed | 7.1 tokens/s | 8.9 tokens/s |
+| Model load duration | 2.63 s | 2.10 s |
+| Ollama GPU allocation | 8.44 GiB | 6.65 GiB |
+| GPU placement | ALLOCATION_OBSERVED | ALLOCATION_OBSERVED |
+| Play recap | 7 ok, 1 changed, 0 failed | 7 ok, 1 changed, 0 failed |
+
+Across the two full-length runs for each model, arithmetic mean
+decode rate is ~7.2 tokens/s for Qwen and 8.9 tokens/s for Mistral
+(~24% faster for Mistral in these runs); Mistral allocation is
+1.79 GiB (~21%) lower. Sample is still too small for strong
+statistical claims and model tokenizers / output lengths differ.
+
+The supplied terminal excerpt also shows an **intermediate failed
+Ansible recap** (`ok=3 changed=1 failed=1`) without the task
+failure message; no root cause is established. A cache-busy
+refusal is plausible if the previously loaded model was within
+its 45-second keep-alive. Do not report that conjecture as fact.
+The subsequent full independent runs both passed.
+
+PR #114 currently retains **Qwen14B as the selected first
+Paperless model** and Mistral as comparison only. GPU throughput
+does not justify changing that reviewed deployment choice before
+synthetic title/correspondent/document-type/tag accuracy testing
+and parent-only ACL + manual-inbox review gates. No Paperless
+configuration or document mutation was performed in these tests.
 ## Step 2 – audit model download needs, still ZERO writes
 
     (
