@@ -1,0 +1,79 @@
+---
+# No writes. Proves only the observed Podman runtime mount relationships.
+- name: Verify CT110 runtime-mount backing for one-off backup preparation
+  hosts: venombox
+  gather_facts: false
+  become: true
+  tasks:
+    - name: Require exact Proxmox host
+      ansible.builtin.assert:
+        that:
+          - inventory_hostname == 'venombox'
+
+    - name: Inspect bounded guest mount tree and Podman bind file identity
+      ansible.builtin.command:
+        argv:
+          - python3
+          - -c
+          - "{{ lookup('ansible.builtin.file', playbook_dir ~ '/../files/bergen_ai/audit_ct110_runtime_mount_relationships_readonly.py', rstrip=False) }}"
+      register: ct110_runtime_raw
+      changed_when: false
+      failed_when: false
+      check_mode: false
+      no_log: true
+
+    - name: Extract exactly one bounded sanitized runtime frame
+      ansible.builtin.set_fact:
+        ct110_runtime_frames: >-
+          {{ ct110_runtime_raw.stdout_lines | default([]) |
+             select('match', '^BERGEN_AI_CT110_RUNTIME_MOUNT_PROOF_V1:') | list }}
+      no_log: true
+
+    - name: Refuse missing duplicate oversized or failed frames
+      ansible.builtin.assert:
+        that:
+          - ct110_runtime_raw.rc == 0
+          - ct110_runtime_frames | length == 1
+          - ct110_runtime_frames[0] | length < 1800
+      no_log: true
+
+    - name: Parse only fixed aggregate runtime mount categories
+      ansible.builtin.set_fact:
+        ct110_runtime: >-
+          {{ (ct110_runtime_frames[0] |
+              regex_replace('^BERGEN_AI_CT110_RUNTIME_MOUNT_PROOF_V1:', '')) | from_json }}
+      no_log: true
+
+    - name: Require no unintended authorization or runtime mutations
+      ansible.builtin.assert:
+        that:
+          - ct110_runtime.AUDIT == 'READ_ONLY'
+          - not ct110_runtime.CHANGED
+          - not ct110_runtime.BACKUP_EXECUTED
+          - not ct110_runtime.BACKUP_AUTHORIZED
+          - not ct110_runtime.APPLY_AUTHORIZED
+          - not ct110_runtime.DATA_INTEGRITY_PROVEN
+          - ct110_runtime.RESTORE_TEST == 'NOT_ATTESTED'
+          - ct110_runtime.ROLLBACK_CLEARANCE == 'NOT_PROVEN'
+          - ct110_runtime.STATUS in ['EXPECTED_RUNTIME_MOUNTS_ONLY', 'REVIEW_REQUIRED', 'UNVERIFIED']
+          - ct110_runtime.PODMAN_INSPECT_RELATIONSHIP in ['EXACT_SINGLE_WEBUI_BIND', 'UNVERIFIED']
+          - ct110_runtime.ROOTFS_BIND_INODE_IDENTITY in ['IDENTICAL', 'UNVERIFIED']
+          - ct110_runtime.RUNTIME_MOUNTS_MATCH_EXPECTATION | type_debug == 'bool'
+      no_log: true
+
+    - name: Display only classified runtime mount evidence
+      ansible.builtin.debug:
+        msg:
+          - AUDIT=READ_ONLY
+          - "STATUS={{ ct110_runtime.STATUS }}"
+          - "PODMAN_INSPECT_RELATIONSHIP={{ ct110_runtime.PODMAN_INSPECT_RELATIONSHIP }}"
+          - "ROOTFS_BIND_INODE_IDENTITY={{ ct110_runtime.ROOTFS_BIND_INODE_IDENTITY }}"
+          - "LXCFS_SYSTEM_MOUNT_COUNT={{ ct110_runtime.LXCFS_SYSTEM_MOUNT_COUNT }}"
+          - "FUSE_OVERLAY_MOUNT_COUNT={{ ct110_runtime.FUSE_OVERLAY_MOUNT_COUNT }}"
+          - "WEBUI_ROOTFS_BIND_MOUNT_COUNT={{ ct110_runtime.WEBUI_ROOTFS_BIND_MOUNT_COUNT }}"
+          - "UNACCOUNTED_NONPSEUDO_MOUNT_COUNT={{ ct110_runtime.UNACCOUNTED_NONPSEUDO_MOUNT_COUNT }}"
+          - "RUNTIME_MOUNTS_MATCH_EXPECTATION={{ ct110_runtime.RUNTIME_MOUNTS_MATCH_EXPECTATION }}"
+          - BACKUP_EXECUTED=False
+          - BACKUP_AUTHORIZED=False
+          - RESTORE_TEST=NOT_ATTESTED
+          - APPLY_AUTHORIZED=False
