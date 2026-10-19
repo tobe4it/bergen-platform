@@ -35,11 +35,14 @@ class TestSafeLinks(unittest.TestCase):
             )
 
     def test_indirect_external_traversal_rejected(self):
-        with self.assertRaisesRegex(audit.AuditError, "SYMLINK_CHAIN_ESCAPE"):
+        # Lexically html/data/redirect/../etc is inside html, but
+        # redirect points to html: resolving .. afterwards escapes html.
+        with self.assertRaisesRegex(audit.AuditError, "SYMLINK_ESCAPE"):
             audit.validate_symbolic_links(
-                {"html", "html/data", "html/data/redirect", "html/data/alias"},
-                {"html/data/redirect": "../../../tmp",
-                 "html/data/alias": "redirect"},
+                {"html", "html/data", "html/data/redirect", "html/data/alias",
+                 "html/data/etc"},
+                {"html/data/redirect": "..",
+                 "html/data/alias": "redirect/../etc"},
             )
 
     def test_cycles_rejected(self):
