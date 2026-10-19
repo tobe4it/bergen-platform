@@ -23,6 +23,8 @@ NEGATIVE_PROBE_SCRIPT = ROOT / "ansible/files/paperless/audit_ai_ollama_bp_contr
 NEGATIVE_PROBE_PLAY = ROOT / "ansible/playbooks/audit-paperless-ai-ollama-negative-client-readonly.yml"
 TOPOLOGY_SCRIPT = ROOT / "ansible/files/paperless/audit_ai_ollama_ct_topology_readonly.py"
 TOPOLOGY_PLAY = ROOT / "ansible/playbooks/audit-paperless-ai-ollama-topology-readonly.yml"
+OBSERVED_SOURCE_SCRIPT = ROOT / "ansible/files/paperless/audit_ai_catalog_observed_tcp_source.py"
+OBSERVED_SOURCE_PLAY = ROOT / "ansible/playbooks/audit-paperless-ai-ollama-observed-source.yml"
 
 
 def load_policy():
@@ -187,6 +189,55 @@ class CatalogPolicyTest(unittest.TestCase):
         self.assertIn("StandardError=null", unit)
         timer_spec = (ROOT / "ansible/files/paperless/bergen-ai-catalog.timer").read_text()
         self.assertIn("OnCalendar=*:0/5", timer_spec)
+
+    def test_observed_paperless_tcp_source_requires_explicit_approval_and_no_http(self):
+        src=OBSERVED_SOURCE_SCRIPT.read_text()
+        ast.parse(src,filename=str(OBSERVED_SOURCE_SCRIPT))
+        playtext=OBSERVED_SOURCE_PLAY.read_text()
+        for token in ('"110","bergen-ai"','"126","bergen-paperless"',
+                      '"ss","-Htn","state","established"',
+                      '"pct","exec","126","--","podman","exec","bergen-paperless"',
+                      'socket.create_connection((sys.argv[1],11434)',
+                      'time.sleep(8)','len(observed)!=1','if baseline:',
+                      'SOURCE_OBSERVED','NOT_DETERMINED',
+                      'NETWORK_EXPOSURE_GATE="REVIEW_REQUIRED"'):
+            self.assertIn(token,src)
+        for forbidden in ('/api/tags', '/api/generate', '/api/chat',
+                          'nft add', 'nft insert', 'iptables -A',
+                          'pct reboot', 'pct set','pct stop',
+                          'ollama pull', 'ollama run',
+                          'document.content', 'model.generate',
+                          '.send(', '.sendall(', '.sendto('):
+            self.assertNotIn(forbidden,src)
+        play=yaml.safe_load(playtext)[0]
+        self.assertEqual(play['hosts'],'venombox')
+        self.assertTrue(play['become'])
+        self.assertFalse(play['gather_facts'])
+        self.assertIn('bergen_ai_paperless_source_observation_approved',playtext)
+        self.assertIn('EXPOSURE_GATE=REVIEW_REQUIRED',playtext)
+        commands=[task for task in play['tasks'] if 'ansible.builtin.command' in task]
+        self.assertEqual(len(commands),1)
+        self.assertTrue(commands[0]['no_log'])
+        self.assertFalse(commands[0]['changed_when'])
+        self.assertFalse(commands[0]['failed_when'])
+        for task in play['tasks']:
+            for condition in task.get('ansible.builtin.assert',{}).get('that',[]):
+                self.assertIsInstance(condition,str)
+
+    def test_socket_peer_parser_requires_unambiguous_single_established_connection(self):
+        from unittest import mock
+        spec=importlib.util.spec_from_file_location('bergen_ai_observed_peer',OBSERVED_SOURCE_SCRIPT)
+        module=importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        sample='ESTAB 0 0 [::ffff:192.168.20.225]:11434 [::ffff:192.168.20.200]:44220\\n'
+        with mock.patch.object(module,'run',return_value=sample):
+            peers=module.peers()
+            self.assertEqual(len(peers),1)
+            self.assertEqual(str(peers[0]),'192.168.20.200')
+        with mock.patch.object(module,'run',return_value=None):
+            self.assertIsNone(module.peers())
+        with mock.patch.object(module,'run',return_value=''):
+            self.assertEqual(module.peers(),[])
 
     def test_ct110_ct126_network_topology_audit_is_private_and_readonly(self):
         src=TOPOLOGY_SCRIPT.read_text()
