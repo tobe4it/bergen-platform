@@ -506,3 +506,37 @@ No commands in this section have been run; no PVE resources or
 production systems have been changed. Begin with read-only network
 topology and free VMID checks; require explicit operator approval
 before any build-guest creation or template conversion.
+
+
+## Phase 5C: read-only template builder preflight on venombox
+
+A fresh manual inspection on 2026-10-20 confirmed PVE
+pve-manager/9.2.20 (kernel 7.0.14-19-pve), candidate VMIDs 702,
+790 and 791 absent, and controller CT100 attached to vmbr2 with
+firewall=1 and DHCP. Local Rocky 9 PVE template already present.
+The vmbr2 UP state is **not** proof of authorized internet egress,
+DNS access or the expected VLAN/firewall policy.
+
+After fetching this branch on the existing bp-controller detached
+worktree, execute **only** the standalone read-only preflight:
+
+    BASE="$HOME/bergen-platform"
+    cd "$HOME/bergen-platform-nextcloud-restore"
+    git fetch origin feat/nextcloud-isolated-restore-701-20261019
+    git switch --detach origin/feat/nextcloud-isolated-restore-701-20261019
+    ansible-playbook \
+      -i "$BASE/ansible/inventory.yml" \
+      -i "$BASE/ansible/inventory.local.yml" \
+      ansible/playbooks/audit-rocky-9-lxc-template-builder-readonly.yml
+
+The preflight verifies the exact PVE host, cluster-wide free IDs,
+existing local template and SHA-256, vmbr2 presence, CT100's
+existing bridge and firewall flag, CT701's continued protection and
+networklessness, local and local-zfs active and ZFS pool health.
+It does not authorize network egress or mutate any host/guest.
+Expected: ROCKY_9_8_LXC_TEMPLATE_BUILDER_READ_ONLY_READY,
+changed=0, failed=0.
+
+Only after separate approval and an exact reviewed network policy
+should an **independent** disposable LXC 790 be created as a
+networked Rocky 9-to-9.8 builder. Never run builder commands on 701.
