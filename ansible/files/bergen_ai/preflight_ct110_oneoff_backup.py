@@ -82,7 +82,9 @@ def guest_mounts():
     try:
         data = json.loads(raw)
         filesystems = data.get("filesystems")
-        if not isinstance(filesystems, list) or not filesystems or len(filesystems) > 250:\n            return "UNVERIFIED"\n        if not any(isinstance(node, dict) and node.get("target") == "/" for node in filesystems):
+        if not isinstance(filesystems, list) or not filesystems or len(filesystems) > 250:
+            return "UNVERIFIED"
+        if not any(isinstance(node, dict) and node.get("target") == "/" for node in filesystems):
             return "UNVERIFIED"
 
         def visit(nodes, depth=0):
