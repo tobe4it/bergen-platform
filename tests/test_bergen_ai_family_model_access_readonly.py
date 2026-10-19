@@ -121,6 +121,10 @@ class FamilyModelACLTest(unittest.TestCase):
         src = PLAYBOOK.read_text()
         self.assertIn("ansible_play_hosts_all | length == 1", src)
         self.assertIn("MODEL_VERSION_UNREVIEWED", src)
+        # Ansible's conditionals must evaluate to bool, not the string
+        # returned by regex_search() on a matching runtime version.
+        self.assertIn("model_audit_version.json.version in ['0.10.2', 'v0.10.2']", src)
+        self.assertNotIn("model_audit_version.json.version | regex_search", src)
         self.assertIn("READ_ONLY", src)
         self.assertIn("CHANGED=False", src)
         self.assertIn("no_log: true", src)
