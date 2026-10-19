@@ -3,7 +3,6 @@
   ansible.builtin.assert:
     that:
       - inventory_hostname == 'venombox'
-      - power_recovery_wol_approved | default(false) | bool in [true, false]
     fail_msg: "Only venombox is supported"
 
 - name: Read short physical-host name
@@ -142,7 +141,7 @@
         name: bergen-venombox-wol.service
         daemon_reload: true
         enabled: true
-        state: started
+        state: "{{ 'restarted' if power_recovery_wol_enabled == 'd' else 'started' }}"
       when: not ansible_check_mode
 
     - name: Verify resulting Wake-on-LAN state
