@@ -71,6 +71,27 @@ class CT110MountDiagnosisTest(TestCase):
         self.assertEqual(diag.classify_config(config)["LXC_MOUNT_ENTRY_DEVICE_ORIGIN"],
                          "EXACT_FUSE_DEVICE_BIND")
 
+    def test_four_and_six_field_device_forms_remain_exactly_restricted(self):
+        four = "/dev/fuse dev/fuse none bind,optional,create=file"
+        six = four + " 0 0"
+        for entry, category in ((four, "FOUR_FIELD_FORM"),
+                                (six, "SIX_FIELD_FORM")):
+            self.assertEqual(diag.classify_entry_device_origin([entry]),
+                             "EXACT_FUSE_DEVICE_BIND")
+            self.assertEqual(diag.classify_entry_format([entry]), category)
+            actual = diag.classify_config(BASE + "lxc.mount.entry: " + entry + "\n")
+            self.assertEqual(actual["LXC_MOUNT_ENTRY_FORMAT"], category)
+        for source in ("/mnt/untrusted", "/etc/secret", "/dev/different"):
+            self.assertEqual(diag.classify_entry_device_origin([
+                source + " dev/fuse none bind,optional,create=file"
+            ]), "SOURCE_OR_OPTIONS_REVIEW")
+        self.assertEqual(diag.classify_entry_format([
+            "/dev/fuse dev/fuse none bind 0"
+        ]), "OTHER_FIELD_COUNT")
+        self.assertEqual(diag.classify_entry_device_origin([
+            "/dev/fuse dev/fuse none bind,create=file 0"
+        ]), "UNVERIFIED")
+
     def test_pve_mp_and_hook_appear_only_as_categories(self):
         report = diag.classify_config(BASE +
             "mp0: /private/customer-folder,mp=/data,backup=0\n"
