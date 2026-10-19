@@ -6,6 +6,7 @@ never printed. Existing user/group membership and OIDC config are untouched.
 import hashlib
 import json
 import os
+import sqlite3
 from pathlib import Path
 import subprocess
 import sys
@@ -98,7 +99,23 @@ def check_guest():
     demand(not any(x in values for x in
                    ("DATABASE_URL", "DATABASE_TYPE", "DATABASE_USER")),
            "DATABASE_BACKEND_UNREVIEWED")
-    demand((Path(sources[0]) / "webui.db").is_file(), "DATABASE_NOT_FOUND")
+    db_file = Path(sources[0]) / "webui.db"
+    demand(db_file.is_file() and not db_file.is_symlink(),
+           "DATABASE_NOT_FOUND")
+    # First-stage release targets an EMPTY membership/ACL baseline. Even a
+    # single unexpected existing member can immediately see the new aliases;
+    # fail closed rather than accidentally enabling anyone at this stage.
+    uri = db_file.resolve().as_uri() + "?mode=ro"
+    with sqlite3.connect(uri, uri=True, timeout=4) as db:
+        db.execute("PRAGMA query_only=ON")
+        member_count = db.execute(
+            'SELECT COUNT(*) FROM "group_member"').fetchone()[0]
+        existing_grants = db.execute(
+            "SELECT COUNT(*) FROM access_grant WHERE resource_type='model'"
+        ).fetchone()[0]
+    demand(member_count == 0, "GROUP_MEMBERSHIP_REVIEW_REQUIRED")
+    demand(existing_grants == 0 or existing_grants == 4,
+           "MODEL_GRANT_BASELINE_DRIFT")
 
 
 def validate_names(names):
@@ -304,6 +321,7 @@ def run():
             "DATA_MOUNT_DRIFT", "ENV_DRIFT", "MODEL_ACL_BYPASSED",
             "OIDC_GROUP_MANAGEMENT_UNREVIEWED",
             "DATABASE_BACKEND_UNREVIEWED", "DATABASE_NOT_FOUND",
+            "GROUP_MEMBERSHIP_REVIEW_REQUIRED", "MODEL_GRANT_BASELINE_DRIFT",
             "GROUP_NAMES_UNREVIEWED", "GROUP_SET_DRIFT",
             "GROUP_ID_UNREVIEWED", "OLLAMA_MODEL_LIST_INVALID",
             "REQUIRED_OLLAMA_MODELS_MISSING", "MODEL_LIST_UNREVIEWED",
