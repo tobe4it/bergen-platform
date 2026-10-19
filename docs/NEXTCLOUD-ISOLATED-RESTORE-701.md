@@ -152,3 +152,36 @@ The destination path is:
 
 Both SSH links require trusted keys and prohibit agent forwarding. Do not
 widen the NAS export or weaken host-key checking to fix SSH auth failures.
+
+## Phase 3A: audit archive before any extraction
+
+The transport was independently verified by identical SHA-256 on mx2 and
+venombox. A power outage interrupted a later command result; the actual
+target archive already existed with its full expected length. Do not repeat
+the transfer.
+
+From the existing detached restore worktree on bp-controller:
+
+    BASE="$HOME/bergen-platform"
+    cd "$HOME/bergen-platform-nextcloud-restore"
+    git fetch origin feat/nextcloud-isolated-restore-701-20261019
+    git switch --detach origin/feat/nextcloud-isolated-restore-701-20261019
+
+    ansible-playbook       -i "$BASE/ansible/inventory.yml"       -i "$BASE/ansible/inventory.local.yml"       ansible/playbooks/audit-nextcloud-restore-archive-readonly.yml       --vault-id infra@prompt
+
+The audit is **read-only** and requires stopped, protected and networkless
+LXC 701. It rechecks exact pinned SHA-256, scans the entire gzip tar
+catalog without extraction, rejects path traversal, duplicate entries,
+special/device files, links or setuid/setgid files, checks required
+Nextcloud files, and decompresses SQL within the tar stream to check gzip
+integrity and target schema selection. It prints only safe counts and
+boolean findings. It does not read secrets into Ansible-visible output.
+
+Expected: NEXTCLOUD_RESTORE_ARCHIVE_READ_ONLY_VERIFIED, changed=0,
+failed=0. If an archive link is detected, stop and review that archive
+construct separately instead of permitting arbitrary extraction.
+
+After success, independently inspect the offline guest base OS packages
+before approving extraction or SQL import. The test guest must never share
+a production MariaDB, mail endpoint or trusted Cloud hostname. No cleanup
+of mx1 is authorized yet.
