@@ -13,6 +13,7 @@ on:
       - 'tests/test_nextcloud_restore_archive_type_diagnostic.py'
       - 'tests/test_nextcloud_restore_archive_symlink_audit.py'
       - 'ansible/playbooks/audit-nextcloud-restore-archive-readonly.yml'
+      - 'ansible/playbooks/inspect-nextcloud-restore-701-offline-runtime.yml'
       - 'docs/NEXTCLOUD-ISOLATED-RESTORE-701.md'
       - '.github/workflows/nextcloud-isolated-restore-701.yml'
   push:
@@ -51,6 +52,9 @@ jobs:
           python3 -m unittest discover -s tests -p 'test_nextcloud_restore_archive_symlink_audit.py'
           ansible-playbook -i localhost, \
             ansible/playbooks/audit-nextcloud-restore-archive-readonly.yml \
+            --syntax-check
+          ansible-playbook -i localhost, \
+            ansible/playbooks/inspect-nextcloud-restore-701-offline-runtime.yml \
             --syntax-check
       - name: Verify offline-only initial provisioning
         run: |
@@ -106,5 +110,14 @@ jobs:
           assert 'NEXTCLOUD_ARCHIVE_TYPE_DIAGNOSTIC=COMPLETE' in diag
           assert 'archive_extracted": False' in diag
 
+          boot = yaml.safe_load(Path("ansible/playbooks/inspect-nextcloud-restore-701-offline-runtime.yml").read_text())
+          assert len(boot) == 1 and boot[0]["hosts"] == "venombox"
+          tasks_boot = boot[0]["tasks"]
+          start_tasks = [t for t in tasks_boot if t.get("name", "").startswith("Start only explicitly approved")]
+          assert len(start_tasks) == 1
+          assert start_tasks[0]["ansible.builtin.command"]["argv"] == ["pct","start","701"]
+          assert "nextcloud_restore_701_start" in start_tasks[0]["when"]
+          assert not any(any(key in t for key in ("ansible.builtin.shell", "ansible.builtin.template", "ansible.builtin.file", "ansible.builtin.copy")) for t in tasks_boot)
+          assert "NON_LOOPBACK_DEVICES=0" in Path("ansible/playbooks/inspect-nextcloud-restore-701-offline-runtime.yml").read_text()
           print("NEXTCLOUD_701_OFFLINE_STATIC_BOUNDARIES=PASS")
           PY
