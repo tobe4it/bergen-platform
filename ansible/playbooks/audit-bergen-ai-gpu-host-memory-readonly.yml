@@ -1,0 +1,75 @@
+---
+# Read-only Proxmox HOST cgroup-v2 memory diagnostic for existing LXC 110.
+# Never trust only guest /sys/fs/cgroup/memory.max with cgroup namespaces.
+- name: Inspect effective host-side LXC110 memory cgroup without changing anything
+  hosts: venombox
+  become: true
+  gather_facts: false
+  tasks:
+    - name: Ensure expected Proxmox host
+      ansible.builtin.assert:
+        that:
+          - inventory_hostname == 'venombox'
+
+    - name: Read only the container init host cgroup and memory.max ancestors
+      ansible.builtin.command:
+        argv:
+          - python3
+          - -c
+          - "{{ lookup('ansible.builtin.file', playbook_dir ~ '/../files/bergen_ai/audit_ollama_host_memory_readonly.py', rstrip=False) }}"
+      register: bergen_ai_cgroup_host_raw
+      changed_when: false
+      failed_when: false
+      check_mode: false
+      no_log: true
+
+    - name: Extract one bounded sanitized host memory result
+      ansible.builtin.set_fact:
+        bergen_ai_cgroup_host_frames: >-
+          {{ bergen_ai_cgroup_host_raw.stdout_lines | default([]) |
+             select('match','^BERGEN_AI_GPU_HOST_MEMORY_V1:') | list }}
+      no_log: true
+
+    - name: Reject failed, ambiguous or oversized result
+      ansible.builtin.assert:
+        that:
+          - bergen_ai_cgroup_host_raw.rc == 0
+          - bergen_ai_cgroup_host_frames | length == 1
+          - bergen_ai_cgroup_host_frames[0] | length < 1000
+        fail_msg: GPU_HOST_MEMORY_CGROUP_UNVERIFIED
+      no_log: true
+
+    - name: Parse classified host cgroup proof only
+      ansible.builtin.set_fact:
+        bergen_ai_cgroup_host: >-
+          {{ (bergen_ai_cgroup_host_frames[0] |
+             regex_replace('^BERGEN_AI_GPU_HOST_MEMORY_V1:','')) | from_json }}
+      no_log: true
+
+    - name: Require validated host cgroup diagnosis without requiring desired result
+      ansible.builtin.assert:
+        that:
+          - bergen_ai_cgroup_host.AUDIT == 'READ_ONLY'
+          - not bergen_ai_cgroup_host.CHANGED
+          - bergen_ai_cgroup_host.LXC110_CONFIGURED_32GIB
+          - bergen_ai_cgroup_host.LXC110_RUNNING
+          - bergen_ai_cgroup_host.HOST_CGROUP_V2
+          - bergen_ai_cgroup_host.CGROUP_LIMIT_STATUS in ['EFFECTIVE_32GIB','BELOW_32GIB','ABOVE_32GIB','NO_FINITE_CGROUP_LIMIT']
+          - not bergen_ai_cgroup_host.GPU_INFERENCE_PROVEN
+        fail_msg: GPU_HOST_MEMORY_CGROUP_FRAME_INVALID
+      no_log: true
+
+    - name: Report effective memory hierarchy, including genuine enforcement gaps
+      ansible.builtin.debug:
+        msg:
+          - AUDIT=READ_ONLY
+          - CHANGED=False
+          - LXC110_RUNNING=YES
+          - LXC110_CONFIGURED_MEMORY=32768_MIB
+          - HOST_CGROUP_V2=YES
+          - "CGROUP_LIMIT_STATUS={{ bergen_ai_cgroup_host.CGROUP_LIMIT_STATUS }}"
+          - "LEAF_MEMORY_LIMIT={{ bergen_ai_cgroup_host.LEAF_MEMORY_LIMIT }}"
+          - "FINITE_ANCESTOR_PRESENT={{ bergen_ai_cgroup_host.FINITE_ANCESTOR_PRESENT }}"
+          - "INSPECTED_HIERARCHY_LEVELS={{ bergen_ai_cgroup_host.INSPECTED_HIERARCHY_LEVELS }}"
+          - GPU_INFERENCE_PROVEN=NO
+          - RESTART_PERFORMED=NO
