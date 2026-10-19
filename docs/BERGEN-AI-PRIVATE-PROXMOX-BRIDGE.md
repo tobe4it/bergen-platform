@@ -1041,3 +1041,91 @@ erneut mit aktuellem Branch ausführen. Der mutierende
 `backup-bergen-ai-ct110-once.yml` bleibt **gesperrt**.
 Auch bei exakter Gerätebindung müssen die Ollama-/Podman-Daten
 vor Backup-Apply überprüft werden.
+
+
+### Phase 0f.1 – FUSE-Ursprung live bestätigt (19.10.2026, 21:40)
+
+Der korrigierte Audit hat auf `venombox` ausschließlich lesend
+`ok=7 changed=0 failed=0` ergeben. Die relevante Klassifikation:
+
+```text
+CT110_CONFIG_IDENTITY=VERIFIED
+PVE_MP_DIRECTIVES=NONE
+LXC_MOUNT_AUTO=ABSENT
+LXC_MOUNT_ENTRY_COUNT=1
+LXC_MOUNT_ENTRY=DEVICE_OR_PSEUDO_TARGETS_PRESENT
+LXC_MOUNT_ENTRY_DEVICE_ORIGIN=EXACT_FUSE_DEVICE_BIND
+LXC_MOUNT_ENTRY_FORMAT=FOUR_FIELD_FORM
+OTHER_MOUNT_OR_EXCLUDE_DIRECTIVES=NONE
+WEBUI_DATA_MOUNT=GUEST_ROOTFS
+BACKUP_EXECUTED=False
+BACKUP_AUTHORIZED=False
+ROLLBACK_CLEARANCE=NOT_PROVEN
+APPLY_AUTHORIZED=False
+```
+
+Der einzige zusätzliche LXC-Mount bindet **exakt `/dev/fuse` nach
+`/dev/fuse`** mit erlaubten Geräte-Bind-Optionen ein. Das ist kein
+separates persistentes Datenvolume; die bisherige pauschale
+Mount-Sperre im CT110-Oneoff-Preflight war für diesen einzelnen Mount
+zu konservativ.
+
+**Offenes Gate:** Die tatsächliche Ollama-Modellablage und die
+Podman-Speicherung müssen separat nachgewiesen werden, bevor ein
+Backup gestartet werden darf. Weder die vorhandene Betreiberfreigabe
+noch die nachgewiesene FUSE-Gerätequelle reichen allein aus.
+
+### Phase 0f.2 – Ollama-/Podman-Datenabdeckung (read-only, vorbereitet)
+
+Der eigenständige Audit
+`ansible/playbooks/audit-bergen-ai-ct110-persistent-data-readonly.yml`
+liest auf CT110 ohne Änderungen:
+
+- laufenden Ollama-Service und dessen konfigurierte
+  `OLLAMA_MODELS`-Zuordnung;
+- `/srv/ai/models`: vorhanden und im Gast-Rootfs;
+- Open-WebUI-Podman-`inspect`: genau die erwartete persistente
+  `/app/backend/data`-Bind-Zuordnung zu `/srv/ai/open-webui`;
+- Open-WebUI-Daten und Podman-Graphroot: im Gast-Rootfs;
+- weitere rootverwaltete Podman-Container oder named volumes.
+
+Ausgegeben werden ausschließlich feste Zustandskategorien.
+Keine Konfigurationswerte, Modellbezeichnungen, Zugangsdaten,
+Source-Mounts oder private Pfade aus Laufzeitdaten werden ausgegeben.
+Dies ist eine **punktuelle, begrenzte Inventur** und keine
+vollständige Datenintegritäts- oder Restore-Aussage. Rootless Podman,
+andere Services, laufzeitabweichende Ollama-Prozessumgebungen und
+Applikationskonsistenz erfordern bei Unklarheiten getrennte Prüfung.
+
+Auf `bp-controller`:
+
+```bash
+(
+set -euo pipefail
+BASE="$HOME/bergen-platform"
+WT="$HOME/bergen-platform-ai-private-bridge"
+
+git -C "$WT" fetch origin feat/bergen-ai-private-bridge-20261019
+git -C "$WT" switch --detach origin/feat/bergen-ai-private-bridge-20261019
+cd "$WT"
+
+"$BASE/.venv/bin/ansible-playbook" \
+  -i ansible/inventory.yml \
+  -i "$BASE/ansible/inventory.local.yml" \
+  ansible/playbooks/audit-bergen-ai-ct110-persistent-data-readonly.yml \
+  --syntax-check
+
+"$BASE/.venv/bin/ansible-playbook" \
+  -i ansible/inventory.yml \
+  -i "$BASE/ansible/inventory.local.yml" \
+  ansible/playbooks/audit-bergen-ai-ct110-persistent-data-readonly.yml \
+  --vault-id ai@prompt
+)
+```
+
+Selbst `STATUS=KNOWN_DATA_PATHS_IN_ROOTFS` darf
+**nicht** automatisch `SAFE_TO_ATTEMPT_SINGLE_BACKUP=True`
+setzen. Erst Live-Befund, Review und gezielt revidierter
+Oneoff-Preflight (mit den bestehenden Geräte-/Datenkontrollen)
+ermöglichen den ursprünglich genehmigten einmaligen
+`vzdump`. Der mutierende Backup-Befehl bleibt bis dahin gesperrt.
