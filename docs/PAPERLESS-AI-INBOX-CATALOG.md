@@ -430,6 +430,53 @@ same-VLAN paths and IPv6 paths have been reviewed and any
 required network restrictions independently applied and
 retested. No automatic changes to Paperless, Ollama,
 syslog LXC120, firewall or the timer are authorized.
+## Confirmed unauthorized management-client connectivity – 2026-10-19
+
+Operator executed the separate bounded TCP-only
+`audit-paperless-ai-ollama-negative-client-readonly.yml`:
+
+    AUDIT=READ_ONLY
+    CHANGED=False
+    PROBE_SOURCE=BP_CONTROLLER
+    IPV4_TCP_11434=REACHABLE
+    IPV6_TCP_11434=REACHABLE
+    UNAPPROVED_SOURCE_ACCESS=REACHABLE
+    OLLAMA_HTTP_REQUESTS=ZERO
+    PAPERLESS_CHANGED=NO
+    OLLAMA_CHANGED=NO
+    EXPOSURE_GATE=REVIEW_REQUIRED
+    RECAP: ok=12 changed=0 failed=0
+
+This **proves** a currently unapproved management source can open
+a TCP connection to Bergen-AI Ollama port 11434 on IPv4 and IPv6.
+The previous Paperless Podman positive probe still proves approved
+service-path reachability. It does **not** prove any WAN exposure
+or successful HTTP/model requests from bp-controller, since the
+negative probe made **no HTTP requests**.
+
+**Hard gate: BLOCKED**. Do not configure Paperless's native LLM
+endpoint/model, turn on AI UI, embeddings/RAG or schedule the
+cataloguer until host/CT-network policy is designed, explicitly
+approved, applied with rollback safeguards, and both approved
+positive and non-approved negative access are retested.
+
+Operator also reserved `bergen-syslog` LXC120 for **future**
+local inference behind a service-authenticated gateway, including
+already-centralized Postfix/Dovecot data sources. It is not a
+present allowlist recipient. In the first release, only the
+reviewed Paperless container client and local Open WebUI loopback
+access should be authorized.
+
+Next: inspect **real** CT110/CT126 PVE bridge and VLAN assignments,
+and identify the actual source IP used by the Paperless Podman
+outbound connection (Podman NAT, if any) before drafting any
+firewall allow rule. UniFi routed policy might not see same-bridge
+or same-VLAN traffic. A host or CT-level control, or a separate
+authenticated API proxy, must block unauthorized TCP/11434
+over both IPv4 and IPv6 while preserving the authorized path.
+Any policy implementation or listener change requires separate
+approval; there is no blanket permission to restart Ollama,
+modify Proxmox firewall or change the host's network topology.
 ## Target behaviour
 
 Only **new**, OCR-complete, unreviewed inbox documents belonging to active,
