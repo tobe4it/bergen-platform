@@ -101,6 +101,47 @@ Eine zweite Prüfung meldet ALREADY_STAGED.
 Sollten API-Token, Modelle oder Datenbankbestand abweichen, wird
 fail-closed abgebrochen. Bei Teil-Apply nicht blind wiederholen.
 
+## Interimslösung: Open-WebUI-Gruppen manuell nutzen
+
+Betreiberentscheidung 20.10.2026: Die vorhandenen drei Gruppen werden
+zunächst **manuell in Open WebUI** gepflegt. Die dauerhafte automatische
+Synology-OIDC-Zuordnung folgt getrennt in Issue #98. Dies ist eine
+kontrollierte Übergangslösung; Identitätsentzug aus Synology entfernt
+bis dahin **nicht automatisch** die lokale Open-WebUI-Mitgliedschaft.
+
+Die Reihenfolge ist verbindlich:
+
+1. Erst die vier *privaten* Aliasmodelle kontrolliert per Staging-Playbook
+   anlegen und deren Berechtigungen nachprüfen. Für die erste Freigabe
+   verweigert das Playbook zu Recht jede bereits bestehende Mitgliedschaft;
+   die Mitgliedschaften erst **danach** pflegen.
+2. Im administrativen Open-WebUI-Gruppenbereich nur **tatsächlich
+   identifizierte vorhandene Konten** zuordnen. Nicht aus E-Mail-Adressen
+   oder einer gespeicherten OAuth-Verknüpfung die Rolle erraten. Ein
+   Elternkonto erhält `Familie` und `Eltern`, ein Kinderkonto
+   `Familie` und `Kinder`; niemals beides.
+3. Unterstützte Open-WebUI-v0.10.2-API-Routen sind
+   `POST /api/v1/groups/id/{id}/users/add` und
+   `POST /api/v1/groups/id/{id}/users/remove`. Für den ersten
+   Betrieb die administrative Gruppenoberfläche nutzen, damit keine
+   User-ID oder Admin-API-Token in Kommandozeile oder Git erscheint.
+4. Das vorhandene `pending`-Konto **nicht pauschal** freischalten.
+   Freigabe der Rolle `user` nur nach expliziter Identitätsprüfung.
+   Der Admin-Account ist kein tauglicher Nachweis der Rechte regulärer
+   Benutzer.
+5. Danach Eltern-/Kinder-Modelle mit einem echten unprivilegierten Konto
+   per UI und Direkt-API gegentesten: nur die zwei passenden Modelle,
+   keine öffentlichen Rohmodelle, keine fremden Profile, keine
+   Eltern-Paperless-Dokumente. Beide Kinderprofile müssen
+   `Vorsagen untersagt` erfüllen.
+6. Bis zur automatischen Zuordnung müssen Gruppenänderungen in Synology
+   **auch lokal** nachvollzogen werden. Mitglieder bei Entzug sofort
+   aus der entsprechenden lokalen Open-WebUI-Gruppe entfernen und
+   die Wirkung auf aktive Sessions/API-Zugriffe testen.
+
+**Kein Workaround durch Public/Familie-Model-Grants** und keine globale
+Rollenfreigabe an alle Benutzer.
+
 ## Danach: automatische Benutzerzuordnung nach Issue #98
 
 Der Live-Iststand vom 19.10.2026 war:
