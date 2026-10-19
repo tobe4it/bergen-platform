@@ -13,6 +13,8 @@ The role checks:
 
 Missing utilities and unsupported management interfaces are reported but never installed or changed. A failed firmware query **does not prove** firmware configuration is impossible: vendor tooling or BMC out-of-band management may still be available.
 
+All discovery commands are explicitly read-only even with Ansible `--check`; check mode must not suppress inventory or host-identity validation.
+
 No BIOS changes, packages, firmware updates, reboot, IPMI power operations, or PVE VM/LXC settings are performed.
 
 A subsequent, independently approved apply implementation must first bind an exact firmware setting and allowed value to the observed board, compare current vs desired state, reject unsupported hardware and unexpected drift, and require an explicit one-time approval before changing it. Do not automatically reboot a headless host as part of that procedure.
