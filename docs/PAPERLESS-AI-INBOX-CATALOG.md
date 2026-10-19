@@ -477,6 +477,46 @@ over both IPv4 and IPv6 while preserving the authorized path.
 Any policy implementation or listener change requires separate
 approval; there is no blanket permission to restart Ollama,
 modify Proxmox firewall or change the host's network topology.
+### Next non-invasive preflight: where should access control live?
+
+After the positive *unapproved* bp-controller TCP/11434 test in
+both address families, PR #114 includes a scoped read-only
+`audit-paperless-ai-ollama-topology-readonly.yml`. It checks
+only PVE LXC110 (Ollama) and LXC126 (Paperless): whether each
+has exactly one PVE network interface, their same/different
+bridge and configured VLAN-tag classification, and whether
+the Paperless Podman application's locally chosen IPv4 route
+source matches the surrounding LXC126 namespace. The route
+test uses UDP socket `connect()` solely to determine the
+locally selected source and does **not send datagrams**.
+
+Run from bp-controller in the existing feature worktree:
+
+~~~bash
+(
+set -euo pipefail
+BASE="$HOME/bergen-platform"
+cd "$HOME/bergen-platform-paperless-ai-catalog"
+git fetch origin feat/paperless-native-ai-inbox-catalog-20261018
+git switch --detach origin/feat/paperless-native-ai-inbox-catalog-20261018
+"$BASE/.venv/bin/ansible-playbook" \
+  -i ansible/inventory.yml \
+  -i "$BASE/ansible/inventory.local.yml" \
+  ansible/playbooks/audit-paperless-ai-ollama-topology-readonly.yml \
+  --vault-id ai@prompt
+)
+~~~
+
+All data remains local; only category flags are printed. Even a
+reported Podman source difference is **not proof of SNAT**, and
+the actual **source IP received at LXC110** remains unverified.
+Same PVE bridge/tag does not conclusively prove L2 reachability
+or that UCG policy can enforce the path; VLAN/firewall details
+require operator review. This preflight never authorizes
+changes. A future allowlist rule must use the **observed**
+real TCP source, preserve localhost Open WebUI, cover IPv4 and
+IPv6 and pass Paperless-positive and unauthorized-negative
+tests after a separately approved, rollback-safe change.
 ## Target behaviour
 
 Only **new**, OCR-complete, unreviewed inbox documents belonging to active,
