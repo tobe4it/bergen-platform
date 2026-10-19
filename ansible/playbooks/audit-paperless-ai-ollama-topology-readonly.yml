@@ -1,0 +1,85 @@
+---
+# Read-only network classification for firewall-rule design (NO firewall changes).
+# Never prints IP, bridge names, VLAN IDs, Podman private routes or secrets.
+- name: Inspect Paperless and Bergen-AI network topology before scoped firewall design
+  hosts: venombox
+  become: true
+  gather_facts: false
+  tasks:
+    - name: Assert only expected Proxmox host
+      ansible.builtin.assert:
+        that:
+          - inventory_hostname == 'venombox'
+
+    - name: Classify LXC bridges VLANs and route selection without mutations
+      ansible.builtin.command:
+        argv:
+          - python3
+          - -c
+          - "{{ lookup('ansible.builtin.file', playbook_dir ~ '/../files/paperless/audit_ai_ollama_ct_topology_readonly.py', rstrip=False) }}"
+      register: bp_ai_ct_topology_raw
+      changed_when: false
+      failed_when: false
+      check_mode: false
+      no_log: true
+
+    - name: Extract single sanitized network frame
+      ansible.builtin.set_fact:
+        bp_ai_ct_topology_frames: >-
+          {{ bp_ai_ct_topology_raw.stdout_lines | default([]) |
+             select('match','^BERGEN_PAPERLESS_OLLAMA_TOPOLOGY_V1:') | list }}
+      no_log: true
+
+    - name: Reject absent duplicate or unbounded topology result
+      ansible.builtin.assert:
+        that:
+          - bp_ai_ct_topology_raw.rc == 0
+          - bp_ai_ct_topology_frames | length == 1
+          - bp_ai_ct_topology_frames[0] | length < 1400
+        fail_msg: BERGEN_AI_TOPOLOGY_RESULT_UNVERIFIED
+      no_log: true
+
+    - name: Decode only allowlisted status values
+      ansible.builtin.set_fact:
+        bp_ai_ct_topology: >-
+          {{ (bp_ai_ct_topology_frames[0] |
+             regex_replace('^BERGEN_PAPERLESS_OLLAMA_TOPOLOGY_V1:','')) | from_json }}
+      no_log: true
+
+    - name: Require read-only and non-authoritative topology classification
+      ansible.builtin.assert:
+        that:
+          - bp_ai_ct_topology.AUDIT == 'READ_ONLY'
+          - not bp_ai_ct_topology.CHANGED
+          - bp_ai_ct_topology.STATUS in ['TOPOLOGY_CLASSIFIED','LXC_IDENTITIES_NOT_VERIFIED','TARGET_ROUTE_UNVERIFIED','UNVERIFIED']
+          - bp_ai_ct_topology.NETS_LXC110 in ['ONE','NOT_ONE','UNVERIFIED']
+          - bp_ai_ct_topology.NETS_LXC126 in ['ONE','NOT_ONE','UNVERIFIED']
+          - bp_ai_ct_topology.SAME_PVE_BRIDGE in ['YES','NO','NOT_VERIFIED']
+          - bp_ai_ct_topology.SAME_CONFIGURED_VLAN in ['YES','NO','NOT_VERIFIED']
+          - bp_ai_ct_topology.PVE_BOTH_NIC_FIREWALL_ENABLED in ['YES','NO','NOT_VERIFIED']
+          - bp_ai_ct_topology.PAPERLESS_ROUTE_SOURCE in ['MATCHES_LXC126_ROUTE','DIFFERENT_FROM_LXC126_ROUTE','UNVERIFIED']
+          - bp_ai_ct_topology.ACTUAL_LXC110_INBOUND_SOURCE == 'NOT_DEMONSTRATED'
+          - bp_ai_ct_topology.EXPOSURE_GATE == 'REVIEW_REQUIRED'
+        fail_msg: BERGEN_AI_TOPOLOGY_CLASSIFICATION_INVALID
+      no_log: true
+
+    - name: Show sanitized preliminary firewall design inputs only
+      ansible.builtin.debug:
+        msg:
+          - AUDIT=READ_ONLY
+          - CHANGED=False
+          - "STATUS={{ bp_ai_ct_topology.STATUS }}"
+          - "LXC110_NETWORKS={{ bp_ai_ct_topology.NETS_LXC110 }}"
+          - "LXC126_NETWORKS={{ bp_ai_ct_topology.NETS_LXC126 }}"
+          - "SAME_PVE_BRIDGE={{ bp_ai_ct_topology.SAME_PVE_BRIDGE }}"
+          - "SAME_CONFIGURED_VLAN={{ bp_ai_ct_topology.SAME_CONFIGURED_VLAN }}"
+          - "PVE_BOTH_NIC_FIREWALL_ENABLED={{ bp_ai_ct_topology.PVE_BOTH_NIC_FIREWALL_ENABLED }}"
+          - "PAPERLESS_PODMAN_ROUTE_SOURCE={{ bp_ai_ct_topology.PAPERLESS_ROUTE_SOURCE }}"
+          - "SOURCE_NAT_EFFECTIVE={{ bp_ai_ct_topology.SOURCE_NAT_EFFECTIVE | default('NOT_PROVEN') }}"
+          - "ACTUAL_LXC110_INBOUND_SOURCE={{ bp_ai_ct_topology.ACTUAL_LXC110_INBOUND_SOURCE }}"
+          - INTRA_VLAN_POLICY=NOT_VERIFIED
+          - IPV6_FIREWALL_POLICY=NOT_VERIFIED
+          - EXPOSURE_GATE=REVIEW_REQUIRED
+          - PAPERLESS_CONFIG_CHANGED=NO
+          - OLLAMA_CONFIG_CHANGED=NO
+          - NEXT_ACTION=REVIEW_EXACT_SOURCE_AND_DESTINATION_BEFORE_FIREWALL_CHANGE
