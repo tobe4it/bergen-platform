@@ -28,7 +28,7 @@ Rollback-Gates geprüft sind.
  │  ├── net0: unverändert       ├── net0: unverändert      │
  │  └── net1: 172.30.110.2/28   └── net1: 172.30.110.3/28 │
  │              │                          │                │
- │              └──────── vmbr10 ──────────┘                │
+ │              └──────── vmbr90 ──────────┘                │
  │                     kein physischer Uplink              │
  │                     keine Host-IP / kein Gateway        │
  │                                                         │
@@ -37,7 +37,9 @@ Rollback-Gates geprüft sind.
  └─────────────────────────────────────────────────────────┘
 ```
 
-**Vorläufige** Bridge `vmbr10`; **vorläufiges** RFC1918-/28-Netz
+**Namenskonvention:** `vmbr90` ist ein lokaler Linux-Bridge-Name und kein UniFi-VLAN 90. Die Ziffernfolge einer Proxmox-Bridge hat keine automatische Beziehung zu einer UniFi-VLAN-ID. Der zuvor vorgeschlagene Name `vmbr10` wurde verworfen, weil das UniFi-Netz `unifi` bereits VLAN-ID 10 verwendet und gleiche Nummern hier verwirren würden. Die neue Bridge muss ohne Uplink/Bridge-Port, VLAN-Tag und Gateway bleiben. Die Eignung von `vmbr90` ist noch **nicht** geprüft.
+
+**Vorläufige** Bridge `vmbr90`; **vorläufiges** RFC1918-/28-Netz
 `172.30.110.0/28`. Adressen sind **nicht reserviert/zugewiesen**.
 Der initiale Audit prüft Host und LXC110/126/120 auf sichtbare
 IPv4-Adress-/Routingüberlappungen und die Bridge-Namensbelegung; er
@@ -49,8 +51,8 @@ vollständige IPAM/UniFi- und VPN-Inventar prüfen.
 Eine mögliche **Basisdefinition**, erst nach Freigabe anzuwenden:
 
 ```ini
-auto vmbr10
-iface vmbr10 inet manual
+auto vmbr90
+iface vmbr90 inet manual
     bridge-ports none
     bridge-stp off
     bridge-fd 0
@@ -108,8 +110,8 @@ cd "$WT"
 
 Der Audit prüft ausschließlich:
 
-- Existenz von `vmbr10` im Host-Kernel und in `/etc/network/interfaces*`.
-- Verweise auf `vmbr10` in PVE-LXC/VM-Konfigurationen.
+- Existenz von `vmbr90` im Host-Kernel und in `/etc/network/interfaces*`.
+- Verweise auf `vmbr90` in PVE-LXC/VM-Konfigurationen.
 - Identität und Zahl der NICs in LXC110, LXC126, LXC120.
 - IPv4-Routen und Interface-Netze des PVE-Hosts sowie dieser
   **drei** LXCs auf Konflikte mit dem **vorgeschlagenen** /28.
@@ -138,7 +140,7 @@ zusätzliche `net1`-Konfigurationen und Ollama-/Open-WebUI-
 Backend-Variablen gesondert versioniert sichern.
 
 **Phase 2 – Transport-Test ohne produktive Umstellung:**
-`vmbr10` zuerst als reinen lokalen Switch anlegen; erst nach
+`vmbr90` zuerst als reinen lokalen Switch anlegen; erst nach
 vorheriger Prüfung nur die zusätzlichen CT-Interfaces einhängen,
 bestehende `net0` und Default-Routen nicht ändern. Jeweils
 einmalige Erreichbarkeitstests zwischen LXC110 und Paperless
