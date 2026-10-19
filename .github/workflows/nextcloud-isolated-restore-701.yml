@@ -8,6 +8,9 @@ on:
       - 'ansible/playbooks/transfer-nextcloud-restore-archive.yml'
       - 'ansible/files/nextcloud/stream_verified_restore_archive.py'
       - 'ansible/files/nextcloud/audit_verified_restore_archive.py'
+      - 'ansible/files/nextcloud/diagnose_restore_archive_member_types.py'
+      - 'ansible/playbooks/diagnose-nextcloud-restore-archive-types-readonly.yml'
+      - 'tests/test_nextcloud_restore_archive_type_diagnostic.py'
       - 'ansible/playbooks/audit-nextcloud-restore-archive-readonly.yml'
       - 'docs/NEXTCLOUD-ISOLATED-RESTORE-701.md'
       - '.github/workflows/nextcloud-isolated-restore-701.yml'
@@ -39,6 +42,11 @@ jobs:
             --syntax-check
           python3 -m py_compile ansible/files/nextcloud/stream_verified_restore_archive.py
           python3 -m py_compile ansible/files/nextcloud/audit_verified_restore_archive.py
+          python3 -m py_compile ansible/files/nextcloud/diagnose_restore_archive_member_types.py
+          ansible-playbook -i localhost, \
+            ansible/playbooks/diagnose-nextcloud-restore-archive-types-readonly.yml \
+            --syntax-check
+          python3 -m unittest discover -s tests -p 'test_nextcloud_restore_archive_type_diagnostic.py'
           ansible-playbook -i localhost, \
             ansible/playbooks/audit-nextcloud-restore-archive-readonly.yml \
             --syntax-check
@@ -86,5 +94,11 @@ jobs:
           assert 'DUPLICATE_ARCHIVE_MEMBER' in archive
           assert 'SQL_DATABASE_NOT_CONFIRMED' in archive
           assert 'tarfile.open(archive, "r:gz")' in archive
+          diag = Path("ansible/files/nextcloud/diagnose_restore_archive_member_types.py").read_text()
+          assert 'DIAGNOSTIC_FAILED=' in diag
+          assert 'tarfile.open(archive, "r:gz")' in diag
+          assert 'NEXTCLOUD_ARCHIVE_TYPE_DIAGNOSTIC=COMPLETE' in diag
+          assert 'archive_extracted": False' in diag
+
           print("NEXTCLOUD_701_OFFLINE_STATIC_BOUNDARIES=PASS")
           PY
