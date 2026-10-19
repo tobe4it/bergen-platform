@@ -75,8 +75,8 @@
     - name: Verify only candidate bridge identity without changing network
       ansible.builtin.assert:
         that:
-          - rocky_controller_config.stdout is search('(?m)^net0: .*bridge=vmbr2,')
-          - rocky_controller_config.stdout is search('(?m)^net0: .*firewall=1,')
+          - "rocky_controller_config.stdout is search('(?m)^net0: .*bridge=vmbr2,')"
+          - "rocky_controller_config.stdout is search('(?m)^net0: .*firewall=1,')"
         fail_msg: Controller network differs from the observed candidate bridge.
 
     - name: Read candidate bridge operational state
@@ -88,7 +88,7 @@
     - name: Require existing active candidate bridge
       ansible.builtin.assert:
         that:
-          - rocky_bridge.stdout is search('^vmbr2\\s+UP\\s+')
+          - "rocky_bridge.stdout.split()[:2] == ['vmbr2', 'UP']"
         fail_msg: Candidate bridge vmbr2 is absent or down.
 
     - name: Inspect protected existing Nextcloud guest without changing it
