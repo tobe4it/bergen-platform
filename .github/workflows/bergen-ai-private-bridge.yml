@@ -12,6 +12,7 @@ on:
       - 'ansible/files/bergen_ai/audit_ct110_mount_directives_readonly.py'
       - 'ansible/files/bergen_ai/audit_ct110_persistent_data_scope_readonly.py'
       - 'ansible/files/bergen_ai/audit_ct110_guest_mount_blockers_readonly.py'
+      - 'ansible/files/bergen_ai/audit_ct110_runtime_mount_relationships_readonly.py'
       - 'ansible/playbooks/audit-bergen-ai-private-bridge-readonly.yml'
       - 'ansible/playbooks/audit-bergen-ai-private-bridge-extended-readonly.yml'
       - 'ansible/playbooks/audit-bergen-ai-private-bridge-external-gates-readonly.yml'
@@ -22,6 +23,7 @@ on:
       - 'ansible/playbooks/audit-bergen-ai-ct110-mount-directives-readonly.yml'
       - 'ansible/playbooks/audit-bergen-ai-ct110-persistent-data-readonly.yml'
       - 'ansible/playbooks/audit-bergen-ai-ct110-guest-mount-blockers-readonly.yml'
+      - 'ansible/playbooks/audit-bergen-ai-ct110-runtime-mount-relationships-readonly.yml'
       - 'docs/BERGEN-AI-PRIVATE-PROXMOX-BRIDGE.md'
       - 'tests/test_bergen_ai_private_bridge_preflight.py'
       - 'tests/test_bergen_ai_private_bridge_external_gates.py'
@@ -31,6 +33,7 @@ on:
       - 'tests/test_bergen_ai_ct110_mount_directives_readonly.py'
       - 'tests/test_bergen_ai_ct110_persistent_data_readonly.py'
       - 'tests/test_bergen_ai_ct110_guest_mount_blockers_readonly.py'
+      - 'tests/test_bergen_ai_ct110_runtime_mount_relationships_readonly.py'
       - 'docs/examples/bergen-ai-bridge-ipam.local.json.example'
       - '.github/workflows/bergen-ai-private-bridge.yml'
   push:
@@ -45,6 +48,7 @@ on:
       - 'ansible/files/bergen_ai/audit_ct110_mount_directives_readonly.py'
       - 'ansible/files/bergen_ai/audit_ct110_persistent_data_scope_readonly.py'
       - 'ansible/files/bergen_ai/audit_ct110_guest_mount_blockers_readonly.py'
+      - 'ansible/files/bergen_ai/audit_ct110_runtime_mount_relationships_readonly.py'
       - 'ansible/playbooks/audit-bergen-ai-private-bridge-readonly.yml'
       - 'ansible/playbooks/audit-bergen-ai-private-bridge-extended-readonly.yml'
       - 'ansible/playbooks/audit-bergen-ai-private-bridge-external-gates-readonly.yml'
@@ -55,6 +59,7 @@ on:
       - 'ansible/playbooks/audit-bergen-ai-ct110-mount-directives-readonly.yml'
       - 'ansible/playbooks/audit-bergen-ai-ct110-persistent-data-readonly.yml'
       - 'ansible/playbooks/audit-bergen-ai-ct110-guest-mount-blockers-readonly.yml'
+      - 'ansible/playbooks/audit-bergen-ai-ct110-runtime-mount-relationships-readonly.yml'
       - 'tests/test_bergen_ai_private_bridge_preflight.py'
       - 'tests/test_bergen_ai_private_bridge_external_gates.py'
       - 'tests/test_bergen_ai_private_bridge_backup_inventory.py'
@@ -63,6 +68,7 @@ on:
       - 'tests/test_bergen_ai_ct110_mount_directives_readonly.py'
       - 'tests/test_bergen_ai_ct110_persistent_data_readonly.py'
       - 'tests/test_bergen_ai_ct110_guest_mount_blockers_readonly.py'
+      - 'tests/test_bergen_ai_ct110_runtime_mount_relationships_readonly.py'
       - 'docs/examples/bergen-ai-bridge-ipam.local.json.example'
 
 jobs:
@@ -87,6 +93,7 @@ jobs:
           python -m unittest discover -s tests -p 'test_bergen_ai_ct110_mount_directives_readonly.py' -v
           python -m unittest discover -s tests -p 'test_bergen_ai_ct110_persistent_data_readonly.py' -v
           python -m unittest discover -s tests -p 'test_bergen_ai_ct110_guest_mount_blockers_readonly.py' -v
+          python -m unittest discover -s tests -p 'test_bergen_ai_ct110_runtime_mount_relationships_readonly.py' -v
       - name: Validate read-only Proxmox inventory playbook syntax
         run: |
           ansible-playbook -i ansible/inventory.yml \
@@ -109,3 +116,5 @@ jobs:
             ansible/playbooks/audit-bergen-ai-ct110-persistent-data-readonly.yml --syntax-check
           ansible-playbook -i ansible/inventory.yml \
             ansible/playbooks/audit-bergen-ai-ct110-guest-mount-blockers-readonly.yml --syntax-check
+          ansible-playbook -i ansible/inventory.yml \
+            ansible/playbooks/audit-bergen-ai-ct110-runtime-mount-relationships-readonly.yml --syntax-check
