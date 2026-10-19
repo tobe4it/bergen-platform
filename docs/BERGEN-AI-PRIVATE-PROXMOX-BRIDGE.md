@@ -1690,3 +1690,57 @@ oder Wiederholungsversuch. Selbst ein erfolgreich
 erstelltes Archiv ist noch kein Integritäts- oder
 Restore-Nachweis. Die Bridge-/Netzwerkfreigabe bleibt
 ausdrücklich unberührt.
+
+### Phase 0f.6 – Produktiver CT110-Preflight bestanden (19.10.2026, 23:06)
+
+Der Betreiber führte den nur lesenden Ansible-Preflight **nach** der
+gezielten Mount-Anpassung aus. Live-Recap auf `venombox`:
+`ok=15 changed=0 unreachable=0 failed=0`.
+
+```text
+AUDIT=READ_ONLY
+STATUS=PRECHECK_PASSED
+CT110_IDENTITY=RUNNING_ROOTFS_ONLY
+WEBUI_DATA=IN_GUEST_ROOTFS
+GUEST_MOUNTS=ROOTFS_INTERNAL_RUNTIME_ONLY
+BACKUP_TARGET=NFS_ACTIVE_WITH_FREE_SPACE
+TEMP_SPACE=LOCAL_TMP_SPACE_OK
+ARCHIVE_STATE=NO_CT110_ARCHIVE_ON_SELECTED_STORAGE
+DATA_SCOPE_STATUS=KNOWN_DATA_PATHS_IN_ROOTFS
+SAFE_TO_ATTEMPT_SINGLE_BACKUP=True
+BACKUP_EXECUTED=False
+ROLLBACK_CLEARANCE=NOT_PROVEN
+APPLY_AUTHORIZED=False
+```
+
+**Ergebnis:** Die Sicherung ist nach dieser Live-Prüfung technisch
+startfähig. Weiterhin ist **kein** CT110-Backup erstellt.
+Das bestehende `backup-bergen-ai-ct110-once.yml` führt die
+schreibgeschützten Same-Run-Prüfungen erneut aus; nur bei
+erneut positivem Befund und vorhandener Betreiberfreigabe
+`APPROVE_CT110_SNAPSHOT_BACKUP_ONCE` startet exakt ein
+`vzdump 110` auf `bergen-synology-backup` im Snapshot-Modus.
+Es gibt keinen automatischen Stop-Fallback, Retry oder Prune.
+Das Vorhandensein eines Archivs ist anschließend separat zu
+prüfen; ein Restore-/Integritätsnachweis steht aus.
+Netzwerk-Apply und Bridge bleiben unabhängig gesperrt.
+
+Freigegebener Operator-Aufruf auf `bp-controller` (in einer
+bestehenden tmux-Sitzung; **nicht blind wiederholen**):
+
+```bash
+(
+set -euo pipefail
+BASE="$HOME/bergen-platform"
+WT="$HOME/bergen-platform-ai-private-bridge"
+git -C "$WT" fetch origin feat/bergen-ai-private-bridge-20261019
+git -C "$WT" switch --detach origin/feat/bergen-ai-private-bridge-20261019
+cd "$WT"
+"$BASE/.venv/bin/ansible-playbook" \
+  -i ansible/inventory.yml \
+  -i "$BASE/ansible/inventory.local.yml" \
+  ansible/playbooks/backup-bergen-ai-ct110-once.yml \
+  -e bergen_ai_ct110_oneoff_approval=APPROVE_CT110_SNAPSHOT_BACKUP_ONCE \
+  --vault-id ai@prompt
+)
+```
