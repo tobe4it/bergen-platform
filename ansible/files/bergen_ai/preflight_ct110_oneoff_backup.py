@@ -18,6 +18,8 @@ MOUNT = Path("/mnt/pve") / STORAGE
 TARGET = "110"
 GUEST_NAME = "bergen-ai"
 PERSISTENT = "/srv/ai/open-webui"
+GRAPHROOT = "/var/lib/containers/storage"
+WEBUI_TARGET = "/app/backend/data"
 BACKUP_TYPE = "backup"
 PSEUDO = {"proc", "sysfs", "devpts", "tmpfs", "cgroup", "cgroup2", "mqueue",
           "devtmpfs", "securityfs", "hugetlbfs", "pstore", "bpf", "ramfs",
@@ -102,44 +104,159 @@ def persistent_data():
     return "IN_GUEST_ROOTFS" if mounted_at and mounted_at.strip() == "/" else "UNVERIFIED"
 
 
-def guest_mounts():
-    raw = command(["pct", "exec", TARGET, "--", "findmnt", "-J",
-                   "-o", "TARGET,FSTYPE"], limit=250000)
-    if not raw:
-        return "UNVERIFIED"
+def guest_json(argv):
+    raw = command(["pct", "exec", TARGET, "--"] + argv, limit=250000)
+    if raw is None:
+        return None
     try:
-        data = json.loads(raw)
-        filesystems = data.get("filesystems")
-        if not isinstance(filesystems, list) or not filesystems or len(filesystems) > 250:
-            return "UNVERIFIED"
-        if not any(isinstance(node, dict) and node.get("target") == "/" for node in filesystems):
-            return "UNVERIFIED"
+        return json.loads(raw)
+    except (ValueError, TypeError):
+        return None
 
-        def visit(nodes, depth=0):
-            if depth > 6:
-                return None
-            for node in nodes:
-                if not isinstance(node, dict):
-                    return None
-                target = node.get("target")
-                fstype = node.get("fstype")
-                if not isinstance(target, str) or not isinstance(fstype, str):
-                    return None
-                if target != "/" and fstype.lower() not in PSEUDO:
-                    return False
-                children = node.get("children", [])
-                if children:
-                    if not isinstance(children, list):
-                        return None
-                    result = visit(children, depth + 1)
-                    if result is not True:
-                        return result
-            return True
 
-        outcome = visit(filesystems)
-        return ("NO_EXTERNAL_MOUNTS_DETECTED" if outcome is True else
-                "EXTERNAL_OR_UNKNOWN_MOUNT" if outcome is False else "UNVERIFIED")
-    except (TypeError, ValueError):
+def guest_stat_inode(path):
+    if not isinstance(path, str) or not path.startswith("/") or len(path) > 512:
+        return None
+    raw = command(["pct", "exec", TARGET, "--", "stat", "-Lc",
+                   "%d:%i", path], limit=160)
+    if raw is None:
+        return None
+    result = raw.strip()
+    return result if re.fullmatch(r"[0-9]+:[0-9]+", result) else None
+
+
+def flattened_mounts(nodes, depth=0):
+    if not isinstance(nodes, list) or depth > 14:
+        raise ValueError("invalid mount tree")
+    for node in nodes:
+        if not isinstance(node, dict):
+            raise ValueError("invalid mount")
+        row = tuple(node.get(k) for k in ("target", "fstype", "source"))
+        if any(not isinstance(item, str) or not item or len(item) > 1600
+               for item in row):
+            raise ValueError("invalid mount metadata")
+        yield row
+        children = node.get("children", [])
+        if children:
+            yield from flattened_mounts(children, depth + 1)
+
+
+def inspected_webui_merged(inspect, info):
+    if (not isinstance(inspect, list) or len(inspect) != 1 or
+            not isinstance(inspect[0], dict)):
+        return None
+    obj = inspect[0]
+    mounts = obj.get("Mounts")
+    if (not isinstance(mounts, list) or len(mounts) != 1 or
+            not isinstance(mounts[0], dict) or
+            (mounts[0].get("Source"), mounts[0].get("Destination"),
+             mounts[0].get("Type")) != (PERSISTENT, WEBUI_TARGET, "bind")):
+        return None
+    if not isinstance(info, dict) or not isinstance(info.get("store"), dict):
+        return None
+    if info["store"].get("graphRoot") != GRAPHROOT:
+        return None
+    state = obj.get("State")
+    if not isinstance(state, dict) or state.get("Running") is not True:
+        return None
+    pid = state.get("Pid")
+    if type(pid) is not int or not 1 < pid < 2 ** 22:
+        return None
+    driver = obj.get("GraphDriver")
+    data = driver.get("Data") if isinstance(driver, dict) else None
+    merged = data.get("MergedDir") if isinstance(data, dict) else None
+    if (not isinstance(merged, str) or
+            not re.fullmatch(
+                r"/var/lib/containers/storage/overlay/[a-f0-9]{16,128}/merged",
+                merged)):
+        return None
+    return merged, pid
+
+
+def classify_rootfs_runtime_mounts(nodes, merged, root_inode, bind_inode):
+    """Accept exactly the known LXCFS + Podman runtime mount fingerprint.
+
+    A non-pseudo source must be from the same guest rootfs dataset and device.
+    Never treat generic bind, NFS, other overlay, or autofs as backup-safe.
+    """
+    records = list(flattened_mounts(nodes))
+    if not 1 <= len(records) <= 240:
+        return False
+    roots = [row for row in records if row[0] == "/"]
+    if len(roots) != 1:
+        return False
+    _, root_type, root_source = roots[0]
+    if root_type != "zfs" or not root_source or not root_inode or not bind_inode:
+        return False
+    if root_inode != bind_inode:
+        return False
+    if any(len([row for row in records if row[0] == target]) != 0 for target in (
+            "/srv/ai/models", "/srv/ai/open-webui",
+            GRAPHROOT + "/volumes")):
+        return False
+
+    lxcfs = overlay = internal = pseudo = 0
+    for target, fstype, source in records:
+        if target == "/":
+            continue
+        if fstype in PSEUDO:
+            # Pseudo filesystems are runtime-only, never backed-up app data.
+            if fstype in {"overlay", "autofs"} or target.startswith(
+                    ("/srv/ai/", GRAPHROOT + "/volumes/")):
+                return False
+            pseudo += 1
+            continue
+        if fstype == "fuse.lxcfs":
+            if not ((target.startswith("/proc/") or target.startswith("/sys/"))
+                    and (source == "lxcfs" or source.startswith("lxcfs["))):
+                return False
+            lxcfs += 1
+            continue
+        if (target == merged and fstype == "fuse.fuse-overlayfs" and
+                source in ("overlay", "fuse-overlayfs", "fuse.fuse-overlayfs")):
+            overlay += 1
+            continue
+        if (target.startswith(GRAPHROOT + "/") and
+                not target.startswith((
+                    GRAPHROOT + "/overlay/",
+                    GRAPHROOT + "/overlay-containers/",
+                    GRAPHROOT + "/volumes/")) and
+                fstype == root_type and
+                source.startswith(root_source + "[") and source.endswith("]")):
+            mount_inode = guest_stat_inode(target)
+            if mount_inode is None or (
+                    mount_inode.split(":", 1)[0] != root_inode.split(":", 1)[0]):
+                return False
+            internal += 1
+            continue
+        return False
+    # Live CT110 fingerprint from the read-only 19 Oct audits:
+    # 52 mounts = root + 39 pseudo + 10 LXCFS + 1 fuse-overlay + 1 internal bind.
+    return (len(records) == 52 and pseudo == 39 and lxcfs == 10
+            and overlay == 1 and internal == 1)
+
+
+def guest_mounts():
+    mounts = guest_json(["findmnt", "-J", "-o", "TARGET,FSTYPE,SOURCE"])
+    info = guest_json(["podman", "info", "--format", "json"])
+    inspect = guest_json(["podman", "inspect", "open-webui"])
+    if not isinstance(mounts, dict):
+        return "UNVERIFIED"
+    identity = inspected_webui_merged(inspect, info)
+    if identity is None:
+        return "EXTERNAL_OR_UNKNOWN_MOUNT"
+    merged, pid = identity
+    source_inode = guest_stat_inode(PERSISTENT)
+    process_inode = guest_stat_inode("/proc/" + str(pid) + "/root" + WEBUI_TARGET)
+    root_inode = guest_stat_inode("/")
+    if source_inode is None or source_inode != process_inode or root_inode is None:
+        return "EXTERNAL_OR_UNKNOWN_MOUNT"
+    try:
+        safe = classify_rootfs_runtime_mounts(
+            mounts.get("filesystems"), merged, root_inode, source_inode)
+        return ("ROOTFS_INTERNAL_RUNTIME_ONLY" if safe else
+                "EXTERNAL_OR_UNKNOWN_MOUNT")
+    except (ValueError, TypeError, KeyError):
         return "UNVERIFIED"
 
 
@@ -210,7 +327,7 @@ def report():
     tmp = temp_space()
     prior = existing_target_archives() if nfs == "NFS_ACTIVE_WITH_FREE_SPACE" else "UNVERIFIED"
     ready = (identity == "RUNNING_ROOTFS_ONLY" and data == "IN_GUEST_ROOTFS" and
-             mounts == "NO_EXTERNAL_MOUNTS_DETECTED" and
+             mounts == "ROOTFS_INTERNAL_RUNTIME_ONLY" and
              nfs == "NFS_ACTIVE_WITH_FREE_SPACE" and tmp == "LOCAL_TMP_SPACE_OK" and
              prior == "NO_CT110_ARCHIVE_ON_SELECTED_STORAGE")
     return dict(AUDIT="READ_ONLY", CHANGED=False,
