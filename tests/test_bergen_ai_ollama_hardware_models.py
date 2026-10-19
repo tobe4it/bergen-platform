@@ -12,6 +12,8 @@ PULL = ROOT / "ansible/playbooks/manage-bergen-ai-ollama-models.yml"
 GPU_AUDIT = ROOT / "ansible/playbooks/audit-bergen-ai-gpu-stage-readonly.yml"
 GPU_STAGE = ROOT / "ansible/playbooks/stage-bergen-ai-ollama-gpu-resources.yml"
 GPU_SCRIPT = ROOT / "ansible/files/bergen_ai/audit_ollama_gpu_stage_readonly.py"
+GPU_ROLLBACK_SCRIPT = ROOT / "ansible/files/bergen_ai/audit_ollama_gpu_rollback_readonly.py"
+GPU_ROLLBACK_PLAY = ROOT / "ansible/playbooks/rollback-bergen-ai-ollama-gpu-stage.yml"
 
 
 class OllamaHardwareTests(unittest.TestCase):
@@ -108,6 +110,24 @@ class OllamaHardwareTests(unittest.TestCase):
             if "ansible.builtin.command" in t:
                 self.assertIs(t["changed_when"], False)
                 self.assertTrue(t["no_log"])
+
+    def test_gpu_stage_rollback_requires_exact_preimage_and_separate_approval(self):
+        raw = GPU_ROLLBACK_SCRIPT.read_text()
+        ast.parse(raw)
+        for evidence in ("lxc110-pre-gpu.conf", "UNRELATED_CONFIG_DRIFT",
+                         "RESTORE_MEMORY_MIB", '"EXACT_STAGE_ONLY"',
+                         "mode=0660", "memory: 32768"):
+            self.assertIn(evidence, raw)
+        play = yaml.safe_load(GPU_ROLLBACK_PLAY.read_text())[0]
+        self.assertEqual(play["hosts"], "venombox")
+        text = GPU_ROLLBACK_PLAY.read_text()
+        self.assertIn("bergen_ai_gpu_rollback_approved", text)
+        self.assertIn("bergen_ai_gpu_rollback_before_restart_confirmed", text)
+        self.assertIn("GPU_ROLLBACK_CONFIG_DRIFT", text)
+        self.assertIn("[pct, set, '110', --delete, 'dev0,dev1']", text)
+        self.assertIn("[pct, set, '110', --memory, '16384']", text)
+        self.assertNotIn("pct, reboot", text)
+        self.assertNotIn("pct, stop", text)
 
     def test_32b_is_only_with_separate_review_and_headroom(self):
         src = PLAN.read_text()
