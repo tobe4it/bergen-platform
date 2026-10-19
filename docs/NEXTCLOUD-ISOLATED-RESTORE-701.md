@@ -343,3 +343,45 @@ The output so far shows Rocky Linux 9.4, Python3, OpenSSL and gzip
 installed; PHP, MariaDB, nginx, httpd, tar and rsync are absent.
 These software dependencies must be delivered using a separately
 reviewed offline package installation plan. No NIC is permitted.
+
+
+## Phase 5A: read-only offline RPM-source inventory
+
+The already-running test guest passed the separate runtime audit:
+Rocky Linux 9.4, zero non-loopback devices, working pct exec and rpm.
+The verified recovery archive remains on the venombox host and is neither
+extracted nor imported.
+
+The guest has gzip, Python3 and OpenSSL, but lacks PHP, MariaDB,
+nginx/httpd, tar and rsync. Before acquiring an RPM bundle, inspect
+**exact installed package versions and sources** on the production
+reference mx2 using strictly read-only queries (rpm -qa, /etc/yum.repos.d
+section identifiers, /etc/dnf/modules.d enabled streams, php -m).
+The inventory reads but never prints repository base URLs, credentials,
+Nextcloud config.php or document paths. Cached RPM availability is
+reported as count and aggregate bytes only.
+
+From bp-controller in the existing restore worktree:
+
+    BASE="$HOME/bergen-platform"
+    cd "$HOME/bergen-platform-nextcloud-restore"
+    git fetch origin feat/nextcloud-isolated-restore-701-20261019
+    git switch --detach origin/feat/nextcloud-isolated-restore-701-20261019
+
+    ansible-playbook       -i "$BASE/ansible/inventory.yml"       -i "$BASE/ansible/inventory.local.yml"       ansible/playbooks/audit-nextcloud-restore-offline-package-sources.yml       -e @"$BASE/ansible/vars/mail-tls.local.yml"       -e @"$BASE/ansible/vars/mail-nextcloud-stack.local.yml"       --vault-id infra@prompt
+
+Expected: NEXTCLOUD_RESTORE_OFFLINE_PACKAGE_INVENTORY_READY,
+changed=0 and failed=0. Source mx2 and test guest 701 remain unchanged.
+
+After reviewing version and provider metadata, design a separate offline
+RPM bundle acquisition on a **non-production** machine with network
+access. Do not attach a network interface to guest 701 or run package
+downloads/updates on mx2. An RPM dependency closure and signature
+verification must be established before anything is installed.
+
+Do not copy production PHP configuration, credential files, mail settings
+or LDAP/OIDC secrets into a guest that could be networked later. The
+proven SHA-256 archive may itself contain production credentials; keep
+the test guest permanently isolated and disable scheduled jobs, outgoing
+notifications, background syncs, external services and login integrations
+before any functional testing.
