@@ -1,0 +1,10 @@
+---
+# Firmware power recovery is a physical-host policy, not a Proxmox LXC option.
+# This playbook deliberately does not modify firmware or reboot the host.
+- name: Audit headless Proxmox AC power recovery support
+  hosts: venombox
+  become: true
+  gather_facts: false
+  serial: 1
+  roles:
+    - role: proxmox_power_recovery_audit
