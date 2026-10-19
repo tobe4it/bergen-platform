@@ -15,6 +15,8 @@ on:
       - 'ansible/playbooks/audit-nextcloud-restore-archive-readonly.yml'
       - 'ansible/playbooks/inspect-nextcloud-restore-701-offline-runtime.yml'
       - 'ansible/playbooks/inspect-nextcloud-restore-701-running-readonly.yml'
+      - 'ansible/playbooks/audit-nextcloud-restore-offline-package-sources.yml'
+      - 'ansible/files/nextcloud/inspect_restore_rpm_inventory.py'
       - 'tests/test_nextcloud_restore_701_iface_count.py'
       - 'docs/NEXTCLOUD-ISOLATED-RESTORE-701.md'
       - '.github/workflows/nextcloud-isolated-restore-701.yml'
@@ -62,6 +64,10 @@ jobs:
           ansible-playbook -i localhost, \
             ansible/playbooks/inspect-nextcloud-restore-701-running-readonly.yml \
             --syntax-check
+          ansible-playbook -i localhost, \
+            ansible/playbooks/audit-nextcloud-restore-offline-package-sources.yml \
+            --syntax-check
+          python3 -m py_compile ansible/files/nextcloud/inspect_restore_rpm_inventory.py
       - name: Verify offline-only initial provisioning
         run: |
           python3 - <<'PY'
@@ -131,5 +137,22 @@ jobs:
           assert not any(t.get("ansible.builtin.command",{}).get("argv",[])[:2] in (["pct","start"],["pct","stop"],["pct","set"],["pct","mount"]) for t in running_tasks)
           assert not any(any(key in t for key in ("ansible.builtin.shell","ansible.builtin.template","ansible.builtin.file","ansible.builtin.copy")) for t in running_tasks)
           assert "NON_LOOPBACK_DEVICES=0" in Path("ansible/playbooks/inspect-nextcloud-restore-701-running-readonly.yml").read_text()
+          rpm = yaml.safe_load(Path("ansible/playbooks/audit-nextcloud-restore-offline-package-sources.yml").read_text())
+          assert len(rpm) == 3
+          assert [p["hosts"] for p in rpm] == ["localhost", "venombox", "nextcloud_restore_rpm_reference"]
+          assert all(
+              not any(k in t for k in ("ansible.builtin.shell","ansible.builtin.script","ansible.builtin.raw","ansible.builtin.copy","ansible.builtin.template","ansible.builtin.file","ansible.builtin.dnf","ansible.builtin.yum"))
+              for p in rpm for t in p["tasks"]
+          )
+          assert all(
+              t.get("ansible.builtin.command",{}).get("argv",[])[:2] not in
+              (["pct","start"],["pct","stop"],["pct","set"],["pct","push"])
+              for p in rpm for t in p["tasks"]
+          )
+          source_inventory = Path("ansible/files/nextcloud/inspect_restore_rpm_inventory.py").read_text()
+          assert 'package_installation": False' in source_inventory
+          assert 'network_changes": False' in source_inventory
+          assert 'rpm", "-qa"' in source_inventory
+          assert 'ALLOWED_ID' in source_inventory
           print("NEXTCLOUD_701_OFFLINE_STATIC_BOUNDARIES=PASS")
           PY
