@@ -1,0 +1,123 @@
+---
+# Stage exactly four private Open WebUI 0.10.2 model aliases for parents/children.
+# NO group assignment, no OIDC toggle, no user-role edits and NO public access.
+# Defaults to AUDIT; apply requires approved backup and snapshot fingerprint.
+- name: Stage reviewed private family chat profiles using Open WebUI API
+  hosts: "{{ bergen_ai_family_audit_host | default('__no_approved_family_host__') }}"
+  gather_facts: false
+  serial: 1
+  vars:
+    bp_family_model_mode: "{{ bergen_ai_family_model_mode | default('audit') }}"
+    bp_family_model_mutating: "{{ bp_family_model_mode in ['apply', 'rollback'] }}"
+    bp_family_model_payload:
+      mode: "{{ bp_family_model_mode }}"
+      approved: "{{ bergen_ai_family_model_approved | default(false) | bool }}"
+      backup_verified: "{{ bergen_ai_family_model_backup_verified | default(false) | bool }}"
+      rollback_approved: "{{ bergen_ai_family_model_rollback_approved | default(false) | bool }}"
+      expected_sha256: "{{ bergen_ai_family_model_expected_sha256 | default('') }}"
+      expected_groups: "{{ bergen_ai_family_group_expected }}"
+      token: "{{ vault_open_webui_admin_token }}"
+      child_prompt: "{{ lookup('ansible.builtin.file', playbook_dir ~ '/../files/bergen_ai/prompts/learning_companion_de_v1.md') }}"
+  tasks:
+    - name: Require approved target and independent per-model release gates
+      ansible.builtin.assert:
+        that:
+          - bergen_ai_family_audit_host is defined
+          - inventory_hostname == bergen_ai_family_audit_host
+          - ansible_play_hosts_all | length == 1
+          - bergen_ai_family_audit_approved | default(false) | bool
+          - bergen_ai_family_group_expected is mapping
+          - (bergen_ai_family_group_expected.keys() | list | sort) == ['adults', 'children', 'family']
+          - vault_open_webui_admin_token is defined
+          - vault_open_webui_admin_token | length >= 20
+          - bp_family_model_mode in ['audit', 'apply', 'rollback']
+          - not bp_family_model_mutating or (bergen_ai_family_model_approved | default(false) | bool)
+          - not bp_family_model_mutating or (bergen_ai_family_model_backup_verified | default(false) | bool)
+          - not bp_family_model_mutating or (bergen_ai_family_model_expected_sha256 | default('') | length == 64)
+          - not bp_family_model_mutating or not ansible_check_mode
+          - bp_family_model_mode != 'rollback' or (bergen_ai_family_model_rollback_approved | default(false) | bool)
+        fail_msg: FAMILY_MODEL_STAGE_GATE_DENIED
+      no_log: true
+
+    - name: Run version-locked WebUI API audit, apply or approved rollback
+      ansible.builtin.command:
+        argv:
+          - python3
+          - -c
+          - "{{ lookup('ansible.builtin.file', playbook_dir ~ '/../files/bergen_ai/manage_family_chat_profiles_v0102.py') }}"
+        stdin: "{{ bp_family_model_payload | to_json }}"
+        stdin_add_newline: true
+      register: bp_family_model_run
+      changed_when: false
+      failed_when: false
+      check_mode: false
+      no_log: true
+
+    - name: Require exactly one bounded status frame
+      ansible.builtin.set_fact:
+        bp_family_model_frames: >-
+          {{ bp_family_model_run.stdout_lines |
+             select('match', '^BERGEN_FAMILY_MODEL_STAGE_V1:') | list }}
+      no_log: true
+
+    - name: Deny absent or malformed model stage status
+      ansible.builtin.assert:
+        that:
+          - bp_family_model_frames | length == 1
+          - bp_family_model_frames[0] | length < 1500
+        fail_msg: FAMILY_MODEL_STAGE_INVALID_OUTPUT
+      no_log: true
+
+    - name: Decode only allowlisted non-sensitive result categories
+      ansible.builtin.set_fact:
+        bp_family_model_result: >-
+          {{ bp_family_model_frames[0] |
+             regex_replace('^BERGEN_FAMILY_MODEL_STAGE_V1:', '') | from_json }}
+      no_log: true
+
+    - name: Report bounded failure reason without API payloads or credentials
+      ansible.builtin.debug:
+        msg: >-
+          FAMILY_MODEL_STAGE_ERROR={{
+            bp_family_model_result.STATUS
+            if bp_family_model_result.STATUS | default('') in [
+              'API_UNAVAILABLE_OR_DENIED', 'UNREVIEWED_OPEN_WEBUI_VERSION',
+              'GROUP_SET_DRIFT', 'REQUIRED_OLLAMA_MODELS_MISSING',
+              'GROUP_MEMBERSHIP_REVIEW_REQUIRED', 'MODEL_GRANT_BASELINE_DRIFT',
+              'PROFILE_DRIFT', 'SNAPSHOT_CHANGED', 'MODEL_ACL_BYPASSED',
+              'CHILD_POLICY_MISSING', 'APPROVAL_OR_BACKUP_MISSING',
+              'MODEL_CREATE_REQUIRES_REVIEW', 'MODEL_POSTCHECK_REQUIRES_REVIEW',
+              'UNCLASSIFIED_RUNTIME_ERROR'
+            ] else 'FAILED_CLOSED'
+          }}
+      when: bp_family_model_run.rc != 0
+
+    - name: Require exactly the approved stage and correct mutation classification
+      ansible.builtin.assert:
+        that:
+          - bp_family_model_run.rc == 0
+          - bp_family_model_result.AUDIT in ['READ_ONLY', 'CONTROLLED']
+          - bp_family_model_result.STATUS in ['EMPTY_READY', 'ALREADY_STAGED', 'PRIVATE_PROFILES_STAGED', 'PROFILES_ROLLED_BACK']
+          - bp_family_model_mode != 'audit' or bp_family_model_result.AUDIT == 'READ_ONLY'
+          - bp_family_model_mode == 'audit' or bp_family_model_result.AUDIT == 'CONTROLLED'
+          - bp_family_model_mode != 'apply' or bp_family_model_result.STATUS in ['PRIVATE_PROFILES_STAGED', 'ALREADY_STAGED']
+          - bp_family_model_mode != 'rollback' or bp_family_model_result.STATUS == 'PROFILES_ROLLED_BACK'
+          - bp_family_model_result.CHANGED is boolean
+          - bp_family_model_mode != 'audit' or not bp_family_model_result.CHANGED
+        fail_msg: FAMILY_MODEL_STAGE_FAILED_CLOSED
+      no_log: true
+
+    - name: Summarize staged parent/child private model profiles only
+      ansible.builtin.debug:
+        msg:
+          - "AUDIT={{ bp_family_model_result.AUDIT }}"
+          - "STATUS={{ bp_family_model_result.STATUS }}"
+          - "CONFIG_SHA256={{ bp_family_model_result.CONFIG_SHA256 | default('N/A') }}"
+          - "REQUIRED_MODELS_PRESENT={{ bp_family_model_result.REQUIRED_MODELS_PRESENT | default('YES') }}"
+          - "CREATED={{ bp_family_model_result.CREATED | default(0) }}"
+          - "CHANGED={{ bp_family_model_result.CHANGED }}"
+          - "USER_MEMBERSHIPS_CHANGED=NO"
+          - "OIDC_CONFIGURATION_CHANGED=NO"
+          - "PAPERLESS_ACL_CHANGED=NO"
+          - "ALL_MODELS_PRIVATE=YES"
+      changed_when: bp_family_model_mutating and bp_family_model_result.CHANGED | bool
