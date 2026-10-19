@@ -30,7 +30,7 @@ class ExternalGatesTest(TestCase):
         src = SCRIPT.read_text()
         ast.parse(src)
         self.assertEqual(str(gates.CANDIDATE), "172.30.110.0/28")
-        self.assertIn('APPLY_AUTHORIZED=False', src)
+        self.assertIn('APPLY_AUTHORIZED=False', src)\n        self.assertIn('r"^net0:\\s"', src)
         self.assertIn('FULL_NETWORK_CLEARANCE="NOT_PROVEN"', src)
         self.assertIn('ROLLBACK_CLEARANCE="NOT_PROVEN"', src)
         for forbidden in ("pct set", "pct start", "pct stop", "pct reboot",
@@ -65,6 +65,34 @@ class ExternalGatesTest(TestCase):
             self.assertEqual(gates.audit_manifest(data)[0], "UNVERIFIED")
         self.assertIsNone(gates.parse_cidr("172.30.110.12"))
         self.assertIsNone(gates.parse_cidr("not-cidr"))
+
+    def test_real_pct_net0_syntax_is_recognized_without_mutation(self):
+        config_110 = (
+            "arch: amd64\\n"
+            "hostname: bergen-ai\\n"
+            "net0: name=eth0,bridge=vmbr20,ip=dhcp,type=veth\\n"
+            "unprivileged: 1\\n"
+        )
+        config_126 = (
+            "hostname: bergen-paperless\\n"
+            "net0: name=eth0,bridge=vmbr1,ip=192.168.20.12/24\\n"
+        )
+        with mock.patch.object(gates, "command", return_value=config_110) as query:
+            self.assertEqual(gates.guest_config("110", "bergen-ai"),
+                             "READABLE_SOURCE_ONLY")
+            query.assert_called_once_with(["pct", "config", "110"])
+        with mock.patch.object(gates, "command", return_value=config_126):
+            self.assertEqual(gates.guest_config("126", "bergen-paperless"),
+                             "READABLE_SOURCE_ONLY")
+        with mock.patch.object(gates, "command", return_value=config_110):
+            self.assertEqual(gates.guest_config("110", "wrong-host"),
+                             "UNVERIFIED")
+        with mock.patch.object(gates, "command", return_value="hostname: bergen-ai\\n"):
+            self.assertEqual(gates.guest_config("110", "bergen-ai"),
+                             "UNVERIFIED")
+        with mock.patch.object(gates, "command", return_value=None):
+            self.assertEqual(gates.guest_config("110", "bergen-ai"),
+                             "UNVERIFIED")
 
     def test_backups_are_metadata_only_not_restore_proof(self):
         with tempfile.TemporaryDirectory() as temporary:
