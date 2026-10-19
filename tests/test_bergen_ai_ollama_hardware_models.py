@@ -27,6 +27,8 @@ GPU_POSTBOOT_DIAG_PLAY = ROOT / "ansible/playbooks/diagnose-bergen-ai-gpu-postbo
 GPU_HOST_MEMORY_SCRIPT = ROOT / "ansible/files/bergen_ai/audit_ollama_host_memory_readonly.py"
 GPU_HOST_MEMORY_AUDIT = ROOT / "ansible/playbooks/audit-bergen-ai-gpu-host-memory-readonly.yml"
 GPU_REBOOT_PLAY = ROOT / "ansible/playbooks/restart-bergen-ai-gpu-approved.yml"
+GPU_BENCH_SCRIPT = ROOT / "ansible/files/bergen_ai/benchmark_ollama_gpu_synthetic.py"
+GPU_BENCH_PLAY = ROOT / "ansible/playbooks/benchmark-bergen-ai-ollama-gpu-synthetic.yml"
 
 
 class OllamaHardwareTests(unittest.TestCase):
@@ -337,6 +339,35 @@ class OllamaHardwareTests(unittest.TestCase):
             if "ansible.builtin.assert" in task:
                 self.assertTrue(all(isinstance(cond,str)
                                     for cond in task["ansible.builtin.assert"]["that"]))
+
+    def test_benchmark_must_have_separate_approval_and_single_synthetic_model(self):
+        script=GPU_BENCH_SCRIPT.read_text()
+        ast.parse(script, filename=str(GPU_BENCH_SCRIPT))
+        playbook=GPU_BENCH_PLAY.read_text()
+        play=yaml.safe_load(playbook)[0]
+        self.assertEqual(play["hosts"], "venombox")
+        self.assertFalse(play["gather_facts"])
+        self.assertIn("bergen_ai_gpu_benchmark_approved", playbook)
+        self.assertIn("bergen_ai_gpu_benchmark_window_approved", playbook)
+        for expected in (
+            '/api/generate', '/api/ps', 'qwen2.5:14b-instruct-q4_K_M',
+            '"keep_alive":"45s"', '"num_predict":40', '"num_ctx":2048',
+            "SYNTHETIC_NO_DOCUMENTS", "GPU_ALLOCATION_OBSERVED",
+            "/sys/fs/cgroup/lxc/110/memory.max"):
+            self.assertIn(expected,script)
+        for forbidden in ("pct reboot","pct set", "ollama pull",
+                          "PAPERLESS_AI_ENABLED=true","/api/chat"):
+            self.assertNotIn(forbidden,script)
+        tasks=[t for t in play["tasks"] if "ansible.builtin.command" in t]
+        self.assertEqual(len(tasks),1)
+        self.assertTrue(tasks[0]["no_log"])
+        self.assertTrue(tasks[0]["changed_when"])
+        self.assertIn("async", tasks[0])
+        self.assertNotIn("GPU_INFERENCE_PROVEN_BY_MODEL_EXECUTION=YES",playbook)
+        for item in play["tasks"]:
+            if "ansible.builtin.assert" in item:
+                for check in item["ansible.builtin.assert"]["that"]:
+                    self.assertIsInstance(check,str)
 
     def test_restart_is_single_guest_explicit_downtime_with_preimage_gate(self):
         play = yaml.safe_load(GPU_REBOOT_PLAY.read_text())[0]
