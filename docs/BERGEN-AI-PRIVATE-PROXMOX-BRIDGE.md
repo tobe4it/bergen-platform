@@ -1004,3 +1004,40 @@ genehmigte Einmalsicherung ist nach dem bisherigen Stand weiterhin
 gesperrt: `SAFE_TO_ATTEMPT_SINGLE_BACKUP=False`.
 Das bestehende mutierende Playbook `backup-bergen-ai-ct110-once.yml`
 nicht erneut starten. Keine automatische Aufweichung der Gates.
+
+
+### Phase 0f.1 – Live-Nachprüfung: Gerätequelle noch unbestimmt (19.10.2026, 21:34)
+
+Beim zweiten Operator-Lauf der erweiterten Mount-Diagnose:
+`venombox ok=7 changed=0 failed=0`.
+`CT110_CONFIG_IDENTITY=VERIFIED`;
+`PVE_MP_COUNT=0`, `LXC_MOUNT_AUTO_COUNT=0`;
+`LXC_MOUNT_ENTRY_COUNT=1`,
+`LXC_MOUNT_ENTRY=DEVICE_OR_PSEUDO_TARGETS_PRESENT`,
+`LXC_MOUNT_ENTRY_DEVICE_ORIGIN=UNVERIFIED`,
+`WEBUI_DATA_MOUNT=GUEST_ROOTFS`.
+**Kein** Backup gestartet oder freigegeben.
+
+Die Quell-/Options-Diagnose verlangte in ihrer ersten Version
+ausnahmslos sechs Felder (`src dst none opts 0 0`).
+LXC-`lxc.mount.entry` kann aber auch vier Felder
+(`src dst none opts`) enthalten. Dies könnte das
+`UNVERIFIED` verursachen; das tatsächliche Format des
+CT110-Mounts ist aus der sanitisierten Ausgabe **nicht** erkennbar.
+
+Der Read-only-Audit akzeptiert nach Korrektur beide
+Schreibweisen **ausschließlich bei exakten, restriktiv
+whitelisteten Geräte-Quell-/Ziel-/Options-Kombinationen**.
+Zusätzlich `LXC_MOUNT_ENTRY_FORMAT` mit
+`FOUR_FIELD_FORM`, `SIX_FIELD_FORM`, `OTHER_FIELD_COUNT`
+oder `UNVERIFIED`. Andere Quellen oder abweichende Optionen
+bleiben gesperrt (`SOURCE_OR_OPTIONS_REVIEW`).
+Die Korrektur erweitert weder das erlaubte Geräteinventar
+noch die Freigaben. Regressionstests und CI sind erfolgreich.
+
+Der Operator muss nun denselben **read-only**
+`audit-bergen-ai-ct110-mount-directives-readonly.yml`
+erneut mit aktuellem Branch ausführen. Der mutierende
+`backup-bergen-ai-ct110-once.yml` bleibt **gesperrt**.
+Auch bei exakter Gerätebindung müssen die Ollama-/Podman-Daten
+vor Backup-Apply überprüft werden.
