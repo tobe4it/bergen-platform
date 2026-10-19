@@ -93,6 +93,31 @@ if any(re.match(r"net\d+:", c) for c in cfg):
 name = "nextcloud-" + ident + ".tar.gz"
 out = root / name
 part = root / (".incoming-" + ident + ".part")
+# An earlier transfer may have completed successfully but its controller
+# receipt may have been lost. Revalidate a pre-existing immutable archive
+# before deciding whether another transfer is needed. Never overwrite it.
+if mode == "verify":
+    if out.is_symlink() or part.exists() or part.is_symlink():
+        raise SystemExit(82)
+    if not out.is_file():
+        print("TARGET_ARCHIVE_ABSENT")
+        raise SystemExit(4)
+    existing_fd = os.open(out, os.O_RDONLY | getattr(os,"O_NOFOLLOW",0))
+    try:
+        if not stat.S_ISREG(os.fstat(existing_fd).st_mode) or os.fstat(existing_fd).st_size != size:
+            raise SystemExit(83)
+        existing_sha = hashlib.sha256()
+        while True:
+            block = os.read(existing_fd, 4 * 1024 * 1024)
+            if not block:
+                break
+            existing_sha.update(block)
+        if existing_sha.hexdigest() != expected_digest:
+            raise SystemExit(84)
+    finally:
+        os.close(existing_fd)
+    print("TARGET_ARCHIVE_SHA256_VERIFIED=YES")
+    raise SystemExit(0)
 if out.exists() or out.is_symlink() or part.exists() or part.is_symlink():
     raise SystemExit(78)
 if mode == "probe":
@@ -151,10 +176,10 @@ def ssh_command(host, user, port, script, *args):
         "-p", str(port), "-l", user, host, shlex.join(command)
     ]
 
-def do_run(command):
+def do_run(command, timeout=60):
     return subprocess.run(
         command, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
-        timeout=60, check=False
+        timeout=timeout, check=False
     )
 
 def fail(msg):
@@ -224,6 +249,16 @@ def main():
         print("NEXTCLOUD_RESTORE_TRANSFER_READ_ONLY_READY")
         return
 
+    # A completed transfer with lost SSH receipt must be recoverable without
+    # modifying the already committed archive or transferring the bytes again.
+    existing = do_run(dst("verify"), timeout=600)
+    if existing.returncode == 0 and existing.stdout.strip() == b"TARGET_ARCHIVE_SHA256_VERIFIED=YES":
+        print("NEXTCLOUD_RESTORE_ARCHIVE_ALREADY_VERIFIED=YES")
+        print("NEXTCLOUD_RESTORE_ARCHIVE_TRANSFER_COMPLETE=YES")
+        return
+    if existing.returncode != 4 or existing.stdout.strip() != b"TARGET_ARCHIVE_ABSENT":
+        fail("EXISTING_DESTINATION_MISMATCH_OR_UNAVAILABLE")
+
     source = subprocess.Popen(src("stream"), stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
     target = subprocess.Popen(dst("receive"), stdin=subprocess.PIPE,
                               stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
@@ -244,12 +279,16 @@ def main():
         src_rc = source.wait(timeout=60)
         receipt = target.stdout.read(2048)
         dst_rc = target.wait(timeout=60)
-        if src_rc or dst_rc:
-            fail("SSH_TRANSFER_OR_DESTINATION_FAILED")
         if sent != size or controller_digest.hexdigest() != digest:
             fail("CONTROLLER_STREAM_HASH_MISMATCH")
-        if receipt.strip() != b"NEXTCLOUD_RESTORE_ARCHIVE_STAGED_AND_SHA256_VERIFIED=YES":
-            fail("TARGET_RECEIPT_INVALID")
+        if src_rc or dst_rc or receipt.strip() != b"NEXTCLOUD_RESTORE_ARCHIVE_STAGED_AND_SHA256_VERIFIED=YES":
+            # Do not assume an SSH receipt is proof of failure: the archive
+            # may already have been fully committed by the remote receiver.
+            verified = do_run(dst("verify"), timeout=600)
+            if verified.returncode == 0 and verified.stdout.strip() == b"TARGET_ARCHIVE_SHA256_VERIFIED=YES":
+                print("NEXTCLOUD_RESTORE_ARCHIVE_RECEIPT_RECOVERED=YES")
+            else:
+                fail("SSH_TRANSFER_OR_DESTINATION_UNVERIFIED")
         print("NEXTCLOUD_RESTORE_ARCHIVE_TRANSFER_COMPLETE=YES")
     finally:
         if source.poll() is None:
