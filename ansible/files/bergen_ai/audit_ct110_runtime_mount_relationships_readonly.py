@@ -147,6 +147,96 @@ def mounted_bind_characteristics(nodes, merged):
     )
 
 
+def rootfs_device_relation(path):
+    """Compare filesystem device IDs only; not an authorization of coverage."""
+    target = checked_inode(path)
+    root = checked_inode("/")
+    if target is None or root is None:
+        return "UNVERIFIED"
+    return "SAME_DEVICE" if target.split(":", 1)[0] == root.split(":", 1)[0] else "OTHER_DEVICE"
+
+
+def unaccounted_mount_details(nodes, merged):
+    """Describe the one remaining non-pseudo mount using fixed labels only.
+
+    Target basename and full source are intentionally not emitted. This step
+    diagnoses storage origin, but cannot authorize an LXC snapshot backup.
+    """
+    records = list(flatten(nodes))
+    roots = [r for r in records if r[0] == "/"]
+    if len(roots) != 1:
+        raise ValueError("ambiguous root")
+    root_source = roots[0][2]
+    remaining = []
+    for target, fstype, source in records:
+        if target == "/" or fstype in PSEUDO:
+            continue
+        if fstype == "fuse.lxcfs" and (
+                target.startswith("/proc/") or target.startswith("/sys/")):
+            continue
+        if target == merged and fstype == "fuse.fuse-overlayfs" and source in (
+                "fuse-overlayfs", "overlay", "fuse.fuse-overlayfs"):
+            continue
+        remaining.append((target, fstype, source))
+    if len(remaining) != 1:
+        return dict(UNRESOLVED_MOUNT_COUNT=len(remaining),
+                    UNRESOLVED_TARGET_CLASS="NOT_SINGLE",
+                    UNRESOLVED_TARGET_ROLE="UNVERIFIED",
+                    UNRESOLVED_SOURCE_CLASS="UNVERIFIED",
+                    UNRESOLVED_FS_RELATION="UNVERIFIED",
+                    UNRESOLVED_DEVICE_RELATION="UNVERIFIED")
+    target, fstype, source = remaining[0]
+    if target == merged + DST:
+        role, target_class = "OPENWEBUI_DATA", "MERGED_DATA"
+    elif target.startswith(merged + "/"):
+        role, target_class = "OTHER_MERGED_CHILD", "MERGED_TREE"
+    elif target.startswith(GRAPH + "/overlay-containers/"):
+        target_class = "PODMAN_RUNTIME_CONTAINER_TREE"
+        tokens = target[len(GRAPH + "/overlay-containers/"):].split("/")
+        if len(tokens) >= 3 and tokens[1] == "userdata":
+            suffix = "/".join(tokens[2:])
+            role = {
+                "hosts": "HOSTS_FILE",
+                "hostname": "HOSTNAME_FILE",
+                "resolv.conf": "RESOLV_FILE",
+                "shm": "SHM_DIRECTORY",
+                "mountpoint": "MOUNTPOINT",
+            }.get(suffix, "OTHER_USERDATA")
+        else:
+            role = "OTHER_CONTAINER_RUNTIME"
+    elif target.startswith(GRAPH + "/overlay/"):
+        role, target_class = "OTHER_OVERLAY_TREE", "PODMAN_OVERLAY_TREE"
+    elif target.startswith(GRAPH + "/volumes/"):
+        role, target_class = "VOLUME_TREE", "PODMAN_VOLUME_TREE"
+    elif target.startswith(GRAPH + "/"):
+        role, target_class = "OTHER_GRAPH", "PODMAN_OTHER_GRAPH"
+    else:
+        role, target_class = "OTHER_GUEST", "OUTSIDE_PODMAN_GRAPH"
+    if source == root_source:
+        source_class = "ROOT_SOURCE_EXACT"
+    elif source.startswith(root_source + "["):
+        source_class = "ROOT_SOURCE_SUBPATH"
+    elif source.startswith("/dev/"):
+        source_class = "DEVICE_PATH"
+    elif ":/" in source or source.startswith("//"):
+        source_class = "NETWORK_SOURCE"
+    elif re.match(r"^(?:rpool|tank|zpool|pool)/", source):
+        source_class = "OTHER_ZFS_DATASET"
+    elif "[" in source and source.endswith("]"):
+        source_class = "OTHER_BRACKET_SOURCE"
+    else:
+        source_class = "OTHER_SOURCE"
+    return dict(
+        UNRESOLVED_MOUNT_COUNT=1,
+        UNRESOLVED_TARGET_CLASS=target_class,
+        UNRESOLVED_TARGET_ROLE=role,
+        UNRESOLVED_SOURCE_CLASS=source_class,
+        UNRESOLVED_FS_RELATION="MATCHES_ROOT" if fstype == roots[0][1]
+                               else "DIFFERS_FROM_ROOT",
+        UNRESOLVED_DEVICE_RELATION=rootfs_device_relation(target),
+    )
+
+
 def identity_details(inspect, nodes, merged):
     """Diagnose host-visible versus process-namespace bind inode identities."""
     source_inode = checked_inode(SOURCE)
@@ -229,6 +319,7 @@ def report():
     # Diagnostics never authorize backup; independently identify why the
     # host-visible bind inode comparison failed, including namespace mismatch.
     detail.update(identity_details(inspect, tree.get("filesystems"), merged))
+    detail.update(unaccounted_mount_details(tree.get("filesystems"), merged))
     return detail
 
 
