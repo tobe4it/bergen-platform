@@ -20,27 +20,37 @@ No inventory IP, credentials, BMC endpoints, passwords, or hardware serial numbe
 
 The playbook refuses an unselected host or an actual host whose short hostname is not `venombox`. It reads DMI hardware IDs and checks existing interfaces via `fwupdmgr`, local IPMI and firmware sysfs. It is safe to repeat, including in Ansible check mode; all expected tasks report unchanged.
 
-## Baseline observed 2026-10-19 (read-only, venombox)
+## Verified audit baseline (2026-10-19, venombox)
 
-The first audited node returned:
-- Proxmox `9.2.20`, running Linux kernel `7.0.14-19-pve`.
-- SMBIOS system: `Micro Computer (HK) Tech Limited / AI Series`.
-- SMBIOS mainboard: `Shenzhen Meigao Electronic Equipment Co.,Ltd / F8BSC`.
-- `/sys/class/firmware-attributes` **absent**.
-- Neither `fwupdmgr` nor `ipmitool` installed; the skipped queries do **not** prove that an actual BMC is absent.
-- Successful Ansible run: `ok=12 changed=0 failed=0 skipped=4`.
+**First run:** `ok=12 changed=0 failed=0 skipped=4`.
+**Extended run:** `ok=18 changed=0 unreachable=0 failed=0 skipped=4`.
 
-**Vendor references, not an exact hardware confirmation:** The `F8BSC` board identifier occurs in Minisforum documentation for AI-family mini PCs. Minisforum describes `Restore on AC Power Loss` for the AI X1 Pro-370:
-- https://www.minisforum.com/de/pages/product-info
-- https://www.minisforum.com/de/blogs/press/hardware-requirements-for-enterprise-video-conferencing-rooms
+Read-only findings:
+- Proxmox `pve-manager/9.2.20`, running kernel `7.0.14-19-pve`.
+- System DMI: `Micro Computer (HK) Tech Limited / AI Series`.
+- Board DMI: `Shenzhen Meigao Electronic Equipment Co.,Ltd / F8BSC`.
+- Firmware: `American Megatrends International, LLC. / 1.04` dated `04/11/2025`.
+- UEFI boot: true.
+- `/sys/class/firmware-attributes`: absent.
+- `/sys/class/ipmi` and `/dev/ipmi0`: absent.
+- Neither `fwupdmgr` nor `ipmitool` is installed; their respective queries were skipped.
+- No firmware settings, guest startup settings, software or host runtime state were changed.
 
-Thus firmware may expose `Restore on AC Power Loss` in its own setup menus even when Linux lacks a writable BIOS interface. The board ID alone does not distinguish every Minisforum AI X1 / X1 Pro variant or firmware revision. The expanded audit collects **BIOS vendor, version and release date**, plus UEFI and local IPMI kernel presence, before choosing an access method.
+**Model evidence:** The official Minisforum AI X1 user manual lives in an `AI+X1-370+-365+-260+-255` download path and names board `F8BSC`. Distinguish this from Minisforum's separate **AI X1 Pro** model before selecting any firmware image.
+- Minisforum support page: https://www.minisforum.com/de/pages/product-info
+- AI X1 F8BSC manual: https://pc-file.s3.us-west-1.amazonaws.com/AI%2BX1-370%2B-365%2B-260%2B-255/user%2Bmannul/%E7%94%B5%E5%AD%90%E6%A1%A3%E8%AF%B4%E6%98%8E%E4%B9%A6%2BF8BSC%2B%28MP%2BV2.0%29%2B2025.5.16.pdf
 
-For some *other* Minisforum AMD systems users report BIOS menu `Advanced → AMD CBS → FCH Common Options → AC Power Loss Options → Ac Loss Control → Always On`. This route is **unverified on F8BSC** and must be confirmed from the actual firmware menus; do not launch the setup menu remotely unless independent KVM/video access is available.
+**AC power recovery:** Other Minisforum AMD devices expose the option at `Advanced → AMD CBS → FCH Common Options → AC Power Loss Options → Ac Loss Control → Always On`, or alternatively under `Advanced → ACPI`. These are **unverified candidate menu paths** on the inventoried F8BSC / AMI 1.04.
+- Community reports: https://www.reddit.com/r/MiniPCs/comments/1cr2rwl/minisforum_venus_series_um790_how_to_start/
+- https://www.reddit.com/r/MINISFORUM/comments/1m8upsj
 
-**Do not install `fwupd` merely to try the setter:** without a kernel-exposed firmware attributes API, installing the client does not create that firmware functionality. Do not install `ipmitool` merely because the binary is missing when no native BMC device has been established.
+### Operational decision
 
-No supported remote BIOS-setting write path is yet demonstrated. Treat the desired `Always On` state as **unverified**, not as applied.
+Do **not** presume a remote BIOS write path exists. The absence of a local IPMI device and OS firmware attributes makes standard Linux-side management unlikely. Installing clients alone cannot prove a BMC or firmware API exists.
+
+Preferred solution: In a scheduled maintenance window with a physically attached screen/keyboard or genuine out-of-band KVM, locate the exact AC recovery setting, choose `Always On`, save, restart and record the outcome. Avoid remotely booting into an inaccessible BIOS setup. Document the setting as a manually established host prerequisite in Ansible; do not misrepresent it as enforced. If a vendor-supported Linux setter becomes available, add an independently gated, exact hardware/firmware-specific apply role with before/after checks.
+
+For physical model confirmation without sending serial numbers, the CPU model can be read locally with `lscpu`. Do **not** flash firmware images based on a generic `F8BSC` board name or an AI X1 Pro article.
 
 ## Decision after audit
 
