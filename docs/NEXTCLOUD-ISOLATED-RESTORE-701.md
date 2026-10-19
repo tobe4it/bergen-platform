@@ -316,3 +316,30 @@ changed=0, failed=0.
 On failure, stop and inspect the sanitized diagnostic status. Do not
 alter existing production hosts or reset the guest to bypass a failed
 isolation assertion.
+
+
+## Phase 4C: sysfs bonding_masters false interface corrected
+
+On the already-running and networkless guest, the first runtime inventory
+reported one non-loopback entry. The operator independently inspected the
+actual network namespace and found only loopback, with 127.0.0.1/8 and
+::1/128; there were no non-loopback addresses, interfaces, or external routes.
+
+The false positive was a regular sysfs control file named bonding_masters
+under /sys/class/net. That path is NOT a network interface. Both the
+single-use boot playbook and the running-guest readonly inventory have
+been corrected to count **only symlink netdevice entries** in that
+directory, explicitly requiring the loopback device to be present.
+
+No guest settings or network configuration were changed. Do not rerun
+the guest boot playbook: VMID 701 is already running.
+
+Run the running-guest read-only inventory playbook again after fetching
+the updated restore branch. Expected:
+NEXTCLOUD_RESTORE_701_RUNNING_OFFLINE_INVENTORY_VERIFIED
+with NON_LOOPBACK_DEVICES=0, changed=0, failed=0.
+
+The output so far shows Rocky Linux 9.4, Python3, OpenSSL and gzip
+installed; PHP, MariaDB, nginx, httpd, tar and rsync are absent.
+These software dependencies must be delivered using a separately
+reviewed offline package installation plan. No NIC is permitted.
