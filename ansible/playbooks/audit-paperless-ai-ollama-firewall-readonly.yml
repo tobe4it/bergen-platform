@@ -1,0 +1,83 @@
+---
+# Read-only Proxmox-side firewall *inventory* for wildcard Ollama listener.
+# Never implies effective deny; UniFi/LAN policies need independent review.
+- name: Inspect Bergen-AI LXC110 firewall configuration without changing settings
+  hosts: venombox
+  become: true
+  gather_facts: false
+  tasks:
+    - name: Restrict firewall inventory to existing Proxmox target
+      ansible.builtin.assert:
+        that:
+          - inventory_hostname == 'venombox'
+        fail_msg: WRONG_PVE_HOST
+
+    - name: Read only sanitized LXC110, cluster and node firewall configuration
+      ansible.builtin.command:
+        argv:
+          - python3
+          - -c
+          - "{{ lookup('ansible.builtin.file', playbook_dir ~ '/../files/paperless/audit_ai_catalog_ollama_firewall_readonly.py', rstrip=False) }}"
+      register: paperless_ai_ollama_firewall_raw
+      changed_when: false
+      failed_when: false
+      check_mode: false
+      no_log: true
+
+    - name: Extract one bounded firewall inventory report
+      ansible.builtin.set_fact:
+        paperless_ai_ollama_firewall_frames: >-
+          {{ paperless_ai_ollama_firewall_raw.stdout_lines | default([]) |
+             select('match','^BERGEN_PAPERLESS_OLLAMA_FIREWALL_V1:') | list }}
+      no_log: true
+
+    - name: Reject missing or ambiguous firewall inventory
+      ansible.builtin.assert:
+        that:
+          - paperless_ai_ollama_firewall_raw.rc == 0
+          - paperless_ai_ollama_firewall_frames | length == 1
+          - paperless_ai_ollama_firewall_frames[0] | length < 1600
+        fail_msg: OLLAMA_FIREWALL_INVENTORY_UNVERIFIED
+      no_log: true
+
+    - name: Parse only sanitized firewall categories
+      ansible.builtin.set_fact:
+        paperless_ai_ollama_firewall: >-
+          {{ (paperless_ai_ollama_firewall_frames[0] |
+             regex_replace('^BERGEN_PAPERLESS_OLLAMA_FIREWALL_V1:','')) | from_json }}
+      no_log: true
+
+    - name: Require read-only classifications and preserve pending network gate
+      ansible.builtin.assert:
+        that:
+          - paperless_ai_ollama_firewall.AUDIT == 'READ_ONLY'
+          - not paperless_ai_ollama_firewall.CHANGED
+          - paperless_ai_ollama_firewall.STATUS in ['CONFIGURATION_INVENTORY','CT110_IDENTITY_OR_RUNTIME_UNVERIFIED','UNVERIFIED']
+          - paperless_ai_ollama_firewall.NETWORK_OPTION in ['ENABLED_ALL_NETS','DISABLED_SOME_NETS','UNSPECIFIED_SOME_NETS','UNKNOWN','UNVERIFIED']
+          - paperless_ai_ollama_firewall.CT_RULE_FILE in ['PRESENT','ABSENT','SYMLINK_UNREVIEWED','UNVERIFIED']
+          - paperless_ai_ollama_firewall.CLUSTER_ENABLE in ['ENABLED','DISABLED','NOT_EXPLICIT','NO_CONFIG_FILE','UNVERIFIED']
+          - paperless_ai_ollama_firewall.NODE_ENABLE in ['ENABLED','DISABLED','NOT_EXPLICIT','NO_CONFIG_FILE','UNVERIFIED']
+          - paperless_ai_ollama_firewall.EXPOSURE_GATE == 'REVIEW_REQUIRED'
+          - paperless_ai_ollama_firewall.UNIFI_POLICY == 'NOT_INSPECTED'
+        fail_msg: OLLAMA_FIREWALL_INVENTORY_FRAME_INVALID
+      no_log: true
+
+    - name: Report firewall scope without IPs or raw security policies
+      ansible.builtin.debug:
+        msg:
+          - AUDIT=READ_ONLY
+          - CHANGED=False
+          - "STATUS={{ paperless_ai_ollama_firewall.STATUS }}"
+          - "LXC110_NETWORK_FIREWALL_OPTION={{ paperless_ai_ollama_firewall.NETWORK_OPTION }}"
+          - "LXC110_FIREWALL_RULE_FILE={{ paperless_ai_ollama_firewall.CT_RULE_FILE }}"
+          - "PVE_CLUSTER_FIREWALL={{ paperless_ai_ollama_firewall.CLUSTER_ENABLE }}"
+          - "PVE_NODE_FIREWALL={{ paperless_ai_ollama_firewall.NODE_ENABLE }}"
+          - "PVE_FIREWALL_SERVICE={{ paperless_ai_ollama_firewall.PVE_FIREWALL_SERVICE }}"
+          - "PROXMOX_NFT_FIREWALL_SERVICE={{ paperless_ai_ollama_firewall.NFT_FIREWALL_SERVICE }}"
+          - "EFFECTIVE_PACKET_FILTERING={{ paperless_ai_ollama_firewall.PACKET_ENFORCEMENT }}"
+          - "UNIFI_POLICY={{ paperless_ai_ollama_firewall.UNIFI_POLICY }}"
+          - "INTRA_VLAN_ISOLATION={{ paperless_ai_ollama_firewall.INTRA_VLAN_ISOLATION | default('NOT_VERIFIED') }}"
+          - EXPOSURE_GATE=REVIEW_REQUIRED
+          - PAPERLESS_CONFIG_CHANGED=NO
+          - OLLAMA_CONFIG_CHANGED=NO
+          - NEXT_ACTION=REVIEW_FIREWALL_RULES_AND_UNIFI_WITH_NO_MUTATIONS
