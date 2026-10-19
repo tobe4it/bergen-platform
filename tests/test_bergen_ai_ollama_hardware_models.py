@@ -24,6 +24,8 @@ GPU_POSTBOOT_SCRIPT = ROOT / "ansible/files/bergen_ai/audit_ollama_gpu_postboot_
 GPU_POSTBOOT_AUDIT = ROOT / "ansible/playbooks/audit-bergen-ai-gpu-postboot-readonly.yml"
 GPU_POSTBOOT_DIAG_SCRIPT = ROOT / "ansible/files/bergen_ai/diagnose_ollama_gpu_postboot_readonly.py"
 GPU_POSTBOOT_DIAG_PLAY = ROOT / "ansible/playbooks/diagnose-bergen-ai-gpu-postboot-readonly.yml"
+GPU_HOST_MEMORY_SCRIPT = ROOT / "ansible/files/bergen_ai/audit_ollama_host_memory_readonly.py"
+GPU_HOST_MEMORY_AUDIT = ROOT / "ansible/playbooks/audit-bergen-ai-gpu-host-memory-readonly.yml"
 GPU_REBOOT_PLAY = ROOT / "ansible/playbooks/restart-bergen-ai-gpu-approved.yml"
 
 
@@ -267,6 +269,51 @@ class OllamaHardwareTests(unittest.TestCase):
             if "ansible.builtin.assert" in task:
                 for cond in task["ansible.builtin.assert"]["that"]:
                     self.assertIsInstance(cond, str)
+
+
+    def test_host_cgroup_memory_ancestor_limit_and_no_mutation(self):
+        script = GPU_HOST_MEMORY_SCRIPT.read_text()
+        ast.parse(script, filename=str(GPU_HOST_MEMORY_SCRIPT))
+        for forbidden in ("pct reboot", "pct set", "ollama run", "ollama pull",
+                          "systemctl restart", "/api/generate", "/api/chat"):
+            self.assertNotIn(forbidden, script)
+        spec = importlib.util.spec_from_file_location(
+            "bergen_ai_host_cgroup", GPU_HOST_MEMORY_SCRIPT
+        )
+        h = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(h)
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            (root / "cgroup.controllers").write_text("cpu memory pids")
+            guest = root / "lxc" / "110" / "ns"
+            guest.mkdir(parents=True)
+            (root / "memory.max").write_text("max")
+            (root / "lxc" / "memory.max").write_text("max")
+            (root / "lxc" / "110" / "memory.max").write_text("34359738368")
+            (guest / "memory.max").write_text("max")
+            observed = h.hierarchy("/lxc/110/ns", root=root)
+            self.assertEqual(observed,[None,34359738368,None,None])
+            self.assertEqual(h.classify(observed),"EFFECTIVE_32GIB")
+            (root / "lxc" / "110" / "memory.max").write_text("max")
+            observed = h.hierarchy("/lxc/110/ns", root=root)
+            self.assertEqual(h.classify(observed),"NO_FINITE_CGROUP_LIMIT")
+            (root / "lxc" / "110" / "memory.max").write_text("17179869184")
+            self.assertEqual(h.classify(h.hierarchy("/lxc/110/ns",root=root)),
+                             "BELOW_32GIB")
+            (root / "lxc" / "110" / "memory.max").write_text("68719476736")
+            self.assertEqual(h.classify(h.hierarchy("/lxc/110/ns",root=root)),
+                             "ABOVE_32GIB")
+            with self.assertRaises(ValueError):
+                h.hierarchy("/lxc/110/../../sensitive",root=root)
+        play = yaml.safe_load(GPU_HOST_MEMORY_AUDIT.read_text())[0]
+        self.assertEqual(play["hosts"],"venombox")
+        for task in play["tasks"]:
+            if "ansible.builtin.command" in task:
+                self.assertFalse(task["changed_when"])
+                self.assertTrue(task["no_log"])
+            if "ansible.builtin.assert" in task:
+                self.assertTrue(all(isinstance(cond,str)
+                                    for cond in task["ansible.builtin.assert"]["that"]))
 
     def test_restart_is_single_guest_explicit_downtime_with_preimage_gate(self):
         play = yaml.safe_load(GPU_REBOOT_PLAY.read_text())[0]
