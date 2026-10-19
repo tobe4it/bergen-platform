@@ -4,6 +4,7 @@ Read-only; no model inference or Paperless access. Designed for Proxmox host.
 All output is short and non-identifying. Does not establish GPU compute use.
 """
 import json
+from pathlib import Path
 import re
 import subprocess
 import sys
@@ -98,11 +99,16 @@ def main():
     data=json.loads(frames[0])
     if set(data) != {"devices_ok","ollama_active","ollama_api","models","memory_limit"}:
         raise ValueError("GUEST_FRAME_INVALID")
-    expectedbytes=str(32768*1024*1024)
+    # Proxmox enforces the limit on its host cgroup. The guest's
+    # cgroup-namespace root is not authoritative and may report 'max'.
+    cgroup_file=Path("/sys/fs/cgroup/lxc/110/memory.max")
+    host_memory_ok=(cgroup_file.is_file() and not cgroup_file.is_symlink()
+                    and cgroup_file.read_text(encoding="ascii").strip()
+                    == str(32768*1024*1024))
     good=(data["devices_ok"] is True and data["ollama_active"] is True
           and data["ollama_api"] is True
           and set(data["models"]) == EXPECTED_MODELS
-          and data["memory_limit"] == expectedbytes)
+          and host_memory_ok)
     print(FRAME+json.dumps({
       "AUDIT":"READ_ONLY", "CHANGED":False,
       "STATUS":"READY_FOR_SYNTHETIC_INFERENCE" if good else "NOT_READY",
@@ -111,7 +117,8 @@ def main():
       "OLLAMA_ACTIVE":data["ollama_active"],
       "OLLAMA_LOOPBACK_OK":data["ollama_api"],
       "THREE_MODELS_PRESENT":set(data["models"])==EXPECTED_MODELS,
-      "MEMORY_CGROUP_32G_OK":data["memory_limit"]==expectedbytes,
+      "MEMORY_CGROUP_32G_OK":host_memory_ok,
+      "MEMORY_CHECK_SOURCE":"PVE_HOST_LXC_110_CGROUP",
       "GPU_COMPUTE_VERIFIED":False
     },sort_keys=True))
 
