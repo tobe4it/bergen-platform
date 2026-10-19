@@ -64,23 +64,18 @@ For physical model confirmation without sending serial numbers, the CPU model ca
 
 **No software-only path is guaranteed to recover the host after full AC loss** until either the exact BIOS recovery policy is confirmed or Wake-on-LAN recovery across G3 is empirically demonstrated.
 
-## Read-only NIC audit, 2026-10-19
+## Verified NIC audit, 2026-10-19
 
-Most recent execution after introducing NIC discovery: `ok=22 changed=0 unreachable=0 failed=0 skipped=4`. Detected physical interfaces:
-- `enp195s0`: wired Ethernet, the principal Wake-on-LAN candidate.
-- `wlp194s0`: wireless interface; do not assume wired WoL support from Wi-Fi detection.
-- `ethtool`: installed.
+Most recent execution: `ok=25 changed=0 unreachable=0 failed=0 skipped=4`. Physical interfaces:
+- `enp195s0`: connected **2.5 Gb/s wired Ethernet**, `Supports Wake-on: pumbg`, `Wake-on: d`, `Link detected: yes`.
+- `wlp194s0`: wireless interface, `Link detected: no`; not a candidate.
+- `ethtool`: preinstalled.
 
-**Not yet determined:** the previous final summary displayed only interface names and the presence of `ethtool`, **not** the `Supports Wake-on` and `Wake-on` modes. A subsequent change exposes those values and Ethernet driver identity in the same final summary; this change has **not** yet been run on the host.
+Interpretation: **Magic Packet wake is supported but currently disabled**. Linux can request `wol g` for the currently running Ethernet driver without having a BIOS settings API. This does **not** prove that the firmware will keep standby power on the NIC through a normal S5 shutdown, and in particular does not prove Wake-on-LAN after total mains loss (G3).
 
-Decision criteria:
-- `supported` containing `g` means the NIC/driver advertises Magic Packet wake.
-- `enabled: g` means it is armed in the current running system.
-- `enabled: d` means Wake-on-LAN is disabled.
-- `supported: d` or missing `g` is not a promising Linux WoL path.
-- Even `enabled: g` does **not** establish successful wake from loss of mains (ACPI G3). Firmware, standby power, link recovery, and independent packet delivery all matter.
+The first version of the per-adapter debug emitted `enp195s0: []` because its text filter did not match tab-indented `ethtool` lines, even though the parsed final summary correctly reported `pumbg/d/yes`. That redundant debug was removed after the successful run. No NIC state change occurred.
 
-Run the updated read-only audit from the existing `bp-controller` worktree and inspect `Wake-on-LAN capabilities` in the final result. Do not enable WoL or schedule a Synology wake job before checking those readings and network reachability.
+A **separate** draft change proposes a guarded systemd one-shot to set `wol g` on `enp195s0` at boot and on explicit approved apply, without Proxmox bridge/interface edits, network reload or host reboot. It must be syntax-checked, reviewed and explicitly approved before deployment.
 
 ## Decision after audit
 
