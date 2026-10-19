@@ -1210,3 +1210,77 @@ Archiv zuerst geprüft werden; bei Fehlern läuft nur die manuelle
 Ursachenanalyse, kein automatischer Retry oder Gast-Neustart.
 Das bestehende Paperless-Backup, alle regelmäßigen Jobs und
 sämtliche Netzwerk-Gates bleiben unverändert.
+
+
+### Phase 0f.3 – Live-Backup-Versuch erneut fail-closed (19.10.2026, 21:58)
+
+Der Betreiber hat den genehmigten einmaligen Backup-Runner gestartet.
+Die erneute Prüfung der Anwendungsdaten war erfolgreich:
+`DATA_SCOPE_STATUS=KNOWN_DATA_PATHS_IN_ROOTFS`,
+`CT110_IDENTITY=RUNNING_ROOTFS_ONLY`,
+`WEBUI_DATA=IN_GUEST_ROOTFS`. NFS-Speicher, lokaler
+Temporärspeicher und der Zielarchivbestand waren ebenfalls
+weiterhin im genehmigten Rahmen. Allerdings meldete die
+Gast-Dateisystemprüfung:
+`GUEST_MOUNTS=EXTERNAL_OR_UNKNOWN_MOUNT`,
+`SAFE_TO_ATTEMPT_SINGLE_BACKUP=False`. Die autorisierte
+Backup-Play-Phase stoppte mit
+`CT110_BACKUP_PREFLIGHT_REVIEW_REQUIRED`.
+Resultat `venombox ok=16 changed=0 failed=1`, **kein**
+`vzdump`, keine Produktionseinstellung verändert.
+
+Der noch offene Mount stammt **nicht** aus der bereits als exakte
+`/dev/fuse`-Gerätebindung nachgewiesenen `lxc.mount.entry`.
+Der alte `guest_mounts()`-Check prüft sämtliche Nicht-Pseudo-
+Gast-Dateisysteme und trifft damit etwa auf LXCFS-Dateisysteme unter
+`/proc` oder separate Container-/Datenträger-Mounts. Ohne
+tatsächlichen Live-Befund darf keine Klasse pauschal freigegeben
+werden.
+
+### Phase 0f.4 – enger Read-only-Audit der Gast-Dateisysteme (vorbereitet)
+
+`ansible/playbooks/audit-bergen-ai-ct110-guest-mount-blockers-readonly.yml`
+liest **nur** die vom Gast per `findmnt` sichtbare Mount-Hierarchie
+und gibt ausschließlich **sanitisierte Klassen und Zähler** aus.
+Keine Quellpfade, Roh-Zielnamen, Inhalte, Credentials, Netzwerkänderungen
+oder Backup-Autorisierung.
+
+Klassifiziert getrennt:
+- übliche `fuse.lxcfs`-Mounts an exakt bekannten Systemzielen,
+- separate /etc-Identitätsdatei-Mounts,
+- unbekannte Mounts in /proc, /sys, /dev, /run, KI-/Podman-Daten,
+  oder sonstige Daten-/Mount-Verzeichnisse,
+- Pseudo-Dateisysteme einschließlich Overlay-Mounts als
+  eigene **Diagnoseanzahl**, nicht als Freigabenachweis.
+
+`PREVIOUS_PREFLIGHT_BLOCKER_COUNT`, `BLOCKER_CLASSES`,
+`LXCFS_SYSTEM_COUNT`, `ETC_IDENTITY_COUNT` und
+`OTHER_NONPSEUDO_COUNT` erklären die bisherige Blockade.
+Bei unlesbarer, zu großer oder mehrdeutiger Dateisystemstruktur
+lautet die Klassifikation `UNVERIFIED`.
+
+Nach aktuellem Branch-Fetch auf `bp-controller` ausschließlich:
+
+```bash
+(
+set -euo pipefail
+BASE="$HOME/bergen-platform"
+WT="$HOME/bergen-platform-ai-private-bridge"
+git -C "$WT" fetch origin feat/bergen-ai-private-bridge-20261019
+git -C "$WT" switch --detach origin/feat/bergen-ai-private-bridge-20261019
+cd "$WT"
+
+"$BASE/.venv/bin/ansible-playbook" \
+  -i ansible/inventory.yml -i "$BASE/ansible/inventory.local.yml" \
+  ansible/playbooks/audit-bergen-ai-ct110-guest-mount-blockers-readonly.yml \
+  --vault-id ai@prompt
+)
+```
+
+Nach diesem *read-only* Live-Ergebnis darf erst bei eindeutiger
+Klassifikation die konkrete Gast-Dateisystem-Vorprüfung gezielt
+korrigiert werden. `backup-bergen-ai-ct110-once.yml` **nicht**
+erneut ausführen, bis ein unabhängiger positiver Preflight vorliegt.
+Die Betreiberfreigabe für genau eine Sicherung bleibt sachlich bestehen,
+jedoch weiterhin technisch gesperrt. Netzwerk-/Rollback-/Restore-Gates
+unverändert offen. PR bleibt Draft.
