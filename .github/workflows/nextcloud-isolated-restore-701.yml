@@ -4,6 +4,7 @@ on:
   pull_request:
     paths:
       - 'ansible/playbooks/prepare-nextcloud-isolated-restore-701.yml'
+      - 'ansible/playbooks/audit-nextcloud-restore-transfer-readonly.yml'
       - 'docs/NEXTCLOUD-ISOLATED-RESTORE-701.md'
       - '.github/workflows/nextcloud-isolated-restore-701.yml'
   push:
@@ -25,6 +26,9 @@ jobs:
         run: |
           ansible-playbook -i localhost, \
             ansible/playbooks/prepare-nextcloud-isolated-restore-701.yml \
+            --syntax-check
+          ansible-playbook -i localhost, \
+            ansible/playbooks/audit-nextcloud-restore-transfer-readonly.yml \
             --syntax-check
       - name: Verify offline-only initial provisioning
         run: |
