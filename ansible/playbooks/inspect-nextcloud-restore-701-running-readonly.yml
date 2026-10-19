@@ -86,9 +86,12 @@
             . /etc/os-release
             printf 'OS_ID=%s\n' "$ID"
             printf 'OS_VERSION=%s\n' "$VERSION_ID"
+            # /sys/class/net/bonding_masters is a control file, NOT an
+            # interface. Kernel netdevices are symlink directory entries.
+            test -L /sys/class/net/lo
             count=0
             for entry in /sys/class/net/*; do
-              test -e "$entry" || continue
+              test -L "$entry" || continue
               case "$entry" in */lo) ;; *) count=$((count + 1)) ;; esac
             done
             printf 'NON_LOOPBACK_DEVICES=%s\n' "$count"
