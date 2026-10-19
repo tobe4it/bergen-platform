@@ -571,3 +571,43 @@ networkless runtime template or restore candidate.
 The existence of the bridge, free VMIDs and a successful SHA-256
 inventory establishes technical feasibility, **not** authorization
 of outbound or lateral network traffic.
+
+
+## Follow-up network review, 2026-10-20 (read-only evidence)
+
+The operator ran the exact requested checks directly on venombox.
+The bridge stanza for vmbr0 is "inet dhcp" with physical
+"bridge-ports enp195s0". Previously established vmbr2 is on
+enp195s0.2 with VLAN 2. The grep command produced no matching
+iface entries for vmbr3 or vmbr6 in the main
+/etc/network/interfaces file; their configuration and topology
+remain unverified (the PVE configuration sources the interfaces.d
+directory).
+
+The legacy Proxmox firewall CLI reported
+"pve-firewall status: disabled/running". Cluster and node firewall
+rules both returned [] and CT100 has no /etc/pve/firewall/100.fw.
+These results establish **no effective PVE classic firewall
+enforcement for this candidate network**, but they do not exclude
+the alternative nftables-based proxmox-firewall daemon or
+upstream UniFi firewall rules. No egress/isolation guarantee
+is established.
+
+Before attaching network to an untrusted or disposable builder,
+read-only verify nftables backend, host policies and bridge topology:
+
+    systemctl is-active proxmox-firewall || true
+    systemctl is-enabled proxmox-firewall || true
+    systemctl is-active pve-firewall || true
+    if command -v nft >/dev/null; then
+      nft list tables
+    fi
+    grep -R -H -E '^(auto |iface |[[:space:]]*bridge-ports|[[:space:]]*bridge-vlan-aware|[[:space:]]*bridge-vids)' /etc/network/interfaces /etc/network/interfaces.d 2>/dev/null
+
+Neither an active service alone nor absence of PVE rules proves
+the upstream UniFi segmentation policy. Review upstream router
+rules before enabling a builder NIC. Do not expose CT701 or a
+restore archive to the build network. Never change host-wide
+firewall configuration during the restore project without a
+separately planned change window; such a change could affect
+production LXC workloads.
