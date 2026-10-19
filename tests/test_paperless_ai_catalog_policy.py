@@ -13,6 +13,8 @@ RUNNER = ROOT / "ansible/files/paperless/bergen_ai_catalog_runner.py"
 PLAY = ROOT / "ansible/playbooks/manage-paperless-ai-inbox-catalog.yml"
 LOCAL_CONFIG = ROOT / "ansible/files/paperless/bergen_ai_catalog_config.py"
 CONFIG_PLAY = ROOT / "ansible/playbooks/manage-paperless-ai-local-ollama.yml"
+PRIVATE_PATH_SCRIPT = ROOT / "ansible/files/paperless/audit_ai_catalog_private_ollama_path_readonly.py"
+PRIVATE_PATH_PLAY = ROOT / "ansible/playbooks/audit-paperless-ai-ollama-private-path-readonly.yml"
 
 
 def load_policy():
@@ -177,6 +179,39 @@ class CatalogPolicyTest(unittest.TestCase):
         self.assertIn("StandardError=null", unit)
         timer_spec = (ROOT / "ansible/files/paperless/bergen-ai-catalog.timer").read_text()
         self.assertIn("OnCalendar=*:0/5", timer_spec)
+
+    def test_paperless_podman_private_ollama_path_audit_is_readonly_and_bounded(self):
+        script=PRIVATE_PATH_SCRIPT.read_text()
+        playtext=PRIVATE_PATH_PLAY.read_text()
+        ast.parse(script, filename=str(PRIVATE_PATH_SCRIPT))
+        self.assertIn('"110","bergen-ai"',script)
+        self.assertIn('"126","bergen-paperless"',script)
+        self.assertIn('"bergen-paperless"',script)
+        self.assertIn('EXPECTED_MODEL = "qwen2.5:14b-instruct-q4_K_M"',script)
+        self.assertIn('"/api/tags"',script)
+        self.assertIn('ProxyHandler({})',script)
+        self.assertIn('NoRedirect()',script)
+        self.assertIn('CANDIDATE_PRIVATE_IPV4',script)
+        self.assertIn('ENDPOINT_APPROVED_FOR_APPLY=False',script)
+        self.assertIn('NETWORK_EXPOSURE_REVIEW',script)
+        for forbidden in ("pct set", "pct reboot", "pct stop", "podman restart",
+                          "ollama pull", "ollama run", "/api/generate", "/api/chat",
+                          "document.content", "document.title", "llm_endpoint =",
+                          "0.0.0.0:11434/api/tags"):
+            self.assertNotIn(forbidden,script)
+        play=yaml.safe_load(playtext)[0]
+        self.assertEqual(play["hosts"], "venombox")
+        self.assertTrue(play["become"])
+        self.assertFalse(play["gather_facts"])
+        cmd=[t for t in play["tasks"] if "ansible.builtin.command" in t]
+        self.assertEqual(len(cmd),1)
+        self.assertTrue(cmd[0]["no_log"])
+        self.assertFalse(cmd[0]["changed_when"])
+        self.assertFalse(cmd[0]["failed_when"])
+        self.assertIn("BERGEN_PAPERLESS_OLLAMA_PATH_V1",playtext)
+        for task in play["tasks"]:
+            for cond in task.get("ansible.builtin.assert",{}).get("that",[]):
+                self.assertIsInstance(cond,str)
 
     def test_runtime_preflight_is_readonly_and_nonidentifying(self):
         paperless = (ROOT / "ansible/files/paperless/audit_ai_catalog_paperless_readonly.py").read_text()
