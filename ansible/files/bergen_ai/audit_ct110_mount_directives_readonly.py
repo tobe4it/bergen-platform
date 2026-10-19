@@ -65,6 +65,35 @@ def classify_entry(values):
             "OTHER_OR_PERSISTENT_TARGETS_PRESENT")
 
 
+
+def classify_entry_device_origin(values):
+    """Do not infer source from a /dev target; verify full src/dst/options."""
+    if not values:
+        return "ABSENT"
+    if len(values) != 1:
+        return "MULTIPLE_ENTRIES_REVIEW"
+    try:
+        parts = shlex.split(values[0])
+    except ValueError:
+        return "UNVERIFIED"
+    if len(parts) != 6 or parts[2] != "none" or parts[4:] != ["0", "0"]:
+        return "UNVERIFIED"
+    source, target = parts[0], "/" + parts[1].lstrip("/")
+    options = parts[3].split(",")
+    if (not options or len(options) != len(set(options)) or
+            "bind" not in options or
+            any(opt not in {"bind", "optional", "create=file", "create=dir", "ro"}
+                for opt in options)):
+        return "SOURCE_OR_OPTIONS_REVIEW"
+    if (source, target) == ("/dev/fuse", "/dev/fuse") and "create=file" in options:
+        return "EXACT_FUSE_DEVICE_BIND"
+    if (source, target) == ("/dev/net/tun", "/dev/net/tun") and "create=file" in options:
+        return "EXACT_TUN_DEVICE_BIND"
+    if (source, target) == ("/dev/dri", "/dev/dri") and "create=dir" in options:
+        return "EXACT_DRI_DEVICE_BIND"
+    return "SOURCE_OR_OPTIONS_REVIEW"
+
+
 def classify_config(raw):
     if not isinstance(raw, str) or len(raw) > MAX_CONFIG:
         return None
@@ -89,6 +118,7 @@ def classify_config(raw):
                 LXC_MOUNT_AUTO=classify_auto(auto),
                 LXC_MOUNT_AUTO_COUNT=len(auto),
                 LXC_MOUNT_ENTRY=classify_entry(entries),
+                LXC_MOUNT_ENTRY_DEVICE_ORIGIN=classify_entry_device_origin(entries),
                 LXC_MOUNT_ENTRY_COUNT=len(entries),
                 OTHER_MOUNT_OR_EXCLUDE_DIRECTIVES=("PRESENT" if hidden else "NONE"))
 
