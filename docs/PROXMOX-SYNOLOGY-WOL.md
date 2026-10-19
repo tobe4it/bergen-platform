@@ -27,32 +27,55 @@ Source: `ansible/files/power-recovery/synology-venombox-wol-onboot.sh`
 - No firmware changes, NIC configuration, NAS routing/VLAN/firewall changes, service shutdown or Proxmox changes.
 - Return code and logs indicate packet-send requests only: actual host power-on cannot be inferred from script success.
 
-## Approval-controlled DSM setup (NOT DEPLOYED)
+## Freigegebener Installationspfad, noch NICHT ausgeführt
 
-1. Review the script and decide whether repeated Wake-on-LAN after **every NAS reboot** is acceptable.
-2. Create a NAS directory `/volume1/bergen-recovery` owned by root with restrictive permissions (suggested mode 0700). Ensure it belongs to a stable data volume.
-3. Copy the reviewed script to `/volume1/bergen-recovery/venombox-wol-onboot.sh` with root owner and executable permissions (suggested mode 0700).
-4. Create `/volume1/bergen-recovery/venombox-wol.mac` containing **only one MAC address** (plain text). Protect it with root ownership and mode 0600. **Never commit site-local identifiers to Git.**
-5. Confirm source files are readable by DSM Task Scheduler root. Validate POSIX syntax: `/bin/sh -n /volume1/bergen-recovery/venombox-wol-onboot.sh`. Then perform a safe local preflight: `sudo /bin/sh /volume1/bergen-recovery/venombox-wol-onboot.sh --check`. Expect `WOL_PREFLIGHT_OK; interface=eth0; packet_send=NONE; reboot=NONE`. This check does not trigger packets or power operations.
-6. In DSM **Control Panel -> Task Scheduler**, create a **Triggered Task -> User-defined Script -> Boot-up** under user **root** (labels may differ across DSM language/version). Configure task command as:
-   
-   `/bin/sh /volume1/bergen-recovery/venombox-wol-onboot.sh --send`
-7. **Keep task disabled** until a separate explicit operator approval. Inspect existing DSM tasks to avoid duplicate wake triggers.
-8. **Only after a separate explicit approval to send packets**, first manually execute `sudo /bin/sh /volume1/bergen-recovery/venombox-wol-onboot.sh --send` while venombox stays **running**; record the DSM result and verify at least one inbound Magic Packet with bounded `tcpdump -Q in`. Only then enable boot trigger. The proof of inbound packets has already been established using a one-time `synonet --wake` command; additional packet-sending tests are optional and should not be confused with evidence of G3 recovery.
-9. Do **not** use an unplanned venombox shutdown, power disconnect or NAS restart as a test.
+Der Betreiber hat Installation und Aktivierung einer DSM-Boot-Aufgabe freigegeben, **ohne NAS-/Host-Neustart oder Stromausfalltest**. Dieses Git-Repository hat keinen direkten Zugang zur privaten Synology-DSM-Sitzung. Die folgenden Schritte sind auf dem vorhandenen bp-controller und danach im DSM-Aufgabenplaner auszuführen.
 
-If the NAS Task Scheduler does not support an initially disabled Boot-up trigger, do not create an active Boot-up task merely to store the command; review the UI first.
+1. Auf bp-controller eine **gitignorierte** `ansible/vars/synology-wol.local.yml` mit folgenden Schlüsseln anlegen:
 
-**Current approval status:** Code committed to a draft PR only. **No files deployed to MountainCloud, no DSM task created, no automatic wake sender enabled, no reboots, no shutdowns, no power loss test.** Retain this state until separately approved.
+   ```yaml
+   synology_admin: "BENUTZER@NAS-SSH-HOST"
+   synology_wol_mac: "XX:XX:XX:XX:XX:XX"
+   ```
 
-## Acceptance criteria for preparation-only phase
+   Werte ausschließlich aus dem privaten Standortinventar übernehmen; niemals in Git committen. Datei mit Modus 0600 schützen.
 
-- Script and runbook reviewed and versioned.
-- No unapproved host or NAS operations.
-- Optional `/bin/sh -n` syntax check can be run on a copy, without execution.
-- Any future NAS-side preflight uses the explicit `--check` switch, never `--send`.
-- Mark firmware wake after complete mains loss **UNVERIFIED**, not passed.
-- Disable/remove a dedicated DSM task for rollback if one is created after explicit approval.
+2. In der Worktree des freigegebenen Branches auf bp-controller ausführen:
+
+   ```bash
+   ansible-playbook -i ansible/inventory.yml \
+     ansible/playbooks/install-synology-venombox-wol.yml \
+     -e @ansible/vars/synology-wol.local.yml \
+     -e synology_wol_install_approved=true --syntax-check
+
+   ansible-playbook -i ansible/inventory.yml \
+     ansible/playbooks/install-synology-venombox-wol.yml \
+     -e @ansible/vars/synology-wol.local.yml \
+     -e synology_wol_install_approved=true --check
+
+   ansible-playbook -i ansible/inventory.yml \
+     ansible/playbooks/install-synology-venombox-wol.yml \
+     -e @ansible/vars/synology-wol.local.yml \
+     -e synology_wol_install_approved=true
+   ```
+
+   Das Playbook prüft per bestehendem SSH-/sudo-Zugang die Hostidentität, legt bei Freigabe ausschließlich root-kontrollierte Dateien unter `/volume1/bergen-recovery/` an, verweigert fremde/abweichende Dateien und führt `/bin/sh -n` sowie `--check` aus. **Kein Paketversand und keine DSM-Task-Erstellung.** Die neue Installer-Rolle ist noch nicht live auf bp-controller geprüft.
+
+3. Im DSM-Aufgabenplaner unter **Systemsteuerung → Aufgabenplaner → Erstellen → Ausgelöste Aufgabe → Benutzerdefiniertes Skript** folgende Aufgabe anlegen:
+
+   | Feld | Wert |
+   | --- | --- |
+   | Name | Bergen – venombox Wake-on-LAN |
+   | Benutzer | root |
+   | Ereignis | Hochfahren / Boot-up |
+   | Aktiviert | Ja |
+   | Benutzerdefiniertes Skript | `/bin/sh /volume1/bergen-recovery/venombox-wol-onboot.sh --send` |
+
+   Einrichtung/Abnahme: Aufgabe als **aktiviert**, Benutzer **root**, Ereignis **Hochfahren** kontrollieren. **Nicht auf Ausführen klicken, keinen Neustart veranlassen.**
+
+4. Rücknahme: Nur diese dedizierte DSM-Aufgabe deaktivieren oder löschen, ohne NAS-/Host-Neustart. Die installierten Dateien dürfen für spätere Wartung verbleiben.
+
+**Stand dieser PR:** Code und Anleitung vorbereitet. **NAS-Dateien nicht nachgewiesen installiert; DSM-Job nicht nachgewiesen angelegt/aktiviert.** Keine Aussage über erfolgreiche Weckfähigkeit nach G3.
 
 ## Rollback and limitations
 
