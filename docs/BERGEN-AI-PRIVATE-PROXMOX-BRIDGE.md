@@ -621,3 +621,59 @@ Vollständigkeit/Integrität von CT126-Mounts oder Restore-Fähigkeit.
 LXC110 gilt bis zu einem überprüften Sicherungs-/Restore-Nachweis als
 **Rollback-Gate offen**. Ein künftiger Sicherungsjob oder einmaliger
 `vzdump` benötigt einen eigenen, expliziten Betreiberentscheid.
+
+
+## Phase 0e – CT110 Sicherungsplan und Datenmounts (read-only, vorbereitet)
+
+Wegen `CT110_BACKUPS=NONE_IN_SCANNED_STORAGES` untersucht eine zusätzliche
+**nicht schreibende** Prüfung:
+`ansible/playbooks/audit-bergen-ai-ct110-backup-policy-readonly.yml`.
+
+Sie liest nur die aktuelle `pct config 110` und die im PVE-Cluster
+sichtbaren `/cluster/backup`-Jobdefinitionen. Sie gibt ausschließlich
+Kategorien aus:
+
+- CT110-Rootfs in der Konfiguration vorhanden;
+- zusätzliche LXC-Mountpoints, insbesondere Host-Bind-Mounts, vorhanden;
+- explizite Mountpoint-`backup=1`-Flags beziehungsweise fehlende Flags;
+- Proxmox-Backup-Jobs mit expliziter VMID-Auswahl oder `all`-Regel;
+- nicht interpretierbare/fehlende Jobs verbleiben `UNVERIFIED` oder
+  `NO_MATCH_IN_VISIBLE_PVE_JOBS`, **nie** „kein Backup existiert“.
+
+Der Audit prüft **keine** lokalen Systemd-/Cron-Jobs, NAS-/PBS-Sicherungen,
+Scheduler-Ausführung, Snapshot-Konsistenz, Archivintegrität oder
+Restore-Fähigkeit. Besonders wichtig ist die Abgrenzung zwischen
+`pct config`-Mountpoint-Flags und tatsächlich im Archiv enthaltenen
+Inhalten. Ein `backup=1` ist dafür alleine kein Nachweis. Ein Bind-Mount
+kann eine separate Sicherungsstrategie benötigen.
+
+Abfrage auf `bp-controller`:
+
+```bash
+(
+set -euo pipefail
+BASE="$HOME/bergen-platform"
+WT="$HOME/bergen-platform-ai-private-bridge"
+
+git -C "$WT" fetch origin feat/bergen-ai-private-bridge-20261019
+git -C "$WT" switch --detach origin/feat/bergen-ai-private-bridge-20261019
+cd "$WT"
+
+"$BASE/.venv/bin/ansible-playbook" \
+  -i ansible/inventory.yml \
+  -i "$BASE/ansible/inventory.local.yml" \
+  ansible/playbooks/audit-bergen-ai-ct110-backup-policy-readonly.yml \
+  --syntax-check
+
+"$BASE/.venv/bin/ansible-playbook" \
+  -i ansible/inventory.yml \
+  -i "$BASE/ansible/inventory.local.yml" \
+  ansible/playbooks/audit-bergen-ai-ct110-backup-policy-readonly.yml \
+  --vault-id ai@prompt
+)
+```
+
+Die Laufzeitabfrage erstellt **keine** Backups und ändert keine Timer,
+Proxmox-Gäste, Netzwerke, Systemeinstellungen oder Daten. Eine
+separate, explizit genehmigte Backup-Einrichtung und ein isolierter
+Restore-Nachweis sind weiterhin erforderlich. **Alle Apply-Gates gesperrt.**
