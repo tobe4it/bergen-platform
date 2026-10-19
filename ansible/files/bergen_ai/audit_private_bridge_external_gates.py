@@ -137,7 +137,7 @@ def guest_config(vmid, expected_hostname):
         return "UNVERIFIED"
     lines = raw.splitlines()
     if (f"hostname: {expected_hostname}" not in lines
-            or not any(re.match(r"^net0:\\s", line) for line in lines)):
+            or not any(re.match(r"^net0:\s", line) for line in lines)):
         return "UNVERIFIED"
     return "READABLE_SOURCE_ONLY"
 
