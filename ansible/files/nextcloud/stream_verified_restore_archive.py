@@ -118,11 +118,13 @@ if mode == "verify":
         os.close(existing_fd)
     print("TARGET_ARCHIVE_SHA256_VERIFIED=YES")
     raise SystemExit(0)
-if out.exists() or out.is_symlink() or part.exists() or part.is_symlink():
-    raise SystemExit(78)
 if mode == "probe":
+    if out.is_symlink() or part.exists() or part.is_symlink() or (out.exists() and not out.is_file()):
+        raise SystemExit(78)
     print("DESTINATION_PROBE_READY")
     raise SystemExit(0)
+if out.exists() or out.is_symlink() or part.exists() or part.is_symlink():
+    raise SystemExit(78)
 if mode != "receive":
     raise SystemExit(79)
 fd = os.open(part, os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os,"O_NOFOLLOW",0), 0o600)
