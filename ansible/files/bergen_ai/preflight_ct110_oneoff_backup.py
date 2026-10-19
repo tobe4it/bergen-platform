@@ -75,7 +75,7 @@ def guest_config(raw, status):
             or len([row for row in rows if row.startswith("rootfs: ")]) != 1
             or not any(row.startswith("net0: ") for row in rows)):
         return "UNVERIFIED"
-    if any(re.match(r"^mp[0-9]+:\\s", row) or
+    if any(re.match(r"^mp[0-9]+:\s", row) or
            row.startswith("lxc.mount.auto:")
            for row in rows):
         return "EXTRA_MOUNTS_REQUIRE_REVIEW"
