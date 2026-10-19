@@ -23,6 +23,8 @@ def shell_fragment(filename):
         argv = call.get("argv", [])
         if argv[:2] == ["pct", "exec",] and len(argv) >= 7:
             script = argv[-1]
+            if "test -L /sys/class/net/lo" not in script:
+                continue
             start = script.index("test -L /sys/class/net/lo")
             stop = script.index("printf 'NON_LOOPBACK_DEVICES=%s\\n' ", start)
             line = script[stop:].split("\n", 1)[0]
