@@ -1,0 +1,213 @@
+---
+# Provision only a disposable, non-networked, unprivileged Rocky 9 LXC.
+# Default: read-only. No connection to production DBs, NFS or external networks.
+# Deliberately independent of generic create-lxc.yml, which creates net0.
+- name: Guard and optionally provision Nextcloud isolated restore guest
+  hosts: venombox
+  become: true
+  gather_facts: false
+  any_errors_fatal: true
+  vars:
+    restore_vmid: 701
+    restore_hostname: nextcloud-restore-701
+    restore_template: local:vztmpl/rockylinux-9-default_20240912_amd64.tar.xz
+    restore_template_file: /var/lib/vz/template/cache/rockylinux-9-default_20240912_amd64.tar.xz
+    restore_workspace: /var/lib/vz/nextcloud-restore-test
+    restore_size_gib: 48
+  tasks:
+    - name: Confirm exactly the intended Proxmox node
+      ansible.builtin.command:
+        argv: [hostname, -s]
+      changed_when: false
+      register: restore_actual_host
+
+    - name: Reject any accidental non-venombox target
+      ansible.builtin.assert:
+        that:
+          - inventory_hostname == 'venombox'
+          - restore_actual_host.stdout == 'venombox'
+          - restore_vmid == 701
+
+    - name: Inspect all existing cluster VMIDs
+      ansible.builtin.command:
+        argv: [pvesh, get, /cluster/resources, --type, vm, --output-format, json]
+      register: restore_cluster_resources
+      changed_when: false
+
+    - name: Refuse VMID collision anywhere in cluster
+      ansible.builtin.assert:
+        that:
+          - >-
+            ((restore_cluster_resources.stdout | from_json)
+             | selectattr('vmid', 'equalto', restore_vmid) | list | length) == 0
+        fail_msg: VMID 701 is occupied. Never overwrite or reuse an existing guest.
+
+    - name: Confirm no local LXC configuration exists
+      ansible.builtin.stat:
+        path: /etc/pve/lxc/701.conf
+        follow: false
+      register: restore_lxc_conf
+
+    - name: Confirm no local VM configuration exists
+      ansible.builtin.stat:
+        path: /etc/pve/qemu-server/701.conf
+        follow: false
+      register: restore_vm_conf
+
+    - name: Require unused local configuration paths
+      ansible.builtin.assert:
+        that:
+          - not restore_lxc_conf.stat.exists
+          - not restore_vm_conf.stat.exists
+
+    - name: Confirm exact Rocky Linux template is present
+      ansible.builtin.stat:
+        path: "{{ restore_template_file }}"
+        follow: false
+      register: restore_template_stat
+
+    - name: Refuse missing or untrusted template
+      ansible.builtin.assert:
+        that:
+          - restore_template_stat.stat.isreg | default(false)
+          - not (restore_template_stat.stat.islnk | default(false))
+
+    - name: Confirm storage status before allocation
+      ansible.builtin.command:
+        argv: [pvesm, status]
+      changed_when: false
+      register: restore_storage
+
+    - name: Require active local ZFS storage
+      ansible.builtin.assert:
+        that:
+          - restore_storage.stdout is search('(?m)^local-zfs[ ]+zfspool[ ]+active[ ]+')
+
+    - name: Require healthy ZFS pool
+      ansible.builtin.command:
+        argv: [zpool, status, -x]
+      changed_when: false
+      register: restore_zpool
+
+    - name: Refuse degraded ZFS
+      ansible.builtin.assert:
+        that:
+          - restore_zpool.stdout is search('all pools are healthy')
+
+    - name: Read available local staging capacity
+      ansible.builtin.command:
+        argv:
+          - python3
+          - -c
+          - "import shutil; print(shutil.disk_usage('/var/lib/vz').free)"
+      changed_when: false
+      register: restore_free_bytes
+
+    - name: Require generous free staging capacity
+      ansible.builtin.assert:
+        that:
+          - restore_free_bytes.stdout | int > 80 * 1024 ** 3
+
+    - name: Inspect staging directory without touching it
+      ansible.builtin.stat:
+        path: "{{ restore_workspace }}"
+        follow: false
+      register: restore_workspace_stat
+
+    - name: Refuse unexpected existing staging directory
+      ansible.builtin.assert:
+        that:
+          - not restore_workspace_stat.stat.exists
+        fail_msg: Restore workspace already exists; inspect before proceeding.
+
+    - name: Report harmless preflight result
+      ansible.builtin.debug:
+        msg:
+          preflight: NEXTCLOUD_RESTORE_701_PREFLIGHT_READY
+          exact_host: venombox
+          vmid: 701
+          guest_template: Rocky_Linux_9
+          rootfs: local-zfs:48
+          guest_network: NONE
+          guest_privilege: UNPRIVILEGED
+          boot_on_host_start: DISABLED
+          apply_requested: "{{ nextcloud_restore_701_apply | default(false) | bool }}"
+
+    - name: Provision protected local staging directory only on approval
+      ansible.builtin.file:
+        path: "{{ restore_workspace }}"
+        state: directory
+        owner: root
+        group: root
+        mode: '0700'
+      when: nextcloud_restore_701_apply | default(false) | bool
+
+    - name: Create expressly approved isolated guest with no networking
+      ansible.builtin.command:
+        argv:
+          - pct
+          - create
+          - "{{ restore_vmid | string }}"
+          - "{{ restore_template }}"
+          - --hostname
+          - "{{ restore_hostname }}"
+          - --ostype
+          - centos
+          - --rootfs
+          - "local-zfs:{{ restore_size_gib }}"
+          - --cores
+          - '2'
+          - --memory
+          - '4096'
+          - --swap
+          - '512'
+          - --unprivileged
+          - '1'
+          - --onboot
+          - '0'
+          - --features
+          - nesting=0
+          - --start
+          - '0'
+          - --protection
+          - '1'
+      register: restore_pct_create
+      no_log: true
+      when: nextcloud_restore_701_apply | default(false) | bool
+
+    - name: Inspect newly created guest configuration
+      ansible.builtin.command:
+        argv: [pct, config, '701']
+      changed_when: false
+      register: restore_pct_config
+      when: nextcloud_restore_701_apply | default(false) | bool
+
+    - name: Inspect newly created guest state
+      ansible.builtin.command:
+        argv: [pct, status, '701']
+      changed_when: false
+      register: restore_pct_status
+      when: nextcloud_restore_701_apply | default(false) | bool
+
+    - name: Enforce isolation, stoppage, identity and protection after create
+      ansible.builtin.assert:
+        that:
+          - "'hostname: nextcloud-restore-701' in restore_pct_config.stdout"
+          - "'unprivileged: 1' in restore_pct_config.stdout"
+          - "'onboot: 0' in restore_pct_config.stdout"
+          - "'protection: 1' in restore_pct_config.stdout"
+          - "not (restore_pct_config.stdout is search('(?m)^net\\d+:'))"
+          - "'status: stopped' in restore_pct_status.stdout"
+        fail_msg: Guest post-creation isolation unexpected. Inspect before starting.
+      when: nextcloud_restore_701_apply | default(false) | bool
+
+    - name: Report no production mutations and optional new guest
+      ansible.builtin.debug:
+        msg:
+          status: "{{ 'NEXTCLOUD_RESTORE_701_PROVISIONED_OFFLINE' if (nextcloud_restore_701_apply | default(false) | bool) else 'NEXTCLOUD_RESTORE_701_READ_ONLY_READY' }}"
+          existing_guests_changed: false
+          mail_or_cloud_modified: false
+          network_attached: false
+          archive_copied: false
+          database_imported: false
+          next_step: Validate controlled backup transfer and offline guest dependency provisioning
