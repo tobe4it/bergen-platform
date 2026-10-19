@@ -188,7 +188,9 @@ def classify_rootfs_runtime_mounts(nodes, merged, root_inode, bind_inode):
     _, root_type, root_source = roots[0]
     if root_type != "zfs" or not root_source or not root_inode or not bind_inode:
         return False
-    if root_inode != bind_inode:
+    # Directories within one rootfs share a device, not the same inode.
+    # The separate process-vs-source comparison must match the full pair.
+    if root_inode.split(":", 1)[0] != bind_inode.split(":", 1)[0]:
         return False
     if any(len([row for row in records if row[0] == target]) != 0 for target in (
             "/srv/ai/models", "/srv/ai/open-webui",
