@@ -517,6 +517,90 @@ changes. A future allowlist rule must use the **observed**
 real TCP source, preserve localhost Open WebUI, cover IPv4 and
 IPv6 and pass Paperless-positive and unauthorized-negative
 tests after a separately approved, rollback-safe change.
+## Live LXC110/LXC126 topology and conservative VLAN correction (2026-10-19)
+
+Operator's approved **read-only** topology check passed:
+
+    AUDIT=READ_ONLY
+    CHANGED=False
+    STATUS=TOPOLOGY_CLASSIFIED
+    LXC110_NETWORKS=ONE
+    LXC126_NETWORKS=ONE
+    SAME_PVE_BRIDGE=NO
+    SAME_CONFIGURED_VLAN=YES
+    PVE_BOTH_NIC_FIREWALL_ENABLED=YES
+    PAPERLESS_PODMAN_ROUTE_SOURCE=DIFFERENT_FROM_LXC126_ROUTE
+    SOURCE_NAT_EFFECTIVE=NOT_PROVEN
+    ACTUAL_LXC110_INBOUND_SOURCE=NOT_DEMONSTRATED
+    EXPOSURE_GATE=REVIEW_REQUIRED
+    RECAP ok=7 changed=0 failed=0
+
+**Interpretation:** Paperless LXC126 and Bergen-AI LXC110 have
+different Proxmox bridges. The old topology script compared
+the *presence or absence* of literal `tag` parameters and
+incorrectly called two unset parameters `SAME_CONFIGURED_VLAN=YES`.
+That is **not evidence of a shared VLAN**, especially across
+different bridges. The script has now been corrected to
+`NOT_VERIFIED` when either tag is absent, and reports YES/NO
+only for two explicit tags. The operator's historical audit
+was performed using the older interpretation; no runtime
+VLAN reassignment or network change has been made.
+
+The selected Podman **local route source** differs from the
+surrounding LXC126 route source. This is compatible with
+Podman bridging/SNAT but cannot establish the source address
+that Ollama in LXC110 actually sees. The actual firewall
+allowlist MUST NOT be based on the original Podman address.
+
+### Optional next gate: observe one real TCP socket's source at Ollama
+
+After explicitly approving one minimal connectivity check during
+a quiet Ollama window, the separately gated
+`audit-paperless-ai-ollama-observed-source.yml` validates both
+guest identities, requires **zero existing** ESTABLISHED
+connections on port 11434, starts a single **TCP-only** connection
+from the actual Paperless Podman application to verified LXC110
+and holds it for eight seconds **without sending HTTP**.
+The host inspects the single Ollama-side TCP peer while held,
+then confirms the test process finished. No addresses leave
+the sanitized task; its report classifies whether the observed
+peer matches the LXC126 address, the LXC126 local route,
+the Podman local route or another private IPv4 address.
+Nonunique/missing/unexpected sockets fail conservatively
+without automatic retry. NAT mechanism is **not inferred**
+from the result.
+
+Run only with explicit approval to conduct this one short TCP
+observation from Paperless (no model run, no document read):
+
+~~~bash
+(
+set -euo pipefail
+BASE="$HOME/bergen-platform"
+cd "$HOME/bergen-platform-paperless-ai-catalog"
+git fetch origin feat/paperless-native-ai-inbox-catalog-20261018
+git switch --detach origin/feat/paperless-native-ai-inbox-catalog-20261018
+"$BASE/.venv/bin/ansible-playbook" \
+  -i ansible/inventory.yml \
+  -i "$BASE/ansible/inventory.local.yml" \
+  ansible/playbooks/audit-paperless-ai-ollama-observed-source.yml \
+  --vault-id ai@prompt \
+  -e bergen_ai_paperless_source_observation_approved=true
+)
+~~~
+
+`STATUS=SOURCE_OBSERVED` with
+`TCP_PEER_SOURCE_CLASS=MATCHES_LXC126_PRIVATE_ADDRESS`
+would support restricting port 11434 to the *LXC126
+egress identity*, not to Podman's private IP. A mismatch
+requires separate network/Podman NAT investigation before
+a firewall rule can be designed. Either way, the previous
+bp-controller **unapproved IPv4 and IPv6** connectivity
+must eventually be blocked with a separately authorized
+rollbackable policy. `EXPOSURE_GATE=REVIEW_REQUIRED` remains
+unchanged. Bergen-syslog LXC120 is reserved for future
+authenticated access only; Paperless AI/UI, automatic
+cataloging, embeddings/RAG remain OFF.
 ## Target behaviour
 
 Only **new**, OCR-complete, unreviewed inbox documents belonging to active,
