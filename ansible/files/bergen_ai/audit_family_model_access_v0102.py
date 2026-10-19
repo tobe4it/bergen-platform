@@ -68,6 +68,21 @@ def read_db(path, expected):
             demand(sum(role_counts.values()) == len(members[role]))
             demand(set(role_counts).issubset({"user", "pending", "admin"}))
         overlap = bool(members["adults"] & members["children"])
+        # No user IDs, names, emails or OIDC claims leave the guest.
+        # OAuth fields are only used to count nonempty saved mappings;
+        # their presence alone does NOT prove current SSO eligibility.
+        user_columns = {row[1] for row in db.execute('PRAGMA table_info("user")')}
+        demand({"id", "role", "oauth"}.issubset(user_columns))
+        accounts = db.execute('SELECT role, oauth FROM "user"').fetchall()
+        account_roles = {"user": 0, "pending": 0, "admin": 0}
+        oauth_linked = 0
+        for account_role, raw_oauth in accounts:
+            demand(account_role in account_roles)
+            account_roles[account_role] += 1
+            if raw_oauth is not None:
+                parsed = json.loads(raw_oauth) if isinstance(raw_oauth, str) else raw_oauth
+                demand(isinstance(parsed, dict))
+                oauth_linked += bool(parsed)
         model_rows = db.execute(
             'SELECT id, base_model_id, is_active FROM "model"').fetchall()
         registered = {model_id: (base_id, bool(active)) for
@@ -117,6 +132,12 @@ def read_db(path, expected):
             "ADULT_MEMBERS": len(members["adults"]),
             "CHILD_MEMBERS": len(members["children"]),
             "FAMILY_MEMBERS": len(members["family"]),
+            "TOTAL_OPEN_WEBUI_ACCOUNTS": len(accounts),
+            "ACCOUNT_ROLE_USER": account_roles["user"],
+            "ACCOUNT_ROLE_PENDING": account_roles["pending"],
+            "ACCOUNT_ROLE_ADMIN": account_roles["admin"],
+            "OAUTH_LINKED_ACCOUNT_RECORDS": oauth_linked,
+            "OIDC_GROUP_CLAIMS_VALIDATED": "NO",
             "ADULT_USER_ROLES": roles["adults"]["USER"],
             "ADULT_PENDING_ROLES": roles["adults"]["PENDING"],
             "CHILD_USER_ROLES": roles["children"]["USER"],
