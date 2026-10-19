@@ -540,3 +540,34 @@ changed=0, failed=0.
 Only after separate approval and an exact reviewed network policy
 should an **independent** disposable LXC 790 be created as a
 networked Rocky 9-to-9.8 builder. Never run builder commands on 701.
+
+
+## VM bridge and firewall policy evidence (2026-10-20)
+
+Direct read-only operator output on venombox:
+
+- vmbr2: inet dhcp; physical bridge port enp195s0.2 (802.1q
+  subinterface), bridge-vlan-aware yes, bridge-vids 2.
+- 'bridge vlan show dev vmbr2' reports PVID 1 untagged for the
+  bridge interface itself. This does not negate the VLAN 2
+  encapsulation of the physical enp195s0.2 uplink.
+- '/cluster/firewall/options' and '/nodes/venombox/firewall/options'
+  each reported only a digest; no explicit enable flag in those
+  responses.
+- No '/etc/pve/firewall/100.fw' was present.
+- CT100 net0 has bridge=vmbr2 and firewall=1, but this setting
+  does **not** prove that packet filtering is actually active or that
+  the upstream UniFi policy restricts inter-VLAN/internal access.
+
+**Network security gate still OPEN / BUILD APPLY NOT APPROVED.**
+Do not attach the planned Rocky 9.8 build guest 790 to vmbr2
+merely because CT100 uses it. Prefer a disposable, egress-only build
+VLAN/network with DNS, HTTPS and signed RPM repositories accessible
+but no unnecessary access to internal or production servers. Confirm
+Proxmox firewall daemon/policy and upstream UniFi isolation. A
+transient or permanent builder NIC must not be inherited into the
+networkless runtime template or restore candidate.
+
+The existence of the bridge, free VMIDs and a successful SHA-256
+inventory establishes technical feasibility, **not** authorization
+of outbound or lateral network traffic.
