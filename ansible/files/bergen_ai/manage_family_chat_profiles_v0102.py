@@ -113,9 +113,11 @@ def check_guest():
         existing_grants = db.execute(
             "SELECT COUNT(*) FROM access_grant WHERE resource_type='model'"
         ).fetchone()[0]
+        all_model_ids = {r[0] for r in db.execute('SELECT id FROM "model"')}
     demand(member_count == 0, "GROUP_MEMBERSHIP_REVIEW_REQUIRED")
     demand(existing_grants == 0 or existing_grants == 4,
            "MODEL_GRANT_BASELINE_DRIFT")
+    return all_model_ids
 
 
 def validate_names(names):
@@ -184,7 +186,13 @@ def matches_existing(record, plan, ids):
 
 def fetch_state(token, names, prompt):
     checked_version()
-    check_guest()
+    db_model_ids = check_guest()
+    oauth = get_json("/api/v1/auths/admin/config/oauth", token)
+    demand(isinstance(oauth, dict)
+           and oauth.get("ENABLE_OAUTH_GROUP_MANAGEMENT") is False
+           and oauth.get("ENABLE_OAUTH_GROUP_CREATION") is False
+           and oauth.get("ENABLE_OAUTH_ROLE_MANAGEMENT") is False,
+           "EFFECTIVE_OIDC_CONFIG_DRIFT")
     groups = get_json("/api/v1/groups/", token)
     demand(isinstance(groups, list) and len(groups) == 3,
            "GROUP_SET_DRIFT")
@@ -221,6 +229,7 @@ def fetch_state(token, names, prompt):
     plan = profile_plan(ids, prompt)
     expected_ids = {p["id"] for p in plan}
     current_ids = {m["id"] for m in entries}
+    demand(current_ids == db_model_ids, "MODEL_DB_API_MISMATCH")
     if not entries:
         stage = "EMPTY_READY"
     elif current_ids == expected_ids and len(entries) == len(expected_ids):
@@ -320,6 +329,7 @@ def run():
             "UNREVIEWED_OPEN_WEBUI_VERSION", "UNREVIEWED_GUEST",
             "DATA_MOUNT_DRIFT", "ENV_DRIFT", "MODEL_ACL_BYPASSED",
             "OIDC_GROUP_MANAGEMENT_UNREVIEWED",
+            "EFFECTIVE_OIDC_CONFIG_DRIFT", "MODEL_DB_API_MISMATCH",
             "DATABASE_BACKEND_UNREVIEWED", "DATABASE_NOT_FOUND",
             "GROUP_MEMBERSHIP_REVIEW_REQUIRED", "MODEL_GRANT_BASELINE_DRIFT",
             "GROUP_NAMES_UNREVIEWED", "GROUP_SET_DRIFT",
