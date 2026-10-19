@@ -67,7 +67,7 @@ class CT110MountDiagnosisTest(TestCase):
             "/dev/fuse dev/fuse none bind,create=file 0 0",
             "/dev/net/tun dev/net/tun none bind,create=file 0 0"
         ]), "MULTIPLE_ENTRIES_REVIEW")
-        config = BASE + "lxc.mount.entry: /dev/fuse dev/fuse none bind,create=file 0 0\\n"
+        config = BASE + "lxc.mount.entry: /dev/fuse dev/fuse none bind,create=file 0 0\n"
         self.assertEqual(diag.classify_config(config)["LXC_MOUNT_ENTRY_DEVICE_ORIGIN"],
                          "EXACT_FUSE_DEVICE_BIND")
 
