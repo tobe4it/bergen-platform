@@ -1,0 +1,9 @@
+---
+# Opt-in physical-host NIC configuration; no BIOS, guest or network reload changes.
+- name: Guarded persistent Wake-on-LAN for venombox physical Ethernet NIC
+  hosts: venombox
+  become: true
+  gather_facts: false
+  serial: 1
+  roles:
+    - role: proxmox_wol

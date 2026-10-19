@@ -1,0 +1,172 @@
+---
+- name: Require explicit physical-host scope and approval setting
+  ansible.builtin.assert:
+    that:
+      - inventory_hostname == 'venombox'
+    fail_msg: "Only venombox is supported"
+
+- name: Read short physical-host name
+  check_mode: false
+  ansible.builtin.command:
+    argv: [hostname, -s]
+  register: power_recovery_wol_hostname
+  changed_when: false
+
+- name: Read physical-host board model
+  check_mode: false
+  ansible.builtin.command:
+    argv: [dmidecode, -s, baseboard-product-name]
+  register: power_recovery_wol_board
+  changed_when: false
+
+- name: Read physical-host BIOS revision
+  check_mode: false
+  ansible.builtin.command:
+    argv: [dmidecode, -s, bios-version]
+  register: power_recovery_wol_bios
+  changed_when: false
+
+- name: Confirm known and audited physical host
+  ansible.builtin.assert:
+    that:
+      - power_recovery_wol_hostname.stdout | trim == 'venombox'
+      - power_recovery_wol_board.stdout | trim == 'F8BSC'
+      - power_recovery_wol_bios.stdout | trim == '1.04'
+    fail_msg: "Unexpected host, board, or BIOS; refuse to change NIC settings"
+
+- name: Verify Proxmox node identity
+  check_mode: false
+  ansible.builtin.command:
+    argv: [pveversion]
+  register: power_recovery_wol_pve
+  changed_when: false
+
+- name: Confirm fixed hardware Ethernet interface exists
+  ansible.builtin.stat:
+    path: /sys/class/net/enp195s0/device
+  register: power_recovery_wol_physical
+
+- name: Refuse missing virtual or unexpected interface
+  ansible.builtin.assert:
+    that:
+      - power_recovery_wol_physical.stat.exists | default(false)
+    fail_msg: "The audited physical NIC enp195s0 is not present"
+
+- name: Confirm ethtool is already present at audited path
+  ansible.builtin.stat:
+    path: /usr/sbin/ethtool
+  register: power_recovery_wol_ethtool
+
+- name: Refuse missing ethtool
+  ansible.builtin.assert:
+    that:
+      - power_recovery_wol_ethtool.stat.exists | default(false)
+      - power_recovery_wol_ethtool.stat.executable | default(false)
+    fail_msg: "Existing /usr/sbin/ethtool is required; no packages are installed"
+
+- name: Read current Ethernet Wake-on-LAN modes
+  check_mode: false
+  ansible.builtin.command:
+    argv: [/usr/sbin/ethtool, enp195s0]
+  register: power_recovery_wol_before
+  changed_when: false
+
+- name: Parse current Ethernet Wake-on-LAN modes
+  ansible.builtin.set_fact:
+    power_recovery_wol_supported: >-
+      {{ power_recovery_wol_before.stdout
+         | regex_findall('(?m)^[ \t]*Supports Wake-on:[ \t]*(\S+)')
+         | first | default('UNKNOWN') }}
+    power_recovery_wol_enabled: >-
+      {{ power_recovery_wol_before.stdout
+         | regex_findall('(?m)^[ \t]*Wake-on:[ \t]*(\S+)')
+         | first | default('UNKNOWN') }}
+
+- name: Refuse non-Magic-Packet NIC or unknown state
+  ansible.builtin.assert:
+    that:
+      - "'g' in power_recovery_wol_supported"
+      - power_recovery_wol_enabled in ['d', 'g']
+    fail_msg: "Expected physical NIC with Magic Packet support and Wake-on d/g"
+
+- name: Inspect managed persistent systemd unit
+  ansible.builtin.stat:
+    path: /etc/systemd/system/bergen-venombox-wol.service
+  register: power_recovery_wol_unit
+
+- name: Read pre-existing unit for no-overwrite protection
+  check_mode: false
+  ansible.builtin.slurp:
+    src: /etc/systemd/system/bergen-venombox-wol.service
+  register: power_recovery_wol_existing_unit
+  when:
+    - power_recovery_wol_unit.stat.exists | default(false)
+    - power_recovery_wol_unit.stat.isreg | default(false)
+
+- name: Refuse unmanaged unit, symlink, permission drift or modified content
+  ansible.builtin.assert:
+    that:
+      - not (power_recovery_wol_unit.stat.exists | default(false)) or
+        ((power_recovery_wol_unit.stat.isreg | default(false)) and
+         (power_recovery_wol_unit.stat.uid | default(-1) == 0) and
+         (power_recovery_wol_unit.stat.mode | default('') == '0644') and
+         (power_recovery_wol_existing_unit.content | default('') | b64decode ==
+          lookup('ansible.builtin.template', 'bergen-venombox-wol.service.j2')))
+    fail_msg: "Existing WoL unit is unmanaged or has drift; do not overwrite it"
+
+- name: Report pre-change state and approval
+  ansible.builtin.debug:
+    msg:
+      - "Host=venombox Board=F8BSC BIOS=1.04"
+      - "Adapter=enp195s0 Supports={{ power_recovery_wol_supported }} Enabled={{ power_recovery_wol_enabled }}"
+      - "Approval={{ power_recovery_wol_approved | default(false) | bool }}"
+      - "Desired persistent setting=Magic Packet (wol g)"
+      - "AC/G3 wake capability=UNPROVEN"
+      - "Network reload/restart=NONE"
+      - "Host reboot=NONE"
+
+- name: Deploy opt-in persistent WoL configuration
+  when: power_recovery_wol_approved | default(false) | bool
+  block:
+    - name: Install dedicated bounded WoL unit
+      ansible.builtin.template:
+        src: bergen-venombox-wol.service.j2
+        dest: /etc/systemd/system/bergen-venombox-wol.service
+        owner: root
+        group: root
+        mode: '0644'
+
+    - name: Enable WoL at boot and apply once now
+      ansible.builtin.systemd_service:
+        name: bergen-venombox-wol.service
+        daemon_reload: true
+        enabled: true
+        state: "{{ 'restarted' if power_recovery_wol_enabled == 'd' else 'started' }}"
+      when: not ansible_check_mode
+
+    - name: Verify resulting Wake-on-LAN state
+      check_mode: false
+      ansible.builtin.command:
+        argv: [/usr/sbin/ethtool, enp195s0]
+      register: power_recovery_wol_after
+      changed_when: false
+      when: not ansible_check_mode
+
+    - name: Require Magic Packet wake after explicit activation
+      ansible.builtin.assert:
+        that:
+          - >-
+            (power_recovery_wol_after.stdout |
+            regex_findall('(?m)^[ \t]*Wake-on:[ \t]*(\S+)') |
+            first | default('UNKNOWN')) == 'g'
+        fail_msg: "Wake-on-LAN did not remain enabled; inspect systemd journal and NIC driver"
+      when: not ansible_check_mode
+
+    - name: Report explicitly approved operation or simulated change
+      ansible.builtin.debug:
+        msg:
+          - "MODE={{ 'CHECK_ONLY_NO_WRITE' if ansible_check_mode else 'APPROVED_APPLY' }}"
+          - "Systemd unit: {{ 'would be rendered' if ansible_check_mode else 'installed and enabled' }}"
+          - "Physical NIC state: {{ 'unchanged by check mode' if ansible_check_mode else 'verified Wake-on=g' }}"
+          - "AC loss G3 recovery=UNPROVEN"
+          - "No host reboot or bridge/network reload"
