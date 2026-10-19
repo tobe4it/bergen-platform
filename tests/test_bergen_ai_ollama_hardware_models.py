@@ -148,6 +148,33 @@ class OllamaHardwareTests(unittest.TestCase):
                 self.assertIs(task["changed_when"], False)
                 self.assertTrue(task["no_log"])
 
+    def test_all_gpu_playbook_assertions_are_yaml_strings(self):
+        """Ansible assert.that must not contain YAML dicts for colon comparisons."""
+        playbooks = (GPU_AUDIT, GPU_STAGE, GPU_STAGED_READONLY, GPU_ROLLBACK_PLAY)
+        for path in playbooks:
+            with self.subTest(playbook=path.name):
+                for play in yaml.safe_load(path.read_text()):
+                    for task in play.get("tasks", []):
+                        checks = task.get("ansible.builtin.assert", {}).get("that", [])
+                        self.assertIsInstance(checks, list)
+                        for check in checks:
+                            self.assertIsInstance(
+                                check, str,
+                                f"{path.name}: {task['name']}: invalid Ansible conditional {check!r}",
+                            )
+
+    def test_gpu_guest_running_condition_is_correctly_quoted(self):
+        play = yaml.safe_load(GPU_STAGED_READONLY.read_text())[0]
+        check_task = next(t for t in play["tasks"]
+                          if t["name"] == "Refuse a non-running or wrong runtime target")
+        conditions = check_task["ansible.builtin.assert"]["that"]
+        self.assertEqual(
+            conditions,
+            ["bergen_gpu_guest_runtime.rc == 0",
+             "bergen_gpu_guest_runtime.stdout | trim == 'status: running'"]
+        )
+        self.assertNotIn("ALLOW_BROKEN_CONDITIONALS", GPU_STAGED_READONLY.read_text())
+
     def test_exact_preimage_compare_accepts_only_expected_gpu_stage(self):
         spec = importlib.util.spec_from_file_location(
             "bergen_gpu_preimage_audit", GPU_ROLLBACK_SCRIPT
