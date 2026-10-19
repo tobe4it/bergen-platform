@@ -27,6 +27,23 @@ Source: `ansible/files/power-recovery/synology-venombox-wol-onboot.sh`
 - No firmware changes, NIC configuration, NAS routing/VLAN/firewall changes, service shutdown or Proxmox changes.
 - Return code and logs indicate packet-send requests only: actual host power-on cannot be inferred from script success.
 
+## Erstlauf-Blocker: fehlende SSH-Host-Key-Vertrauensstellung (19.10.2026)
+
+Der **tatsächliche** erste `bp-controller`-Installationslauf ist beim rein lesenden NAS-Preflight mit `rc=255` abgebrochen, bevor Dateien angelegt wurden: `No ED25519 host key is known ... StrictHostKeyChecking=yes`. Ansible: `ok=2 changed=0 failed=1`. Das ist eine gewollte Fail-Closed-Sicherheitsgrenze, keine Aufforderung, die SSH-Host-Key-Prüfung abzuschalten.
+
+Vorgehensweise:
+1. Den **vertrauenswürdigen** SSH-ED25519-Host-Key-Fingerprint auf einer bestehenden, bereits authentifizierten DSM-Sitzung ermitteln:
+   `ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub -E sha256`.
+2. Auf bp-controller den **angebotenen** Schlüssel in eine temporäre Datei holen:
+   `ssh-keyscan -T 10 -t ed25519 NAS_SSH_IP > /tmp/mountaincloud-ed25519.known_hosts`
+   und den angebotenen Fingerprint mit
+   `ssh-keygen -lf /tmp/mountaincloud-ed25519.known_hosts -E sha256` auslesen.
+3. Nur bei exakter Übereinstimmung die Zeile in `~/.ssh/known_hosts` des **Ansible-Ausführungsbenutzers** ergänzen. Nicht die privaten NAS-Netzparameter oder SSH-Schlüsselmaterial in Git aufnehmen.
+4. `ssh -T -o BatchMode=yes -o StrictHostKeyChecking=yes BENUTZER@NAS_SSH_IP 'hostname -s'` als Read-only-Test. Falls danach Public-Key-Authentifizierung oder `sudo -n` scheitert, separat und sicher behandeln. Keinen passwortbasierten Bypass und kein `StrictHostKeyChecking=no`.
+5. Danach zuerst das vorgesehene `--check` und erst dann den freigegebenen Installations-Apply erneut ausführen. **Keine** NAS/Host-Neustarts oder Paketsendetests erforderlich.
+
+Der Boot-up-Task auf DSM ist weiterhin **nicht** nachgewiesen eingerichtet oder aktiviert; er erfordert die separate native DSM-Aufgabenplaner-Bedienung nach erfolgreicher Bereitstellung.
+
 ## Freigegebener Installationspfad, noch NICHT ausgeführt
 
 Der Betreiber hat Installation und Aktivierung einer DSM-Boot-Aufgabe freigegeben, **ohne NAS-/Host-Neustart oder Stromausfalltest**. Dieses Git-Repository hat keinen direkten Zugang zur privaten Synology-DSM-Sitzung. Die folgenden Schritte sind auf dem vorhandenen bp-controller und danach im DSM-Aufgabenplaner auszuführen.
