@@ -448,3 +448,61 @@ guest networking or production changes are authorized yet.
 The source inventory lists only selected package prefixes, not
 the full RPM dependency closure. The module/repo names alone do
 not prove downloads or package compatibility.
+
+
+## Alternative accepted for planning: Rocky Linux 9.8 LXC template on venombox
+
+The operator's 2026-10-20 read-only PVE inventory established:
+
+- PVE appliance templates advertised:
+  rockylinux-9-default_20240912_amd64.tar.xz,
+  rockylinux-10-default_20251001_amd64.tar.xz.
+- The first (Rocky 9, older image) is already on the local template
+  storage, 99.54 MB. There is no explicitly versioned 9.8 PVE template.
+- local-zfs active; approx. 1.86 billion KiB reported available.
+- Running unprivileged LXC 701 has onboot=0, protection=1,
+  no configured netX, and only loopback. The sysfs
+  bonding_masters entry is a control file, not an interface.
+- IDs 702 and 790 appear absent from pct list, but must be rechecked
+  against cluster and config inventory immediately before reservation.
+
+A separate non-production Rocky 9.x unprivileged LXC **could** be
+created from the existing PVE image on local-zfs. Allow network access
+to **the disposable builder only**, with no imported backup or
+production credentials. Rocky Linux supports in-major upgrades from
+9.x to 9.8 using dnf upgrade. Require a read-only review of the
+Proxmox bridge/VLAN, reachable trusted Rocky repositories, OS release,
+signature verification policy and adequate disk space before allowing
+the upgrade. Do not attach any NIC to LXC 701.
+
+After controlled upgrade, reboot and verify /etc/os-release, rpm
+database and package signatures. Remove build credentials, machine
+identity, SSH host keys if any, system logs and cached networking
+state; then shut down the builder and remove its PVE netX settings
+before converting the guest to an immutable named versioned PVE
+template. Ensure clones cannot accidentally inherit a route or
+network adapter.
+
+An optional second stage can build a **separate, clean Nextcloud
+runtime template** from the Rocky 9.8 base, install Remi PHP 8.3
+and AppStream MariaDB 10.11 plus required extensions (as pinned /
+confirmed available), using dnf dependency resolution **while the
+builder is networked**, then sanitize and remove its network
+configuration before templating. Never copy Nextcloud archives,
+config.php, SQL dump, LDAP credentials or other production secrets
+into a connected build container.
+
+A fresh networkless LXC cloned from the fully provisioned runtime
+template could serve as an isolated restore guest. **A template
+does not upgrade existing LXC 701**; using another VMID such as 702
+requires a separately approved amendment to the current 701-locked
+playbooks and restore runbook. Never delete, replace, reset or
+reconfigure the protected 701 as a shortcut. The previously staged,
+SHA-verified backup on venombox may be reused only after new guest
+identity, protection, mounts, hash and network gating are explicitly
+revalidated.
+
+No commands in this section have been run; no PVE resources or
+production systems have been changed. Begin with read-only network
+topology and free VMID checks; require explicit operator approval
+before any build-guest creation or template conversion.
