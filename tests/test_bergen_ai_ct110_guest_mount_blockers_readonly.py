@@ -51,6 +51,43 @@ class CT110GuestMountBlockersTest(TestCase):
             "OTHER_MOUNTED_STORAGE", "OTHER_PROC_OR_SYS"
         ])
 
+    def test_profiles_break_down_all_four_unknown_mounts_without_raw_paths(self):
+        tree = [mount("/", "zfs", "rpool/secret", [
+            mount("/proc/cpuinfo", "fuse.lxcfs", "lxcfs"),
+            mount("/proc/other", "fuse.lxcfs", "lxcfs"),
+            mount("/proc/newmount", "nfs4", "nas:/secret"),
+            mount("/var/lib/containers/storage/overlay/x/merged",
+                  "fuse.fuse-overlayfs", "fuse-overlayfs"),
+            mount("/home/private/hidden", "ext4", "/dev/secret"),
+            mount("/dev/shm", "tmpfs", "tmpfs"),
+        ])]
+        output = a.diagnose(tree)
+        self.assertEqual(output["OTHER_NONPSEUDO_COUNT"], 4)
+        self.assertEqual(output["OVERLAY_MOUNT_COUNT"], 1)
+        self.assertEqual(output["UNRESOLVED_PROFILES"], [
+            "HOME_TREE:BLOCK_OR_COW_FS:DEVICE_SOURCE:1",
+            "PODMAN_GRAPH_TREE:FUSE_OVERLAYFS:OVERLAY_SOURCE:1",
+            "PROC_TREE:FUSE_LXCFS:LXCFS_SOURCE:1",
+            "PROC_TREE:NETWORK_FS:NETWORK_SOURCE:1",
+        ])
+        self.assertNotIn("/secret", str(output))
+        self.assertNotIn("/home/private", str(output))
+        self.assertNotIn("/var/lib/containers/storage", str(output))
+
+    def test_overlay_in_podman_graph_not_automatically_backup_safe(self):
+        tree = [mount("/", "zfs", "rpool", [
+            mount("/var/lib/containers/storage/overlay/x/merged",
+                  "overlay", "overlay"),
+            mount("/var/lib/containers/storage/volumes/external",
+                  "nfs4", "nas:/private"),
+        ])]
+        result = a.diagnose(tree)
+        self.assertEqual(result["OVERLAY_MOUNT_COUNT"], 1)
+        self.assertEqual(result["PREVIOUS_PREFLIGHT_BLOCKER_COUNT"], 1)
+        self.assertEqual(result["OTHER_NONPSEUDO_COUNT"], 1)
+        self.assertEqual(result["UNRESOLVED_PROFILES"], [
+            "PODMAN_GRAPH_TREE:NETWORK_FS:NETWORK_SOURCE:1"])
+
     def test_any_ambiguous_or_missing_source_fails_closed(self):
         self.assertRaises(ValueError, a.diagnose, [])
         self.assertRaises(ValueError, a.diagnose,
@@ -70,6 +107,7 @@ class CT110GuestMountBlockersTest(TestCase):
                           "os.remove", "os.unlink"):
             self.assertNotIn(forbidden, source)
         self.assertIn("BACKUP_AUTHORIZED=False", source)
+        self.assertIn("UNRESOLVED_PROFILES", source)
         play = yaml.safe_load(PLAY.read_text())[0]
         self.assertEqual(play["hosts"], "venombox")
         self.assertFalse(play["gather_facts"])
