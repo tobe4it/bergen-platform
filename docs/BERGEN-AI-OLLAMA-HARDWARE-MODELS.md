@@ -178,6 +178,27 @@ nodes exist with correct ownership inside the guest and Ollama local API
 is healthy, then run bounded synthetic inference and inspect Ollama's
 GPU/CPU placement. Merely mounting devices does not prove GPU execution.
 Paperless and other LXCs must not be restarted as part of this change.
+### Post-stage audit runtime assertion correction (2026-10-19)
+
+The full original-vs-staged config comparison passed live, including the
+32-GiB ceiling and exact two native PVE device assignments. Its last
+assertion, checking `pct status 110`, then failed because the expression
+containing `'status: running'` was not quoted as a **YAML scalar** and
+was parsed as a mapping, which Ansible rejects as a conditional.
+No LXC/GPU/host config was changed by this read-only audit.
+
+Fix: quote the **whole** `assert.that` expression:
+
+    - "bergen_gpu_guest_runtime.stdout | trim == 'status: running'"
+
+Additional regression tests now reject any non-string `assert.that`
+entry in all PR #115 GPU playbooks, not only this one. The older
+CI syntax check did not detect this runtime typing error.
+
+Do not set `ALLOW_BROKEN_CONDITIONALS`, do not repeat the stage
+operation, and do not restart LXC 110 until the corrected full
+read-only pre-restart audit returns `STATUS=EXACT_STAGE_ONLY`,
+`LXC110_RUNNING=YES` and `failed=0`.
 ## Step 2 – audit model download needs, still ZERO writes
 
     (
