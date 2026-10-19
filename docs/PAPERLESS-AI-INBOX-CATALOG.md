@@ -351,6 +351,85 @@ is authorized as part of this inspection. The future
 `bergen-syslog` LXC120 client is out of scope for the immediate
 Paperless allowlist; a later authenticated inference gateway
 can offer separate per-service access controls.
+## Live firewall runtime audit and planned negative TCP test — 2026-10-19
+
+Operator completed `audit-paperless-ai-ollama-runtime-filter-readonly.yml`
+on venombox: `ok=7 changed=0 failed=0`:
+
+| Evidence | Live status |
+| --- | --- |
+| nft loaded | `LOADED` |
+| Recognized nft base chains / TCP-11434 references | `0 / 0` |
+| nft CT110 interface hints | `NOT_OBSERVED` |
+| iptables IPv4 and IPv6 snapshot | `AVAILABLE`, `0` rules in each |
+| Ollama separate IPv4 listener | `NONE` |
+| Ollama IPv6 listener | `WILDCARD` |
+| LXC110 non-link-local IPv6 | `PRESENT` |
+| Effective 11434 deny / same VLAN isolation | `NOT_VERIFIED` |
+| UniFi policy | `NOT_INSPECTED` |
+| Exposure gate | `REVIEW_REQUIRED` |
+
+Important: the IPv6 wildcard socket may be dual-stack and accept IPv4,
+consistent with the previously successful IPv4 request from the
+Paperless Podman container. Presence of a non-link-local IPv6
+does **not** prove globally routed IPv6 reachability. Zero recognized
+host nft base chains/iptables rules means our tool observed no
+applicable explicit enforcement, **not** proof that no other
+firewall, bridge, guest, eBPF or gateway control exists.
+
+### One approved negative connect test from bp-controller
+
+Before proposing a CT-specific firewall/ACL change, a single
+no-write read-only reachability test is prepared:
+`audit-paperless-ai-ollama-negative-client-readonly.yml`.
+It verifies current LXC110 identity, discovers the sole private
+IPv4 address and at most one non-link-local IPv6 address inside
+that guest and cross-checks its IPv4 against inventory
+`bergen-ai`. The delegated task executes **only on verified
+bp-controller** (not Paperless, and not presently approved
+for direct Ollama access), and attempts one TCP connect to
+11434 in each address family with a short timeout. No
+HTTP request, Ollama inference, arbitrary port scanning,
+config changes or guest restarts. Actual addresses remain
+protected by Ansible no_log and are never displayed.
+
+At a maintenance-safe time with the operator approving only
+this test:
+
+~~~bash
+(
+set -euo pipefail
+BASE="$HOME/bergen-platform"
+cd "$HOME/bergen-platform-paperless-ai-catalog"
+git fetch origin feat/paperless-native-ai-inbox-catalog-20261018
+git switch --detach origin/feat/paperless-native-ai-inbox-catalog-20261018
+"$BASE/.venv/bin/ansible-playbook" \
+  -i ansible/inventory.yml \
+  -i "$BASE/ansible/inventory.local.yml" \
+  ansible/playbooks/audit-paperless-ai-ollama-negative-client-readonly.yml \
+  --vault-id ai@prompt \
+  -e bergen_ai_negative_probe_approved=true
+)
+~~~
+
+If `IPV4_TCP_11434=REACHABLE`, **an unapproved
+management-client source** can reach the Ollama TCP port,
+demonstrating broader network accessibility than the currently
+reviewed Paperless source. This is a transport-only check;
+it cannot by itself prove HTTP API access or full exposure
+to all clients. `REFUSED`, `TIMEOUT` or `NO_ROUTE` may
+reflect different network controls and only characterize
+the tested source/path at that moment, not all untrusted
+clients. IPv6 is evaluated independently when a single
+eligible guest IPv6 target exists.
+
+**The network approval gate remains `REVIEW_REQUIRED` even
+after a negative test**, until expected Paperless access,
+the necessary authorized-client list, Proxmox/UniFi rules,
+same-VLAN paths and IPv6 paths have been reviewed and any
+required network restrictions independently applied and
+retested. No automatic changes to Paperless, Ollama,
+syslog LXC120, firewall or the timer are authorized.
 ## Target behaviour
 
 Only **new**, OCR-complete, unreviewed inbox documents belonging to active,
