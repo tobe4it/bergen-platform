@@ -745,3 +745,108 @@ Weder Rolle noch Timer dürfen unverändert für CT110 aktiviert werden.
 unabhängiger Proxmox-Konsolenzugriff, Konfigurations-Sicherungen und
 Anwendungs-/Restore-Freigaben fehlen weiterhin. `vmbr90`,
 LXC-`net1`, Ollama-Binding und Paperless bleiben unangetastet.
+
+
+## Phase 0f – erste einmalige CT110-Sicherung (operatorfreigegeben, noch nicht ausgeführt)
+
+**Freigabeumfang:** Der Betreiber hat die **einmalige Sicherung von
+LXC 110 Bergen-AI** genehmigt. Kein regelmäßiger Job, keine Backup-Rotation,
+keine Proxmox-/Netzwerkänderungen und kein Restore sind freigegeben.
+
+Da der Proxmox-`stop`-Modus den Container über die gesamte
+Archivierungsdauer anhalten kann, verwenden wir zunächst ausschließlich
+`--mode snapshot`. Proxmox kann den Container dafür kurz suspendieren;
+bei nicht unterstützter Snapshot-Fähigkeit **nicht** automatisch auf
+`stop` oder `suspend` zurückfallen. Es gibt keine bewussten
+`pct stop`-/`pct start`-/`pct reboot`-Kommandos. Ein Snapshot ist
+dennoch kein Nachweis einer anwendungskonsistenten Wiederherstellung.
+
+**Ziel:** genau CT110 auf dem schon verwendeten NFS-Storage
+`bergen-synology-backup`, komprimiert als zstd-`vzdump`, ohne Entfernen
+bisheriger Backups (`--remove 0 --prune-backups keep-all=1`), ohne
+Systemd-Timer.
+
+Zwei getrennte Playbooks:
+
+- `preflight-bergen-ai-ct110-oneoff-backup-readonly.yml`: Gastidentität,
+  laufender Zustand, `pct`-Rootfs ohne separate konfigurierte `mpN`,
+  bekannte persistente Open-WebUI-Daten im Gast-Rootfs, tatsächlich
+  erkannte weitere Dateisysteme im Gast, aktives NFS-Ziel, verfügbaren
+  Platz am Ziel und in `/var/tmp` sowie ältere CT110-Archive auf dem
+  gewählten Storage **ohne Änderungen** prüfen.
+- `backup-bergen-ai-ct110-once.yml`: importiert den Preflight im
+  **gleichen Lauf** und verlangt zusätzlich den exakten
+  operatorseitigen Bestätigungstext
+  `APPROVE_CT110_SNAPSHOT_BACKUP_ONCE`. Bei einem nicht eindeutig
+  positiven Preflight wird `vzdump` **nicht gestartet**. Die Verifikation
+  prüft anschließend, ob CT110 noch läuft und ein neues,
+  nichtleeres Archiv im NFS-Storage als Metadatum sichtbar ist.
+  Danach sind Backup-Datenintegrität, enthaltene Daten und Restore
+  ausdrücklich **noch nicht attestiert**.
+
+Die Gastprüfung ist konservativ. Wenn `podman`, Open WebUI oder Ollama
+weitere Hostdaten außerhalb des LXC-Rootfs nutzen, eine Mount-Art nicht
+erkannt wird oder der Proxmox-Storage sein Backup-Content-Flag nicht
+liefert, muss zuerst die Herkunft verifiziert werden. **Keinesfalls**
+nur zum Erzwingen eines grünen Status den Audit abschwächen.
+
+### Auf bp-controller: erst read-only Preflight
+
+```bash
+(
+set -euo pipefail
+BASE="$HOME/bergen-platform"
+WT="$HOME/bergen-platform-ai-private-bridge"
+
+git -C "$WT" fetch origin feat/bergen-ai-private-bridge-20261019
+git -C "$WT" switch --detach origin/feat/bergen-ai-private-bridge-20261019
+cd "$WT"
+
+"$BASE/.venv/bin/ansible-playbook" \
+  -i ansible/inventory.yml -i "$BASE/ansible/inventory.local.yml" \
+  ansible/playbooks/preflight-bergen-ai-ct110-oneoff-backup-readonly.yml \
+  --syntax-check
+"$BASE/.venv/bin/ansible-playbook" \
+  -i ansible/inventory.yml -i "$BASE/ansible/inventory.local.yml" \
+  ansible/playbooks/preflight-bergen-ai-ct110-oneoff-backup-readonly.yml \
+  --vault-id ai@prompt
+)
+```
+
+### Erst bei PRECHECK_PASSED und SAFE_TO_ATTEMPT_SINGLE_BACKUP=True
+
+Dann (in einem `tmux`-Fenster auf `bp-controller`) **einmalig**:
+
+```bash
+(
+set -euo pipefail
+BASE="$HOME/bergen-platform"
+WT="$HOME/bergen-platform-ai-private-bridge"
+cd "$WT"
+
+"$BASE/.venv/bin/ansible-playbook" \
+  -i ansible/inventory.yml -i "$BASE/ansible/inventory.local.yml" \
+  ansible/playbooks/backup-bergen-ai-ct110-once.yml \
+  --syntax-check
+"$BASE/.venv/bin/ansible-playbook" \
+  -i ansible/inventory.yml -i "$BASE/ansible/inventory.local.yml" \
+  ansible/playbooks/backup-bergen-ai-ct110-once.yml \
+  -e bergen_ai_ct110_oneoff_approval=APPROVE_CT110_SNAPSHOT_BACKUP_ONCE \
+  --vault-id ai@prompt
+)
+```
+
+Nur der zweite Befehl der zweiten Gruppe enthält einen mutierenden
+`vzdump`-Schritt; er ist **kein** Check-Mode-Aufruf. Fällt der
+Snapshot-Backup-Lauf aus, darf er wegen einer möglichen Teilsicherung
+nicht blind wiederholt werden. Der `rescue`-Zweig prüft den Gaststatus,
+startet jedoch keinen Container neu. Mögliche Modell-/WebUI-
+Funktionseinschränkungen während des Snapshot-Suspends sind vorher
+betrieblich einzuplanen. Besonders wichtig: die fortlaufende Integrität
+der SQLite-/Podman-Daten und die Wiederherstellbarkeit müssen durch
+separate, später freizugebende Tests validiert werden.
+
+**Nicht durch die Freigabe umfasst:** Änderungen an `vmbr90`,
+`net1`, Ollama-Binding, Paperless-Konfiguration, Systemd-Timern,
+Proxmox-Backuplaufplänen, Retention/Pruning, Host-Neustarts oder
+irgendeine Bereinigung vorhandener Archive.
