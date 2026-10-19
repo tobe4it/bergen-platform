@@ -1,0 +1,129 @@
+---
+# Read-only model authorization audit for Open WebUI v0.10.2 on existing LXC110.
+# No admin tokens, user identifiers, group names, model prompts or secrets leave
+# the verified guest; actual group names reside only in site-local vars.
+- name: Audit adult/child Open WebUI model visibility before any grant
+  hosts: "{{ bergen_ai_family_audit_host | default('__no_approved_family_host__') }}"
+  gather_facts: false
+  serial: 1
+  tasks:
+    - name: Require one approved exact host and three private role mappings
+      ansible.builtin.assert:
+        that:
+          - bergen_ai_family_audit_host is defined
+          - bergen_ai_family_audit_host == inventory_hostname
+          - ansible_play_hosts_all | length == 1
+          - bergen_ai_family_audit_approved | default(false) | bool
+          - bergen_ai_family_group_expected is defined
+          - bergen_ai_family_group_expected is mapping
+          - (bergen_ai_family_group_expected.keys() | list | sort) == ['adults', 'children', 'family']
+        fail_msg: MODEL_READONLY_SCOPE_UNAPPROVED
+      no_log: true
+
+    - name: Read live application version on existing guest loopback
+      ansible.builtin.uri:
+        url: http://127.0.0.1:3000/api/version
+        method: GET
+        use_proxy: false
+        follow_redirects: none
+        status_code: 200
+        return_content: false
+        timeout: 10
+      register: model_audit_version
+      changed_when: false
+      check_mode: false
+      no_log: true
+
+    - name: Require reviewed version pinned to upstream authorization semantics
+      ansible.builtin.assert:
+        that:
+          - model_audit_version.json is mapping
+          - model_audit_version.json.version | regex_search('^v?0[.]10[.]2$')
+        fail_msg: MODEL_VERSION_UNREVIEWED
+      no_log: true
+
+    - name: Run immutable SQLite model/grant audit from installed container data
+      ansible.builtin.command:
+        argv:
+          - python3
+          - -c
+          - "{{ lookup('ansible.builtin.file', playbook_dir ~ '/../files/bergen_ai/audit_family_model_access_v0102.py') }}"
+        stdin: >-
+          {{ {
+              'version': '0.10.2',
+              'expected': bergen_ai_family_group_expected
+             } | to_json }}
+        stdin_add_newline: true
+      register: model_audit_raw
+      changed_when: false
+      check_mode: false
+      failed_when: false
+      no_log: true
+
+    - name: Extract exactly one bounded audit frame
+      ansible.builtin.set_fact:
+        model_audit_frames: >-
+          {{ model_audit_raw.stdout_lines |
+             select('match', '^BERGEN_FAMILY_MODEL_ACCESS_V1:') | list }}
+      changed_when: false
+      no_log: true
+
+    - name: Refuse missing or duplicate frames
+      ansible.builtin.assert:
+        that:
+          - model_audit_raw.rc == 0
+          - model_audit_frames | length == 1
+          - model_audit_frames[0] | length < 2500
+        fail_msg: MODEL_AUDIT_INVALID
+      no_log: true
+
+    - name: Decode only non-identifying counters
+      ansible.builtin.set_fact:
+        model_audit_result: >-
+          {{ model_audit_frames[0] |
+             regex_replace('^BERGEN_FAMILY_MODEL_ACCESS_V1:', '') |
+             from_json }}
+      changed_when: false
+      no_log: true
+
+    - name: Require an unchanged read-only inventory
+      ansible.builtin.assert:
+        that:
+          - model_audit_result.AUDIT == 'READ_ONLY'
+          - model_audit_result.CHANGED == false
+          - model_audit_result.STATUS in ['INVENTORY_ONLY', 'REVIEW_REQUIRED']
+          - model_audit_result.GROUP_REVOCATION_E2E == 'NOT_PROVEN'
+          - model_audit_result.MODEL_API_DENY_E2E == 'NOT_PROVEN'
+          - model_audit_result.ADULT_MEMBERS is number
+          - model_audit_result.CHILD_MEMBERS is number
+          - model_audit_result.PUBLIC_READ_GRANTS is number
+          - model_audit_result.CATALOG_MODEL is mapping
+          - model_audit_result.MULTILINGUAL_MODEL is mapping
+          - model_audit_result.EMBEDDING_MODEL is mapping
+        fail_msg: MODEL_AUDIT_SCOPE_UNREVIEWED
+      no_log: true
+
+    - name: Report only reviewed aggregate adult/child model-access state
+      ansible.builtin.debug:
+        msg:
+          - "AUDIT={{ model_audit_result.AUDIT }}"
+          - "STATUS={{ model_audit_result.STATUS }}"
+          - "CHANGED=False"
+          - "ADULT_MEMBERS={{ model_audit_result.ADULT_MEMBERS }}"
+          - "CHILD_MEMBERS={{ model_audit_result.CHILD_MEMBERS }}"
+          - "FAMILY_MEMBERS={{ model_audit_result.FAMILY_MEMBERS }}"
+          - "ADULT_USER_ROLES={{ model_audit_result.ADULT_USER_ROLES }}"
+          - "CHILD_USER_ROLES={{ model_audit_result.CHILD_USER_ROLES }}"
+          - "ADULT_PENDING_ROLES={{ model_audit_result.ADULT_PENDING_ROLES }}"
+          - "CHILD_PENDING_ROLES={{ model_audit_result.CHILD_PENDING_ROLES }}"
+          - "ADULT_CHILD_MEMBER_OVERLAP={{ model_audit_result.ADULT_CHILD_MEMBER_OVERLAP }}"
+          - "REGISTERED_MODELS={{ model_audit_result.TOTAL_REGISTERED_MODELS }}"
+          - "MODEL_GRANTS={{ model_audit_result.TOTAL_MODEL_GRANTS }}"
+          - "PUBLIC_READ_GRANTS={{ model_audit_result.PUBLIC_READ_GRANTS }}"
+          - "CHILD_RAW_MODEL_READ_GRANTS={{ model_audit_result.CHILD_RAW_MODEL_READ_GRANTS }}"
+          - "UNKNOWN_OR_FOREIGN_MODEL_GRANTS={{ model_audit_result.UNKNOWN_OR_FOREIGN_MODEL_GRANTS }}"
+          - "CATALOG_MODEL={{ model_audit_result.CATALOG_MODEL }}"
+          - "MULTILINGUAL_MODEL={{ model_audit_result.MULTILINGUAL_MODEL }}"
+          - "EMBEDDING_MODEL={{ model_audit_result.EMBEDDING_MODEL }}"
+          - "GROUP_REVOCATION_E2E={{ model_audit_result.GROUP_REVOCATION_E2E }}"
+          - "MODEL_API_DENY_E2E={{ model_audit_result.MODEL_API_DENY_E2E }}"
