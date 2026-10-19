@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
 """Read-only host-side cgroup v2 memory limit diagnostic for LXC 110.
 
-Find container init host PID using LXC, inspect the unified cgroup hierarchy
-of that exact process from Proxmox host namespace and read memory.max on
-its cgroup AND ancestors. The smallest finite ancestor limit is the effective
+Inspect Proxmox's exact /sys/fs/cgroup/lxc/110 host cgroup first. Fall back
+to the container init host PID only where the standard PVE path is absent.
+Read memory.max on the cgroup AND ancestors; the smallest finite
+ancestor limit is the effective
 cgroup ceiling. Guest-visible cgroup memory.max='max' is not authoritative.
 No writes, restarts, model execution or document access.
 """
@@ -76,18 +77,29 @@ def main():
         raise ValueError("LXC_WRONG_IDENTITY_OR_LIMIT")
     if checked(["pct", "status", "110"]) != "status: running":
         raise ValueError("LXC_NOT_RUNNING")
-    pidtext = checked(["lxc-info", "-n", "110", "-p", "-H"], limit=150)
-    if not re.fullmatch(r"[1-9][0-9]{0,9}", pidtext):
-        raise ValueError("LXC_PID_UNKNOWN")
-    pid = int(pidtext)
-    if pid == 1:
-        raise ValueError("INVALID_CONTAINER_PID")
-    cgroup_text = Path(f"/proc/{pid}/cgroup").read_text(encoding="ascii")
-    unified = [line[len("0::"):] for line in cgroup_text.splitlines()
-               if line.startswith("0::")]
-    if len(unified) != 1:
-        raise ValueError("NO_UNIFIED_CGROUP")
-    limits = hierarchy(unified[0])
+    # Proxmox 9 may not expose guest PID through standalone lxc-info,
+    # despite the CT running under pct. Prefer its native host cgroup.
+    direct = ROOT / "lxc" / "110"
+    if (direct.is_dir() and not direct.is_symlink()
+            and not (ROOT / "lxc").is_symlink()
+            and (direct / "memory.max").is_file()):
+        limits = hierarchy("/lxc/110")
+        source = "PVE_LXC_110_CGROUP"
+    else:
+        # Secondary discovery for nonstandard PVE cgroup layouts.
+        pidtext = checked(["lxc-info", "-n", "110", "-p", "-H"], limit=150)
+        if not re.fullmatch(r"[1-9][0-9]{0,9}", pidtext):
+            raise ValueError("LXC_PID_UNKNOWN")
+        pid = int(pidtext)
+        if pid == 1:
+            raise ValueError("INVALID_CONTAINER_PID")
+        cgroup_text = Path(f"/proc/{pid}/cgroup").read_text(encoding="ascii")
+        unified = [line[len("0::"):] for line in cgroup_text.splitlines()
+                   if line.startswith("0::")]
+        if len(unified) != 1:
+            raise ValueError("NO_UNIFIED_CGROUP")
+        limits = hierarchy(unified[0])
+        source = "INIT_PROCESS_HOST_CGROUP"
     status = classify(limits)
     print(FRAME+json.dumps({
         "AUDIT":"READ_ONLY", "CHANGED":False,
@@ -95,6 +107,7 @@ def main():
         "LXC110_RUNNING":True,
         "HOST_CGROUP_V2":True,
         "CGROUP_LIMIT_STATUS":status,
+        "CGROUP_SOURCE":source,
         "LEAF_MEMORY_LIMIT":"FINITE" if limits[0] is not None else "MAX",
         "FINITE_ANCESTOR_PRESENT":any(x is not None for x in limits[1:]),
         "INSPECTED_HIERARCHY_LEVELS":len(limits),
