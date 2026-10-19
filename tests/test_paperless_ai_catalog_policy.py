@@ -229,7 +229,7 @@ class CatalogPolicyTest(unittest.TestCase):
         spec=importlib.util.spec_from_file_location('bergen_ai_observed_peer',OBSERVED_SOURCE_SCRIPT)
         module=importlib.util.module_from_spec(spec)
         spec.loader.exec_module(module)
-        sample='ESTAB 0 0 [::ffff:192.168.20.225]:11434 [::ffff:192.168.20.200]:44220\\n'
+        sample='ESTAB 0 0 [::ffff:192.168.20.225]:11434 [::ffff:192.168.20.200]:44220\n'
         with mock.patch.object(module,'run',return_value=sample):
             peers=module.peers()
             self.assertEqual(len(peers),1)
