@@ -129,3 +129,26 @@ Expected results:
 Next phase will choose a bounded SSH transport or equivalent explicit file
 delivery, with independent digest verification on venombox. Never bypass
 host-key verification or widen the Synology NFS export.
+
+## Phase 2B: pinned archive transfer
+
+Use ansible/playbooks/transfer-nextcloud-restore-archive.yml for controller-
+relayed SSH. Its default execution checks both SSH identities, the pinned
+completed source snapshot, and the stopped isolated destination. It does not
+transfer data without an explicit apply setting.
+
+Pass the same three protected site-local variables files as for phase 2A.
+Specify nextcloud_restore_snapshot_id=20261019T043001Z-3349088. First run
+without an apply flag; expect NEXTCLOUD_RESTORE_TRANSFER_READ_ONLY_READY.
+
+A second run with nextcloud_restore_transfer_apply=true streams this one
+archive over the controller in bounded memory. The target refuses to
+overwrite existing files and uses SHA-256 and length verification before
+committing a complete root-only local archive. The controller also verifies
+the in-flight bytes. Guest 701 remains stopped without network.
+
+The destination path is:
+  /var/lib/vz/nextcloud-restore-test/nextcloud-20261019T043001Z-3349088.tar.gz
+
+Both SSH links require trusted keys and prohibit agent forwarding. Do not
+widen the NAS export or weaken host-key checking to fix SSH auth failures.
