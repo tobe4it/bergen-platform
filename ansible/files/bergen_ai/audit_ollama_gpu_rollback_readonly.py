@@ -35,13 +35,12 @@ def main():
     devs = [line for line in current if re.match(r"^dev[0-9]+:", line)]
     if len(devs) != 2:
         raise ValueError("DEVICE_DRIFT")
-    for slot, path in (("dev0", "/dev/dri/renderD128"),
-                       ("dev1", "/dev/kfd")):
-        candidates = [x for x in devs if x.startswith(slot + ":")]
-        if len(candidates) != 1 or path not in candidates[0]:
-            raise ValueError("DEVICE_DRIFT")
-        if "mode=0660" not in candidates[0]:
-            raise ValueError("DEVICE_DRIFT")
+    expected = {
+        "dev0: path=/dev/dri/renderD128,uid=999,gid=992,mode=0660",
+        "dev1: path=/dev/kfd,uid=999,gid=992,mode=0660",
+    }
+    if set(devs) != expected:
+        raise ValueError("DEVICE_DRIFT")
     restored = [x for x in current if not x.startswith(("dev0:", "dev1:"))]
     restored[restored.index("memory: 32768")] = "memory: 16384"
     if sorted(restored) != backup:
