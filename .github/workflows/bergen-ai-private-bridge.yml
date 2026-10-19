@@ -5,23 +5,27 @@ on:
     paths:
       - 'ansible/files/bergen_ai/audit_private_bridge_preflight.py'
       - 'ansible/files/bergen_ai/audit_private_bridge_extended_networks.py'
-      - 'ansible/files/bergen_ai/audit_private_bridge_wg_prefixes_readonly.py'
+      - 'ansible/files/bergen_ai/audit_private_bridge_external_gates.py'
       - 'ansible/playbooks/audit-bergen-ai-private-bridge-readonly.yml'
       - 'ansible/playbooks/audit-bergen-ai-private-bridge-extended-readonly.yml'
-      - 'ansible/playbooks/audit-bergen-ai-private-bridge-wg-readonly.yml'
+      - 'ansible/playbooks/audit-bergen-ai-private-bridge-external-gates-readonly.yml'
       - 'docs/BERGEN-AI-PRIVATE-PROXMOX-BRIDGE.md'
       - 'tests/test_bergen_ai_private_bridge_preflight.py'
+      - 'tests/test_bergen_ai_private_bridge_external_gates.py'
+      - 'docs/examples/bergen-ai-bridge-ipam.local.json.example'
       - '.github/workflows/bergen-ai-private-bridge.yml'
   push:
     branches: [main]
     paths:
       - 'ansible/files/bergen_ai/audit_private_bridge_preflight.py'
       - 'ansible/files/bergen_ai/audit_private_bridge_extended_networks.py'
-      - 'ansible/files/bergen_ai/audit_private_bridge_wg_prefixes_readonly.py'
+      - 'ansible/files/bergen_ai/audit_private_bridge_external_gates.py'
       - 'ansible/playbooks/audit-bergen-ai-private-bridge-readonly.yml'
       - 'ansible/playbooks/audit-bergen-ai-private-bridge-extended-readonly.yml'
-      - 'ansible/playbooks/audit-bergen-ai-private-bridge-wg-readonly.yml'
+      - 'ansible/playbooks/audit-bergen-ai-private-bridge-external-gates-readonly.yml'
       - 'tests/test_bergen_ai_private_bridge_preflight.py'
+      - 'tests/test_bergen_ai_private_bridge_external_gates.py'
+      - 'docs/examples/bergen-ai-bridge-ipam.local.json.example'
 
 jobs:
   readonly-policy-and-syntax:
@@ -36,7 +40,9 @@ jobs:
       - name: Install offline testing dependencies
         run: python -m pip install 'ansible-core>=2.16,<2.18' 'PyYAML>=6,<7'
       - name: Test no-mutation and CIDR guard invariants
-        run: python -m unittest discover -s tests -p 'test_bergen_ai_private_bridge_preflight.py' -v
+        run: |
+          python -m unittest discover -s tests -p 'test_bergen_ai_private_bridge_preflight.py' -v
+          python -m unittest discover -s tests -p 'test_bergen_ai_private_bridge_external_gates.py' -v
       - name: Validate read-only Proxmox inventory playbook syntax
         run: |
           ansible-playbook -i ansible/inventory.yml \
@@ -44,4 +50,4 @@ jobs:
           ansible-playbook -i ansible/inventory.yml \
             ansible/playbooks/audit-bergen-ai-private-bridge-extended-readonly.yml --syntax-check
           ansible-playbook -i ansible/inventory.yml \
-            ansible/playbooks/audit-bergen-ai-private-bridge-wg-readonly.yml --syntax-check
+            ansible/playbooks/audit-bergen-ai-private-bridge-external-gates-readonly.yml --syntax-check
