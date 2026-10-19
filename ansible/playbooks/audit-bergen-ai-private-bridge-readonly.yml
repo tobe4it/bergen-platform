@@ -1,0 +1,91 @@
+---
+# Zero-write Bergen-AI private Linux bridge discovery.
+# This is not an apply and never creates vmbr10 or a second CT interface.
+- name: Audit proposed Bergen-AI isolated Proxmox bridge without changes
+  hosts: venombox
+  become: true
+  gather_facts: false
+  tasks:
+    - name: Restrict to production Proxmox host
+      ansible.builtin.assert:
+        that:
+          - inventory_hostname == 'venombox'
+        fail_msg: WRONG_PROXMOX_HOST
+
+    - name: Read only Proxmox bridges guest networks and scoped IPv4 routes
+      ansible.builtin.command:
+        argv:
+          - python3
+          - -c
+          - "{{ lookup('ansible.builtin.file', playbook_dir ~ '/../files/bergen_ai/audit_private_bridge_preflight.py', rstrip=False) }}"
+      register: bp_ai_bridge_audit_raw
+      changed_when: false
+      failed_when: false
+      check_mode: false
+      no_log: true
+
+    - name: Extract exactly one sanitized status frame
+      ansible.builtin.set_fact:
+        bp_ai_bridge_audit_frames: >-
+          {{ bp_ai_bridge_audit_raw.stdout_lines | default([]) |
+             select('match', '^BERGEN_AI_PRIVATE_BRIDGE_PREFLIGHT_V1:') | list }}
+      no_log: true
+
+    - name: Refuse malformed duplicate or oversized output
+      ansible.builtin.assert:
+        that:
+          - bp_ai_bridge_audit_raw.rc == 0
+          - bp_ai_bridge_audit_frames | length == 1
+          - bp_ai_bridge_audit_frames[0] | length < 1800
+        fail_msg: PRIVATE_BRIDGE_AUDIT_UNVERIFIED
+      no_log: true
+
+    - name: Parse only bounded non-identifying bridge status
+      ansible.builtin.set_fact:
+        bp_ai_bridge_audit: >-
+          {{ (bp_ai_bridge_audit_frames[0] |
+              regex_replace('^BERGEN_AI_PRIVATE_BRIDGE_PREFLIGHT_V1:', '')) | from_json }}
+      no_log: true
+
+    - name: Verify no changes and never infer deployment approval
+      ansible.builtin.assert:
+        that:
+          - bp_ai_bridge_audit.AUDIT == 'READ_ONLY'
+          - not bp_ai_bridge_audit.CHANGED
+          - bp_ai_bridge_audit.STATUS in ['CANDIDATE_LOCALLY_UNCONFLICTED','REVIEW_EXISTING_NETWORK_CONFLICT','REVIEW_INCOMPLETE','GUEST_IDENTITY_OR_STATE_UNVERIFIED','UNVERIFIED']
+          - bp_ai_bridge_audit.BRIDGE_KERNEL in ['EXISTS','ABSENT','UNVERIFIED']
+          - bp_ai_bridge_audit.BRIDGE_CONFIG in ['EXISTS','ABSENT','UNVERIFIED']
+          - bp_ai_bridge_audit.BRIDGE_GUEST_REFERENCES in ['IN_USE','NOT_REFERENCED_IN_SCANNED_GUESTS','UNVERIFIED']
+          - bp_ai_bridge_audit.SCOPED_IPV4_ROUTE_OVERLAP in ['OVERLAP_FOUND','NO_OVERLAP_IN_SCOPED_ROUTES','UNVERIFIED']
+          - bp_ai_bridge_audit.SUBNET_CLEARANCE == 'NOT_PROVEN'
+          - not bp_ai_bridge_audit.APPLY_AUTHORIZED
+          - bp_ai_bridge_audit.NETWORK_CHANGES == 'NONE'
+          - bp_ai_bridge_audit.FIREWALL_CHANGES == 'NONE'
+          - bp_ai_bridge_audit.OLLAMA_BINDING_CHANGED == 'NO'
+          - bp_ai_bridge_audit.PAPERLESS_CHANGED == 'NO'
+        fail_msg: PRIVATE_BRIDGE_AUDIT_INVALID_OR_UNSAFE
+      no_log: true
+
+    - name: Display no-write local feasibility categories
+      ansible.builtin.debug:
+        msg:
+          - AUDIT=READ_ONLY
+          - CHANGED=False
+          - "STATUS={{ bp_ai_bridge_audit.STATUS }}"
+          - "BRIDGE_CANDIDATE={{ bp_ai_bridge_audit.BRIDGE_CANDIDATE }}"
+          - "BRIDGE_KERNEL={{ bp_ai_bridge_audit.BRIDGE_KERNEL }}"
+          - "BRIDGE_CONFIG={{ bp_ai_bridge_audit.BRIDGE_CONFIG }}"
+          - "BRIDGE_GUEST_REFERENCES={{ bp_ai_bridge_audit.BRIDGE_GUEST_REFERENCES }}"
+          - "CT110_NETWORK_INTERFACE_COUNT={{ bp_ai_bridge_audit.CT110_NICS }}"
+          - "CT126_NETWORK_INTERFACE_COUNT={{ bp_ai_bridge_audit.CT126_NICS }}"
+          - "CT120_NETWORK_INTERFACE_COUNT={{ bp_ai_bridge_audit.CT120_NICS }}"
+          - "SCOPED_IPV4_ROUTE_OVERLAP={{ bp_ai_bridge_audit.SCOPED_IPV4_ROUTE_OVERLAP }}"
+          - "SUBNET_CLEARANCE={{ bp_ai_bridge_audit.SUBNET_CLEARANCE }}"
+          - "PRIVATE_NET_DESIGN={{ bp_ai_bridge_audit.PRIVATE_NET_DESIGN }}"
+          - "IPV6_DESIGN={{ bp_ai_bridge_audit.IPV6_DESIGN | default('UNVERIFIED') }}"
+          - "PROXMOX_APPLY_GATE={{ bp_ai_bridge_audit.PROXMOX_APPLY_GATE | default('BLOCKED_PENDING_REVIEW') }}"
+          - "INFERENCE_API_ACCESS_GATE={{ bp_ai_bridge_audit.INFERENCE_API_ACCESS_GATE | default('BLOCKED_PENDING_RESTRICTED_BIND_AND_TEST') }}"
+          - NETWORK_CHANGES=NONE
+          - OLLAMA_CONFIG_CHANGED=NO
+          - PAPERLESS_CHANGED=NO
+          - NEXT_ACTION=REVIEW_BRIDGE_NAME_SUBNET_AND_ROLLBACK_BEFORE_APPLY
