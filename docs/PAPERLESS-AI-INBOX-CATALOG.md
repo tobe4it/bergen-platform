@@ -176,6 +176,61 @@ network isolation and backup/fingerprint gates are approved
 may the native Paperless LLM backend/model/endpoint be configured
 using its protected, separately approved playbook. No global
 Paperless AI, embeddings, RAG or timer activation is authorized.
+## Live Proxmox firewall configuration inventory — 2026-10-19
+
+Operator ran `audit-paperless-ai-ollama-firewall-readonly.yml` on
+venombox successfully (`ok=7`, `changed=0`, `failed=0`):
+
+| Evidence | Live sanitized classification |
+| --- | --- |
+| CT110 network interfaces | `ENABLED_ALL_NETS` (`firewall=1` on each) |
+| CT110 `/etc/pve/firewall/110.fw` | `ABSENT` |
+| PVE cluster firewall config | `NO_CONFIG_FILE` |
+| PVE node firewall config | `NO_CONFIG_FILE` |
+| `pve-firewall` service | `ACTIVE` |
+| `proxmox-firewall` service | `ACTIVE` |
+| Effective LXC110 inbound filtering | `NOT_DEMONSTRATED` |
+| UniFi rules / intra-VLAN isolation | `NOT_INSPECTED` / `NOT_VERIFIED` |
+| Ollama LXC110 listener (prior live probe) | `WILDCARD` |
+| Paperless Podman → Qwen14B (prior live probe) | `MODEL_PRESENT` |
+
+**Do not interpret `firewall=1` or active daemons as an access
+control.** Missing configuration files do not by themselves
+establish global default policy or exact runtime rules; however
+there is no CT110-specific allowlist evidence. In particular
+the unauthenticated Ollama API may be reachable from unintended
+hosts in the same L2 broadcast domain even when UniFi inter-VLAN
+routing restrictions exist. IPv6 binding/access and any host nft
+filters are not yet validated.
+
+### Next security review (no production mutation)
+
+1. Identify **all intended Ollama clients**: current Paperless
+   Podman LXC126, Open WebUI in the same LXC110 using loopback,
+   and any additional explicitly authorized application guests.
+   Do not assume a broad LAN allow rule is needed.
+2. Map the real source/destination interface, subnet, VLAN,
+   Proxmox CT110 network bridge, and any UniFi/L3 boundaries
+   privately. Never commit internal addresses or identities.
+3. Examine effective host firewall packet-filter rules (not
+   service state alone), IPv4 and IPv6, and actual allowed
+   reachability from a representative unauthorized client.
+   Probe only a pre-agreed non-sensitive test client.
+4. Design an **explicit allowlist for TCP/11434** limited to
+   required clients with a deny for everyone else. Favor guest
+   endpoint or Proxmox CT-specific enforcement for clients in
+   the same VLAN. Ensure established web UI access / loopback
+   Ollama and maintenance are preserved.
+5. Any firewall change requires independent operator approval,
+   rollback plan and remote-access safety checks. Re-test
+   Paperless-to-Qwen reachability and an agreed negative probe.
+   Do not open 11434 to all LAN/WAN clients.
+
+**Gate remains BLOCKED** pending effective network policy
+evidence and backup verification. Do not invoke the protected
+native ORM LLM `apply` or AI cataloguing pilot as a side effect
+of this inventory. All global AI, embeddings, RAG and automatic
+timers remain OFF.
 ## Target behaviour
 
 Only **new**, OCR-complete, unreviewed inbox documents belonging to active,
