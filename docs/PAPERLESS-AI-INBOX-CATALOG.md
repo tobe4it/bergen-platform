@@ -4,6 +4,61 @@
 document metadata, permissions or archives were changed by the PR. Code review,
 live preflight and a one-document trial are mandatory before automatic apply.
 
+## Live initial audit — 2026-10-19 (read-only, PASSED)
+
+Operator executed `audit-paperless-ai-catalog-runtime-readonly.yml`
+against the real venombox guests. All 15 tasks passed;
+`changed=0 failed=0`.
+
+| Gate | Live result |
+| --- | --- |
+| Paperless version / configuration | 3.3.0 / 1 singleton row |
+| Public AI UI and embeddings | Both OFF |
+| Native LLM backend/model/endpoint | NOT_CONFIGURED / NOT_SET / NOT_CONFIGURED |
+| Internal local LLM policy | PRIVATE_LLM_ALLOWED=True |
+| Inbox tag / all inbox docs | 1 / 33 |
+| Family/parent/child groups | 1 / 1 / 1 |
+| Active regular parent accounts | 2 |
+| Parent-owned inbox documents with OCR | 8 |
+| Bergen-AI LXC110 Ollama | Verified guest, healthy loopback API |
+| Installed comparison models | qwen2.5:14b-instruct-q4_K_M, mistral-nemo:12b, bge-m3:latest and existing smaller models |
+
+**Not yet verified:** any private network route from the
+Paperless *container* in LXC126 to Ollama in LXC110, and the
+effective Paperless-native ORM LLM configuration/optimistic
+fingerprint. Local Ollama loopback visibility **within LXC110**
+does not establish reachability from LXC126. Do not use
+`127.0.0.1:11434` as the Paperless endpoint unless Paperless
+itself runs the listener; do not copy example addresses into
+the real site-local variables.
+
+### Next safe gate: native configuration audit without writes
+
+On bp-controller use the existing AI catalog worktree, updated from
+this PR, to run:
+
+~~~bash
+(
+set -euo pipefail
+BASE="$HOME/bergen-platform"
+WT="$HOME/bergen-platform-paperless-ai-catalog"
+cd "$WT"
+git fetch origin feat/paperless-native-ai-inbox-catalog-20261018
+git switch --detach origin/feat/paperless-native-ai-inbox-catalog-20261018
+"$BASE/.venv/bin/ansible-playbook" \
+  -i ansible/inventory.yml \
+  -i "$BASE/ansible/inventory.local.yml" \
+  ansible/playbooks/manage-paperless-ai-local-ollama.yml \
+  --vault-id ai@prompt
+)
+~~~
+
+The default action is `audit`, no local vars or approvals required.
+Expected: `AUDIT=READ_ONLY`, `STATUS=INSPECTED`,
+`AI_UI_ENABLED=NO`, `EMBEDDINGS=OFF`, `CHANGED=False` and
+an opaque `CURRENT_SHA256` to gate any later reviewed setting
+change. The live network path, backups and approval must be
+separately established **before** changing any setting.
 ## Target behaviour
 
 Only **new**, OCR-complete, unreviewed inbox documents belonging to active,
