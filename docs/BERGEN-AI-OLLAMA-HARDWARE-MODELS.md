@@ -574,6 +574,48 @@ Report `EVAL_TOKENS`, `TOKENS_PER_SECOND`, `LOAD_SECONDS`,
 different tokenizers mean output length and token semantics may vary.
 Do not run multiple model benchmarks concurrently or infer
 cataloging accuracy from synthetic throughput. Paperless remains OFF.
+### Live Mistral Nemo 12B GPU benchmark – 2026-10-19
+
+The user ran the separately approved Mistral Nemo 12B benchmark
+successfully on commit `fe7b6a42d3ac66f6d6b734f1695c3fa4795bd1cb`:
+
+    STATUS=SYNTHETIC_COMPLETED
+    MODEL=MISTRAL_NEMO_12B
+    TOKENS_PER_SECOND=8.9
+    EVAL_TOKENS=192
+    LOAD_SECONDS=6.05
+    GPU_PLACEMENT=GPU_ALLOCATION_OBSERVED
+    GPU_ALLOCATED_GIB=6.65
+    MODEL_INFERENCE_COMPLETED=YES
+    PAPERLESS_CHANGED=NO
+    PVE_CONFIG_CHANGED=NO
+    RECAP ok=7 changed=1 failed=0
+
+Both models used the same synthetic counting task (context=2048,
+num_predict=192) and positive Ollama `/api/ps` GPU allocation:
+
+| Metric | Qwen2.5 14B | Mistral Nemo 12B |
+| --- | ---: | ---: |
+| Generation | 7.3 tok/s | 8.9 tok/s |
+| Generated tokens | 127 | 192 |
+| Reported GPU allocation | 8.44 GiB | 6.65 GiB |
+| Model load duration | 2.27 s | 6.05 s |
+
+Within single-run variability, Mistral was ~22% faster at
+generation and required ~21% less GPU-allocated shared RAM
+(1.79 GiB less). Its slower load in this run is not an established
+systematic disadvantage; cache state and model initialisation
+may differ. Mistral reached the 192-token output cap;
+token counts are not perfectly comparable across tokenizers.
+These are **throughput**, not accuracy, measurements.
+
+Status: hardware/GPU provisioning and both synthetic benchmarks
+passed. Do NOT change LXC110 hardware configuration or merge
+Paperless-AI from this alone. Next step is an offline synthetic
+metadata-quality comparison against known answers (title,
+correspondent, document type, tags) with no real family documents.
+Preserve the Paperless inbox tag and existing parent-only ACL
+gates; embeddings/RAG remain OFF.
 ## Step 2 – audit model download needs, still ZERO writes
 
     (
