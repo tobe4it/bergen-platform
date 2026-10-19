@@ -12,6 +12,7 @@ on:
       - 'ansible/playbooks/manage-bergen-ai-ollama-models.yml'
       - 'ansible/playbooks/audit-bergen-ai-gpu-stage-readonly.yml'
       - 'ansible/playbooks/stage-bergen-ai-ollama-gpu-resources.yml'
+      - 'ansible/playbooks/audit-bergen-ai-gpu-staged-readonly.yml'
       - 'ansible/playbooks/rollback-bergen-ai-ollama-gpu-stage.yml'
       - 'tests/test_bergen_ai_ollama_hardware_models.py'
   pull_request:
@@ -24,6 +25,7 @@ on:
       - 'ansible/playbooks/manage-bergen-ai-ollama-models.yml'
       - 'ansible/playbooks/audit-bergen-ai-gpu-stage-readonly.yml'
       - 'ansible/playbooks/stage-bergen-ai-ollama-gpu-resources.yml'
+      - 'ansible/playbooks/audit-bergen-ai-gpu-staged-readonly.yml'
       - 'ansible/playbooks/rollback-bergen-ai-ollama-gpu-stage.yml'
       - 'tests/test_bergen_ai_ollama_hardware_models.py'
       - '.github/workflows/bergen-ai-ollama-hardware-models.yml'
@@ -49,4 +51,5 @@ jobs:
           ansible-playbook -i ansible/inventory.yml ansible/playbooks/manage-bergen-ai-ollama-models.yml --syntax-check
           ansible-playbook -i ansible/inventory.yml ansible/playbooks/audit-bergen-ai-gpu-stage-readonly.yml --syntax-check
           ansible-playbook -i ansible/inventory.yml ansible/playbooks/stage-bergen-ai-ollama-gpu-resources.yml --syntax-check
+          ansible-playbook -i ansible/inventory.yml ansible/playbooks/audit-bergen-ai-gpu-staged-readonly.yml --syntax-check
           ansible-playbook -i ansible/inventory.yml ansible/playbooks/rollback-bergen-ai-ollama-gpu-stage.yml --syntax-check
