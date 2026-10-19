@@ -15,6 +15,7 @@ on:
       - 'ansible/playbooks/audit-nextcloud-restore-archive-readonly.yml'
       - 'ansible/playbooks/inspect-nextcloud-restore-701-offline-runtime.yml'
       - 'ansible/playbooks/inspect-nextcloud-restore-701-running-readonly.yml'
+      - 'tests/test_nextcloud_restore_701_iface_count.py'
       - 'docs/NEXTCLOUD-ISOLATED-RESTORE-701.md'
       - '.github/workflows/nextcloud-isolated-restore-701.yml'
   push:
@@ -51,6 +52,7 @@ jobs:
             --syntax-check
           python3 -m unittest discover -s tests -p 'test_nextcloud_restore_archive_type_diagnostic.py'
           python3 -m unittest discover -s tests -p 'test_nextcloud_restore_archive_symlink_audit.py'
+          python3 -m unittest discover -s tests -p 'test_nextcloud_restore_701_iface_count.py'
           ansible-playbook -i localhost, \
             ansible/playbooks/audit-nextcloud-restore-archive-readonly.yml \
             --syntax-check
