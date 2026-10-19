@@ -526,3 +526,67 @@ anders benannte oder extern gespeicherte Backups nicht aus. LXC126-
 Dateimetadaten sind weder ein Integritäts- noch ein Restorebeweis.
 Externe UniFi-/VPN-/Off-Host-Netze sind weiterhin unvollständig.
 **Keine Apply-Erlaubnis.**
+
+
+## Phase 0d – Proxmox-Backup-Storage-Inventur (Read-only, noch nicht live getestet)
+
+Die Phase 0c fand auf dem direkt eingebundenen NFS unter `dump/` für LXC110
+keine Archiv-Dateimetadaten mit Zeitstempel innerhalb von sieben Tagen. Das ist
+**kein** Beleg für eine fehlende Sicherung. LXC126 hatte aktuelle Dateimetadaten,
+aber ohne Integritäts- oder Restore-Nachweis.
+
+Der zusätzliche Audit
+`ansible/playbooks/audit-bergen-ai-private-bridge-backups-readonly.yml`
+fragt ausschließlich über den lokalen `pvesh get`-Zugriff des Knotens
+`venombox` die auf diesem Knoten **sichtbaren Proxmox-Storages mit
+Backup-Inhalten** ab und liest deren Volumen-Metadaten. Er klassifiziert
+LXC110 und LXC126 getrennt als aktuelle, ältere, unklare oder nicht
+in den überprüften Storages beobachtete Archiv-Metadaten.
+
+Damit prüfen wir auch alternative Proxmox-Storages, nicht nur
+`/mnt/pve/bergen-synology-backup/dump`. Nicht erreichbare, deaktivierte,
+externe oder anders verwaltete Speicher bleiben ausdrücklich außerhalb
+eines vollständigen Nachweises. PBS-/NAS-Sicherungen, die nicht als
+`vzdump-lxc-*.tar.*` in den abgefragten Volumenlisten erscheinen,
+können unerkannt bleiben.
+
+Auf `bp-controller` ausführen:
+
+```bash
+(
+set -euo pipefail
+BASE="$HOME/bergen-platform"
+WT="$HOME/bergen-platform-ai-private-bridge"
+
+git -C "$WT" fetch origin feat/bergen-ai-private-bridge-20261019
+git -C "$WT" switch --detach origin/feat/bergen-ai-private-bridge-20261019
+cd "$WT"
+
+"$BASE/.venv/bin/ansible-playbook" \
+  -i ansible/inventory.yml \
+  -i "$BASE/ansible/inventory.local.yml" \
+  ansible/playbooks/audit-bergen-ai-private-bridge-backups-readonly.yml \
+  --syntax-check
+
+"$BASE/.venv/bin/ansible-playbook" \
+  -i ansible/inventory.yml \
+  -i "$BASE/ansible/inventory.local.yml" \
+  ansible/playbooks/audit-bergen-ai-private-bridge-backups-readonly.yml \
+  --vault-id ai@prompt
+)
+```
+
+Der Audit enthält keine Schreibbefehle; er meldet ausschließlich
+Zustandskategorien ohne Volume-Namen, Zeitstempel, Dateiinhalte oder
+Zugangsdaten. `CT110_BACKUPS=NONE_IN_SCANNED_STORAGES` bedeutet
+**nicht**, dass überhaupt keine Sicherung existiert.
+Selbst `RECENT_METADATA_ONLY` beweist weder valide Daten noch eine
+wiederherstellbare Konfiguration. Laufender Proxmox-Backup-Plan,
+Datenträgermounts, kryptographische Integrität, ein isolierter Restore-Test
+sowie ein unabhängiger Host-Konsolenzugang sind vor einem
+Netzwerk-Change weiter zu verifizieren.
+
+**Unverändert:** `APPLY_AUTHORIZED=False`,
+`FULL_NETWORK_CLEARANCE=NOT_PROVEN`,
+`ROLLBACK_CLEARANCE=NOT_PROVEN`. Kein Merge nach `main`
+und kein produktiver Proxmox-/Ollama-/Paperless-Apply.
