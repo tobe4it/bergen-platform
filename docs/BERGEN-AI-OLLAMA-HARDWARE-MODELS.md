@@ -17,9 +17,12 @@ headroom.
 
 ## Chosen install list
 
-Initial: qwen2.5:14b-instruct-q4_K_M (9GB weights) and
-mistral-nemo:12b (7.1GB). Optional later: llama3.1:8b (~5GB),
-bge-m3 (~1.2GB, embedding only, no RAG activation).
+Initial: qwen2.5:14b-instruct-q4_K_M (9GB weights),
+mistral-nemo:12b (7.1GB) and **bge-m3:latest** (~1.2GB,
+embedding only, no RAG activation). Optional later: llama3.1:8b (~5GB).
+The exact `bge-m3:latest` tag matters: the Ollama inventory stores
+that canonical model name; `bge-m3` without a tag would otherwise
+be repeatedly flagged as missing.
 Special approval: qwen2.5:32b-instruct-q4_K_M (20GB download) after
 memory, storage and performance proof. Coder model not needed for
 document tagging. Quantized weight size is NOT peak RAM including
@@ -133,7 +136,7 @@ https://github.com/proxmox/pve-docs/blob/master/generated/pct.1-synopsis.adoc
       --vault-id ai@prompt
     )
 
-The default requests 14B Qwen2.5 and Mistral NeMo only. An explicit
+The default requests Qwen2.5 14B, Mistral NeMo 12B and the BGE-M3 embedding model only. Downloading BGE-M3 does **not** start any Paperless embedding jobs or create an index. An explicit
 operator decision is required before any model pull.
 
 ## Step 3 – deliberate download, only after good disk/resource plan
@@ -152,7 +155,7 @@ operator decision is required before any model pull.
       -e bergen_ai_models_download_window_approved=true
     )
 
-This stages only two reviewed local tags. A 32B download additionally
+This stages only three reviewed local tags (including BGE-M3). A 32B download additionally
 requires bergen_ai_models_large_approved=true and a separately specified
 model list. Do not use the additional flag before a 32B resource test.
 No LXC restarts or application writes are part of model download.
