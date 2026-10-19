@@ -20,7 +20,7 @@ class PrivateBridgeAuditTest(TestCase):
     def test_script_parses_and_exposes_only_sanitized_no_write_inventory(self):
         src = SCRIPT.read_text()
         ast.parse(src)
-        self.assertEqual(bridge.BRIDGE, "vmbr10")
+        self.assertEqual(bridge.BRIDGE, "vmbr90")
         self.assertEqual(str(bridge.CANDIDATE), "172.30.110.0/28")
         for identifier in (
             "pct", "ip", "network_overlaps", "single_ct_identity",
@@ -61,7 +61,7 @@ class PrivateBridgeAuditTest(TestCase):
     def test_bridge_device_classification_never_proves_no_leaks(self):
         with mock.patch.object(bridge, "read_command", return_value='[{"ifname":"vmbr1"}]'):
             self.assertEqual(bridge.kernel_bridge_exists(), "ABSENT")
-        with mock.patch.object(bridge, "read_command", return_value='[{"ifname":"vmbr10"}]'):
+        with mock.patch.object(bridge, "read_command", return_value='[{"ifname":"vmbr90"}]'):
             self.assertEqual(bridge.kernel_bridge_exists(), "EXISTS")
         with mock.patch.object(bridge, "read_command", return_value=None):
             self.assertEqual(bridge.kernel_bridge_exists(), "UNVERIFIED")
