@@ -16,7 +16,7 @@ SIZES_GIB = {
     "qwen2.5:14b-instruct-q4_K_M": 10,
     "mistral-nemo:12b": 8,
     "llama3.1:8b": 6,
-    "bge-m3": 2,
+    "bge-m3:latest": 2,
     "qwen2.5:32b-instruct-q4_K_M": 22,
 }
 
