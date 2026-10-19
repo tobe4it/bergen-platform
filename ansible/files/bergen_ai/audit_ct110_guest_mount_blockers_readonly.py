@@ -7,6 +7,7 @@ explains which mounts it rejects, without changing that rule.
 """
 import json
 import subprocess
+from collections import Counter
 
 FRAME = "BERGEN_AI_CT110_GUEST_MOUNT_DIAG_V1:"
 PSEUDO = {"proc", "sysfs", "devpts", "tmpfs", "cgroup", "cgroup2", "mqueue",
@@ -80,6 +81,76 @@ def flatten(nodes, depth=0):
             yield from flatten(children, depth + 1)
 
 
+
+def target_scope(target, broad):
+    """Only static site-independent classifications leave the guest."""
+    if broad == "OTHER_CONTAINER_STORAGE":
+        if target == "/var/lib/containers/storage" or target.startswith(
+                "/var/lib/containers/storage/"):
+            return "PODMAN_GRAPH_TREE"
+        if target == "/home" or target.startswith("/home/"):
+            return "HOME_TREE"
+        return "OTHER_CONTAINER_TREE"
+    if broad == "OTHER_PROC_OR_SYS":
+        if target.startswith("/proc/"):
+            return "PROC_TREE"
+        if target.startswith("/sys/"):
+            return "SYS_TREE"
+    return broad
+
+
+def filesystem_class(fstype):
+    if fstype == "fuse.lxcfs":
+        return "FUSE_LXCFS"
+    if fstype == "fuse.fuse-overlayfs":
+        return "FUSE_OVERLAYFS"
+    if fstype == "overlay":
+        return "OVERLAY"
+    if fstype.startswith("fuse."):
+        return "OTHER_FUSE"
+    if fstype in {"nfs", "nfs4", "cifs", "smb3"}:
+        return "NETWORK_FS"
+    if fstype in {"ext4", "xfs", "btrfs", "zfs", "vfat", "ntfs3"}:
+        return "BLOCK_OR_COW_FS"
+    if fstype in PSEUDO:
+        return "PSEUDO_FS"
+    return "OTHER_FS"
+
+
+def source_class(source):
+    if source == "lxcfs":
+        return "LXCFS_SOURCE"
+    if source in {"overlay", "fuse-overlayfs"}:
+        return "OVERLAY_SOURCE"
+    if source.startswith("/dev/"):
+        return "DEVICE_SOURCE"
+    if source.startswith("//") or ":/" in source:
+        return "NETWORK_SOURCE"
+    return "OTHER_SOURCE"
+
+
+def remaining_profiles(records):
+    """Profiles explain blockers; no profile ever clears a backup gate."""
+    profiles = Counter()
+    for target, fstype, source in records:
+        if target == "/" or fstype in PSEUDO:
+            continue
+        broad = record_category(target, fstype, source)
+        if broad in {"LXCFS_SYSTEM_TARGET", "ETC_IDENTITY_TARGET"}:
+            continue
+        key = (target_scope(target, broad),
+               filesystem_class(fstype),
+               source_class(source))
+        profiles[key] += 1
+    if len(profiles) > 16:
+        raise ValueError("too many distinct unverified mounts")
+    return sorted(
+        category + ":" + fs + ":" + source + ":" + str(count)
+        for (category, fs, source), count in profiles.items()
+    )
+
+
+
 def diagnose(nodes):
     records = list(flatten(nodes))
     if not 1 <= len(records) <= MAX_ITEMS or sum(t == "/" for t, _, _ in records) != 1:
@@ -99,6 +170,9 @@ def diagnose(nodes):
         OTHER_NONPSEUDO_COUNT=sum(
             x not in ("LXCFS_SYSTEM_TARGET", "ETC_IDENTITY_TARGET") for x in blockers),
         PSEUDO_OR_OVERLAY_COUNT=classified.count("PSEUDO_OR_OVERLAY"),
+        OVERLAY_MOUNT_COUNT=sum(fstype in {"overlay", "fuse.fuse-overlayfs"}
+                                for _, fstype, _ in records),
+        UNRESOLVED_PROFILES=remaining_profiles(records),
     )
 
 
@@ -111,7 +185,9 @@ def main():
                        BLOCKER_CLASSES=["UNVERIFIED"], LXCFS_SYSTEM_COUNT="UNVERIFIED",
                        ETC_IDENTITY_COUNT="UNVERIFIED",
                        OTHER_NONPSEUDO_COUNT="UNVERIFIED",
-                       PSEUDO_OR_OVERLAY_COUNT="UNVERIFIED")
+                       PSEUDO_OR_OVERLAY_COUNT="UNVERIFIED",
+                       OVERLAY_MOUNT_COUNT="UNVERIFIED",
+                       UNRESOLVED_PROFILES=["UNVERIFIED"])
     result = dict(AUDIT="READ_ONLY", CHANGED=False, BACKUP_STARTED=False,
                   BACKUP_AUTHORIZED=False, APPLY_AUTHORIZED=False,
                   ROLLBACK_CLEARANCE="NOT_PROVEN", NETWORK_CHANGES="NONE", **details)
