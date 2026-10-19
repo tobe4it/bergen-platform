@@ -132,6 +132,51 @@ class RuntimeMountRelationshipTests(TestCase):
         self.assertEqual(a.comparison("5:6", "5:7"), "DIFFERENT")
         self.assertEqual(a.comparison(None, "5:7"), "UNVERIFIED")
 
+    def test_residual_mount_target_classes_do_not_imply_backup_clearance(self):
+        userdata = "/var/lib/containers/storage/overlay-containers/" + "b" * 64
+        candidates = [
+            (userdata + "/userdata/hosts", "PODMAN_RUNTIME_CONTAINER_TREE", "HOSTS_FILE"),
+            (userdata + "/userdata/hostname", "PODMAN_RUNTIME_CONTAINER_TREE", "HOSTNAME_FILE"),
+            (userdata + "/userdata/resolv.conf", "PODMAN_RUNTIME_CONTAINER_TREE", "RESOLV_FILE"),
+            (userdata + "/userdata/secret", "PODMAN_RUNTIME_CONTAINER_TREE", "OTHER_USERDATA"),
+            ("/var/lib/containers/storage/overlay/" + "b" * 64 + "/diff",
+             "PODMAN_OVERLAY_TREE", "OTHER_OVERLAY_TREE"),
+            (MERGED + "/tmp/other", "MERGED_TREE", "OTHER_MERGED_CHILD"),
+            ("/mnt/external", "OUTSIDE_PODMAN_GRAPH", "OTHER_GUEST"),
+        ]
+        for path, expected_class, expected_role in candidates:
+            tree = sample_tree(outside=mount(path, "zfs", "otherpool/files"))
+            # sample_tree also contains old bound target; expect more than one
+            # residual when the inode hasn't been proven.
+            with mock.patch.object(a, "rootfs_device_relation", return_value="OTHER_DEVICE"):
+                result = a.unaccounted_mount_details(tree, MERGED)
+            self.assertEqual(result["UNRESOLVED_TARGET_CLASS"], "NOT_SINGLE")
+            self.assertEqual(result["UNRESOLVED_MOUNT_COUNT"], 2)
+            tree = sample_tree(bind_source=ROOTSRC + "[/srv/ai/open-webui]")
+            tree[0]["children"][-1]["children"][0] = mount(path, "zfs", "otherpool/files")
+            with mock.patch.object(a, "rootfs_device_relation", return_value="OTHER_DEVICE"):
+                result = a.unaccounted_mount_details(tree, MERGED)
+            self.assertEqual(result["UNRESOLVED_TARGET_CLASS"], expected_class)
+            self.assertEqual(result["UNRESOLVED_TARGET_ROLE"], expected_role)
+            self.assertEqual(result["UNRESOLVED_SOURCE_CLASS"], "OTHER_SOURCE")
+            self.assertEqual(result["UNRESOLVED_DEVICE_RELATION"], "OTHER_DEVICE")
+            self.assertNotIn(path, str(result))
+
+    def test_residual_rootfs_device_and_source_roles_are_kept_separate(self):
+        base = sample_tree()
+        with mock.patch.object(a, "rootfs_device_relation", return_value="SAME_DEVICE"):
+            result = a.unaccounted_mount_details(base, MERGED)
+        self.assertEqual(result["UNRESOLVED_MOUNT_COUNT"], 1)
+        self.assertEqual(result["UNRESOLVED_TARGET_CLASS"], "MERGED_DATA")
+        self.assertEqual(result["UNRESOLVED_SOURCE_CLASS"], "ROOT_SOURCE_SUBPATH")
+        self.assertEqual(result["UNRESOLVED_DEVICE_RELATION"], "SAME_DEVICE")
+        with mock.patch.object(a, "checked_inode", side_effect=["7:88", "7:1"]):
+            self.assertEqual(a.rootfs_device_relation("/any"), "SAME_DEVICE")
+        with mock.patch.object(a, "checked_inode", side_effect=["9:88", "7:1"]):
+            self.assertEqual(a.rootfs_device_relation("/any"), "OTHER_DEVICE")
+        with mock.patch.object(a, "checked_inode", return_value=None):
+            self.assertEqual(a.rootfs_device_relation("/any"), "UNVERIFIED")
+
     def test_no_writes_or_hidden_authority_and_valid_ansible(self):
         source = SCRIPT.read_text()
         ast.parse(source)
