@@ -22,7 +22,7 @@ def fixture(db):
         c.executescript("""
         CREATE TABLE "group"(id TEXT PRIMARY KEY, name TEXT);
         CREATE TABLE "group_member"(group_id TEXT, user_id TEXT);
-        CREATE TABLE "user"(id TEXT PRIMARY KEY, role TEXT);
+        CREATE TABLE "user"(id TEXT PRIMARY KEY, role TEXT, oauth TEXT);
         CREATE TABLE "model"(id TEXT PRIMARY KEY, base_model_id TEXT, is_active INTEGER);
         CREATE TABLE "access_grant"(resource_type TEXT, resource_id TEXT,
                                     principal_type TEXT, principal_id TEXT,
@@ -31,8 +31,11 @@ def fixture(db):
         """)
         for role in ("family", "adults", "children"):
             c.execute('INSERT INTO "group" VALUES (?,?)', (role, GROUPS[role]))
-        c.executemany('INSERT INTO "user" VALUES (?,?)',
-                      [("adult1", "user"), ("kid1", "user")])
+        c.executemany('INSERT INTO "user" VALUES (?,?,?)',
+                      [("adult1", "user", '{"google": {"sub": "test-adult"}}'),
+                       ("kid1", "user", '{"google": {"sub": "test-child"}}'),
+                       ("other1", "pending", None),
+                       ("admin1", "admin", None)])
         c.executemany('INSERT INTO "group_member" VALUES (?,?)',
                       [("family", "adult1"), ("family", "kid1"),
                        ("adults", "adult1"), ("children", "kid1")])
@@ -65,6 +68,12 @@ class FamilyModelACLTest(unittest.TestCase):
         self.assertEqual(r["AUDIT"], "READ_ONLY")
         self.assertEqual(r["CHANGED"], False)
         self.assertEqual(r["STATUS"], "INVENTORY_ONLY")
+        self.assertEqual(r["TOTAL_OPEN_WEBUI_ACCOUNTS"], 4)
+        self.assertEqual(r["ACCOUNT_ROLE_USER"], 2)
+        self.assertEqual(r["ACCOUNT_ROLE_PENDING"], 1)
+        self.assertEqual(r["ACCOUNT_ROLE_ADMIN"], 1)
+        self.assertEqual(r["OAUTH_LINKED_ACCOUNT_RECORDS"], 2)
+        self.assertEqual(r["OIDC_GROUP_CLAIMS_VALIDATED"], "NO")
         self.assertEqual(r["ADULT_MEMBERS"], 1)
         self.assertEqual(r["CHILD_MEMBERS"], 1)
         self.assertEqual(r["PUBLIC_READ_GRANTS"], 0)
@@ -76,7 +85,21 @@ class FamilyModelACLTest(unittest.TestCase):
         self.assertEqual(r["CATALOG_MODEL"]["RAW_REGISTERED"], False)
         self.assertEqual(r["GROUP_REVOCATION_E2E"], "NOT_PROVEN")
         self.assertNotIn("kid1", json.dumps(r))
+        self.assertNotIn("test-adult", json.dumps(r))
+        self.assertNotIn("test-child", json.dumps(r))
         self.assertNotIn("family@site.example", json.dumps(r))
+
+    def test_unknown_user_role_and_malformed_sso_link_fail_closed(self):
+        with sqlite3.connect(self.db) as c:
+            c.execute('UPDATE "user" SET role=? WHERE id=?',
+                      ("unreviewed-role", "other1"))
+        with self.assertRaises(mod.Refuse):
+            self.read()
+        with sqlite3.connect(self.db) as c:
+            c.execute('UPDATE "user" SET role=?, oauth=? WHERE id=?',
+                      ("pending", '{"a": [}', "other1"))
+        with self.assertRaises(ValueError):
+            self.read()
 
     def test_public_read_requires_review(self):
         with sqlite3.connect(self.db) as c:
