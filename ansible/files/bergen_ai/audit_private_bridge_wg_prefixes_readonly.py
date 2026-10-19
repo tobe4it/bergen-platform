@@ -3,8 +3,8 @@
 
 Checks LIVE WireGuard peers only on verified venombox host and LXC110/126/120.
 Never reads private keys or config files. Raw peer public keys, interfaces and
-network addresses are never printed in summaries. Does not run ip link, set,
-wg set, reload/restart, network probes, inference or any writes.
+network addresses are never printed in summaries. Never changes interfaces,
+WireGuard settings, service state, network routes, or application data.
 A nonoverlap result does NOT clear remote VPNs, inactive WG interfaces or IPAM.
 """
 import ipaddress
