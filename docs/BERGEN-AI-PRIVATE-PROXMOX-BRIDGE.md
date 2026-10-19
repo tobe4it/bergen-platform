@@ -125,6 +125,78 @@ Auch `STATUS=CANDIDATE_LOCALLY_UNCONFLICTED` bedeutet **NICHT**,
 dass die Bridge oder das Subnetz endgültig freigegeben sind:
 `SUBNET_CLEARANCE=NOT_PROVEN` und `APPLY_AUTHORIZED=False`.
 
+## Live-Befund vmbr90 / Phase 0 (19.10.2026)
+
+Der Betreiber hat den ersten, schreibgeschützten Preflight auf
+`venombox` mit `ok=7, changed=0, failed=0` abgeschlossen:
+
+```text
+STATUS=CANDIDATE_LOCALLY_UNCONFLICTED
+BRIDGE_CANDIDATE=vmbr90
+BRIDGE_KERNEL=ABSENT
+BRIDGE_CONFIG=ABSENT
+BRIDGE_GUEST_REFERENCES=NOT_REFERENCED_IN_SCANNED_GUESTS
+CT110_NETWORK_INTERFACE_COUNT=1
+CT126_NETWORK_INTERFACE_COUNT=1
+CT120_NETWORK_INTERFACE_COUNT=1
+SCOPED_IPV4_ROUTE_OVERLAP=NO_OVERLAP_IN_SCOPED_ROUTES
+SUBNET_CLEARANCE=NOT_PROVEN
+PROXMOX_APPLY_GATE=BLOCKED_PENDING_REVIEW
+INFERENCE_API_ACCESS_GATE=BLOCKED_PENDING_RESTRICTED_BIND_AND_TEST
+```
+
+Die Bridge ist nach dem geprüften lokalen Inventar **frei**.
+Die provisorische Netzplanung ist dadurch **nicht** freigegeben.
+
+### Phase 0b – weitere LXC- und Container-Subnetze (read-only)
+
+Die ergänzende Prüfung
+`ansible/playbooks/audit-bergen-ai-private-bridge-extended-readonly.yml`
+liest die erkannten statischen LXC-Netzdefinitionen und die
+IPv4-Adressen und Routen aller **laufenden** Proxmox-LXC auf
+`venombox`. Zusätzlich werden die Podman-Netzdefinitionen
+von LXC 110 und 126 sowie Docker-Netzdefinitionen auf dem
+Proxmox-Host (falls installiert) gegen das vorgeschlagene
+`172.30.110.0/28` abgeglichen. Sie verändert nichts und
+gibt ausschließlich klassifizierte Befunde aus.
+
+Nach erfolgreicher GitHub-CI auf `bp-controller` ausführen:
+
+```bash
+(
+set -euo pipefail
+BASE="$HOME/bergen-platform"
+WT="$HOME/bergen-platform-ai-private-bridge"
+cd "$WT"
+git fetch origin feat/bergen-ai-private-bridge-20261019
+git switch --detach origin/feat/bergen-ai-private-bridge-20261019
+"$BASE/.venv/bin/ansible-playbook" \
+  -i ansible/inventory.yml \
+  -i "$BASE/ansible/inventory.local.yml" \
+  ansible/playbooks/audit-bergen-ai-private-bridge-extended-readonly.yml \
+  --syntax-check
+"$BASE/.venv/bin/ansible-playbook" \
+  -i ansible/inventory.yml \
+  -i "$BASE/ansible/inventory.local.yml" \
+  ansible/playbooks/audit-bergen-ai-private-bridge-extended-readonly.yml \
+  --vault-id ai@prompt
+)
+```
+
+Eine der Antwortkategorien kann `SCOPED_AUDIT_INCOMPLETE`
+sein, beispielsweise bei einem nicht verfügbaren Podman-Netzwerk,
+fehlenden Gast-Tools, dynamischen/gestoppten Netzen oder
+nicht lesbaren Laufzeit-Routen. Das ist **kein** Grund,
+einen Dienst umzukonfigurieren, sondern ein Auftrag zur
+gezielten weiteren read-only Diagnostik.
+
+Auch `NO_OVERLAP_IN_SCANNED_DOMAINS` bleibt beschränkt:
+UniFi- und VPN-Netze, QEMU-Gastbetriebssysteme, nicht laufende
+Podman-Namespaces sowie Netze auf anderen Hosts und zukünftige
+Adressen sind nicht nachgewiesen. Deshalb meldet der Audit
+immer `FULL_NETWORK_CLEARANCE=NOT_PROVEN` und
+`APPLY_AUTHORIZED=False`. Es erfolgt keine Proxmox-Bridge-/
+LXC-NIC-Anlage, Routing-, Firewall- oder Ollama-Konfigurationsänderung.
 ## Nach dem Audit – gesondert freizugebende Phasen
 
 **Phase 1 – Sicherheits-/Rollback-Design:**
