@@ -1572,3 +1572,121 @@ ausschließlich das bestehende read-only-Playbook
 ausführen. CI umfasst erneute Regressionen gegen
 externe Quellen, unbekannte Targets und unterschiedliche
 Mount-Geräte, zusätzlich Ansible-Syntax.
+
+
+### Phase 0f.5 – Live-Befund: letzter Podman-Mount auf demselben Rootfs (19.10.2026, 22:54)
+
+Der Operator hat den erweiterten, schreibgeschützten Runtime-Mount-
+Audit mit `ok=7 changed=0 failed=0` auf `venombox` ausgeführt:
+
+```text
+PODMAN_INSPECT_RELATIONSHIP=EXACT_SINGLE_WEBUI_BIND
+PROCESS_ROOT_INODE_RELATION=IDENTICAL
+LXCFS_SYSTEM_MOUNT_COUNT=10
+FUSE_OVERLAY_MOUNT_COUNT=1
+UNRESOLVED_MOUNT_COUNT=1
+UNRESOLVED_TARGET_CLASS=PODMAN_OTHER_GRAPH
+UNRESOLVED_TARGET_ROLE=OTHER_GRAPH
+UNRESOLVED_SOURCE_CLASS=ROOT_SOURCE_SUBPATH
+UNRESOLVED_FS_RELATION=MATCHES_ROOT
+UNRESOLVED_DEVICE_RELATION=SAME_DEVICE
+BACKUP_EXECUTED=False
+BACKUP_AUTHORIZED=False
+```
+
+Das letzte Nicht-Pseudo-Dateisystem liegt im rootverwalteten
+Podman-Graphroot, hat exakt denselben Dateisystemtyp und
+dieselbe Gerät-ID wie das LXC-Rootfs und zeigt in `findmnt`
+auf ein **Unterverzeichnis derselben Rootfs-Quelle**.
+Es ist damit keine zusätzliche externe Datenquelle
+erkennbar. Die aktuelle Funktion dieses Runtime-Mounts
+ist nicht abschließend bestimmt; `OTHER_GRAPH` alleine
+ist auch kein Datenintegritätsnachweis.
+
+Der tatsächlich laufende Open-WebUI-Container verwendet
+nach `podman inspect` und übereinstimmender
+`/proc/<pid>/root/app/backend/data`-Dateiidentität
+das persistente `/srv/ai/open-webui`-Verzeichnis
+im Gast-Rootfs. Der unmittelbare Zugriff auf
+`MergedDir/app/backend/data` zeigt andere Inodes,
+weshalb diese Namespace-Ansicht **nicht** als Backup-
+Nachweis genutzt wird.
+
+### Phase 0f.6 – Enger Same-Run-Oneoff-Preflight
+
+Die bestehende Sicherungsvorprüfung wurde präzise auf
+die bestätigte Gastkonfiguration erweitert. Im selben
+Preflight-Lauf (nicht aufgrund älterer Audit-Ergebnisse)
+müssen neu geprüft werden:
+
+- der einzelne explizite `/dev/fuse`-nach-`/dev/fuse`-
+  Gerätebind in der Proxmox-LXC-Konfiguration und keine
+  `mpN`-/anderen Mount- oder Exclude-Direktiven;
+- `podman inspect open-webui`: genau **eine** erwartete
+  Bind-Zuordnung, korrekter rootverwalteter Podman-
+  Graphroot, laufender Container und dessen
+  `MergedDir` im erwarteten Graphroot-Schema;
+- exakte Device-/Inode-Gleichheit von
+  `/srv/ai/open-webui` und dem Datenziel aus dem
+  Namespace des laufenden Prozesses;
+- Gast-`findmnt` enthält genau die zuvor gesehenen
+  52 Einträge: Gast-`/` auf ZFS, 39 Pseudo-Mounts,
+  genau zehn `fuse.lxcfs` unter `/proc` oder
+  `/sys`, ein FUSE-Overlay direkt am inspizierten
+  Podman-`MergedDir` und **genau ein** weiteres
+  Mount-Ziel im Podman-Graphroot (aber nicht in
+  `overlay`, `overlay-containers` oder `volumes`);
+- dieses letzte Mount ist **nachweislich ein
+  Unterverzeichnis derselben ZFS-Rootfs-Quelle**,
+  sein FSType entspricht `/` und die Gerät-ID
+  seines Ziels ist identisch zu `/`. Separate
+  NFS-/CIFS-/Block-Device-Quellen, nicht bestätigte
+  Bind-Daten und weitere Overlay-/Autofs-Mounts
+  bleiben gesperrt;
+- laufend erneut auszuführende Ollama-/Podman-
+  Dateninventur, NFS-Zielspeicher, ausreichend
+  `/var/tmp`, noch kein CT110-Archiv am ausgewählten
+  Backupziel und separate Operator-Einmalfreigabe.
+
+Die resultierende Kategorie lautet ausschließlich bei
+positivem Nachweis
+`GUEST_MOUNTS=ROOTFS_INTERNAL_RUNTIME_ONLY`.
+Nur dann darf `SAFE_TO_ATTEMPT_SINGLE_BACKUP=True`
+werden. Alle Abweichungen sperren. Tests in CI decken
+unerwartete/zusätzliche Mounts, Rootfs-Fstype,
+unterschiedliche Device-IDs, andere Quell-Dateisysteme,
+abweichende Bind-Inodes und geänderte Gastkonfigurationen
+ab. Der produktive CT110-Preflight ist **noch nicht**
+erneut ausgeführt worden.
+
+**Nächster Operator-Schritt (nur read-only):**
+
+```bash
+(
+set -euo pipefail
+BASE="$HOME/bergen-platform"
+WT="$HOME/bergen-platform-ai-private-bridge"
+
+git -C "$WT" fetch origin feat/bergen-ai-private-bridge-20261019
+git -C "$WT" switch --detach origin/feat/bergen-ai-private-bridge-20261019
+cd "$WT"
+
+"$BASE/.venv/bin/ansible-playbook" \
+  -i ansible/inventory.yml \
+  -i "$BASE/ansible/inventory.local.yml" \
+  ansible/playbooks/preflight-bergen-ai-ct110-oneoff-backup-readonly.yml \
+  --vault-id ai@prompt
+)
+```
+
+Erst bei `STATUS=PRECHECK_PASSED`,
+`GUEST_MOUNTS=ROOTFS_INTERNAL_RUNTIME_ONLY` und
+`SAFE_TO_ATTEMPT_SINGLE_BACKUP=True` darf der Betreiber
+das zuvor genehmigte **einmalige** Snapshot-Backup erneut
+starten. Proxmox-LXC-Snapshots können durch FUSE-basierte
+Runtime-Mounts fehlschlagen; es gibt **keinen**
+automatischen Fallback auf Stop-Modus, Gast-Neustart
+oder Wiederholungsversuch. Selbst ein erfolgreich
+erstelltes Archiv ist noch kein Integritäts- oder
+Restore-Nachweis. Die Bridge-/Netzwerkfreigabe bleibt
+ausdrücklich unberührt.
