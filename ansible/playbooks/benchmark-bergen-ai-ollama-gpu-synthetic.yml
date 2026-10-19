@@ -78,7 +78,7 @@
           - "EVAL_TOKENS={{ bergen_ai_gpu_benchmark.EVAL_TOKENS }}"
           - "GPU_PLACEMENT={{ bergen_ai_gpu_benchmark.GPU_PLACEMENT }}"
           - "GPU_ALLOCATED_GIB={{ bergen_ai_gpu_benchmark.GPU_ALLOCATED_GIB }}"
-          - GPU_INFERENCE_PROVEN_BY_MODEL_EXECUTION=YES
+          - MODEL_INFERENCE_COMPLETED=YES
           - GPU_OFFLOAD_ONLY_IF_ALLOCATION_OBSERVED=YES
           - PAPERLESS_CHANGED=NO
           - PVE_CONFIG_CHANGED=NO
