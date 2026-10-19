@@ -76,7 +76,11 @@ def classify_entry_device_origin(values):
         parts = shlex.split(values[0])
     except ValueError:
         return "UNVERIFIED"
-    if len(parts) != 6 or parts[2] != "none" or parts[4:] != ["0", "0"]:
+    # LXC accepts both 4-field and 6-field mount entry forms.
+    # Missing fstab dump/pass is not evidence of an untrusted host source.
+    if len(parts) not in (4, 6):
+        return "UNVERIFIED"
+    if parts[2] != "none" or (len(parts) == 6 and parts[4:] != ["0", "0"]):
         return "UNVERIFIED"
     source, target = parts[0], "/" + parts[1].lstrip("/")
     options = parts[3].split(",")
@@ -92,6 +96,23 @@ def classify_entry_device_origin(values):
     if (source, target) == ("/dev/dri", "/dev/dri") and "create=dir" in options:
         return "EXACT_DRI_DEVICE_BIND"
     return "SOURCE_OR_OPTIONS_REVIEW"
+
+
+def classify_entry_format(values):
+    """Report syntax shape only: never reveal actual source or options."""
+    if not values:
+        return "ABSENT"
+    if len(values) != 1:
+        return "MULTIPLE_ENTRIES_REVIEW"
+    try:
+        parts = shlex.split(values[0])
+    except ValueError:
+        return "UNVERIFIED"
+    if len(parts) == 4:
+        return "FOUR_FIELD_FORM"
+    if len(parts) == 6:
+        return "SIX_FIELD_FORM"
+    return "OTHER_FIELD_COUNT"
 
 
 def classify_config(raw):
@@ -119,6 +140,7 @@ def classify_config(raw):
                 LXC_MOUNT_AUTO_COUNT=len(auto),
                 LXC_MOUNT_ENTRY=classify_entry(entries),
                 LXC_MOUNT_ENTRY_DEVICE_ORIGIN=classify_entry_device_origin(entries),
+                LXC_MOUNT_ENTRY_FORMAT=classify_entry_format(entries),
                 LXC_MOUNT_ENTRY_COUNT=len(entries),
                 OTHER_MOUNT_OR_EXCLUDE_DIRECTIVES=("PRESENT" if hidden else "NONE"))
 
