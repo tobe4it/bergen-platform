@@ -1,0 +1,13 @@
+[Unit]
+Description=Bergen venombox wired Magic-Packet Wake-on-LAN
+Documentation=man:ethtool(8)
+After=networking.service
+ConditionPathExists=/sys/class/net/enp195s0/device
+
+[Service]
+Type=oneshot
+ExecStart=/usr/sbin/ethtool -s enp195s0 wol g
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target
