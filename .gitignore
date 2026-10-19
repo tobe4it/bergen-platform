@@ -57,3 +57,6 @@ ansible/group_vars/all/bergen-paperless.yml
 
 # Private Nextcloud and Collabora production baseline
 ansible/vars/mail-nextcloud-stack.local.yml
+
+# Read-only mx1 retirement inventory (private SSH target)
+ansible/vars/mx1-nextcloud-retirement.local.yml

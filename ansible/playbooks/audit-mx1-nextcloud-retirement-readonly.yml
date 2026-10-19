@@ -1,0 +1,83 @@
+---
+# Deliberately read-only. Does not remove files, change DNS/certs or stop
+# services. Requires explicit mx1-specific site-local target approval.
+- name: Register precisely the retiring mx1 Nextcloud source
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  tasks:
+    - name: Require reviewed source inventory without mutating it
+      ansible.builtin.assert:
+        that:
+          - mx1_retire_ssh_address is defined
+          - mx1_retire_ssh_user is defined
+          - mx1_retire_expected_fqdn is defined
+          - mx1_retire_nextcloud_root is defined
+          - mx1_retire_expected_fqdn is match('^[a-z0-9][a-z0-9.-]*[a-z0-9]$')
+          - mx1_retire_nextcloud_root == '/usr/share/nginx/de.tbergen.cloud/html'
+          - not ansible_check_mode
+        fail_msg: Explicit mx1-only identity required. Never reuse the mx2 target variables.
+      no_log: true
+
+    - name: Register approved historical mx1 as audit-only host
+      ansible.builtin.add_host:
+        name: selected-mx1-nextcloud-retirement
+        groups: selected_mx1_nextcloud_retirement
+        ansible_host: "{{ mx1_retire_ssh_address }}"
+        ansible_user: "{{ mx1_retire_ssh_user }}"
+        ansible_python_interpreter: /usr/bin/python3
+      changed_when: false
+
+- name: Inventory only obsolete Cloud components without changing mx1
+  hosts: selected_mx1_nextcloud_retirement
+  become: true
+  gather_facts: false
+  any_errors_fatal: true
+  tasks:
+    - name: Independently verify the target hostname
+      ansible.builtin.command:
+        argv: [hostname, -f]
+      register: mx1_retire_identity
+      changed_when: false
+
+    - name: Refuse wrong server before inspecting anything sensitive
+      ansible.builtin.assert:
+        that:
+          - mx1_retire_identity.stdout == mx1_retire_expected_fqdn
+          - mx1_retire_expected_fqdn != 'mx.thebergens.net'
+        fail_msg: MX1-only guard failed; no changes permitted.
+
+    - name: Gather bounded safe classifications from the existing host
+      ansible.builtin.command:
+        argv:
+          - python3
+          - -c
+          - "{{ lookup('ansible.builtin.file', playbook_dir ~ '/../files/mail/audit_mx1_nextcloud_retirement.py') }}"
+          - "{{ mx1_retire_expected_fqdn }}"
+          - "{{ mx1_retire_nextcloud_root }}"
+      register: mx1_retire_report
+      changed_when: false
+      no_log: true
+
+    - name: Require successful, bounded and unambiguous audit result
+      ansible.builtin.assert:
+        that:
+          - mx1_retire_report.rc == 0
+          - mx1_retire_report.stdout_lines | length == 2
+          - mx1_retire_report.stdout_lines[1] == 'MX1_NEXTCLOUD_RETIREMENT_READ_ONLY=COMPLETE'
+          - (mx1_retire_report.stdout_lines[0] | from_json)['mx1-nextcloud-retirement-audit']['identity'] == 'VERIFIED'
+      no_log: true
+
+    - name: Report only sanitized retirement inventory
+      ansible.builtin.debug:
+        msg: "{{ mx1_retire_report.stdout_lines[0] | from_json }}"
+
+    - name: Report strict read-only completion
+      ansible.builtin.debug:
+        msg:
+          status: MX1_NEXTCLOUD_RETIREMENT_READ_ONLY_COMPLETE
+          files_deleted: 0
+          databases_modified: 0
+          services_stopped: 0
+          mail_stack_modified: false
+          next_action: Review restore proof and audit before separate destructive approval

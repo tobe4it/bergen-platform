@@ -1,0 +1,7 @@
+---
+# Copy to mx1-nextcloud-retirement.local.yml (Git-ignored).
+# Never point this at mx2.
+mx1_retire_ssh_address: CHANGE_ME_MX1_SSH_ADDRESS
+mx1_retire_ssh_user: CHANGE_ME_AUTHORIZED_SSH_USER
+mx1_retire_expected_fqdn: CHANGE_ME_MX1_HOSTNAME_FROM_HOSTNAME_F
+mx1_retire_nextcloud_root: /usr/share/nginx/de.tbergen.cloud/html
