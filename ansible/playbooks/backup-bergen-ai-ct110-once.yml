@@ -1,0 +1,137 @@
+---
+# Manual single-run backup only. No systemd timers, no prune, no explicit stop.
+# A snapshot can briefly suspend CT110; no fallback to stop mode.
+- import_playbook: preflight-bergen-ai-ct110-oneoff-backup-readonly.yml
+
+- name: Create one approved Bergen-AI CT110 NFS backup after fail-closed preflight
+  hosts: venombox
+  become: true
+  gather_facts: false
+  serial: 1
+  vars:
+    bergen_ai_ct110_oneoff_approval: ""
+  tasks:
+    - name: Require explicit CT110 snapshot-only authorization from operator
+      ansible.builtin.assert:
+        that:
+          - inventory_hostname == 'venombox'
+          - bergen_ai_ct110_oneoff_approval == 'APPROVE_CT110_SNAPSHOT_BACKUP_ONCE'
+        fail_msg: CT110_BACKUP_NOT_AUTHORIZED
+      no_log: true
+
+    - name: Require current same-run preflight proves selected target and data scope
+      ansible.builtin.assert:
+        that:
+          - ct110_preflight.STATUS == 'PRECHECK_PASSED'
+          - ct110_preflight.SAFE_TO_ATTEMPT_SINGLE_BACKUP | bool
+          - ct110_preflight.CT110_IDENTITY == 'RUNNING_ROOTFS_ONLY'
+          - ct110_preflight.WEBUI_DATA == 'IN_GUEST_ROOTFS'
+          - ct110_preflight.GUEST_MOUNTS == 'NO_EXTERNAL_MOUNTS_DETECTED'
+          - ct110_preflight.BACKUP_TARGET == 'NFS_ACTIVE_WITH_FREE_SPACE'
+          - ct110_preflight.TEMP_SPACE == 'LOCAL_TMP_SPACE_OK'
+          - ct110_preflight.ARCHIVE_STATE == 'NO_CT110_ARCHIVE_ON_SELECTED_STORAGE'
+          - not ct110_preflight.APPLY_AUTHORIZED
+        fail_msg: CT110_BACKUP_PREFLIGHT_REVIEW_REQUIRED
+      no_log: true
+
+    - name: Run exactly one CT110 snapshot vzdump without prune or forced stop
+      block:
+        - name: Start only the explicitly approved scoped snapshot backup
+          ansible.builtin.command:
+            argv:
+              - vzdump
+              - '110'
+              - --storage
+              - bergen-synology-backup
+              - --mode
+              - snapshot
+              - --compress
+              - zstd
+              - --tmpdir
+              - /var/tmp
+              - --prune-backups
+              - keep-all=1
+              - --remove
+              - '0'
+          async: 21600
+          poll: 30
+          register: oneoff_backup_exec
+          changed_when: oneoff_backup_exec.rc == 0
+          no_log: true
+
+        - name: Read CT110 state after backup without starting or restarting
+          ansible.builtin.command:
+            argv: [pct, status, '110']
+          register: ct110_after
+          changed_when: false
+          no_log: true
+
+        - name: Require CT110 is still running
+          ansible.builtin.assert:
+            that:
+              - ct110_after.stdout | trim == 'status: running'
+          no_log: true
+
+        - name: Read selected NFS storage backup metadata after success
+          ansible.builtin.command:
+            argv:
+              - pvesh
+              - get
+              - /nodes/venombox/storage/bergen-synology-backup/content
+              - --content
+              - backup
+              - --output-format
+              - json
+          register: after_content_raw
+          changed_when: false
+          no_log: true
+
+        - name: Extract only newly visible CT110 backup record categories
+          ansible.builtin.set_fact:
+            ct110_after_volumes: >-
+              {{ (after_content_raw.stdout | from_json) |
+                 selectattr('volid', 'defined') |
+                 selectattr('volid', 'search', 'vzdump-lxc-110-') | list }}
+          no_log: true
+
+        - name: Ensure precisely one new CT110 archive is visible on chosen storage
+          ansible.builtin.assert:
+            that:
+              - ct110_after_volumes | length == 1
+              - ct110_after_volumes[0].size | default(0) | int > 0
+          no_log: true
+
+        - name: Report one-off backup completion as metadata only
+          ansible.builtin.debug:
+            msg:
+              - ONEOFF_BACKUP_EXECUTION=COMPLETED
+              - CT110_POST_BACKUP=RUNNING
+              - CT110_ARCHIVE_METADATA=ONE_NONEMPTY_ARCHIVE_VISIBLE
+              - BACKUP_MODE=SNAPSHOT
+              - OLD_BACKUPS_PRUNED=NO
+              - TIMER_CHANGED=NO
+              - BACKUP_INTEGRITY=NOT_TESTED
+              - RESTORE_TEST=NOT_ATTESTED
+              - NETWORK_CHANGES=NONE
+              - NETWORK_APPLY_AUTHORIZED=False
+
+      rescue:
+        - name: Check CT110 guest status after failed or unverified attempt
+          ansible.builtin.command:
+            argv: [pct, status, '110']
+          register: ct110_failed_state
+          changed_when: false
+          failed_when: false
+          no_log: true
+
+        - name: Emit safe failure without automatically restarting anything
+          ansible.builtin.debug:
+            msg:
+              - BACKUP_STATE=FAILED_OR_NOT_ATTESTED
+              - "CT110_RUNNING={{ (ct110_failed_state.stdout | default('') | trim) == 'status: running' }}"
+              - OPERATOR_ACTION=REVIEW_PROXMOX_VZDUMP_TASK_AND_CT110_STATE
+              - NO_AUTOMATIC_RETRY_OR_RESTART=True
+
+        - name: Keep backup result fail-closed until manual investigation
+          ansible.builtin.fail:
+            msg: CT110_ONEOFF_BACKUP_FAILED_OR_UNVERIFIED
