@@ -59,6 +59,64 @@ Expected: `AUDIT=READ_ONLY`, `STATUS=INSPECTED`,
 an opaque `CURRENT_SHA256` to gate any later reviewed setting
 change. The live network path, backups and approval must be
 separately established **before** changing any setting.
+## Native ORM configuration audit PASSED (2026-10-19)
+
+The operator executed `manage-paperless-ai-local-ollama.yml` without
+extra vars. The default `audit` action returned `AUDIT=READ_ONLY`,
+`STATUS=INSPECTED`, `AI_UI_ENABLED=NO`, `EMBEDDINGS=OFF`,
+`CHANGED=False`, `ok=9 changed=0 failed=0 skipped=1`. The
+optimistic `CURRENT_SHA256` was received; it is **not** an
+approval to modify Paperless. No backend, model, endpoint, document
+metadata, systemd timer or RAG setting was changed.
+
+### Private Paperless-Podman → Ollama network preflight
+
+Before applying a native LLM configuration, the independent
+`audit-paperless-ai-ollama-private-path-readonly.yml` checks the
+**actual Paperless Podman application** in LXC126 can reach Ollama
+on the verified private address of LXC110. The audit reads
+the existing LXC110 interface inventory and Ollama listener
+without displaying actual addresses. It requires exactly one
+private IPv4 candidate and tests only its `:11434/api/tags` from
+within `podman exec bergen-paperless` without proxy or redirects.
+No configuration change, model load/inference, document read,
+indexing, ACL modification or service restart occurs.
+
+~~~bash
+(
+set -euo pipefail
+BASE="$HOME/bergen-platform"
+cd "$HOME/bergen-platform-paperless-ai-catalog"
+git fetch origin feat/paperless-native-ai-inbox-catalog-20261018
+git switch --detach origin/feat/paperless-native-ai-inbox-catalog-20261018
+"$BASE/.venv/bin/ansible-playbook" \
+  -i ansible/inventory.yml \
+  -i "$BASE/ansible/inventory.local.yml" \
+  ansible/playbooks/audit-paperless-ai-ollama-private-path-readonly.yml \
+  --vault-id ai@prompt
+)
+~~~
+
+Expected only if cross-guest access truly works:
+`STATUS=PAPERLESS_PRIVATE_PATH_READY` and
+`QWEN14_FROM_PAPERLESS_PODMAN=MODEL_PRESENT`. A wildcard
+Ollama listener (`OLLAMA_LISTENER=WILDCARD`) requires
+separate firewall/exposure review before approval; it is
+**not** authority to open additional interfaces.
+`REVIEW_PRIVATE_IPV4_SELECTION` indicates multiple or missing
+addresses and requires operator selection without broadening
+the test. Any `NOT_READY`, `UNREACHABLE`, `UNVERIFIED` or
+loopback-only result blocks configuration apply. The audit
+never prints the candidate endpoint. Do not substitute an
+example IP or use Paperless localhost for LXC110.
+
+**Further gates after a successful path audit:** review actual
+network isolation/firewall and verify backups, then prepare an
+ignored local vars file with the *actual* private endpoint and
+reviewed parent group/domain (keep flags false by default).
+The current config fingerprint must be re-observed at the
+moment of separately authorized native LLM settings apply.
+Global Paperless AI/UI and embeddings/RAG remain OFF.
 ## Target behaviour
 
 Only **new**, OCR-complete, unreviewed inbox documents belonging to active,
