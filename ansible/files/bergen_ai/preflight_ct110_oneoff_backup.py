@@ -54,7 +54,7 @@ def guest_config(raw, status):
             or not any(row.startswith("net0: ") for row in rows)):
         return "UNVERIFIED"
     # An unknown external data/mount source must be reviewed before a full backup.
-    if any(re.match(r"^mp[0-9]+:\\s", row) or
+    if any(re.match(r"^mp[0-9]+:\s", row) or
            row.startswith(("lxc.mount.entry:", "lxc.mount.auto:"))
            for row in rows):
         return "EXTRA_MOUNTS_REQUIRE_REVIEW"
