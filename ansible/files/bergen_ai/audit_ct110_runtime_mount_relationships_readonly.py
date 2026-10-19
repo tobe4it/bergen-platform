@@ -97,6 +97,74 @@ def inode_identity(left, right):
     return results[0] == results[1]
 
 
+def checked_inode(path):
+    """Device/inode read only; never export the numeric values."""
+    raw = guest(["stat", "-Lc", "%d:%i", path], max_bytes=160)
+    if raw is None:
+        return None
+    value = raw.strip()
+    return value if re.fullmatch(r"[0-9]+:[0-9]+", value) else None
+
+
+def comparison(left, right):
+    if left is None or right is None:
+        return "UNVERIFIED"
+    return "IDENTICAL" if left == right else "DIFFERENT"
+
+
+def running_podman_pid(inspect):
+    if not isinstance(inspect, list) or len(inspect) != 1:
+        return None
+    obj = inspect[0]
+    if not isinstance(obj, dict):
+        return None
+    state = obj.get("State")
+    if not isinstance(state, dict) or state.get("Running") is not True:
+        return None
+    pid = state.get("Pid")
+    return pid if type(pid) is int and 1 < pid < 2 ** 22 else None
+
+
+def mounted_bind_characteristics(nodes, merged):
+    """Return only shape/fstype/source relationships; never raw mount strings."""
+    records = list(flatten(nodes))
+    roots = [item for item in records if item[0] == "/"]
+    candidates = [item for item in records if item[0] == merged + DST]
+    if len(roots) != 1 or len(candidates) != 1:
+        return dict(BIND_TARGET="NOT_UNIQUE_OR_MISSING",
+                    BIND_FSTYPE_RELATION="UNVERIFIED",
+                    BIND_SOURCE_RELATION="UNVERIFIED")
+    _, root_type, root_src = roots[0]
+    _, bind_type, bind_src = candidates[0]
+    return dict(
+        BIND_TARGET="EXACT_MERGED_DATA_TARGET",
+        BIND_FSTYPE_RELATION="MATCHES_ROOT" if bind_type == root_type
+                             else "DIFFERS_FROM_ROOT",
+        BIND_SOURCE_RELATION=(
+            "MATCHES_ROOT_SOURCE" if (
+                bind_src == root_src or bind_src.startswith(root_src + "["))
+            else "DIFFERS_FROM_ROOT_SOURCE"),
+    )
+
+
+def identity_details(inspect, nodes, merged):
+    """Diagnose host-visible versus process-namespace bind inode identities."""
+    source_inode = checked_inode(SOURCE)
+    merged_inode = checked_inode(merged + DST)
+    pid = running_podman_pid(inspect)
+    process_inode = checked_inode("/proc/" + str(pid) + "/root" + DST) if pid else None
+    details = dict(
+        SOURCE_INODE_READ="AVAILABLE" if source_inode else "UNAVAILABLE",
+        MERGED_INODE_READ="AVAILABLE" if merged_inode else "UNAVAILABLE",
+        CONTAINER_PID="RUNNING_AND_AVAILABLE" if pid else "UNVERIFIED",
+        PROCESS_ROOT_INODE_READ="AVAILABLE" if process_inode else "UNAVAILABLE",
+        MERGED_INODE_RELATION=comparison(source_inode, merged_inode),
+        PROCESS_ROOT_INODE_RELATION=comparison(source_inode, process_inode),
+    )
+    details.update(mounted_bind_characteristics(nodes, merged))
+    return details
+
+
 def classify(items, merged, same_inode):
     records = list(flatten(items))
     if not 1 <= len(records) <= 240:
@@ -158,6 +226,9 @@ def report():
                         else "REVIEW_REQUIRED")
     detail["PODMAN_INSPECT_RELATIONSHIP"] = "EXACT_SINGLE_WEBUI_BIND"
     detail["ROOTFS_BIND_INODE_IDENTITY"] = "IDENTICAL" if same_inode else "UNVERIFIED"
+    # Diagnostics never authorize backup; independently identify why the
+    # host-visible bind inode comparison failed, including namespace mismatch.
+    detail.update(identity_details(inspect, tree.get("filesystems"), merged))
     return detail
 
 
