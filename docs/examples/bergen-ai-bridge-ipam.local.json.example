@@ -1,0 +1,16 @@
+{
+  "scopes": {
+    "unifi": {
+      "complete": false,
+      "networks": []
+    },
+    "vpn": {
+      "complete": false,
+      "networks": []
+    },
+    "other_hosts": {
+      "complete": false,
+      "networks": []
+    }
+  }
+}
