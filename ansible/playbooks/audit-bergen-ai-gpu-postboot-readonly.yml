@@ -59,6 +59,7 @@
           - bergen_ai_postboot.OLLAMA_LOOPBACK_OK
           - bergen_ai_postboot.THREE_MODELS_PRESENT
           - bergen_ai_postboot.MEMORY_CGROUP_32G_OK
+          - bergen_ai_postboot.MEMORY_CHECK_SOURCE == 'PVE_HOST_LXC_110_CGROUP'
           - not bergen_ai_postboot.GPU_COMPUTE_VERIFIED
         fail_msg: GPU_POSTBOOT_RUNTIME_INCOMPLETE_DO_NOT_ASSUME_GPU_ACCELERATION
       no_log: true
@@ -71,7 +72,7 @@
           - "STATUS={{ bergen_ai_postboot.STATUS }}"
           - LXC110_RUNNING=YES
           - GPU_DEVICES_ACCESSIBLE=YES
-          - LXC110_MEMORY_CGROUP_32G=YES
+          - LXC110_HOST_CGROUP_LIMIT_32G=YES
           - OLLAMA_LOCAL_API=OK
           - ALL_THREE_ADDITIONAL_MODELS=PRESENT
           - GPU_COMPUTE_VERIFIED=NO
