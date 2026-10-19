@@ -289,6 +289,68 @@ pilot and future syslog use are independent releases; this PR
 does not implement a central proxy or authorize any non-Paperless
 consumer. Preserve the inbox tag; global Paperless AI UI,
 embeddings and RAG remain OFF.
+## Next runtime firewall inspection – read-only nft/iptables and IPv6 (2026-10-19)
+
+The previous live configuration inventory showed `firewall=1` on
+all CT110 network interfaces, no CT110-specific rule file,
+no cluster/node firewall file, and both Proxmox firewall service
+names active. This does NOT establish access denial to the
+unauthenticated wildcard Ollama API. The previous private-path
+audit proved only that Paperless Podman **can** reach Qwen14B.
+
+New `audit-paperless-ai-ollama-runtime-filter-readonly.yml`
+reads the **loaded host nftables** rule set (structured JSON),
+and optional IPv4/IPv6 legacy iptables-save snapshots, and reads
+the LXC110 `ss`-reported AF_INET/AF_INET6 Ollama listeners.
+Only sanitized aggregate counts and categories are reported:
+observed nft input/forward/prerouting/ingress hook counts,
+references to port 11434, mention of veth110 interfaces,
+presence of non-link-local IPv6 in the Ollama guest. This
+reading itself does not create a new model inference, perform
+any outbound network probe or alter network/service state.
+
+On bp-controller:
+
+~~~bash
+(
+set -euo pipefail
+BASE="$HOME/bergen-platform"
+cd "$HOME/bergen-platform-paperless-ai-catalog"
+git fetch origin feat/paperless-native-ai-inbox-catalog-20261018
+git switch --detach origin/feat/paperless-native-ai-inbox-catalog-20261018
+"$BASE/.venv/bin/ansible-playbook" \
+  -i ansible/inventory.yml \
+  -i "$BASE/ansible/inventory.local.yml" \
+  ansible/playbooks/audit-paperless-ai-ollama-runtime-filter-readonly.yml \
+  --vault-id ai@prompt
+)
+~~~
+
+**Interpretation:** `NFT_RUNTIME=LOADED` means nft rules are
+present/readable, not that a deny rule necessarily applies to
+CT110 or TCP/11434. Rule-reference counts can include allows,
+denies or non-matching chains; even zero references does not
+prove an open port if a parent/default policy denies access.
+`IPTABLES_IPV4` and `_IPV6` represent whether the legacy rule
+snapshot was readable, not whether those stacks enforce any
+specific flow. An IPv6 wildcard socket does not itself prove
+a globally routed IPv6 destination, but it requires separate
+IPv6 filtering/reachability consideration. The script always
+sets `EXPOSURE_GATE=REVIEW_REQUIRED` and `UNIFI_POLICY=NOT_INSPECTED`.
+
+After inspecting these summaries, select an actual **non-authorized
+test client** (one on the same VLAN if possible and one in another
+VLAN where required). With operator approval, test its ability
+to reach `LXC110:11434`; prove Paperless continues to reach the
+same endpoint. Determine effective access from real source
+addresses and both families before any setting apply.
+
+No role deployment, firewall edit, Ollama listener change,
+Paperless configuration change, AI inference or document write
+is authorized as part of this inspection. The future
+`bergen-syslog` LXC120 client is out of scope for the immediate
+Paperless allowlist; a later authenticated inference gateway
+can offer separate per-service access controls.
 ## Target behaviour
 
 Only **new**, OCR-complete, unreviewed inbox documents belonging to active,
