@@ -258,6 +258,65 @@ gesperrt.** Folgende Nachweise fehlen vor dem Einrichten:
 Read-only-Audit automatisch autorisiert. Syslog CT120 erhält
 bei dieser Migration noch kein zusätzliches Interface.
 
+### Phase 0c – Aktive lokale WireGuard-Routen (read-only)
+
+Da die vorigen Host-/LXC-/Podman-Prüfungen keine Überschneidung mit
+`172.30.110.0/28` ergaben und die gezeigten UniFi-Subnetze
+aus `192.168.0.0/16` stammen, ist die nächste verbleibende
+technische Kollisionsklasse ein aktivierter VPN-AllowedIPs-Prefix.
+
+Der zusätzliche Audit
+`ansible/playbooks/audit-bergen-ai-private-bridge-wg-readonly.yml`
+prüft ausschließlich die **live** WireGuard-`AllowedIPs` der
+Peerlisten auf `venombox` sowie in den verifizierten LXCs 110,
+126 und 120. Er zeigt weder Peer-Schlüssel noch tatsächliche
+Netzwerkadressen, Interface-Namen oder Tunnelkonfigurationen.
+Das Tool führt keine WireGuard-Konfigurationsänderung und
+keinen Netzwerkverbindungsversuch aus.
+
+Auf `bp-controller`, im bestehenden Private-Bridge-Worktree:
+
+```bash
+(
+set -euo pipefail
+BASE="$HOME/bergen-platform"
+cd "$HOME/bergen-platform-ai-private-bridge"
+git fetch origin feat/bergen-ai-private-bridge-20261019
+git switch --detach origin/feat/bergen-ai-private-bridge-20261019
+"$BASE/.venv/bin/ansible-playbook" \
+  -i ansible/inventory.yml \
+  -i "$BASE/ansible/inventory.local.yml" \
+  ansible/playbooks/audit-bergen-ai-private-bridge-wg-readonly.yml \
+  --syntax-check
+"$BASE/.venv/bin/ansible-playbook" \
+  -i ansible/inventory.yml \
+  -i "$BASE/ansible/inventory.local.yml" \
+  ansible/playbooks/audit-bergen-ai-private-bridge-wg-readonly.yml \
+  --vault-id ai@prompt
+)
+```
+
+Die Ausgabe `NO_OVERLAP_IN_INSPECTED_LIVE_WG_PEERS` besagt
+**ausschließlich**, dass keine Kollision in den gerade aktiven
+WireGuard-Peer-Prefixen der vier geprüften Systeme entdeckt
+wurde. `NOT_INSTALLED` und `NO_ACTIVE_PEER_PREFIXES` sind
+ebenfalls keine Aussagen über abgeschaltete Konfigurationen.
+Eine aktuelle Peer-Liste kann `0.0.0.0/0` enthalten;
+dies gilt bewusst als Prefix-Überlappung und erfordert
+eine separate Routing-/Prioritätsbewertung statt einer
+vorschnellen Freigabe.
+
+Nicht aktive Tunnel, UniFi-WireGuard, VPNs auf MX-/NAS-/anderen
+Systemen, Site-to-Site-Partner und Drittanbieter-Subnetze
+werden nicht geprüft. Die endgültige IPAM-Freigabe bleibt
+deshalb bei jedem Audit-Ergebnis offen:
+`FULL_NETWORK_CLEARANCE=NOT_PROVEN`, `APPLY_AUTHORIZED=False`.
+
+Der folgende Schritt vor einem produktiven Netzwerk-Apply ist
+ein dokumentiertes und geprüftes Restore-/Rollback-Verfahren,
+einschließlich Zugang zu Proxmox außerhalb des neu anzulegenden
+KI-Netzes; bisher sind weder Bridge noch zusätzliche LXC-NICs
+freigegeben.
 ## Nach dem Audit – gesondert freizugebende Phasen
 
 **Phase 1 – Sicherheits-/Rollback-Design:**
