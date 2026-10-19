@@ -245,17 +245,6 @@
   loop: "{{ power_recovery_ethernet_drivers.results | default([]) }}"
   when: not (item.skipped | default(false))
 
-- name: Report Wake-on-LAN capability without changing device state
-  ansible.builtin.debug:
-    msg: >-
-      {{ item.item }}:
-      {{ item.stdout_lines
-         | default([])
-         | select('search', '^\\s*(Supports Wake-on:|Wake-on:|Link detected:)')
-         | list }}
-  loop: "{{ power_recovery_nic_wol.results | default([]) }}"
-  when: not (item.skipped | default(false))
-
 - name: Report supported remote-management surfaces without changing settings
   ansible.builtin.debug:
     msg:
