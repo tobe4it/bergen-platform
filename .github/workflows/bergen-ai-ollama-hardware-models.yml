@@ -7,20 +7,24 @@ on:
       - 'ansible/files/bergen_ai/audit_ollama_hardware_readonly.py'
       - 'ansible/files/bergen_ai/plan_ollama_models_readonly.py'
       - 'ansible/files/bergen_ai/audit_ollama_gpu_stage_readonly.py'
+      - 'ansible/files/bergen_ai/audit_ollama_gpu_rollback_readonly.py'
       - 'ansible/playbooks/audit-bergen-ai-ollama-hardware-readonly.yml'
       - 'ansible/playbooks/manage-bergen-ai-ollama-models.yml'
       - 'ansible/playbooks/audit-bergen-ai-gpu-stage-readonly.yml'
       - 'ansible/playbooks/stage-bergen-ai-ollama-gpu-resources.yml'
+      - 'ansible/playbooks/rollback-bergen-ai-ollama-gpu-stage.yml'
       - 'tests/test_bergen_ai_ollama_hardware_models.py'
   pull_request:
     paths:
       - 'ansible/files/bergen_ai/audit_ollama_hardware_readonly.py'
       - 'ansible/files/bergen_ai/plan_ollama_models_readonly.py'
       - 'ansible/files/bergen_ai/audit_ollama_gpu_stage_readonly.py'
+      - 'ansible/files/bergen_ai/audit_ollama_gpu_rollback_readonly.py'
       - 'ansible/playbooks/audit-bergen-ai-ollama-hardware-readonly.yml'
       - 'ansible/playbooks/manage-bergen-ai-ollama-models.yml'
       - 'ansible/playbooks/audit-bergen-ai-gpu-stage-readonly.yml'
       - 'ansible/playbooks/stage-bergen-ai-ollama-gpu-resources.yml'
+      - 'ansible/playbooks/rollback-bergen-ai-ollama-gpu-stage.yml'
       - 'tests/test_bergen_ai_ollama_hardware_models.py'
       - '.github/workflows/bergen-ai-ollama-hardware-models.yml'
       - 'docs/BERGEN-AI-OLLAMA-HARDWARE-MODELS.md'
@@ -45,3 +49,4 @@ jobs:
           ansible-playbook -i ansible/inventory.yml ansible/playbooks/manage-bergen-ai-ollama-models.yml --syntax-check
           ansible-playbook -i ansible/inventory.yml ansible/playbooks/audit-bergen-ai-gpu-stage-readonly.yml --syntax-check
           ansible-playbook -i ansible/inventory.yml ansible/playbooks/stage-bergen-ai-ollama-gpu-resources.yml --syntax-check
+          ansible-playbook -i ansible/inventory.yml ansible/playbooks/rollback-bergen-ai-ollama-gpu-stage.yml --syntax-check
