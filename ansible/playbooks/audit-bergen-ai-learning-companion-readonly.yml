@@ -1,0 +1,124 @@
+---
+# Read-only learning-companion security preflight; never creates/updates users,
+# groups, memories, reminders, calendars, prompts, OIDC or scheduler settings.
+- name: Audit Bergen-AI learning companion capabilities without mutations
+  hosts: "{{ bergen_ai_family_audit_host | default('__no_selected_family_host__') }}"
+  gather_facts: false
+  serial: 1
+  tasks:
+    - name: Require one approved inventory host and ignored family role mapping
+      ansible.builtin.assert:
+        that:
+          - bergen_ai_family_audit_host is defined
+          - inventory_hostname == bergen_ai_family_audit_host
+          - ansible_play_hosts_all | length == 1
+          - bergen_ai_family_audit_approved | default(false) | bool
+          - bergen_ai_family_group_expected is defined
+          - bergen_ai_family_group_expected is mapping
+          - (bergen_ai_family_group_expected.keys() | list | sort) == ['adults', 'children', 'family']
+        fail_msg: "Use approved exact inventory host and private three-role group mapping."
+      no_log: true
+
+    - name: Read effective Open WebUI release without credentials
+      ansible.builtin.uri:
+        url: http://127.0.0.1:3000/api/version
+        method: GET
+        status_code: 200
+        use_proxy: false
+        follow_redirects: none
+        return_content: false
+        timeout: 10
+      register: bergen_ai_learning_version
+      changed_when: false
+      check_mode: false
+      no_log: true
+
+    - name: Fail closed on unreviewed application version
+      ansible.builtin.assert:
+        that:
+          - bergen_ai_learning_version.json is mapping
+          - bergen_ai_learning_version.json.version == '0.10.2'
+        fail_msg: "Learning companion audit reviewed only for Open WebUI 0.10.2."
+      no_log: true
+
+    - name: Read SQLite settings and group permissions using immutable Python inspector
+      ansible.builtin.command:
+        argv:
+          - python3
+          - -c
+          - "{{ lookup('ansible.builtin.file', playbook_dir ~ '/../files/bergen_ai/audit_learning_companion_v0102.py') }}"
+        stdin: >-
+          {{ {
+            'version': bergen_ai_learning_version.json.version,
+            'expected': bergen_ai_family_group_expected
+          } | to_json }}
+        stdin_add_newline: true
+      register: bergen_ai_learning_raw
+      changed_when: false
+      check_mode: false
+      no_log: true
+
+    - name: Parse private audit result without revealing live data
+      ansible.builtin.set_fact:
+        bergen_ai_learning_audit: "{{ bergen_ai_learning_raw.stdout | from_json }}"
+      changed_when: false
+      no_log: true
+
+    - name: Require bounded, verified read-only classification
+      ansible.builtin.assert:
+        that:
+          - bergen_ai_learning_audit.AUDIT == 'READ_ONLY'
+          - bergen_ai_learning_audit.STATUS == 'POLICY_INVENTORY_ONLY'
+          - bergen_ai_learning_audit.VERSION_REVIEWED == 'V0_10_2'
+          - bergen_ai_learning_audit.PERSISTENT_CONFIG == 'ON'
+          - bergen_ai_learning_audit.GROUP_COUNT == 3
+          - bergen_ai_learning_audit.TOTAL_MEMBERSHIPS == 0
+          - bergen_ai_learning_audit.NO_MEMBERSHIP_WRITES == 'YES'
+        fail_msg: "Unsafe or incomplete learning-companion inventory."
+      no_log: true
+
+    - name: Report only aggregate rights and explicitly hypothetical assignments
+      ansible.builtin.debug:
+        msg:
+          - "STATUS={{ bergen_ai_learning_audit.STATUS }}"
+          - "AUDIT={{ bergen_ai_learning_audit.AUDIT }}"
+          - "GROUP_COUNT={{ bergen_ai_learning_audit.GROUP_COUNT }}"
+          - "TOTAL_MEMBERSHIPS={{ bergen_ai_learning_audit.TOTAL_MEMBERSHIPS }}"
+          - "GLOBAL_MEMORIES={{ bergen_ai_learning_audit.GLOBAL_MEMORIES }}"
+          - "GLOBAL_CALENDAR={{ bergen_ai_learning_audit.GLOBAL_CALENDAR }}"
+          - "GLOBAL_AUTOMATIONS={{ bergen_ai_learning_audit.GLOBAL_AUTOMATIONS }}"
+          - "GLOBAL_WEB_UPLOAD={{ bergen_ai_learning_audit.GLOBAL_WEB_UPLOAD }}"
+          - "GLOBAL_CHAT_SHARING={{ bergen_ai_learning_audit.GLOBAL_CHAT_SHARING }}"
+          - "GLOBAL_PUBLIC_CALENDARS={{ bergen_ai_learning_audit.GLOBAL_PUBLIC_CALENDARS }}"
+          - "GLOBAL_PUBLIC_CHATS={{ bergen_ai_learning_audit.GLOBAL_PUBLIC_CHATS }}"
+          - "GLOBAL_PUBLIC_NOTES={{ bergen_ai_learning_audit.GLOBAL_PUBLIC_NOTES }}"
+          - "GLOBAL_PUBLIC_TOOLS={{ bergen_ai_learning_audit.GLOBAL_PUBLIC_TOOLS }}"
+          - "GLOBAL_USER_WEBHOOKS={{ bergen_ai_learning_audit.GLOBAL_USER_WEBHOOKS }}"
+          - "MEMORIES_ENABLED={{ bergen_ai_learning_audit.MEMORIES_ENABLED }}"
+          - "MEMORIES_SYSTEM_CONTEXT={{ bergen_ai_learning_audit.MEMORIES_SYSTEM_CONTEXT }}"
+          - "MEMORIES_BACKGROUND_REVIEW={{ bergen_ai_learning_audit.MEMORIES_BACKGROUND_REVIEW }}"
+          - "CALENDAR_ENABLED={{ bergen_ai_learning_audit.CALENDAR_ENABLED }}"
+          - "AUTOMATIONS_ENABLED={{ bergen_ai_learning_audit.AUTOMATIONS_ENABLED }}"
+          - "USER_WEBHOOKS_ENABLED={{ bergen_ai_learning_audit.USER_WEBHOOKS_ENABLED }}"
+          - "FAMILY_MEMORIES={{ bergen_ai_learning_audit.FAMILY_MEMORIES }}"
+          - "FAMILY_CALENDAR={{ bergen_ai_learning_audit.FAMILY_CALENDAR }}"
+          - "FAMILY_AUTOMATIONS={{ bergen_ai_learning_audit.FAMILY_AUTOMATIONS }}"
+          - "CHILDREN_MEMORIES={{ bergen_ai_learning_audit.CHILDREN_MEMORIES }}"
+          - "CHILDREN_CALENDAR={{ bergen_ai_learning_audit.CHILDREN_CALENDAR }}"
+          - "CHILDREN_AUTOMATIONS={{ bergen_ai_learning_audit.CHILDREN_AUTOMATIONS }}"
+          - "CHILD_IF_ASSIGNED_MEMORIES={{ bergen_ai_learning_audit.CHILD_IF_ASSIGNED_MEMORIES }}"
+          - "CHILD_IF_ASSIGNED_CALENDAR={{ bergen_ai_learning_audit.CHILD_IF_ASSIGNED_CALENDAR }}"
+          - "CHILD_IF_ASSIGNED_AUTOMATIONS={{ bergen_ai_learning_audit.CHILD_IF_ASSIGNED_AUTOMATIONS }}"
+          - "CHILD_IF_ASSIGNED_WEB_SEARCH={{ bergen_ai_learning_audit.CHILD_IF_ASSIGNED_WEB_SEARCH }}"
+          - "CHILD_IF_ASSIGNED_IMAGE_GENERATION={{ bergen_ai_learning_audit.CHILD_IF_ASSIGNED_IMAGE_GENERATION }}"
+          - "CHILD_IF_ASSIGNED_CODE_INTERPRETER={{ bergen_ai_learning_audit.CHILD_IF_ASSIGNED_CODE_INTERPRETER }}"
+          - "CHILD_IF_ASSIGNED_FILE_UPLOAD={{ bergen_ai_learning_audit.CHILD_IF_ASSIGNED_FILE_UPLOAD }}"
+          - "CHILD_IF_ASSIGNED_WEB_UPLOAD={{ bergen_ai_learning_audit.CHILD_IF_ASSIGNED_WEB_UPLOAD }}"
+          - "CHILD_IF_ASSIGNED_CHAT_SHARING={{ bergen_ai_learning_audit.CHILD_IF_ASSIGNED_CHAT_SHARING }}"
+          - "CHILD_IF_ASSIGNED_PUBLIC_CALENDARS={{ bergen_ai_learning_audit.CHILD_IF_ASSIGNED_PUBLIC_CALENDARS }}"
+          - "CHILD_IF_ASSIGNED_USER_WEBHOOKS={{ bergen_ai_learning_audit.CHILD_IF_ASSIGNED_USER_WEBHOOKS }}"
+          - "MEMORY_ISOLATION_E2E={{ bergen_ai_learning_audit.MEMORY_ISOLATION_E2E }}"
+          - "REMINDER_DELIVERY_E2E={{ bergen_ai_learning_audit.REMINDER_DELIVERY_E2E }}"
+          - "HOMEWORK_BEHAVIOR_E2E={{ bergen_ai_learning_audit.HOMEWORK_BEHAVIOR_E2E }}"
+          - "RESOURCE_ACL_SEPARATION_E2E={{ bergen_ai_learning_audit.RESOURCE_ACL_SEPARATION_E2E }}"
+          - "CHANGED=NO"
