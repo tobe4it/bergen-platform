@@ -17,6 +17,50 @@ The project follows **Semantic Versioning (SemVer)** and the changelog format is
 
 ---
 
+## [0.14.0] - 2026-10-19
+
+Headless Proxmox and Synology Wake-on-LAN recovery preparation. This is a
+**best-effort fallback**, not a proven automatic restart after complete AC loss.
+
+### Added
+- Read-only, hardware-bound Proxmox firmware, NIC, and power-recovery audit,
+  including explicit documentation of BIOS/BMC access limitations (PR #118).
+- Guarded `venombox` wired NIC Magic-Packet setting, applied with approval via
+  a dedicated enabled systemd oneshot, without restarting or reconfiguring the
+  Proxmox network (PR #120).
+- Root-controlled Synology DSM boot Wake-on-LAN sender, bounded to 12 packets
+  on `eth0` following network readiness; separated `--check` and `--send`
+  modes, an approval-gated and idempotent Ansible file installer, ignored
+  site-local target identification and an operational runbook (PR #121).
+
+### Verified
+- Proxmox audit: `ok=25 changed=0 failed=0 skipped=4`.
+- Proxmox WoL apply: `ok=21 changed=2 failed=0 skipped=1`;
+  `ethtool` readback: `Wake-on: g`.
+- From the NAS, a Magic Packet was captured **inbound** on the running
+  physical NIC with `tcpdump -Q in`: VLAN 3, EtherType `0x0842`,
+  correct magic payload, zero kernel drops.
+- Independent matching NAS SSH host-key fingerprints pinned on the controller.
+  Synology install preflight passed `--check` with
+  `ok=5 changed=0 failed=0 skipped=2`; live file installation passed
+  `ok=7 changed=1 failed=0 skipped=0` with syntax and non-sending
+  `--check` validation.
+- DSM startup-task configuration instructions supplied; the operator
+  acknowledged the DSM setup, but independent verification of scheduler
+  enabled status is **not recorded**.
+
+### Safety boundary
+- **No** NAS, Proxmox, or router reboot, shutdown, BIOS modification,
+  firmware update, or deliberate mains interruption was performed.
+- Host recovery from S5 (soft off) and G3 (complete AC loss) is **unverified**,
+  especially for VLAN-tagged magic packets after power loss.
+- Source and documentation integration on `main` does not itself enable a
+  remote DSM task. Verify the DSM boot trigger through its own UI at a
+  convenient time without manually running it.
+- No local MAC addresses, private site IPs, or credentials are versioned.
+
+---
+
 ## [0.13.0] - 2026-10-17
 
 Paperless-ngx group scan automation reference release. Scope is **production group operation only**; the secure deletion/quarantine v2 workflow is not part of this release.
