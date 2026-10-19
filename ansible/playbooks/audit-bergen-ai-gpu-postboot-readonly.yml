@@ -1,0 +1,78 @@
+---
+# Zero-write postboot verification for ONLY existing unprivileged LXC110.
+# No inference; GPU offload must be validated separately with synthetic input.
+- name: Verify Bergen-AI GPU runtime and local Ollama after restart
+  hosts: venombox
+  become: true
+  gather_facts: false
+  tasks:
+    - name: Require expected single PVE target
+      ansible.builtin.assert:
+        that:
+          - inventory_hostname == 'venombox'
+
+    - name: Inspect exact LXC 110 character nodes, cgroup and loopback Ollama
+      ansible.builtin.command:
+        argv:
+          - python3
+          - -c
+          - "{{ lookup('ansible.builtin.file', playbook_dir ~ '/../files/bergen_ai/audit_ollama_gpu_postboot_readonly.py', rstrip=False) }}"
+      register: bergen_ai_postboot_raw
+      changed_when: false
+      failed_when: false
+      check_mode: false
+      no_log: true
+
+    - name: Extract exactly one bounded nonidentifying GPU runtime result
+      ansible.builtin.set_fact:
+        bergen_ai_postboot_frames: >-
+          {{ bergen_ai_postboot_raw.stdout_lines |
+             default([]) |
+             select('match', '^BERGEN_AI_GPU_POSTBOOT_V1:') | list }}
+      no_log: true
+
+    - name: Refuse missing or invalid runtime proof
+      ansible.builtin.assert:
+        that:
+          - bergen_ai_postboot_raw.rc == 0
+          - bergen_ai_postboot_frames | length == 1
+          - bergen_ai_postboot_frames[0] | length < 1200
+        fail_msg: GPU_POSTBOOT_INSPECTION_INCOMPLETE
+      no_log: true
+
+    - name: Decode sanitized GPU device and local service results
+      ansible.builtin.set_fact:
+        bergen_ai_postboot: >-
+          {{ (bergen_ai_postboot_frames[0] |
+             regex_replace('^BERGEN_AI_GPU_POSTBOOT_V1:', '')) | from_json }}
+      no_log: true
+
+    - name: Require all postboot device Ollama and model gates
+      ansible.builtin.assert:
+        that:
+          - bergen_ai_postboot.AUDIT == 'READ_ONLY'
+          - not bergen_ai_postboot.CHANGED
+          - bergen_ai_postboot.STATUS == 'READY_FOR_SYNTHETIC_INFERENCE'
+          - bergen_ai_postboot.LXC110_RUNNING
+          - bergen_ai_postboot.GPU_DEVICE_ACCESS_OK
+          - bergen_ai_postboot.OLLAMA_ACTIVE
+          - bergen_ai_postboot.OLLAMA_LOOPBACK_OK
+          - bergen_ai_postboot.THREE_MODELS_PRESENT
+          - bergen_ai_postboot.MEMORY_CGROUP_32G_OK
+          - not bergen_ai_postboot.GPU_COMPUTE_VERIFIED
+        fail_msg: GPU_POSTBOOT_RUNTIME_INCOMPLETE_DO_NOT_ASSUME_GPU_ACCELERATION
+      no_log: true
+
+    - name: Print sanitized postboot readiness classification
+      ansible.builtin.debug:
+        msg:
+          - AUDIT=READ_ONLY
+          - CHANGED=False
+          - "STATUS={{ bergen_ai_postboot.STATUS }}"
+          - LXC110_RUNNING=YES
+          - GPU_DEVICES_ACCESSIBLE=YES
+          - LXC110_MEMORY_CGROUP_32G=YES
+          - OLLAMA_LOCAL_API=OK
+          - ALL_THREE_ADDITIONAL_MODELS=PRESENT
+          - GPU_COMPUTE_VERIFIED=NO
+          - NEXT_STEP=BOUNDED_SYNTHETIC_GPU_INFERENCE
