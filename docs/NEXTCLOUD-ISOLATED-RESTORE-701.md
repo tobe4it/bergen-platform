@@ -92,3 +92,40 @@ Do not delete stale mx1 code or DB until separate restore approval.
 Do not alter the mx2 backup script/timer, production Cloud, the public DNS,
 Synology NAS exports or legacy PVE containers. This preflight cannot by
 itself prove disaster recovery, since it stops before loading any backup.
+
+
+## Phase 2A: read-only selection and transfer preflight
+
+After phase 1 has created the offline 701 guest, independently verify that
+VMID, isolated state and latest completed Synology snapshot still match:
+
+    BASE="$HOME/bergen-platform"
+    cd "$HOME/bergen-platform-nextcloud-restore"
+    git fetch origin feat/nextcloud-isolated-restore-701-20261019
+    git switch --detach origin/feat/nextcloud-isolated-restore-701-20261019
+
+    ansible-playbook \
+      -i "$BASE/ansible/inventory.yml" \
+      -i "$BASE/ansible/inventory.local.yml" \
+      ansible/playbooks/audit-nextcloud-restore-transfer-readonly.yml \
+      -e @"$BASE/ansible/vars/mail-tls.local.yml" \
+      -e @"$BASE/ansible/vars/mail-nextcloud-stack.local.yml" \
+      -e @"$HOME/bergen-platform-nextcloud-backup/ansible/vars/nextcloud-backup.local.yml" \
+      --vault-id infra@prompt
+
+The final local backup configuration path must exist and be a protected ignored
+YAML file. Do not copy passwords to a git-tracked path. The audit verifies only
+the latest completed snapshot metadata and its two completion markers; it
+does **not** rehash the entire archive and it performs no transfer. It also
+reports the source's PHP and MariaDB versions to plan compatible offline
+package acquisition.
+
+Expected results:
+- VENOMBOX_701_ISOLATED_STOPPED
+- one safe snapshot ID and its archive size
+- NEXTCLOUD_RESTORE_TRANSFER_PREFLIGHT_READY
+- changed=0, failed=0
+
+Next phase will choose a bounded SSH transport or equivalent explicit file
+delivery, with independent digest verification on venombox. Never bypass
+host-key verification or widen the Synology NFS export.
