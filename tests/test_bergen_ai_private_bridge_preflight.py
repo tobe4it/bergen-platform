@@ -10,6 +10,8 @@ import yaml
 ROOT = Path(__file__).resolve().parents[1]
 SCRIPT = ROOT / "ansible/files/bergen_ai/audit_private_bridge_preflight.py"
 PLAY = ROOT / "ansible/playbooks/audit-bergen-ai-private-bridge-readonly.yml"
+EXTENDED_SCRIPT = ROOT / "ansible/files/bergen_ai/audit_private_bridge_extended_networks.py"
+EXTENDED_PLAY = ROOT / "ansible/playbooks/audit-bergen-ai-private-bridge-extended-readonly.yml"
 
 spec = importlib.util.spec_from_file_location("bergen_ai_private_bridge_preflight", SCRIPT)
 bridge = importlib.util.module_from_spec(spec)
@@ -94,3 +96,54 @@ class PrivateBridgeAuditTest(TestCase):
         self.assertIn("Roll", doc)
         self.assertIn("LXC 120", doc)
         self.assertIn("aus", doc)
+
+spec_extended = importlib.util.spec_from_file_location("bergen_ai_extended_net", EXTENDED_SCRIPT)
+extended = importlib.util.module_from_spec(spec_extended)
+spec_extended.loader.exec_module(extended)
+
+
+class ExtendedBridgeAuditTest(TestCase):
+    def test_extended_script_is_no_write_and_rejects_overlap(self):
+        text = EXTENDED_SCRIPT.read_text()
+        ast.parse(text, filename=str(EXTENDED_SCRIPT))
+        self.assertEqual(str(extended.CANDIDATE), "172.30.110.0/28")
+        self.assertIn('podman", "network", "inspect"', text)
+        self.assertIn('["pct", "list"]', text)
+        self.assertIn('run(["pct", "config", vmid]', text)
+        self.assertIn('FULL_NETWORK_CLEARANCE="NOT_PROVEN"', text)
+        self.assertIn('APPLY_AUTHORIZED=False', text)
+        for forbidden in ("pct set", "pct start", "pct reboot",
+                          "ip link add", "ip addr add", "nft add",
+                          "iptables -A", "systemctl restart",
+                          "podman run", "podman network create",
+                          "/api/generate", "/api/tags"):
+            self.assertNotIn(forbidden, text)
+
+    def test_extended_overlap_classifies_addresses_routes_and_static_guest_configs(self):
+        self.assertTrue(extended.overlaps_address_routes(
+            [{"addr_info": [{"family": "inet", "local": "172.30.110.5", "prefixlen": 28}]}], []))
+        self.assertFalse(extended.overlaps_address_routes(
+            [{"addr_info": [{"family": "inet", "local": "192.168.20.225", "prefixlen": 24}]}],
+            [{"dst": "default"}]))
+        self.assertTrue(extended.overlaps_address_routes(
+            [{"addr_info": []}], [{"dst": "172.30.110.0/24"}]))
+        self.assertIsNone(extended.overlaps_address_routes(None, []))
+        with mock.patch.object(extended, "run", return_value="net0: name=eth0,bridge=vmbr1,ip=172.30.110.5/28"):
+            self.assertTrue(extended.static_lxc_overlap("110"))
+        with mock.patch.object(extended, "run", return_value="net0: name=eth0,bridge=vmbr1,ip=dhcp"):
+            self.assertFalse(extended.static_lxc_overlap("110"))
+
+    def test_extended_playbook_cannot_activate_bridge(self):
+        document = yaml.safe_load(EXTENDED_PLAY.read_text())[0]
+        self.assertEqual(document["hosts"], "venombox")
+        self.assertFalse(document["gather_facts"])
+        tasks = document["tasks"]
+        commands = [t for t in tasks if "ansible.builtin.command" in t]
+        self.assertEqual(len(commands), 1)
+        self.assertTrue(commands[0]["no_log"])
+        self.assertFalse(commands[0]["changed_when"])
+        self.assertFalse(commands[0]["failed_when"])
+        text = EXTENDED_PLAY.read_text()
+        self.assertIn("FULL_NETWORK_CLEARANCE=NOT_PROVEN", text)
+        self.assertIn("not extended_report.APPLY_AUTHORIZED", text)
+        self.assertIn("NETWORKS", text)
