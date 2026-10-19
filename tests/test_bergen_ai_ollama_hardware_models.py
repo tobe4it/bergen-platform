@@ -20,6 +20,9 @@ GPU_SCRIPT = ROOT / "ansible/files/bergen_ai/audit_ollama_gpu_stage_readonly.py"
 GPU_ROLLBACK_SCRIPT = ROOT / "ansible/files/bergen_ai/audit_ollama_gpu_rollback_readonly.py"
 GPU_ROLLBACK_PLAY = ROOT / "ansible/playbooks/rollback-bergen-ai-ollama-gpu-stage.yml"
 GPU_STAGED_READONLY = ROOT / "ansible/playbooks/audit-bergen-ai-gpu-staged-readonly.yml"
+GPU_POSTBOOT_SCRIPT = ROOT / "ansible/files/bergen_ai/audit_ollama_gpu_postboot_readonly.py"
+GPU_POSTBOOT_AUDIT = ROOT / "ansible/playbooks/audit-bergen-ai-gpu-postboot-readonly.yml"
+GPU_REBOOT_PLAY = ROOT / "ansible/playbooks/restart-bergen-ai-gpu-approved.yml"
 
 
 class OllamaHardwareTests(unittest.TestCase):
@@ -150,7 +153,8 @@ class OllamaHardwareTests(unittest.TestCase):
 
     def test_all_gpu_playbook_assertions_are_yaml_strings(self):
         """Ansible assert.that must not contain YAML dicts for colon comparisons."""
-        playbooks = (GPU_AUDIT, GPU_STAGE, GPU_STAGED_READONLY, GPU_ROLLBACK_PLAY)
+        playbooks = (GPU_AUDIT, GPU_STAGE, GPU_STAGED_READONLY, GPU_ROLLBACK_PLAY,
+                     GPU_POSTBOOT_AUDIT, GPU_REBOOT_PLAY)
         for path in playbooks:
             with self.subTest(playbook=path.name):
                 for play in yaml.safe_load(path.read_text()):
@@ -216,6 +220,46 @@ class OllamaHardwareTests(unittest.TestCase):
                             else:
                                 with self.assertRaises(ValueError):
                                     audit.main()
+
+    def test_postboot_audit_does_not_execute_inference_or_mutate(self):
+        source = GPU_POSTBOOT_SCRIPT.read_text()
+        ast.parse(source, filename=str(GPU_POSTBOOT_SCRIPT))
+        self.assertIn('"dev0": "path=/dev/dri/renderD128,uid=999,gid=992,mode=0660"', source)
+        self.assertIn('"dev1": "path=/dev/kfd,uid=999,gid=992,mode=0660"', source)
+        self.assertIn('EXPECTED_MODELS', source)
+        self.assertIn('"memory", "32768"', source)
+        for forbidden in ('pct set', 'pct reboot', 'ollama run',
+                          '/api/generate', '/api/chat', 'PAPERLESS_AI_ENABLED=true'):
+            self.assertNotIn(forbidden, source)
+        audit = yaml.safe_load(GPU_POSTBOOT_AUDIT.read_text())[0]
+        self.assertEqual(audit["hosts"], "venombox")
+        for task in audit["tasks"]:
+            if "ansible.builtin.command" in task:
+                self.assertFalse(task["changed_when"])
+                self.assertTrue(task["no_log"])
+
+    def test_restart_is_single_guest_explicit_downtime_with_preimage_gate(self):
+        play = yaml.safe_load(GPU_REBOOT_PLAY.read_text())[0]
+        self.assertEqual(play["hosts"], "venombox")
+        src = GPU_REBOOT_PLAY.read_text()
+        for approval in ("bergen_ai_gpu_reboot_approved",
+                         "bergen_ai_gpu_reboot_downtime_approved",
+                         "EXACT_STAGE_ONLY",
+                         "audit_ollama_gpu_rollback_readonly.py",
+                         "audit_ollama_gpu_postboot_readonly.py",
+                         "GPU_REBOOT_POSTBOOT_NOT_READY_MANUAL_RECOVERY_REQUIRED"):
+            self.assertIn(approval, src)
+        reboot_tasks = [
+            t for t in play["tasks"]
+            if t.get("ansible.builtin.command", {}).get("argv", []) == ["pct", "reboot", "110"]
+        ]
+        self.assertEqual(len(reboot_tasks), 1)
+        self.assertTrue(reboot_tasks[0]["no_log"])
+        self.assertEqual(reboot_tasks[0]["async"], 240)
+        for forbidden in ("pct, reboot, '126'", "pct, stop, '110'",
+                          "pct, set, '110'", "PAPERLESS_AI_ENABLED=true"):
+            self.assertNotIn(forbidden, src)
+        self.assertIn('"bergen_gpu_reboot_status.stdout | trim == \'status: running\'"', src)
 
     def test_embedding_tag_is_canonical_and_default_but_rag_stays_off(self):
         planner = PLAN.read_text()
