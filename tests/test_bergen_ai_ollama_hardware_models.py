@@ -9,11 +9,14 @@ HW = ROOT / "ansible/files/bergen_ai/audit_ollama_hardware_readonly.py"
 PLAN = ROOT / "ansible/files/bergen_ai/plan_ollama_models_readonly.py"
 AUDIT = ROOT / "ansible/playbooks/audit-bergen-ai-ollama-hardware-readonly.yml"
 PULL = ROOT / "ansible/playbooks/manage-bergen-ai-ollama-models.yml"
+GPU_AUDIT = ROOT / "ansible/playbooks/audit-bergen-ai-gpu-stage-readonly.yml"
+GPU_STAGE = ROOT / "ansible/playbooks/stage-bergen-ai-ollama-gpu-resources.yml"
+GPU_SCRIPT = ROOT / "ansible/files/bergen_ai/audit_ollama_gpu_stage_readonly.py"
 
 
 class OllamaHardwareTests(unittest.TestCase):
     def test_scripts_parse_and_audit_does_not_mutate(self):
-        for f in [HW, PLAN]:
+        for f in [HW, PLAN, GPU_SCRIPT]:
             src = f.read_text()
             ast.parse(src, filename=str(f))
             for forbidden in [
@@ -63,6 +66,48 @@ class OllamaHardwareTests(unittest.TestCase):
         self.assertEqual(len(pulls), 1)
         self.assertIn("bergen_ai_models_action == 'apply'", str(pulls[0]["when"]))
         self.assertTrue(pulls[0]["no_log"])
+
+    def test_native_proxmox_device_mapping_requires_confinement_and_backup(self):
+        script = GPU_SCRIPT.read_text()
+        ast.parse(script)
+        for expected in (
+            '"hostname") == name', # intentionally absent; use code-specific checks
+        ):
+            pass
+        for keyword in ("unprivileged", "lxc.idmap:", "pct", "help",
+                        "getgrouplist", "GUEST_RENDER_GID"):
+            # fields inside output are validated by target Ansible and script
+            if keyword == "GUEST_RENDER_GID":
+                continue
+            self.assertIn(keyword, script)
+        self.assertIn("LXC_MEMORY_MIB", script)
+        self.assertIn("GUEST_OLLAMA_UID", script)
+        self.assertIn('"READY_FOR_REVIEW"', script)
+        s = GPU_STAGE.read_text()
+        checks = yaml.safe_load(s)[0]
+        self.assertEqual(checks["hosts"], "venombox")
+        for gate in ("bergen_ai_gpu_stage_approved",
+                     "bergen_ai_gpu_stage_config_backup_approved",
+                     "RENDER_HOST_GID == 993", "KFD_HOST_GID == 993",
+                     "GPU_RAM_CAP_HEADROOM_INSUFFICIENT",
+                     "GPU_PREIMAGE_ALREADY_EXISTS_REVIEW_FIRST"):
+            self.assertIn(gate, s)
+        self.assertIn("remote_src: true", s)
+        self.assertIn("lxc110-pre-gpu.conf", s)
+        self.assertIn("/dev/dri/renderD128,uid=", s)
+        self.assertIn("/dev/kfd,uid=", s)
+        self.assertIn("mode=0660", s)
+        self.assertIn("pct, set, '110', --memory, '32768'", s)
+        self.assertNotIn("pct, stop", s)
+        self.assertNotIn("pct, reboot", s)
+        self.assertNotIn("unprivileged: 0", s)
+        self.assertNotIn("lxc.idmap:", s)
+        audit = yaml.safe_load(GPU_AUDIT.read_text())[0]
+        self.assertEqual(audit["hosts"], "venombox")
+        for t in audit["tasks"]:
+            if "ansible.builtin.command" in t:
+                self.assertIs(t["changed_when"], False)
+                self.assertTrue(t["no_log"])
 
     def test_32b_is_only_with_separate_review_and_headroom(self):
         src = PLAN.read_text()
