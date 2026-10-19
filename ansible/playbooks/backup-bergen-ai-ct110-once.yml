@@ -56,7 +56,7 @@
           async: 21600
           poll: 30
           register: oneoff_backup_exec
-          changed_when: oneoff_backup_exec.rc == 0
+          changed_when: true
           no_log: true
 
         - name: Read CT110 state after backup without starting or restarting
