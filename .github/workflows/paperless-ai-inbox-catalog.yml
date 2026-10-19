@@ -8,6 +8,7 @@ on:
       - 'ansible/files/paperless/audit_ai_catalog_ollama_firewall_readonly.py'
       - 'ansible/files/paperless/audit_ai_catalog_ollama_runtime_filter_readonly.py'
       - 'ansible/files/paperless/audit_ai_ollama_bp_controller_negative_readonly.py'
+      - 'ansible/files/paperless/audit_ai_ollama_ct_topology_readonly.py'
       - 'ansible/playbooks/manage-paperless-ai-inbox-catalog.yml'
       - 'ansible/playbooks/manage-paperless-ai-local-ollama.yml'
       - 'ansible/playbooks/audit-paperless-ai-catalog-runtime-readonly.yml'
@@ -15,6 +16,7 @@ on:
       - 'ansible/playbooks/audit-paperless-ai-ollama-firewall-readonly.yml'
       - 'ansible/playbooks/audit-paperless-ai-ollama-runtime-filter-readonly.yml'
       - 'ansible/playbooks/audit-paperless-ai-ollama-negative-client-readonly.yml'
+      - 'ansible/playbooks/audit-paperless-ai-ollama-topology-readonly.yml'
       - 'ansible/playbooks/deploy-paperless-ai-inbox-catalog-timer.yml'
       - 'ansible/files/paperless/bergen-ai-catalog-*'
       - 'tests/test_paperless_ai_catalog_policy.py'
@@ -29,6 +31,7 @@ on:
       - 'ansible/files/paperless/audit_ai_catalog_ollama_firewall_readonly.py'
       - 'ansible/files/paperless/audit_ai_catalog_ollama_runtime_filter_readonly.py'
       - 'ansible/files/paperless/audit_ai_ollama_bp_controller_negative_readonly.py'
+      - 'ansible/files/paperless/audit_ai_ollama_ct_topology_readonly.py'
       - 'ansible/playbooks/manage-paperless-ai-inbox-catalog.yml'
       - 'ansible/playbooks/manage-paperless-ai-local-ollama.yml'
       - 'ansible/playbooks/audit-paperless-ai-catalog-runtime-readonly.yml'
@@ -36,6 +39,7 @@ on:
       - 'ansible/playbooks/audit-paperless-ai-ollama-firewall-readonly.yml'
       - 'ansible/playbooks/audit-paperless-ai-ollama-runtime-filter-readonly.yml'
       - 'ansible/playbooks/audit-paperless-ai-ollama-negative-client-readonly.yml'
+      - 'ansible/playbooks/audit-paperless-ai-ollama-topology-readonly.yml'
       - 'ansible/playbooks/deploy-paperless-ai-inbox-catalog-timer.yml'
       - 'ansible/files/paperless/bergen-ai-catalog-*'
       - 'tests/test_paperless_ai_catalog_policy.py'
@@ -63,4 +67,5 @@ jobs:
           ansible-playbook -i ansible/inventory.yml ansible/playbooks/audit-paperless-ai-ollama-firewall-readonly.yml --syntax-check
           ansible-playbook -i ansible/inventory.yml ansible/playbooks/audit-paperless-ai-ollama-runtime-filter-readonly.yml --syntax-check
           ansible-playbook -i ansible/inventory.yml ansible/playbooks/audit-paperless-ai-ollama-negative-client-readonly.yml --syntax-check
+          ansible-playbook -i ansible/inventory.yml ansible/playbooks/audit-paperless-ai-ollama-topology-readonly.yml --syntax-check
           ansible-playbook -i ansible/inventory.yml ansible/playbooks/deploy-paperless-ai-inbox-catalog-timer.yml --syntax-check
