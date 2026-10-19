@@ -59,6 +59,15 @@
           - ct110_runtime.PODMAN_INSPECT_RELATIONSHIP in ['EXACT_SINGLE_WEBUI_BIND', 'UNVERIFIED']
           - ct110_runtime.ROOTFS_BIND_INODE_IDENTITY in ['IDENTICAL', 'UNVERIFIED']
           - ct110_runtime.RUNTIME_MOUNTS_MATCH_EXPECTATION | type_debug == 'bool'
+          - ct110_runtime.SOURCE_INODE_READ | default('UNVERIFIED') in ['AVAILABLE', 'UNAVAILABLE', 'UNVERIFIED']
+          - ct110_runtime.MERGED_INODE_READ | default('UNVERIFIED') in ['AVAILABLE', 'UNAVAILABLE', 'UNVERIFIED']
+          - ct110_runtime.CONTAINER_PID | default('UNVERIFIED') in ['RUNNING_AND_AVAILABLE', 'UNVERIFIED']
+          - ct110_runtime.PROCESS_ROOT_INODE_READ | default('UNVERIFIED') in ['AVAILABLE', 'UNAVAILABLE', 'UNVERIFIED']
+          - ct110_runtime.MERGED_INODE_RELATION | default('UNVERIFIED') in ['IDENTICAL', 'DIFFERENT', 'UNVERIFIED']
+          - ct110_runtime.PROCESS_ROOT_INODE_RELATION | default('UNVERIFIED') in ['IDENTICAL', 'DIFFERENT', 'UNVERIFIED']
+          - ct110_runtime.BIND_TARGET | default('UNVERIFIED') in ['EXACT_MERGED_DATA_TARGET', 'NOT_UNIQUE_OR_MISSING', 'UNVERIFIED']
+          - ct110_runtime.BIND_FSTYPE_RELATION | default('UNVERIFIED') in ['MATCHES_ROOT', 'DIFFERS_FROM_ROOT', 'UNVERIFIED']
+          - ct110_runtime.BIND_SOURCE_RELATION | default('UNVERIFIED') in ['MATCHES_ROOT_SOURCE', 'DIFFERS_FROM_ROOT_SOURCE', 'UNVERIFIED']
       no_log: true
 
     - name: Display only classified runtime mount evidence
@@ -73,6 +82,15 @@
           - "WEBUI_ROOTFS_BIND_MOUNT_COUNT={{ ct110_runtime.WEBUI_ROOTFS_BIND_MOUNT_COUNT }}"
           - "UNACCOUNTED_NONPSEUDO_MOUNT_COUNT={{ ct110_runtime.UNACCOUNTED_NONPSEUDO_MOUNT_COUNT }}"
           - "RUNTIME_MOUNTS_MATCH_EXPECTATION={{ ct110_runtime.RUNTIME_MOUNTS_MATCH_EXPECTATION }}"
+          - "SOURCE_INODE_READ={{ ct110_runtime.SOURCE_INODE_READ | default('UNVERIFIED') }}"
+          - "MERGED_INODE_READ={{ ct110_runtime.MERGED_INODE_READ | default('UNVERIFIED') }}"
+          - "CONTAINER_PID={{ ct110_runtime.CONTAINER_PID | default('UNVERIFIED') }}"
+          - "PROCESS_ROOT_INODE_READ={{ ct110_runtime.PROCESS_ROOT_INODE_READ | default('UNVERIFIED') }}"
+          - "MERGED_INODE_RELATION={{ ct110_runtime.MERGED_INODE_RELATION | default('UNVERIFIED') }}"
+          - "PROCESS_ROOT_INODE_RELATION={{ ct110_runtime.PROCESS_ROOT_INODE_RELATION | default('UNVERIFIED') }}"
+          - "BIND_TARGET={{ ct110_runtime.BIND_TARGET | default('UNVERIFIED') }}"
+          - "BIND_FSTYPE_RELATION={{ ct110_runtime.BIND_FSTYPE_RELATION | default('UNVERIFIED') }}"
+          - "BIND_SOURCE_RELATION={{ ct110_runtime.BIND_SOURCE_RELATION | default('UNVERIFIED') }}"
           - BACKUP_EXECUTED=False
           - BACKUP_AUTHORIZED=False
           - RESTORE_TEST=NOT_ATTESTED
