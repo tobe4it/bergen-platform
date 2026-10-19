@@ -21,6 +21,8 @@ RUNTIME_FILTER_SCRIPT = ROOT / "ansible/files/paperless/audit_ai_catalog_ollama_
 RUNTIME_FILTER_PLAY = ROOT / "ansible/playbooks/audit-paperless-ai-ollama-runtime-filter-readonly.yml"
 NEGATIVE_PROBE_SCRIPT = ROOT / "ansible/files/paperless/audit_ai_ollama_bp_controller_negative_readonly.py"
 NEGATIVE_PROBE_PLAY = ROOT / "ansible/playbooks/audit-paperless-ai-ollama-negative-client-readonly.yml"
+TOPOLOGY_SCRIPT = ROOT / "ansible/files/paperless/audit_ai_ollama_ct_topology_readonly.py"
+TOPOLOGY_PLAY = ROOT / "ansible/playbooks/audit-paperless-ai-ollama-topology-readonly.yml"
 
 
 def load_policy():
@@ -185,6 +187,48 @@ class CatalogPolicyTest(unittest.TestCase):
         self.assertIn("StandardError=null", unit)
         timer_spec = (ROOT / "ansible/files/paperless/bergen-ai-catalog.timer").read_text()
         self.assertIn("OnCalendar=*:0/5", timer_spec)
+
+    def test_ct110_ct126_network_topology_audit_is_private_and_readonly(self):
+        src=TOPOLOGY_SCRIPT.read_text()
+        ast.parse(src,filename=str(TOPOLOGY_SCRIPT))
+        for text in ('("110","bergen-ai")','("126","bergen-paperless")',
+                     '"pct","config"','"pct","status"',
+                     '"podman","exec","bergen-paperless"',
+                     'SOCK_DGRAM','NOT_DEMONSTRATED',
+                     'EXPOSURE_GATE="REVIEW_REQUIRED"'):
+            self.assertIn(text,src)
+        for forbidden in ("pct set","pct reboot","pct stop",
+                          "nft add","iptables -A","systemctl restart",
+                          "/api/generate","/api/tags","/api/chat",
+                          "ollama run","ollama pull",
+                          "sock.send","sendto("):
+            self.assertNotIn(forbidden,src)
+        play=yaml.safe_load(TOPOLOGY_PLAY.read_text())[0]
+        self.assertEqual(play["hosts"],"venombox")
+        self.assertFalse(play["gather_facts"])
+        tasks=play["tasks"]
+        commands=[x for x in tasks if "ansible.builtin.command" in x]
+        self.assertEqual(len(commands),1)
+        self.assertTrue(commands[0]["no_log"])
+        self.assertFalse(commands[0]["changed_when"])
+        self.assertIn("SAME_PVE_BRIDGE",TOPOLOGY_PLAY.read_text())
+        self.assertIn("SOURCE_NAT_EFFECTIVE",TOPOLOGY_PLAY.read_text())
+        self.assertIn("EXPOSURE_GATE=REVIEW_REQUIRED",TOPOLOGY_PLAY.read_text())
+
+    def test_ct_topology_classification_does_not_approve_firewall_changes(self):
+        spec=importlib.util.spec_from_file_location("bergen_ai_topology",TOPOLOGY_SCRIPT)
+        module=importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        a=module.net_config("hostname: bergen-ai\\nnet0: name=eth0,bridge=vmbr2,firewall=1,ip=dhcp\\n")
+        b=module.net_config("hostname: bergen-paperless\\nnet0: name=eth0,bridge=vmbr2,firewall=1,ip=dhcp\\n")
+        result=module.classification(a,b)
+        self.assertEqual(result["SAME_PVE_BRIDGE"],"YES")
+        self.assertEqual(result["SAME_CONFIGURED_VLAN"],"YES")
+        self.assertEqual(result["PVE_BOTH_NIC_FIREWALL_ENABLED"],"YES")
+        self.assertEqual(module.classification(a,{} )["SAME_PVE_BRIDGE"],"NOT_VERIFIED")
+        self.assertEqual(module.net_config("no network here"),{})
+        self.assertTrue(module.valid_address("192.168.20.225"))
+        self.assertFalse(module.valid_address("1.1.1.1"))
 
     def test_approved_client_negative_probe_is_one_connect_only(self):
         script=NEGATIVE_PROBE_SCRIPT.read_text()
