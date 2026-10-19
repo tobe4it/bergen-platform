@@ -4,7 +4,7 @@
 
 ## Ziel
 
-Eine dedizierte, auf \`venombox\` lokal gebridgte KI-Transportebene für
+Eine dedizierte, auf `venombox` lokal gebridgte KI-Transportebene für
 **Bergen-AI / Ollama (LXC 110)** und **Paperless (LXC 126)**.
 **Bergen-syslog (LXC 120)** soll später unter eigener Freigabe folgen.
 Die vorhandenen Netzinterfaces, DNS/LDAP/OIDC, Mail-/Syslog-Einspeisung und
@@ -20,7 +20,7 @@ Rollback-Gates geprüft sind.
 
 ## Technische Zieltopologie (nicht implementiert)
 
-\`\`\`text
+```text
                        venombox (Proxmox)
  ┌─────────────────────────────────────────────────────────┐
  │                                                         │
@@ -35,10 +35,10 @@ Rollback-Gates geprüft sind.
  │  LXC120 bergen-syslog (später, extra Freigabe)          │
  │  └── mögliche net1: 172.30.110.4/28                     │
  └─────────────────────────────────────────────────────────┘
-\`\`\`
+```
 
-**Vorläufige** Bridge \`vmbr10\`; **vorläufiges** RFC1918-/28-Netz
-\`172.30.110.0/28\`. Adressen sind **nicht reserviert/zugewiesen**.
+**Vorläufige** Bridge `vmbr10`; **vorläufiges** RFC1918-/28-Netz
+`172.30.110.0/28`. Adressen sind **nicht reserviert/zugewiesen**.
 Der initiale Audit prüft Host und LXC110/126/120 auf sichtbare
 IPv4-Adress-/Routingüberlappungen und die Bridge-Namensbelegung; er
 kann nicht alle VPN-, UniFi-, Docker-/Podman-, Fremdhost-, Off-Host-
@@ -48,18 +48,18 @@ vollständige IPAM/UniFi- und VPN-Inventar prüfen.
 
 Eine mögliche **Basisdefinition**, erst nach Freigabe anzuwenden:
 
-\`\`\`ini
+```ini
 auto vmbr10
 iface vmbr10 inet manual
     bridge-ports none
     bridge-stp off
     bridge-fd 0
-\`\`\`
+```
 
 Diese Bridge erhält weder IPv4- noch IPv6-Hostadresse, physisches
 Interface, VLAN-Trunk noch IP-Gateway. Die zusätzlichen CT-Interfaces
 werden mit **festen IPv4-Adressen ohne Default-Route** versehen,
-\`firewall=1\` allein ist **kein** Filterbeweis.
+`firewall=1` allein ist **kein** Filterbeweis.
 
 Wichtig: Dual-Homing jedes LXC bedeutet, dass ein kompromittierter
 LXC potentiell zwischen seinen beiden Interfaces weiterleiten könnte,
@@ -72,11 +72,11 @@ keine Dokument-ACL und nicht den Schutz gegen unbefugte App-Clients.
 
 Ansible-Playbook:
 
-\`ansible/playbooks/audit-bergen-ai-private-bridge-readonly.yml\`
+`ansible/playbooks/audit-bergen-ai-private-bridge-readonly.yml`
 
 Auf bp-controller:
 
-\`\`\`bash
+```bash
 (
 set -euo pipefail
 BASE="$HOME/bergen-platform"
@@ -104,12 +104,12 @@ cd "$WT"
   ansible/playbooks/audit-bergen-ai-private-bridge-readonly.yml \
   --vault-id ai@prompt
 )
-\`\`\`
+```
 
 Der Audit prüft ausschließlich:
 
-- Existenz von \`vmbr10\` im Host-Kernel und in \`/etc/network/interfaces*\`.
-- Verweise auf \`vmbr10\` in PVE-LXC/VM-Konfigurationen.
+- Existenz von `vmbr10` im Host-Kernel und in `/etc/network/interfaces*`.
+- Verweise auf `vmbr10` in PVE-LXC/VM-Konfigurationen.
 - Identität und Zahl der NICs in LXC110, LXC126, LXC120.
 - IPv4-Routen und Interface-Netze des PVE-Hosts sowie dieser
   **drei** LXCs auf Konflikte mit dem **vorgeschlagenen** /28.
@@ -119,9 +119,9 @@ aus. Keine internen Ist-IP-Adressen, MACs, Routenzeilen,
 Benutzeridentitäten, Log- oder OCR-Inhalte. Keine Netzpakete,
 KI-Aufrufe, PVE-Änderungen, Neustarts oder Anwendungs-Updates.
 
-Auch \`STATUS=CANDIDATE_LOCALLY_UNCONFLICTED\` bedeutet **NICHT**,
+Auch `STATUS=CANDIDATE_LOCALLY_UNCONFLICTED` bedeutet **NICHT**,
 dass die Bridge oder das Subnetz endgültig freigegeben sind:
-\`SUBNET_CLEARANCE=NOT_PROVEN\` und \`APPLY_AUTHORIZED=False\`.
+`SUBNET_CLEARANCE=NOT_PROVEN` und `APPLY_AUTHORIZED=False`.
 
 ## Nach dem Audit – gesondert freizugebende Phasen
 
@@ -133,14 +133,14 @@ bereits direkt Port 11434 verwenden. Dokumentieren, welches
 System die Bridge konfigurieren darf und wie ein Ansible-Playbook
 sie idempotent anlegt. Vor einem produktiven Apply Snapshot /
 Konfigurations-Backups und sicheren Out-of-band-Zugriff prüfen.
-Rollback: letzte bekannte \`/etc/network/interfaces\`-Version,
-zusätzliche \`net1\`-Konfigurationen und Ollama-/Open-WebUI-
+Rollback: letzte bekannte `/etc/network/interfaces`-Version,
+zusätzliche `net1`-Konfigurationen und Ollama-/Open-WebUI-
 Backend-Variablen gesondert versioniert sichern.
 
 **Phase 2 – Transport-Test ohne produktive Umstellung:**
-\`vmbr10\` zuerst als reinen lokalen Switch anlegen; erst nach
+`vmbr10` zuerst als reinen lokalen Switch anlegen; erst nach
 vorheriger Prüfung nur die zusätzlichen CT-Interfaces einhängen,
-bestehende \`net0\` und Default-Routen nicht ändern. Jeweils
+bestehende `net0` und Default-Routen nicht ändern. Jeweils
 einmalige Erreichbarkeitstests zwischen LXC110 und Paperless
 aus der **echten Paperless-Podman-Anwendung**, inkl. gesonderter
 Prüfung, ob Podman-NAT den Gast-zu-Gast-Pfad beeinträchtigt.
@@ -156,7 +156,7 @@ und Paperless nach der Umstellung funktionieren und dass
 bp-controller/ungewollte LAN-Clients die alte IPv4- und IPv6-
 Endpunktverbindung **nicht** mehr aufbauen können. Ein gültiger
 host-/CT-seitiger Filter kann als Defense-in-Depth hinzukommen.
-Niemals \`OLLAMA_HOST=0.0.0.0\` oder \`[::]\` als endgültige
+Niemals `OLLAMA_HOST=0.0.0.0` oder `[::]` als endgültige
 Freigabe behandeln.
 
 **Phase 4 – Paperless-LLM-Katalogisierung:**
@@ -179,10 +179,10 @@ Service-Identitäten vorgesehen.
 
 ## Betriebsgrenzen
 
-- Kein Merge nach \`main\` bedeutet keine produktive Aktivierung.
-- \`ansible --check\` ist kein Ersatz für den kontrollierten
+- Kein Merge nach `main` bedeutet keine produktive Aktivierung.
+- `ansible --check` ist kein Ersatz für den kontrollierten
   Netzwerk-Rollback bei späteren Anwendungen.
 - Proxmox-Hostmanagement, Backup-NFS, LDAP, Paperless-SSO und
   bestehender Daten-/Internetpfad dürfen nicht unterbrochen werden.
-- \`bergen-syslog\` und andere künftige KI-Clients werden **nicht**
+- `bergen-syslog` und andere künftige KI-Clients werden **nicht**
   schon bei der Paperless-Einführung freigeschaltet.
