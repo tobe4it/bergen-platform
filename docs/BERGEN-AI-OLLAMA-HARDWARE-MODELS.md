@@ -498,6 +498,20 @@ residency/offload under known load.
 Do not reboot, re-stage, roll back or change Paperless for this
 successful smoke test. Keep RAG/indexing and document AI activation
 behind the separate Issue #113 / Draft PR #114 review gates.
+### Sustained throughput re-test added after two-token success
+
+The same separately approved `benchmark-bergen-ai-ollama-gpu-synthetic.yml`
+now runs a slightly longer **bounded** synthetic task: a numerical
+list from 1 to 300, capped at 192 generated tokens and 2048 context.
+The run is accepted as a useful throughput sample only if at least
+64 tokens were actually generated. It sends no Paperless documents,
+does not persist custom prompts or change any model/Proxmox settings,
+and refuses to load if the Ollama model cache is already occupied.
+The earlier result of 14.3 tokens/s (based on two tokens) remains
+documented as a smoke test and is **not** directly comparable with
+the forthcoming longer-run throughput. Runtime GPU allocation via
+`/api/ps` is reported again. If the synthetic task ends under 64
+tokens, the playbook fails conservatively without trying again.
 ## Step 2 – audit model download needs, still ZERO writes
 
     (
