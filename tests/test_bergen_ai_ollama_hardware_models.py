@@ -129,12 +129,23 @@ class OllamaHardwareTests(unittest.TestCase):
         self.assertNotIn("pct, reboot", text)
         self.assertNotIn("pct, stop", text)
 
+    def test_embedding_tag_is_canonical_and_default_but_rag_stays_off(self):
+        planner = PLAN.read_text()
+        installer = PULL.read_text()
+        self.assertIn('"bge-m3:latest": 2', planner)
+        self.assertIn("'bge-m3:latest'", installer)
+        self.assertNotIn("'bge-m3']", installer)
+        for text in (planner, installer):
+            self.assertNotIn("PAPERLESS_AI_ENABLED=true", text)
+            self.assertNotIn("PAPERLESS_AI_LLM_EMBEDDING_BACKEND", text)
+            self.assertNotIn("index_documents", text)
+
     def test_32b_is_only_with_separate_review_and_headroom(self):
         src = PLAN.read_text()
         self.assertIn('"qwen2.5:32b-instruct-q4_K_M": 22', src)
         self.assertIn('"qwen2.5:14b-instruct-q4_K_M": 10', src)
         self.assertIn('"mistral-nemo:12b": 8', src)
-        self.assertIn('"bge-m3": 2', src)
+        self.assertIn('"bge-m3:latest": 2', src)
         self.assertIn("not request.get(\"large_model_review\")", src)
         self.assertIn("+15", src)
         self.assertIn('not isinstance(models,list)', src)
