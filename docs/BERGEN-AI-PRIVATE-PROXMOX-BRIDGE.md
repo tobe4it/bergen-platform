@@ -197,6 +197,67 @@ Adressen sind nicht nachgewiesen. Deshalb meldet der Audit
 immer `FULL_NETWORK_CLEARANCE=NOT_PROVEN` und
 `APPLY_AUTHORIZED=False`. Es erfolgt keine Proxmox-Bridge-/
 LXC-NIC-Anlage, Routing-, Firewall- oder Ollama-Konfigurationsänderung.
+### Live-Ergebnis Phase 0b – 19.10.2026
+
+Der Betreiber hat die erweiterte Bestandsaufnahme ebenfalls erfolgreich
+durchgeführt (`ok=7`, `changed=0`, `failed=0`):
+
+```text
+STATUS=NO_OVERLAP_IN_SCANNED_DOMAINS
+BRIDGE_CANDIDATE=vmbr90
+SUBNET_CANDIDATE=172.30.110.0/28
+ALL_LXC_NETWORKS=NO_OVERLAP_IN_SCANNED_GUESTS
+LXC_TOTAL=16
+LXC_RUNNING=13
+LXC_STOPPED=3
+PAPERLESS_PODMAN=NO_OVERLAP_IN_SCANNED_NETWORKS
+BERGEN_AI_PODMAN=NO_OVERLAP_IN_SCANNED_NETWORKS
+PVE_HOST_DOCKER=NOT_INSTALLED
+FULL_NETWORK_CLEARANCE=NOT_PROVEN
+```
+
+Interpretation: Im dokumentierten Prüfumfang kollidiert weder ein
+untersuchtes LXC-Netz noch ein inventarisiertes Podman-Netz mit
+dem vorgeschlagenen /28. Die 3 gestoppten LXCs wurden anhand
+ihrer **statischen** `pct config`-Netzangaben erfasst, nicht
+über aktive Laufzeitinterfaces. Weitere Netzwerk-Namespaces und
+dynamisch vergebene IPs bleiben außerhalb des Nachweises.
+
+Der Betreiber hat zudem eine UniFi-Netzwerkliste vorgelegt;
+die darin sichtbaren IPv4-Subnetze liegen ausschließlich im
+Bereich `192.168.0.0/16` und überschneiden sich nicht mit
+`172.30.110.0/28`. Das ist eine Sichtprüfung der gezeigten
+UniFi-Netzwerke, keine vollständige IPAM- oder WireGuard-Prüfung.
+
+**Freigabestatus: Planung plausibel, produktiver Apply weiterhin
+gesperrt.** Folgende Nachweise fehlen vor dem Einrichten:
+
+1. Alle relevanten WireGuard-/Site-to-Site-/Remote-VPN-Netze
+   und `AllowedIPs` auf Konflikte gegen das /28 prüfen;
+   zusätzlich andere Hypervisoren, NAS und externe VM-Netze
+   in die IPAM-Prüfung einbeziehen.
+2. Für `venombox` eine wiederherstellbare Sicherung von
+   `/etc/network/interfaces` und `/etc/network/interfaces.d/`,
+   den aktuellen `pct config` von CT110/CT126 sowie den
+   Ollama- und Open-WebUI-Verbindungseinstellungen belegen.
+3. Einen funktionierenden Wiederherstellungszugang zum
+   PVE-Host und einen Rollback auch bei unerwartetem
+   Verlust der primären SSH-Verbindung nachweisen.
+4. Nach separater Freigabe zuerst nur die Bridge und
+   sekundären, gatewaylosen Interfaces anlegen; keine
+   Änderung an `net0`, bestehenden IPs oder Default-Routen.
+5. Ollama ausschließlich nach geprüftem Paperless-Podman
+   Positivtest auf die interne Adresse binden und
+   Open WebUI lokal weiterhin erreichbar halten.
+6. Die alte API-Erreichbarkeit vom bisher unautorisierten
+   `bp-controller` über IPv4 **und** IPv6 muss anschließend
+   negativ getestet und gegebenenfalls durch einen
+   expliziten Host-/LXC-Filter zusätzlich abgesichert werden.
+
+**Keine** der Phasen wird durch einen erfolgreichen
+Read-only-Audit automatisch autorisiert. Syslog CT120 erhält
+bei dieser Migration noch kein zusätzliches Interface.
+
 ## Nach dem Audit – gesondert freizugebende Phasen
 
 **Phase 1 – Sicherheits-/Rollback-Design:**
