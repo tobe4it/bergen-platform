@@ -1,0 +1,51 @@
+name: MX1 Cloud retirement read-only audit
+
+on:
+  push:
+    branches: [audit/mx1-nextcloud-retirement-20261019]
+  pull_request:
+    paths:
+      - 'ansible/playbooks/audit-mx1-nextcloud-retirement-readonly.yml'
+      - 'ansible/files/mail/audit_mx1_nextcloud_retirement.py'
+      - 'ansible/vars/mx1-nextcloud-retirement.local.yml.example'
+      - 'docs/MX1-NEXTCLOUD-RETIREMENT-READONLY.md'
+      - '.github/workflows/mx1-nextcloud-retirement-audit.yml'
+
+jobs:
+  readonly-syntax:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install Ansible
+        run: python3 -m pip install 'ansible-core>=2.16,<2.21'
+      - name: Syntax check
+        run: |
+          python3 -m py_compile ansible/files/mail/audit_mx1_nextcloud_retirement.py
+          ansible-playbook -i localhost, \
+            ansible/playbooks/audit-mx1-nextcloud-retirement-readonly.yml \
+            --syntax-check
+      - name: Assert audit has no mutating code paths
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import ast
+          import yaml
+          code = Path("ansible/files/mail/audit_mx1_nextcloud_retirement.py").read_text()
+          tree = ast.parse(code)
+          assert not any(isinstance(n, (ast.Delete, ast.Global)) for n in ast.walk(tree))
+          assert "subprocess.run(" in code
+          assert "stderr=subprocess.DEVNULL" in code
+          pb = yaml.safe_load(Path("ansible/playbooks/audit-mx1-nextcloud-retirement-readonly.yml").read_text())
+          forbidden = ["ansible.builtin.file", "ansible.builtin.copy",
+                       "ansible.builtin.template", "ansible.builtin.systemd",
+                       "ansible.builtin.service", "ansible.builtin.shell"]
+          for play in pb:
+              for task in play.get("tasks", []):
+                  assert not any(module in task for module in forbidden), task.get("name")
+          print("MX1_READ_ONLY_STATIC_AUDIT=PASS")
+          PY
