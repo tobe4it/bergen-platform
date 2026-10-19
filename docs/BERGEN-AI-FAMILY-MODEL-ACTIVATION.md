@@ -70,6 +70,45 @@ enthalten. Die bisherige Gültigkeit dieses Tokens ist nicht nachgewiesen;
 bei API_UNAVAILABLE_OR_DENIED zuerst seine Rotation prüfen, nicht
 am Berechtigungsmodell vorbei arbeiten.
 
+### Fehlender administrativer API-Schlüssel (Live-Befund 19.10.2026 22:21)
+
+Der Betreiber-Preflight wurde korrekt gestoppt:
+`VAULT_ADMIN_TOKEN_DEFINED=False`,
+`VAULT_ADMIN_TOKEN_MIN_LENGTH_OK=False`, alle sonstigen
+nichtgeheimen Voraussetzungen erfüllten das READ_ONLY-Gate.
+`PLAY RECAP: ok=1 changed=0 failed=1`. Es wurde weder eine
+Modell-API noch eine Gruppen-/Dokumentänderung ausgeführt.
+
+Der Name `vault_open_webui_admin_token` ist eine **separate**
+Ansible-Vault-Variable und nicht identisch mit einem Synology
+OIDC-Client-Secret oder dem Linux-Vault-Passwort. Ist er nicht
+vorhanden, lokal über einen bestehenden autorisierten Open-WebUI-
+Administrator einen API-Schlüssel beschaffen und in der bereits
+verschlüsselten Datei ergänzen:
+
+    cd "$HOME/bergen-platform"
+    ansible-vault edit --vault-id ai@prompt ansible/vars/ai-oidc.vault.yml
+
+Dort den Schlüssel als
+`vault_open_webui_admin_token: '<lokal-geheim-verwalteter-Schlüssel>'`
+ergänzen, ohne andere Schlüssel zu überschreiben.
+Nie auf Kommandozeile, in Chat, im Git oder im Ansible-Output offenlegen.
+
+Open WebUI stellt API-Schlüssel üblicherweise unter dem eigenen
+Administratorprofil **Settings → Account → API Keys** bereit.
+Wenn der Bereich fehlt, zuerst nur die effektive globale
+API-Key-Einstellung im Adminbereich prüfen. Ein notwendiges
+temporäres Einschalten muss vom Betreiber bewusst geprüft werden;
+**Default-API-Keys für Kinder/Regulärbenutzer bleiben ausgeschaltet**.
+Bei einem bestehenden API-Schlüssel kann eine Neuausstellung die
+alte Integration sofort ungültig machen. Aktive Secrets nach Abschluss
+des Rollouts sicher widerrufen/rotieren.
+
+Danach denselben Default-READ_ONLY-Playbooklauf wiederholen.
+`VAULT_ADMIN_TOKEN_DEFINED=True` belegt zunächst nur das Vorhandensein
+der Variablen, **nicht** die Wirksamkeit des API-Schlüssels. Das bestätigt
+erst der geschützte Admin-GET und der durchgehende STATUS=EMPTY_READY.
+
 READ_ONLY Audit (standardmäßig, keine Freigabe-Flags erforderlich):
 
     cd "$WT"
