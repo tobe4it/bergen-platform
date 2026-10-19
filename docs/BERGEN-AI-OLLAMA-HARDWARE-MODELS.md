@@ -69,6 +69,57 @@ Do NOT blindly assign 48 GiB on a 64-GB host running other LXCs.
 Use measured free RAM / ARC before a separate, maintenance-window
 increase to 24 or 32 GiB. Paperless normally requires no GPU.
 
+## Verified live hardware evidence: 2026-10-19
+
+User-run read-only audit completed with 7 successful tasks, changed=0:
+- Ryzen AI 9 HX 370 confirmed, 61,894 MiB host RAM / 49,919 MiB available.
+- LXC 110 16,384 MiB RAM, 2,048 MiB swap, **18 cores**, unprivileged;
+  GPU passthrough absent. The historical bergen-ai.yml says 8 cores:
+  avoid clobbering current production CPU configuration.
+- LXC 126 4,096 MiB RAM, 2 cores, unprivileged. Leave unchanged.
+- Host renderD128 char major/minor 226:128 GID 993;
+  host KFD char major/minor 511:0 GID 993.
+- Neither device currently appears inside LXC 110.
+- 74.8 GiB free model storage, five installed models, loopback API OK.
+
+### Stage GPU readiness separately, read-only
+
+Before touching resource configuration, use the new playbook:
+
+    (
+    set -euo pipefail
+    cd "$HOME/bergen-platform-ollama-hardware"
+    BASE="$HOME/bergen-platform"
+    "$BASE/.venv/bin/ansible-playbook" \
+      -i ansible/inventory.yml \
+      -i "$BASE/ansible/inventory.local.yml" \
+      ansible/playbooks/audit-bergen-ai-gpu-stage-readonly.yml \
+      --vault-id ai@prompt
+    )
+
+It validates that native PVE dev0/dev1 slots and the current memory baseline
+are unused, confirms actual Ollama UID and render GID inside the guest, and
+requires the already measured exact AMD host device major/minor values.
+
+The subsequent *independently approved* playbook is
+ansible/playbooks/stage-bergen-ai-ollama-gpu-resources.yml.
+It changes ONLY existing unprivileged LXC 110: native Proxmox dev0 for
+/dev/dri/renderD128, dev1 for /dev/kfd, each owned by the existing Ollama
+UID and guest render GID with permissions 0660; and RAM limit to 32 GiB.
+Unlike historical manual cgroup/idmap guides it never changes privileges,
+subgid or idmap. A root-only original LXC configuration is saved at
+/var/lib/bergen-platform-recovery/ollama-gpu/lxc110-pre-gpu.conf
+(0600, never overwritten). A partial failure requires manual review
+against this backup, NOT an unexamined container restart.
+
+Stage requires explicit bergen_ai_gpu_stage_approved=true and
+bergen_ai_gpu_stage_config_backup_approved=true, after the audit.
+It does **NOT** restart LXC 110; a separate scheduled outage and
+post-reboot device and GPU-inference checks are required. This change
+does not enable Paperless, embeddings, RAG or any new network listener.
+
+Native PVE device passthrough is documented at:
+https://github.com/proxmox/pve-docs/blob/master/generated/pct.1-synopsis.adoc
 ## Step 2 – audit model download needs, still ZERO writes
 
     (
