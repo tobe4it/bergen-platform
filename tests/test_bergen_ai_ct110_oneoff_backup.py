@@ -23,13 +23,22 @@ class BergenAiOneOffTest(TestCase):
             "unprivileged: 1\n"
             "rootfs: local-zfs:subvol-110-disk-0,size=36G\n"
             "net0: name=eth0,bridge=vmbr1\n"
+            "lxc.mount.entry: /dev/fuse dev/fuse none bind,optional,create=file\n"
         )
         self.assertEqual(a.guest_config(cfg, "status: running\n"),
                          "RUNNING_ROOTFS_ONLY")
         self.assertEqual(a.guest_config(cfg.replace("bergen-ai", "not-ai"), "status: running"),
                          "UNVERIFIED")
         self.assertEqual(a.guest_config(cfg, "status: stopped"), "UNVERIFIED")
+        self.assertEqual(a.guest_config(cfg.replace(
+            "lxc.mount.entry: /dev/fuse dev/fuse none bind,optional,create=file\n", ""),
+            "status: running"), "EXTRA_MOUNTS_REQUIRE_REVIEW")
+        self.assertEqual(a.guest_config(cfg.replace(
+            "bind,optional,create=file\n", "bind,optional,create=file 0 0\n"),
+            "status: running"), "RUNNING_ROOTFS_ONLY")
         self.assertEqual(a.guest_config(cfg + "mp0: /host/data,mp=/data\n",
+                                        "status: running"), "EXTRA_MOUNTS_REQUIRE_REVIEW")
+        self.assertEqual(a.guest_config(cfg.replace("/dev/fuse dev/fuse", "/etc/private dev/fuse"),
                                         "status: running"), "EXTRA_MOUNTS_REQUIRE_REVIEW")
         self.assertEqual(a.guest_config(cfg + "lxc.mount.entry: /x /y none bind 0 0\n",
                                         "status: running"), "EXTRA_MOUNTS_REQUIRE_REVIEW")
@@ -70,7 +79,9 @@ class BergenAiOneOffTest(TestCase):
             self.assertNotIn(forbidden, source)
 
     def test_anisble_preflight_has_no_write_operation(self):
-        play = yaml.safe_load(PREFLIGHT.read_text())[0]
+        playbooks = yaml.safe_load(PREFLIGHT.read_text())
+        self.assertEqual(playbooks[0]["import_playbook"], "audit-bergen-ai-ct110-persistent-data-readonly.yml")
+        play = playbooks[1]
         self.assertEqual(play["hosts"], "venombox")
         self.assertTrue(play["become"])
         self.assertFalse(play["gather_facts"])
@@ -80,6 +91,8 @@ class BergenAiOneOffTest(TestCase):
         self.assertFalse(commands[0]["changed_when"])
         self.assertFalse(commands[0]["failed_when"])
         self.assertIn("BACKUP_EXECUTED=False", PREFLIGHT.read_text())
+        self.assertIn("ct110_backup_ready:", PREFLIGHT.read_text())
+        self.assertIn("data_scope.STATUS == 'KNOWN_DATA_PATHS_IN_ROOTFS'", PREFLIGHT.read_text())
 
     def test_single_backup_has_explicit_separate_gates_and_no_prune(self):
         plays = yaml.safe_load(ONEOFF.read_text())
@@ -91,6 +104,8 @@ class BergenAiOneOffTest(TestCase):
         content = ONEOFF.read_text()
         self.assertIn("APPROVE_CT110_SNAPSHOT_BACKUP_ONCE", content)
         self.assertIn("ct110_preflight.SAFE_TO_ATTEMPT_SINGLE_BACKUP", content)
+        self.assertIn("ct110_backup_ready | bool", content)
+        self.assertIn("data_scope.PODMAN_NAMED_VOLUMES == 'NONE'", content)
         self.assertIn("SAFE_TO_ATTEMPT_SINGLE_BACKUP", content)
         self.assertIn("vzdump", content)
         self.assertIn("- snapshot", content)
