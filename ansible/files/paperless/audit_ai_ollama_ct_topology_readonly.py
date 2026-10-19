@@ -97,12 +97,16 @@ def classification(n1,n2):
     a=next(iter(n1.values()))
     b=next(iter(n2.values()))
     bridge=bool(a.get("bridge")) and bool(b.get("bridge"))
-    tag=(a.get("tag","UNTAGGED") == b.get("tag","UNTAGGED"))
+    # An absent explicit PVE VLAN tag means untagged on that bridge, NOT
+    # that two different bridges share the same effective VLAN.
+    tag_a, tag_b = a.get("tag"), b.get("tag")
+    tag = ("NOT_VERIFIED" if tag_a is None or tag_b is None else
+           ("YES" if tag_a == tag_b else "NO"))
     both_fw=a.get("firewall")=="1" and b.get("firewall")=="1"
     return {"NETS_LXC110":"ONE","NETS_LXC126":"ONE",
             "SAME_PVE_BRIDGE":"YES" if bridge and a["bridge"]==b["bridge"] else
                 ("NO" if bridge else "NOT_VERIFIED"),
-            "SAME_CONFIGURED_VLAN":"YES" if tag else "NO",
+            "SAME_CONFIGURED_VLAN":tag,
             "PVE_BOTH_NIC_FIREWALL_ENABLED":"YES" if both_fw else "NO"}
 
 
