@@ -564,7 +564,7 @@ and holds it for eight seconds **without sending HTTP**.
 The host inspects the single Ollama-side TCP peer while held,
 then confirms the test process finished. No addresses leave
 the sanitized task; its report classifies whether the observed
-peer matches the LXC126 address, the LXC126 local route,
+peer matches the LXC126 local route,
 the Podman local route or another private IPv4 address.
 Nonunique/missing/unexpected sockets fail conservatively
 without automatic retry. NAT mechanism is **not inferred**
@@ -590,9 +590,8 @@ git switch --detach origin/feat/paperless-native-ai-inbox-catalog-20261018
 ~~~
 
 `STATUS=SOURCE_OBSERVED` with
-`TCP_PEER_SOURCE_CLASS=MATCHES_LXC126_PRIVATE_ADDRESS`
-would support restricting port 11434 to the *LXC126
-egress identity*, not to Podman's private IP. A mismatch
+`TCP_PEER_SOURCE_CLASS=MATCHES_LXC126_ROUTE_SOURCE`
+would support using the *LXC126 routed egress identity* as the firewall allowlist source, subject to separate effective policy testing; never use Podman's internal private IP as a firewall source merely because it appears in its own namespace. A mismatch
 requires separate network/Podman NAT investigation before
 a firewall rule can be designed. Either way, the previous
 bp-controller **unapproved IPv4 and IPv6** connectivity
