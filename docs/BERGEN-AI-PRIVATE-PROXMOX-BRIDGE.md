@@ -677,3 +677,71 @@ Die Laufzeitabfrage erstellt **keine** Backups und ändert keine Timer,
 Proxmox-Gäste, Netzwerke, Systemeinstellungen oder Daten. Eine
 separate, explizit genehmigte Backup-Einrichtung und ein isolierter
 Restore-Nachweis sind weiterhin erforderlich. **Alle Apply-Gates gesperrt.**
+
+
+### Phase 0e – Live-Ergebnis (19.10.2026, 20:57 Europe/Berlin)
+
+Der Operator hat `audit-bergen-ai-ct110-backup-policy-readonly.yml`
+auf `venombox` ausgeführt: `ok=7 changed=0 failed=0 unreachable=0`.
+
+```text
+STATUS=POLICY_INVENTORY_ONLY
+CT110_ROOTFS=CONFIGURED
+CT110_EXTRA_MOUNTS=NONE
+CT110_EXTRA_MOUNT_BACKUP_FLAGS=NO_EXTRA_MOUNTS
+PVE_BACKUP_JOB_SELECTION=NO_MATCH_IN_VISIBLE_PVE_JOBS
+VISIBLE_PVE_BACKUP_JOB_COUNT=0
+OTHER_BACKUP_SYSTEMS=NOT_INSPECTED
+MOUNT_CONTENT_BACKUP=NOT_PROVEN
+CT110_BACKUP_SCHEDULE_EFFECTIVE=NOT_PROVEN
+ROLLBACK_CLEARANCE=NOT_PROVEN
+APPLY_AUTHORIZED=False
+```
+
+**Bewertung:** CT110 hat ein konfiguriertes LXC-Rootfs und keine
+weiteren in der Proxmox-LXC-Konfiguration aufgeführten `mpN`-Mounts.
+Die PVE-Cluster-API `/cluster/backup` meldet null sichtbare Jobs.
+Das belegt ausdrücklich **nicht**, dass es keine lokalen Systemd-/
+Cron-, Synology-, PBS- oder anderen Sicherungsmechanismen gibt.
+Die vorangegangene Phase 0d hatte in zwei Proxmox-sichtbaren
+Backup-Storages kein passendes klassisches CT110-Archiv nachgewiesen.
+Damit ist eine geprüfte Sicherung für die bevorstehende Netzänderung
+weiterhin **nicht belegt**.
+
+**Abgrenzung der bestehenden Paperless-Backup-Rolle:**
+`ansible/roles/proxmox_vzdump_backup` implementiert den gesondert
+freizugebenden Systemd-Backup-Timer für CT126. Dessen feste
+Sicherheitsannahmen (Gastidentität, `local-zfs`-Rootfs und
+separater `mp0` mit `backup=1`) passen nicht direkt auf CT110.
+Zudem verwendet dessen Service `vzdump --mode stop`, also
+einen Backup-Modus, der eine Betriebsunterbrechung beinhaltet.
+Weder Rolle noch Timer dürfen unverändert für CT110 aktiviert werden.
+
+**Plan vor einer CT110-Sicherung (gesonderte Freigabe):**
+
+1. In CT110 lesend prüfen, wo Ollama-Modelle, Open-WebUI-Daten,
+   Container-Volumes und SQLite/andere persistente Daten liegen;
+   auch innerhalb des Gasts eingehängte Dateisysteme und
+   Ausschlussregeln prüfen. `CT110_EXTRA_MOUNTS=NONE` allein
+   beweist keine vollständige Datensicherung.
+2. Die tatsächlichen Backup-Jobs außerhalb der PVE-Cluster-API
+   (Systemd-Timer, Cron, externe NAS-/PBS-Mechanismen) inventarisieren,
+   um eine Doppelplanung und konkurrierende Rotationen zu vermeiden.
+3. Das konkrete Host-Storage, freie Kapazität, NFS-Ziel, Zugriffsrechte
+   und temporären Ablageplatz prüfen. Kein `prune` oder `--remove 1`
+   ohne ausdrückliches Retention- und Schutzkonzept.
+4. Snapshot- und Stop-Mode anhand des CT110-Storage und der
+   notwendigen Applikationskonsistenz vergleichen. Ein Backup soll
+   nicht ohne Genehmigung einen Stop/Restart von Bergen-AI auslösen.
+5. Eine ausdrücklich freigegebene erste Sicherung als eigenes
+   Change-Ereignis vorsehen; deren Existenz, Vollständigkeit,
+   Archivintegrität und später ein **isolierter** Restore-Nachweis
+   sind gesonderte Freigabeschritte.
+6. Bestehende Paperless-Sicherungen unverändert lassen. Eine
+   CT110-Automatisierung benötigt einen unabhängig freizugebenden
+   Timer mit eigener Retention und nachgewiesenem Ausführungspfad.
+
+**Netzwerk-Apply bleibt ausgeschlossen:** Externe UniFi-/VPN-Netze,
+unabhängiger Proxmox-Konsolenzugriff, Konfigurations-Sicherungen und
+Anwendungs-/Restore-Freigaben fehlen weiterhin. `vmbr90`,
+LXC-`net1`, Ollama-Binding und Paperless bleiben unangetastet.
