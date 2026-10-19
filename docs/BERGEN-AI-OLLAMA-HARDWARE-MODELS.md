@@ -199,6 +199,93 @@ Do not set `ALLOW_BROKEN_CONDITIONALS`, do not repeat the stage
 operation, and do not restart LXC 110 until the corrected full
 read-only pre-restart audit returns `STATUS=EXACT_STAGE_ONLY`,
 `LXC110_RUNNING=YES` and `failed=0`.
+## Read-only staged audit PASSED on venombox (2026-10-19)
+
+Current reported status:
+
+    AUDIT=READ_ONLY
+    CHANGED=False
+    STATUS=EXACT_STAGE_ONLY
+    LXC110_MEMORY_STAGED=32768_MiB
+    LXC110_GPU_STAGED=RENDER_AND_KFD_WITH_UID_999_GID_992
+    LXC110_OTHER_CONFIG=UNCHANGED_FROM_PREIMAGE
+    LXC110_RUNNING=YES
+    RESTART_PERFORMED=NO
+    GPU_COMPUTE_VERIFIED=NO
+
+Play recap was `ok=9 changed=0 failed=0`. All guarded resource
+changes are staged, not yet proved active inside the guest.
+
+### Independently approved GPU maintenance reboot (downtime required)
+
+The additional playbook
+`ansible/playbooks/restart-bergen-ai-gpu-approved.yml` re-checks
+the exact protected full-configuration preimage (not just a device
+substring), insists the guest is already running, and requires TWO
+explicit acknowledgement flags for the LXC110 service interruption.
+It does NOT touch LXC126 or reboot the Proxmox host. Inference is not
+run by this playbook. On return it demands running LXC110, the exact
+character-device nodes and ownership/mode, `memory.max` 32GiB,
+the local Ollama service and API and all three new model tags.
+
+At a suitable maintenance window on bp-controller:
+
+    (
+    set -euo pipefail
+    BASE="$HOME/bergen-platform"
+    cd "$HOME/bergen-platform-ollama-hardware"
+    git fetch origin feat/bergen-ai-ollama-hardware-models-20261019
+    git switch --detach origin/feat/bergen-ai-ollama-hardware-models-20261019
+    "$BASE/.venv/bin/ansible-playbook" \
+      -i ansible/inventory.yml \
+      -i "$BASE/ansible/inventory.local.yml" \
+      ansible/playbooks/restart-bergen-ai-gpu-approved.yml \
+      --vault-id ai@prompt \
+      -e bergen_ai_gpu_reboot_approved=true \
+      -e bergen_ai_gpu_reboot_downtime_approved=true
+    )
+
+Expected: `STATUS=GPU_POSTBOOT_READY_FOR_SYNTHETIC_INFERENCE`,
+`GPU_COMPUTE_VERIFIED=NO`, no failures. The first approved
+reboot causes short local Ollama + Open WebUI downtime. Other
+services are not restarted.
+
+### Independent read-only GPU postboot verification
+
+If the reboot playbook succeeded, or to check afterward without
+a second reboot, run:
+
+    (
+    set -euo pipefail
+    BASE="$HOME/bergen-platform"
+    cd "$HOME/bergen-platform-ollama-hardware"
+    "$BASE/.venv/bin/ansible-playbook" \
+      -i ansible/inventory.yml \
+      -i "$BASE/ansible/inventory.local.yml" \
+      ansible/playbooks/audit-bergen-ai-gpu-postboot-readonly.yml \
+      --vault-id ai@prompt
+    )
+
+The result `STATUS=READY_FOR_SYNTHETIC_INFERENCE` proves the GPU
+nodes are accessible to the Ollama account, the local API is
+running and 32GiB LXC memory limit is effective. It does **not**
+prove that any model executed on GPU. Next: separately benchmark
+one tiny synthetic Ollama request while inspecting processor
+placement with `ollama ps` or `/api/ps`.
+
+### Failure discipline
+
+If the reboot or postboot audit fails, **do not rerun the reboot**.
+Do not run the pre-reboot rollback playbook after reboot has begun,
+because its approval text and assumptions are specifically
+pre-restart. Examine PVE task/runtime state and LXC110 service
+read-only; any subsequent stop/start or configuration changes
+are an incident-level operator decision. Retain the protected
+source configuration preimage and do not clobber unrelated LXC
+settings. In a failed guest-boot situation, recovery may require
+removing only the newly added GPU device nodes and returning the
+RAM limit to 16GiB, followed by a reviewed restart, but not an
+automatic blind rollback.
 ## Step 2 – audit model download needs, still ZERO writes
 
     (
