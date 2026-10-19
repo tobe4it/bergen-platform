@@ -1,0 +1,88 @@
+---
+# Read-only: compare live local WireGuard peer AllowedIPs to proposed /28.
+# No tunnel changes. No raw addresses, peer IDs, keys or config contents emitted.
+- name: Inspect local WireGuard candidate subnet conflicts without changes
+  hosts: venombox
+  become: true
+  gather_facts: false
+  tasks:
+    - name: Require verified Proxmox inventory host
+      ansible.builtin.assert:
+        that:
+          - inventory_hostname == 'venombox'
+        fail_msg: WRONG_PROXMOX_HOST
+
+    - name: Inspect only active WG AllowedIPs on host and AI client guests
+      ansible.builtin.command:
+        argv:
+          - python3
+          - -c
+          - "{{ lookup('ansible.builtin.file', playbook_dir ~ '/../files/bergen_ai/audit_private_bridge_wg_prefixes_readonly.py', rstrip=False) }}"
+      register: ai_bridge_wg_raw
+      changed_when: false
+      failed_when: false
+      check_mode: false
+      no_log: true
+
+    - name: Extract only the one bounded sanitized frame
+      ansible.builtin.set_fact:
+        ai_bridge_wg_frames: >-
+          {{ ai_bridge_wg_raw.stdout_lines | default([]) |
+             select('match', '^BERGEN_AI_BRIDGE_WG_PREFLIGHT_V1:') | list }}
+      no_log: true
+
+    - name: Reject absent duplicate or oversized result
+      ansible.builtin.assert:
+        that:
+          - ai_bridge_wg_raw.rc == 0
+          - ai_bridge_wg_frames | length == 1
+          - ai_bridge_wg_frames[0] | length < 1400
+        fail_msg: PRIVATE_BRIDGE_WG_RESULT_UNVERIFIED
+      no_log: true
+
+    - name: Decode sanitized WG prefix overlap classifications
+      ansible.builtin.set_fact:
+        ai_bridge_wg: >-
+          {{ (ai_bridge_wg_frames[0] |
+              regex_replace('^BERGEN_AI_BRIDGE_WG_PREFLIGHT_V1:', '')) | from_json }}
+      no_log: true
+
+    - name: Assert read only and never infer VPN clearance
+      ansible.builtin.assert:
+        that:
+          - ai_bridge_wg.AUDIT == 'READ_ONLY'
+          - not ai_bridge_wg.CHANGED
+          - ai_bridge_wg.BRIDGE_CANDIDATE == 'vmbr90'
+          - ai_bridge_wg.STATUS in ['OVERLAP_FOUND','INCOMPLETE','NO_OVERLAP_IN_INSPECTED_LIVE_WG_PEERS']
+          - ai_bridge_wg.WG_HOST in ['NOT_INSTALLED','NO_ACTIVE_PEER_PREFIXES','NO_OVERLAP_IN_ACTIVE_PEERS','OVERLAP_FOUND','UNVERIFIED']
+          - ai_bridge_wg.WG_LXC110 in ['NOT_INSTALLED','NO_ACTIVE_PEER_PREFIXES','NO_OVERLAP_IN_ACTIVE_PEERS','OVERLAP_FOUND','UNVERIFIED']
+          - ai_bridge_wg.WG_LXC126 in ['NOT_INSTALLED','NO_ACTIVE_PEER_PREFIXES','NO_OVERLAP_IN_ACTIVE_PEERS','OVERLAP_FOUND','UNVERIFIED']
+          - ai_bridge_wg.WG_LXC120 in ['NOT_INSTALLED','NO_ACTIVE_PEER_PREFIXES','NO_OVERLAP_IN_ACTIVE_PEERS','OVERLAP_FOUND','UNVERIFIED']
+          - ai_bridge_wg.FULL_NETWORK_CLEARANCE == 'NOT_PROVEN'
+          - not ai_bridge_wg.APPLY_AUTHORIZED
+          - ai_bridge_wg.INACTIVE_WG_TUNNELS == 'NOT_INSPECTED'
+          - ai_bridge_wg.REMOTE_WG_PEERS_AND_SITES == 'NOT_INSPECTED'
+          - ai_bridge_wg.NETWORK_CHANGES == 'NONE'
+        fail_msg: PRIVATE_BRIDGE_WG_AUDIT_INVALID
+      no_log: true
+
+    - name: Report prefix conflicts without WireGuard keys or real routes
+      ansible.builtin.debug:
+        msg:
+          - AUDIT=READ_ONLY
+          - CHANGED=False
+          - "STATUS={{ ai_bridge_wg.STATUS }}"
+          - "BRIDGE_CANDIDATE={{ ai_bridge_wg.BRIDGE_CANDIDATE }}"
+          - "SUBNET_CANDIDATE={{ ai_bridge_wg.SUBNET_CANDIDATE }}"
+          - "WG_HOST={{ ai_bridge_wg.WG_HOST }}"
+          - "WG_LXC110={{ ai_bridge_wg.WG_LXC110 }}"
+          - "WG_LXC126={{ ai_bridge_wg.WG_LXC126 }}"
+          - "WG_LXC120={{ ai_bridge_wg.WG_LXC120 }}"
+          - INACTIVE_WG_TUNNELS=NOT_INSPECTED
+          - REMOTE_WG_PEERS_AND_SITES=NOT_INSPECTED
+          - OTHER_VPN_TECHNOLOGIES=NOT_INSPECTED
+          - FULL_NETWORK_CLEARANCE=NOT_PROVEN
+          - NETWORK_CHANGES=NONE
+          - OLLAMA_CHANGED=NO
+          - PAPERLESS_CHANGED=NO
+          - NEXT_ACTION=REVIEW_REMOTE_VPN_IPAM_AND_FAILSAFE_ROLLBACK
