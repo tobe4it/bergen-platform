@@ -19,6 +19,8 @@ FIREWALL_SCRIPT = ROOT / "ansible/files/paperless/audit_ai_catalog_ollama_firewa
 FIREWALL_PLAY = ROOT / "ansible/playbooks/audit-paperless-ai-ollama-firewall-readonly.yml"
 RUNTIME_FILTER_SCRIPT = ROOT / "ansible/files/paperless/audit_ai_catalog_ollama_runtime_filter_readonly.py"
 RUNTIME_FILTER_PLAY = ROOT / "ansible/playbooks/audit-paperless-ai-ollama-runtime-filter-readonly.yml"
+NEGATIVE_PROBE_SCRIPT = ROOT / "ansible/files/paperless/audit_ai_ollama_bp_controller_negative_readonly.py"
+NEGATIVE_PROBE_PLAY = ROOT / "ansible/playbooks/audit-paperless-ai-ollama-negative-client-readonly.yml"
 
 
 def load_policy():
@@ -183,6 +185,41 @@ class CatalogPolicyTest(unittest.TestCase):
         self.assertIn("StandardError=null", unit)
         timer_spec = (ROOT / "ansible/files/paperless/bergen-ai-catalog.timer").read_text()
         self.assertIn("OnCalendar=*:0/5", timer_spec)
+
+    def test_approved_client_negative_probe_is_one_connect_only(self):
+        script=NEGATIVE_PROBE_SCRIPT.read_text()
+        ast.parse(script,filename=str(NEGATIVE_PROBE_SCRIPT))
+        playtext=NEGATIVE_PROBE_PLAY.read_text()
+        self.assertIn('11434',script)
+        self.assertIn('def tcp_11434(',script)
+        self.assertIn('sock.connect_ex((str(dest),11434))',script)
+        self.assertIn('SOCK_STREAM',script)
+        self.assertIn('def local_ipv4_contains(',script)
+        self.assertIn('BP_CONTROLLER_ONLY',script)
+        self.assertIn('TARGET_DISCOVERED',script)
+        self.assertIn('EXTERNAL_CLIENT_ACCESS',script)
+        self.assertIn('NO_TARGET_ADDRESS',script)
+        for forbidden in ('/api/tags', '/api/generate', '/api/chat',
+                          'nft add','nft insert','iptables -A',
+                          'pct reboot','pct set','systemctl restart',
+                          'ollama run','ollama pull','document.content'):
+            self.assertNotIn(forbidden,script)
+        play=yaml.safe_load(playtext)[0]
+        self.assertEqual(play['hosts'],'venombox')
+        self.assertFalse(play['gather_facts'])
+        self.assertIn('bergen_ai_negative_probe_approved',playtext)
+        self.assertIn('delegate_to: bp-controller',playtext)
+        self.assertIn("bp_ai_negative_discovery.IPV4 == hostvars['bergen-ai'].ansible_host",playtext)
+        self.assertIn('EXPOSURE_GATE=REVIEW_REQUIRED',playtext)
+        cmds=[x for x in play['tasks'] if 'ansible.builtin.command' in x]
+        self.assertEqual(len(cmds),2)
+        for task in cmds:
+            self.assertTrue(task['no_log'])
+            self.assertFalse(task['changed_when'])
+            self.assertFalse(task['failed_when'])
+        for task in play['tasks']:
+            for condition in task.get('ansible.builtin.assert',{}).get('that',[]):
+                self.assertIsInstance(condition,str)
 
     def test_runtime_firewall_probe_exposes_only_aggregate_rule_and_ipv6_status(self):
         src=RUNTIME_FILTER_SCRIPT.read_text()
