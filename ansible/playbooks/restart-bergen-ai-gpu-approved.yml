@@ -1,0 +1,124 @@
+---
+# Explicitly approved downtime for EXISTING LXC 110 only.
+# No other CT, host, Paperless, application config, model or network changes.
+# If postboot verification fails, STOP and investigate: NO automatic rollback.
+- name: Restart staged Bergen-AI LXC110 in independent maintenance window
+  hosts: venombox
+  become: true
+  gather_facts: false
+  tasks:
+    - name: Require operator approval for LXC110 outage, exact host and apply mode
+      ansible.builtin.assert:
+        that:
+          - inventory_hostname == 'venombox'
+          - not ansible_check_mode
+          - bergen_ai_gpu_reboot_approved | default(false) | bool
+          - bergen_ai_gpu_reboot_downtime_approved | default(false) | bool
+        fail_msg: GPU_REBOOT_REQUIRES_EXPLICIT_DOWNTIME_APPROVAL
+      no_log: true
+
+    - name: Refuse reboot unless exact staged LXC config equals protected preimage plus approved differences
+      ansible.builtin.command:
+        argv:
+          - python3
+          - -c
+          - "{{ lookup('ansible.builtin.file', playbook_dir ~ '/../files/bergen_ai/audit_ollama_gpu_rollback_readonly.py', rstrip=False) }}"
+      register: bergen_gpu_reboot_pre_raw
+      changed_when: false
+      failed_when: false
+      no_log: true
+
+    - name: Extract bounded and unique pre-reboot audit result
+      ansible.builtin.set_fact:
+        bergen_gpu_reboot_frames: >-
+          {{ bergen_gpu_reboot_pre_raw.stdout_lines |
+             default([]) |
+             select('match', '^BERGEN_AI_GPU_ROLLBACK_V1:') | list }}
+      no_log: true
+
+    - name: Require successful exact-preimage comparison
+      ansible.builtin.assert:
+        that:
+          - bergen_gpu_reboot_pre_raw.rc == 0
+          - bergen_gpu_reboot_frames | length == 1
+          - bergen_gpu_reboot_frames[0] | length < 900
+        fail_msg: GPU_REBOOT_BLOCKED_BY_CONFIG_DRIFT
+      no_log: true
+
+    - name: Decode exact pre-restart LXC staged state
+      ansible.builtin.set_fact:
+        bergen_gpu_reboot_stage: >-
+          {{ (bergen_gpu_reboot_frames[0] |
+             regex_replace('^BERGEN_AI_GPU_ROLLBACK_V1:', '')) | from_json }}
+      no_log: true
+
+    - name: Require unchanged approved GPU stage only
+      ansible.builtin.assert:
+        that:
+          - bergen_gpu_reboot_stage.AUDIT == 'READ_ONLY'
+          - not bergen_gpu_reboot_stage.CHANGED
+          - bergen_gpu_reboot_stage.STATUS == 'EXACT_STAGE_ONLY'
+          - bergen_gpu_reboot_stage.RESTORE_MEMORY_MIB == 16384
+          - bergen_gpu_reboot_stage.DEVICES_TO_REMOVE == ['dev0', 'dev1']
+        fail_msg: GPU_REBOOT_UNREVIEWED_STAGE
+      no_log: true
+
+    - name: Require existing Bergen-AI LXC110 still running before restart
+      ansible.builtin.command:
+        argv: [pct, status, '110']
+      register: bergen_gpu_reboot_status
+      changed_when: false
+      no_log: true
+
+    - name: Refuse stopped or unrecognized runtime
+      ansible.builtin.assert:
+        that:
+          - bergen_gpu_reboot_status.rc == 0
+          - "bergen_gpu_reboot_status.stdout | trim == 'status: running'"
+        fail_msg: GPU_REBOOT_TARGET_NOT_RUNNING
+      no_log: true
+
+    - name: Restart ONLY Bergen-AI LXC110 to apply PVE GPU device assignments
+      ansible.builtin.command:
+        argv: [pct, reboot, '110']
+      async: 240
+      poll: 5
+      changed_when: true
+      no_log: true
+
+    - name: Wait for verified running guest and local Ollama GPU readiness without additional changes
+      ansible.builtin.command:
+        argv:
+          - python3
+          - -c
+          - "{{ lookup('ansible.builtin.file', playbook_dir ~ '/../files/bergen_ai/audit_ollama_gpu_postboot_readonly.py', rstrip=False) }}"
+      register: bergen_ai_reboot_post_raw
+      changed_when: false
+      failed_when: false
+      until:
+        - bergen_ai_reboot_post_raw.rc == 0
+        - "'\"STATUS\": \"READY_FOR_SYNTHETIC_INFERENCE\"' in bergen_ai_reboot_post_raw.stdout"
+      retries: 24
+      delay: 5
+      no_log: true
+
+    - name: Refuse partially recovered LXC110; never automatically rewrite config
+      ansible.builtin.assert:
+        that:
+          - bergen_ai_reboot_post_raw.rc == 0
+          - "'\"STATUS\": \"READY_FOR_SYNTHETIC_INFERENCE\"' in bergen_ai_reboot_post_raw.stdout"
+        fail_msg: GPU_REBOOT_POSTBOOT_NOT_READY_MANUAL_RECOVERY_REQUIRED
+      no_log: true
+
+    - name: Verify GPU mapping active and Ollama loopback healthy; inference still untested
+      ansible.builtin.debug:
+        msg:
+          - STATUS=GPU_POSTBOOT_READY_FOR_SYNTHETIC_INFERENCE
+          - LXC110_RESTARTED=YES
+          - LXC110_UNPRIVILEGED=YES
+          - LXC110_32G_CGROUP=YES
+          - DEVICE_RENDER_AND_KFD=VERIFIED
+          - OLLAMA_API=LOCAL_OK
+          - ADDITIONAL_MODELS=QWEN14_MISTRAL12_BGE_M3_PRESENT
+          - GPU_COMPUTE_VERIFIED=NO
+          - PAPERLESS_LXC126_CHANGED=NO
