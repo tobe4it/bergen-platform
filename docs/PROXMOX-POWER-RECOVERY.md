@@ -64,6 +64,24 @@ For physical model confirmation without sending serial numbers, the CPU model ca
 
 **No software-only path is guaranteed to recover the host after full AC loss** until either the exact BIOS recovery policy is confirmed or Wake-on-LAN recovery across G3 is empirically demonstrated.
 
+## Read-only NIC audit, 2026-10-19
+
+Most recent execution after introducing NIC discovery: `ok=22 changed=0 unreachable=0 failed=0 skipped=4`. Detected physical interfaces:
+- `enp195s0`: wired Ethernet, the principal Wake-on-LAN candidate.
+- `wlp194s0`: wireless interface; do not assume wired WoL support from Wi-Fi detection.
+- `ethtool`: installed.
+
+**Not yet determined:** the previous final summary displayed only interface names and the presence of `ethtool`, **not** the `Supports Wake-on` and `Wake-on` modes. A subsequent change exposes those values and Ethernet driver identity in the same final summary; this change has **not** yet been run on the host.
+
+Decision criteria:
+- `supported` containing `g` means the NIC/driver advertises Magic Packet wake.
+- `enabled: g` means it is armed in the current running system.
+- `enabled: d` means Wake-on-LAN is disabled.
+- `supported: d` or missing `g` is not a promising Linux WoL path.
+- Even `enabled: g` does **not** establish successful wake from loss of mains (ACPI G3). Firmware, standby power, link recovery, and independent packet delivery all matter.
+
+Run the updated read-only audit from the existing `bp-controller` worktree and inspect `Wake-on-LAN capabilities` in the final result. Do not enable WoL or schedule a Synology wake job before checking those readings and network reachability.
+
 ## Decision after audit
 
 - **fwupd supports an AC-recovery key:** establish the precise setting name and firmware-accepted `Power On` value; introduce a separately approved idempotent setter.
