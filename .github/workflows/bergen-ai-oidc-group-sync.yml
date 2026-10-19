@@ -6,6 +6,9 @@ on:
       - 'ansible/files/bergen_ai/manage_oidc_group_sync_v0102.py'
       - 'ansible/playbooks/manage-bergen-ai-oidc-group-sync.yml'
       - 'ansible/playbooks/manage-bergen-ai-oidc-group-sync-env.yml'
+      - 'ansible/playbooks/audit-bergen-ai-oidc-effective-runtime-readonly.yml'
+      - 'ansible/files/bergen_ai/audit_oidc_effective_runtime_v0102.py'
+      - 'tests/test_bergen_ai_oidc_effective_runtime_readonly.py'
       - 'ansible/playbooks/configure-open-webui-oidc.yml'
       - 'ansible/templates/open-webui/oidc.env.j2'
       - 'tests/test_bergen_ai_oidc_group_sync_env.py'
@@ -29,8 +32,10 @@ jobs:
         run: |
           python -m unittest discover -s tests -p 'test_bergen_ai_oidc_group_sync.py' -v
           python -m unittest discover -s tests -p 'test_bergen_ai_oidc_group_sync_env.py' -v
+          python -m unittest discover -s tests -p 'test_bergen_ai_oidc_effective_runtime_readonly.py' -v
       - name: Validate production playbook syntax
         run: |
           ansible-playbook -i ansible/inventory.yml ansible/playbooks/manage-bergen-ai-oidc-group-sync.yml --syntax-check
           ansible-playbook -i ansible/inventory.yml ansible/playbooks/manage-bergen-ai-oidc-group-sync-env.yml --syntax-check
+          ansible-playbook -i ansible/inventory.yml ansible/playbooks/audit-bergen-ai-oidc-effective-runtime-readonly.yml --syntax-check
           ansible-playbook -i ansible/inventory.yml ansible/playbooks/configure-open-webui-oidc.yml --syntax-check
