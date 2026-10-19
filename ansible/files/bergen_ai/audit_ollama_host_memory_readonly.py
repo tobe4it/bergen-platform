@@ -53,7 +53,9 @@ def hierarchy(cgroup_path, root=ROOT):
     if not (resolved_root / "cgroup.controllers").is_file():
         raise ValueError("NOT_CGROUP_V2")
     values = []
-    while True:
+    # cgroup-v2 host ROOT normally has no resource-control files:
+    # memory.max exists only on non-root cgroups, so don't demand it at ROOT.
+    while node != root:
         file = node / "memory.max"
         if not file.is_file():
             raise ValueError("MEMORY_MAX_MISSING")
@@ -64,8 +66,6 @@ def hierarchy(cgroup_path, root=ROOT):
             values.append(int(raw))
         else:
             raise ValueError("MEMORY_MAX_UNRECOGNIZED")
-        if node == root:
-            break
         node = node.parent
     return values
 
