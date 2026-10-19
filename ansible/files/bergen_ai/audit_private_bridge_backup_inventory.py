@@ -14,7 +14,7 @@ FRAME = "BERGEN_AI_BRIDGE_BACKUP_INVENTORY_V1:"
 NODE = "venombox"
 TARGETS = ("110", "126")
 BACKUP_BASENAME = re.compile(
-    r"^vzdump-lxc-(110|126)-[0-9]{4}_[0-9]{2}_[0-9]{2}-[0-9]{2}_[0-9]{2}_[0-9]{2}\\.tar(?:\\.(?:zst|gz|lzo))?$"
+    r"^vzdump-lxc-(110|126)-[0-9]{4}_[0-9]{2}_[0-9]{2}-[0-9]{2}_[0-9]{2}_[0-9]{2}\.tar(?:\.(?:zst|gz|lzo))?$"
 )
 STORAGE_NAME = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
 MAX_STORES = 24
