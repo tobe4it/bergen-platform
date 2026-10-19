@@ -13,7 +13,7 @@ import re
 import subprocess
 
 FRAME = "BERGEN_AI_PRIVATE_BRIDGE_PREFLIGHT_V1:"
-BRIDGE = "vmbr10"
+BRIDGE = "vmbr90"
 CANDIDATE = ipaddress.ip_network("172.30.110.0/28")
 GUESTS = (("110", "bergen-ai"), ("126", "bergen-paperless"), ("120", "bergen-syslog"))
 MAX_BYTES = 180000
@@ -166,7 +166,7 @@ def classification(results):
 
 def emit(**data):
     print(FRAME + json.dumps(dict(
-        AUDIT="READ_ONLY", CHANGED=False, BRIDGE_CANDIDATE="vmbr10",
+        AUDIT="READ_ONLY", CHANGED=False, BRIDGE_CANDIDATE="vmbr90",
         SUBNET_CANDIDATE="PROPOSAL_ONLY_172.30.110.0_28",
         PRIVATE_NET_DESIGN="NO_UPLINK_NO_HOST_IP_NO_DEFAULT_GATEWAY",
         NETWORK_CHANGES="NONE", FIREWALL_CHANGES="NONE",
