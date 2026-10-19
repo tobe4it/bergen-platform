@@ -160,8 +160,18 @@
           - "'unprivileged: 1' in bergen_gpu_staged_config.stdout_lines"
           - "'hostname: bergen-ai' in bergen_gpu_staged_config.stdout_lines"
           - "'memory: 32768' in bergen_gpu_staged_config.stdout_lines"
-          - "'dev0: /dev/dri/renderD128' in bergen_gpu_staged_config.stdout"
-          - "'dev1: /dev/kfd' in bergen_gpu_staged_config.stdout"
+          - >-
+            ('dev0: path=/dev/dri/renderD128,uid=' ~
+            (bergen_gpu_stage.GUEST_OLLAMA_UID | string) ~
+            ',gid=' ~
+            (bergen_gpu_stage.GUEST_RENDER_GID | string) ~
+            ',mode=0660') in bergen_gpu_staged_config.stdout_lines
+          - >-
+            ('dev1: path=/dev/kfd,uid=' ~
+            (bergen_gpu_stage.GUEST_OLLAMA_UID | string) ~
+            ',gid=' ~
+            (bergen_gpu_stage.GUEST_RENDER_GID | string) ~
+            ',mode=0660') in bergen_gpu_staged_config.stdout_lines
         fail_msg: GPU_STAGE_INCOMPLETE_REVIEW_RECOVERY_PREIMAGE
       no_log: true
 
