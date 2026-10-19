@@ -17,6 +17,8 @@ PRIVATE_PATH_SCRIPT = ROOT / "ansible/files/paperless/audit_ai_catalog_private_o
 PRIVATE_PATH_PLAY = ROOT / "ansible/playbooks/audit-paperless-ai-ollama-private-path-readonly.yml"
 FIREWALL_SCRIPT = ROOT / "ansible/files/paperless/audit_ai_catalog_ollama_firewall_readonly.py"
 FIREWALL_PLAY = ROOT / "ansible/playbooks/audit-paperless-ai-ollama-firewall-readonly.yml"
+RUNTIME_FILTER_SCRIPT = ROOT / "ansible/files/paperless/audit_ai_catalog_ollama_runtime_filter_readonly.py"
+RUNTIME_FILTER_PLAY = ROOT / "ansible/playbooks/audit-paperless-ai-ollama-runtime-filter-readonly.yml"
 
 
 def load_policy():
@@ -181,6 +183,59 @@ class CatalogPolicyTest(unittest.TestCase):
         self.assertIn("StandardError=null", unit)
         timer_spec = (ROOT / "ansible/files/paperless/bergen-ai-catalog.timer").read_text()
         self.assertIn("OnCalendar=*:0/5", timer_spec)
+
+    def test_runtime_firewall_probe_exposes_only_aggregate_rule_and_ipv6_status(self):
+        src=RUNTIME_FILTER_SCRIPT.read_text()
+        ast.parse(src, filename=str(RUNTIME_FILTER_SCRIPT))
+        playtext=RUNTIME_FILTER_PLAY.read_text()
+        for token in ('"nft","-j","list","ruleset"',
+                      'iptables-save','ip6tables-save',
+                      '"pct","exec","110","--","python3","-c",GUEST',
+                      '"ss","-H","-ltn4"', '"ss","-H","-ltn6"',
+                      'EXPOSURE_GATE="REVIEW_REQUIRED"',
+                      'EFFECTIVE_TCP_11434_DENY="NOT_VERIFIED"'):
+            self.assertIn(token,src)
+        for forbidden in ("nft add", "nft insert","iptables -A","ip6tables -A",
+                          "pct reboot", "pct set", "systemctl restart",
+                          "/api/generate", "/api/chat", "ollama run","ollama pull",
+                          "document.content", "document.title"):
+            self.assertNotIn(forbidden,src)
+        self.assertIn('EXPOSURE_GATE=REVIEW_REQUIRED',playtext)
+        self.assertIn('UNIFI_POLICY=NOT_INSPECTED',playtext)
+        play=yaml.safe_load(playtext)[0]
+        self.assertEqual(play["hosts"],"venombox")
+        self.assertFalse(play["gather_facts"])
+        commands=[x for x in play["tasks"] if "ansible.builtin.command" in x]
+        self.assertEqual(len(commands),1)
+        self.assertTrue(commands[0]["no_log"])
+        self.assertFalse(commands[0]["changed_when"])
+        for task in play["tasks"]:
+            for condition in task.get("ansible.builtin.assert",{}).get("that",[]):
+                self.assertIsInstance(condition,str)
+
+    def test_runtime_nft_inspection_is_not_security_proof(self):
+        from unittest import mock
+        spec=importlib.util.spec_from_file_location(
+            "bergen_ai_runtime_filter",RUNTIME_FILTER_SCRIPT
+        )
+        mod=importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        sample_json=json.dumps({"nftables":[
+            {"table":{"family":"inet","name":"sample"}},
+            {"chain":{"family":"inet","table":"sample","name":"input","hook":"input","policy":"accept"}},
+            {"rule":{"family":"inet","table":"sample","chain":"input",
+                     "expr":[{"match":{"left":{"payload":{"protocol":"tcp","field":"dport"}},
+                                       "op":"==","right":11434}},
+                             {"accept":None}]}},
+            {"rule":{"family":"inet","table":"sample","chain":"input",
+                     "expr":[{"match":{"left":{"meta":{"key":"iifname"}},"op":"==",
+                                       "right":"veth110i0"}}]}}
+        ]})
+        with mock.patch.object(mod,"run",return_value=sample_json):
+            self.assertEqual(mod.nft_inspect(),("LOADED","1","1","PRESENT"))
+        with mock.patch.object(mod,"run",return_value=None):
+            self.assertEqual(mod.nft_inspect(),(
+                "UNAVAILABLE","UNVERIFIED","UNVERIFIED","UNVERIFIED"))
 
     def test_ollama_firewall_inventory_reports_evidence_not_effective_allow(self):
         source=FIREWALL_SCRIPT.read_text()
