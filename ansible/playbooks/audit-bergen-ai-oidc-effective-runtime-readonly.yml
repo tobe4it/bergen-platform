@@ -1,6 +1,6 @@
 ---
-# Verify the *effective* Open WebUI v0.10.2 OAuth runtime values without an
-# admin API token. Environment checks alone are insufficient. Never print
+# Review the running container OIDC environment as a source of configuration without an
+# admin API token. It CANNOT attest to the in-process memory defaults. Never print
 # IdP tokens, individual/group names, OAuth secrets, or user identifiers.
 - name: Audit effective Open WebUI OAuth group authorization in live container
   hosts: bergen-ai
@@ -84,7 +84,7 @@
             }}
       changed_when: false
 
-    - name: Refuse runtime interpreter problems before processing OAuth configuration
+    - name: Refuse container Python failures before reading environment source
       ansible.builtin.assert:
         that:
           - bp_oidc_python_exec.rc == 0
@@ -94,7 +94,7 @@
         fail_msg: CONTAINER_PYTHON_EXEC_OR_MODULE_UNAVAILABLE
       no_log: true
 
-    - name: Read same Open WebUI effective OAuth runtime resolver as the callback
+    - name: Audit Open WebUI v0.10.2 environment source with standard-library Python
       ansible.builtin.command:
         argv:
           - podman
@@ -125,10 +125,10 @@
           - "STATUS_FRAME_COUNT={{ bp_oidc_effective_frames | length }}"
           - >-
             FAILURE_CATEGORY={{
-              'MODULE_IMPORT_FAILED'
+              'OAUTH_PERSISTENCE_NOT_COVERED'
               if (bp_oidc_effective_frames | length == 1 and
                   '"STATUS": "MODULE_IMPORT_FAILED"' in bp_oidc_effective_frames[0])
-              else 'RUNTIME_CONFIG_RESOLUTION_FAILED'
+              else 'BLOCKED_GROUPS_FORMAT_UNREVIEWED'
               if (bp_oidc_effective_frames | length == 1 and
                   '"STATUS": "RUNTIME_CONFIG_RESOLUTION_FAILED"' in bp_oidc_effective_frames[0])
               else 'UNEXPECTED_RUNTIME_FAILURE'
@@ -139,7 +139,7 @@
       changed_when: false
       when: bp_oidc_effective_raw.rc != 0 or bp_oidc_effective_frames | length != 1
 
-    - name: Reject failed imports, duplicate frames and unsafe output
+    - name: Reject missing frames, nonzero exit and unsafe output
       ansible.builtin.assert:
         that:
           - bp_oidc_effective_raw.rc == 0
@@ -159,12 +159,15 @@
     - name: Require read-only status with non-secret allowlisted categories
       ansible.builtin.assert:
         that:
+          - bp_oidc_effective.CONFIG_BASIS == 'RUNNING_CONTAINER_ENV_V0_10_2'
+          - bp_oidc_effective.IN_PROCESS_EFFECTIVE_CONFIG == 'NOT_MEASURED'
+          - bp_oidc_effective.PERSISTENT_OAUTH_CONFIG == 'OFF'
           - bp_oidc_effective.AUDIT == 'READ_ONLY'
           - bp_oidc_effective.CHANGED == false
           - bp_oidc_effective.GROUP_MANAGEMENT_ENV in ['ON', 'OFF']
-          - bp_oidc_effective.GROUP_MANAGEMENT_EFFECTIVE in ['ON', 'OFF']
-          - bp_oidc_effective.GROUP_CREATION_EFFECTIVE in ['ON', 'OFF']
-          - bp_oidc_effective.ROLE_MANAGEMENT_EFFECTIVE in ['ON', 'OFF']
+          - bp_oidc_effective.GROUP_MANAGEMENT_SOURCE in ['ON', 'OFF']
+          - bp_oidc_effective.GROUP_CREATION_SOURCE in ['ON', 'OFF']
+          - bp_oidc_effective.ROLE_MANAGEMENT_SOURCE in ['ON', 'OFF']
           - bp_oidc_effective.GROUP_CLAIM in ['GROUPS', 'OTHER']
           - bp_oidc_effective.BLOCKED_GROUPS in ['EMPTY', 'NONEMPTY', 'UNREVIEWED']
           - bp_oidc_effective.DEFAULT_USER_ROLE in ['PENDING', 'OTHER']
@@ -175,11 +178,13 @@
       ansible.builtin.debug:
         msg:
           - "AUDIT=READ_ONLY"
+          - "CONFIG_BASIS=RUNNING_CONTAINER_ENV_V0_10_2"
+          - "IN_PROCESS_EFFECTIVE_CONFIG=NOT_MEASURED"
           - "CHANGED=False"
           - "GROUP_MANAGEMENT_ENV={{ bp_oidc_effective.GROUP_MANAGEMENT_ENV }}"
-          - "GROUP_MANAGEMENT_EFFECTIVE={{ bp_oidc_effective.GROUP_MANAGEMENT_EFFECTIVE }}"
-          - "GROUP_CREATION_EFFECTIVE={{ bp_oidc_effective.GROUP_CREATION_EFFECTIVE }}"
-          - "ROLE_MANAGEMENT_EFFECTIVE={{ bp_oidc_effective.ROLE_MANAGEMENT_EFFECTIVE }}"
+          - "GROUP_MANAGEMENT_SOURCE={{ bp_oidc_effective.GROUP_MANAGEMENT_SOURCE }}"
+          - "GROUP_CREATION_SOURCE={{ bp_oidc_effective.GROUP_CREATION_SOURCE }}"
+          - "ROLE_MANAGEMENT_SOURCE={{ bp_oidc_effective.ROLE_MANAGEMENT_SOURCE }}"
           - "PERSISTENT_OAUTH_CONFIG={{ bp_oidc_effective.PERSISTENT_OAUTH_CONFIG }}"
           - "GROUP_CLAIM={{ bp_oidc_effective.GROUP_CLAIM }}"
           - "BLOCKED_GROUPS={{ bp_oidc_effective.BLOCKED_GROUPS }}"
