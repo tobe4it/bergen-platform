@@ -232,9 +232,15 @@ The Bergen Platform follows Semantic Versioning.
 
 Current release:
 
-v0.14.0 — Headless Proxmox/Synology Wake-on-LAN recovery preparation (2026-10-19)
+v0.15.0 — Bergen-AI family OIDC and four private chat profiles (2026-10-20)
 
-See **docs/CHANGELOG.md** for release history. The documented v0.14.0 baseline does **not** prove recovery after a full AC power loss, and the release/tag publishing status must be checked independently.
+See **[docs/CHANGELOG.md](docs/CHANGELOG.md)** for release history and
+**[the Bergen-AI family chat operations runbook](docs/BERGEN-AI-CHAT-PROFILES-LIVE-OIDC.md)**
+for reproducible Ansible commands, exact model/group ACLs, idempotent second
+apply and outstanding child-access and revocation tests. The v0.15.0
+documentation records a live functional deployment; it does **not** claim
+complete child/login revocation E2E assurance or a verified backup restore.
+Source-merge and Git tag/release publishing are separate steps.
 
 ---
 

@@ -1,5 +1,7 @@
 # Bergen-AI – Freigabe Eltern- und Kinder-Chatprofile
 
+> **Historischer Entwurf (vor produktivem OIDC-Gruppensync).** Die hier dokumentierten Sperren `ENABLE_OAUTH_GROUP_MANAGEMENT=false`, null Gruppenmitglieder und ein zwingender `sk-`-API-Key sind inzwischen überholt. Der produktive Stand mit vier tatsächlich eingerichteten Aliasprofilen, bestehendem Admin-Session-JWT, aktuellen Gates und idempotentem Re-Apply ist ausschließlich in [BERGEN-AI-CHAT-PROFILES-LIVE-OIDC.md](BERGEN-AI-CHAT-PROFILES-LIVE-OIDC.md) beschrieben. Dieses Dokument nur für die Entstehungsgeschichte von PR #123 verwenden.
+
 Betreiberfreigabe 19.10.2026. Versionierte, gesondert gesicherte
 Bereitstellung von vier privaten Modellen auf Open WebUI 0.10.2.
 Dieser Branch aktiviert keine Benutzer-/Gruppenmitgliedschaften.

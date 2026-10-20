@@ -1,0 +1,112 @@
+---
+# No admin API token and no direct DB write. Exact expected site groups
+# are read from existing ignored local vars; model prompt from this branch.
+- name: Inspect four private family chat profiles against live OIDC membership
+  hosts: "{{ bergen_ai_family_audit_host | default('__no_approved_family_host__') }}"
+  gather_facts: false
+  serial: 1
+  vars:
+    bp_family_chat_ready_payload:
+      names: "{{ bergen_ai_family_group_expected }}"
+      child_prompt: "{{ lookup('ansible.builtin.file', playbook_dir ~ '/../files/bergen_ai/prompts/learning_companion_de_v1.md') }}"
+  tasks:
+    - name: Require approved exact host and existing site-local role names
+      ansible.builtin.assert:
+        that:
+          - bergen_ai_family_audit_host is defined
+          - bergen_ai_family_audit_host == inventory_hostname
+          - ansible_play_hosts_all | length == 1
+          - bergen_ai_family_audit_approved | default(false) | bool
+          - bergen_ai_family_group_expected is mapping
+          - (bergen_ai_family_group_expected.keys() | list | sort) == ['adults','children','family']
+        fail_msg: PRIVATE_FAMILY_PROFILE_AUDIT_NOT_AUTHORIZED
+      no_log: true
+
+    - name: Read-only inspect runtime flags, local groups, members, models and installed Ollama bases
+      ansible.builtin.command:
+        argv:
+          - python3
+          - -c
+          - "{{ lookup('ansible.builtin.file', playbook_dir ~ '/../files/bergen_ai/audit_family_chat_ready_v0102.py') }}"
+        stdin: "{{ bp_family_chat_ready_payload | to_json }}"
+        stdin_add_newline: true
+      register: bp_family_chat_ready_raw
+      changed_when: false
+      failed_when: false
+      check_mode: false
+      no_log: true
+
+    - name: Extract exactly one redacted audit message
+      ansible.builtin.set_fact:
+        bp_family_chat_ready_frames: >-
+          {{ bp_family_chat_ready_raw.stdout_lines |
+             select('match','^BERGEN_AI_FAMILY_MODELS_READINESS_V1:') | list }}
+      changed_when: false
+      no_log: true
+
+    - name: Deny missing or oversized private status data
+      ansible.builtin.assert:
+        that:
+          - bp_family_chat_ready_frames | length == 1
+          - bp_family_chat_ready_frames[0] | length < 1500
+        fail_msg: PRIVATE_FAMILY_PROFILE_AUDIT_FRAME_MISSING
+      no_log: true
+
+    - name: Parse only bounded private model state
+      ansible.builtin.set_fact:
+        bp_family_chat_ready: >-
+          {{ bp_family_chat_ready_frames[0] |
+             regex_replace('^BERGEN_AI_FAMILY_MODELS_READINESS_V1:', '') |
+             from_json }}
+      no_log: true
+
+    - name: Emit allowlisted failure reason
+      ansible.builtin.debug:
+        msg: >-
+          PRIVATE_FAMILY_PROFILE_AUDIT_FAILURE={{
+            bp_family_chat_ready.STATUS if
+              bp_family_chat_ready.STATUS | default('') in [
+                'THREE_PRIVATE_GROUPS_REQUIRED', 'LEARNING_PROMPT_UNREVIEWED',
+                'WEBUI_VERSION_UNREVIEWED', 'CONTAINER_UNREVIEWED',
+                'DATA_MOUNT_DRIFT', 'ENV_UNREVIEWED',
+                'OIDC_OR_ACL_BASELINE_DRIFT', 'DATABASE_UNREVIEWED',
+                'OLLAMA_MODEL_LIST_UNREVIEWED', 'DB_SCHEMA_UNREVIEWED',
+                'GROUPS_UNREVIEWED', 'MEMBERSHIP_UNREVIEWED',
+                'MEMBERSHIP_BASELINE_DRIFT', 'MODEL_INVENTORY_TOO_LARGE',
+                'API_NOT_READY', 'UNCLASSIFIED_READONLY_ERROR'
+              ] else 'UNREVIEWED_READONLY_ERROR'
+          }}
+      when: bp_family_chat_ready_raw.rc != 0
+
+    - name: Require a safe and genuinely immutable readiness result
+      ansible.builtin.assert:
+        that:
+          - bp_family_chat_ready_raw.rc == 0
+          - bp_family_chat_ready.AUDIT == 'READ_ONLY'
+          - bp_family_chat_ready.CHANGED is boolean
+          - not bp_family_chat_ready.CHANGED
+          - bp_family_chat_ready.STATUS in ['READY_FOR_PRIVATE_PROFILES', 'BASE_MODELS_MISSING', 'PROFILE_INVENTORY_PRESENT', 'MODEL_OR_ACL_BASELINE_DRIFT']
+          - bp_family_chat_ready.GROUP_SYNC_CONFIGURED == 'ON'
+          - bp_family_chat_ready.ADULT_CHILD_OVERLAP == 'NONE'
+          - bp_family_chat_ready.PUBLIC_MODEL_GRANTS == 0
+          - bp_family_chat_ready.CHILD_PROMPT_POLICY == 'VALIDATED_SOURCE'
+        fail_msg: PRIVATE_FAMILY_PROFILE_READINESS_REVIEW_REQUIRED
+      no_log: true
+
+    - name: Print model prerequisites and current private profile status only
+      ansible.builtin.debug:
+        msg:
+          - "AUDIT={{ bp_family_chat_ready.AUDIT }}"
+          - "STATUS={{ bp_family_chat_ready.STATUS }}"
+          - "ADULT_MEMBERS={{ bp_family_chat_ready.ADULT_MEMBERS }}"
+          - "FAMILY_MEMBERS={{ bp_family_chat_ready.FAMILY_MEMBERS }}"
+          - "CHILD_MEMBERS={{ bp_family_chat_ready.CHILD_MEMBERS }}"
+          - "ADULT_CHILD_OVERLAP={{ bp_family_chat_ready.ADULT_CHILD_OVERLAP }}"
+          - "REQUIRED_BASE_MODELS_MISSING={{ bp_family_chat_ready.REQUIRED_BASE_MODELS_MISSING }}"
+          - "REGISTERED_MODELS={{ bp_family_chat_ready.REGISTERED_MODELS }}"
+          - "MODEL_GRANTS={{ bp_family_chat_ready.MODEL_GRANTS }}"
+          - "PUBLIC_MODEL_GRANTS={{ bp_family_chat_ready.PUBLIC_MODEL_GRANTS }}"
+          - "CHILD_PROMPT_POLICY={{ bp_family_chat_ready.CHILD_PROMPT_POLICY }}"
+          - "CONFIG_SHA256={{ bp_family_chat_ready.CONFIG_SHA256 }}"
+          - "MODEL_API_AUTHENTICATION_REQUIRED_FOR_WRITES=YES"
+          - "CHANGED=False"

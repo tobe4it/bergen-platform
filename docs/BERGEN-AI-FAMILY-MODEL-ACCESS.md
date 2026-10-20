@@ -1,5 +1,7 @@
 # Bergen-AI: parent and child chat model access (Issues #98, #105)
 
+> **Aktueller Status:** Die vier Modelle sind mittlerweile produktiv angelegt und mit vier privaten Gruppen-READ-Grants unabhängig auditiert. Dies ist das ursprüngliche READ_ONLY-Konzept aus PR #122; maßgebliche aktuelle Befehle, Betriebsnachweise und offene Sicherheitstests stehen in [BERGEN-AI-CHAT-PROFILES-LIVE-OIDC.md](BERGEN-AI-CHAT-PROFILES-LIVE-OIDC.md).
+
 Operator decision 2026-10-19: Parents AND children shall receive local chat
 model access; Paperless/KI document rights are kept separate. This change
 includes only a read-only preflight and no production activation.
