@@ -1,220 +1,82 @@
-# Bergen-AI: Vier private Chatprofile bei aktivem OIDC-Gruppensync
+# Bergen-AI: OIDC-Familienrollen und vier private Chatprofile
 
-Stand: 20.10.2026. Auf `bergen-ai` ist die automatische Zuordnung
-`ENABLE_OAUTH_GROUP_MANAGEMENT=true` produktiv aktiv. Der
-Live-READ_ONLY-Audit nach Eltern-SSO-Login meldete
-`ADULT_MEMBERS=1`, `FAMILY_MEMBERS=1`, `CHILD_MEMBERS=0`,
-`REGISTERED_MODELS=0` und `MODEL_GRANTS=0`.
-Der Kindertest und Rights-Revocation-Test bleiben getrennt offen.
+**Betriebsstand:** 20.10.2026; Open WebUI 0.10.2, Podman/Quadlet im bestehenden LXC `bergen-ai`, Ollama lokal. Dies ist der aktuelle Runbook- und Release-Nachweis für die Änderungen aus PRs #122–#125. Ältere erste-Installation-Anweisungen, die abgeschalteten OIDC-Gruppensync und null Mitglieder voraussetzen, gelten **nicht mehr**.
 
-## Sollprofile
+## Architektur
 
-| Alias-ID | Anzeigename | Ollama-Basismodell | ACL (exakt eine private Lesefreigabe) |
+Drei vorhandene, zentral über Synology verwaltete OIDC-Rollengruppen: `Familie`, `Eltern` und `Kinder`. Tatsächliche standortspezifische Gruppennamen und Domänen stehen ausschließlich im lokalen ignorierten `ansible/vars/bergen-ai-family-audit.local.yml` (Mapping `bergen_ai_family_group_expected`). **Keine vier weiteren OIDC-Gruppen erforderlich.** Ein neuer OIDC-Callback synchronisiert die vorhandenen Gruppenzugehörigkeiten; ein Seiten-Reload allein reicht nicht.
+
+`ENABLE_OAUTH_GROUP_MANAGEMENT=true` aktiv, `ENABLE_OAUTH_GROUP_CREATION=false` und `ENABLE_OAUTH_ROLE_MANAGEMENT=false` deaktiviert; `DEFAULT_USER_ROLE=pending` bleibt die Voreinstellung.
+
+| Private Alias-ID | Name | Ollama-Basis | ACL |
 | --- | --- | --- | --- |
-| `bergen-eltern-qwen25` | Bergen AI – Eltern | `qwen2.5:14b-instruct-q4_K_M` | Nur standortspezifische Gruppe Eltern |
-| `bergen-eltern-sprachen` | Bergen AI – Sprachen | `mistral-nemo:12b` | Nur Eltern |
-| `bergen-kinder-lernen` | Bergen AI – Lernbegleiter | `qwen2.5:14b-instruct-q4_K_M` | Nur Kinder |
-| `bergen-kinder-sprachen` | Bergen AI – Sprachtrainer | `mistral-nemo:12b` | Nur Kinder |
+| `bergen-eltern-qwen25` | Bergen AI – Eltern | `qwen2.5:14b-instruct-q4_K_M` | nur Eltern, read |
+| `bergen-eltern-sprachen` | Bergen AI – Sprachen | `mistral-nemo:12b` | nur Eltern, read |
+| `bergen-kinder-lernen` | Bergen AI – Lernbegleiter | `qwen2.5:14b-instruct-q4_K_M` | nur Kinder, read |
+| `bergen-kinder-sprachen` | Bergen AI – Sprachtrainer | `mistral-nemo:12b` | nur Kinder, read |
 
-Beide Kinderprofile verwenden vollständig denselben
-`ansible/files/bergen_ai/prompts/learning_companion_de_v1.md` als
-Systemanweisung. Enthält „Vorsagen untersagt“; ist pädagogische
-Steuerung, **kein Berechtigungsmechanismus**. Elternprofile verwenden die
-konstant definierte `PARENT_PROMPT` in
-`manage_family_chat_profiles_v0102.py`. Nicht automatisch Paperless,
-Websuche, Tools, Knowledge oder fremde Benutzer freigeben. Embedding
-`bge-m3` ist kein Chatprofil.
+`Familie` hat **keinen eigenen Modellgrant**. `bge-m3:latest` ist ausschließlich Embedding, kein Chatprofil. Alle Kinderprofile erhalten denselben **vollständigen** versionierten Lernprompt `ansible/files/bergen_ai/prompts/learning_companion_de_v1.md` mit „Vorsagen untersagt“. Die Elternprofile verwenden den konstanten `PARENT_PROMPT` im Stager. **Systemprompts sind keine technische Zugriffssperre.** Paperless, Websuche, externe Tools, Memory anderer Personen und RAG werden nicht dadurch freigegeben.
 
-## 1. Tokenloser READ_ONLY Preflight
+**Beschreibung der Profile:** Das aktuell gespeicherte generische Metadatenfeld ist „Privates Bergen-AI Gruppenmodell“. Die zuvor besprochenen verständlichen individuellen Profilbeschreibungen wurden noch **nicht** als vier unterschiedliche Beschreibungen produktiv aufgespielt; ihre redaktionelle Einführung wäre ein eigener, idempotent abgesicherter Änderungsumfang.
 
-Alle OIDC-/Ollama-/SQLite-Leseprüfungen erfolgen über die vorhandene
-Ansible-SSH-Verwaltung; **kein Open-WebUI-Admin-API-Schlüssel notwendig**.
-Er prüft aktivierten Gruppensync, die bereits vorhandene erwachsene
-Mitgliedschaft, keine Eltern-/Kinderüberschneidung, genau drei konfigurierte
-lokale Gruppen, die zwei Ollama-Basismodelle, bisherige Modell-Grants
-und die Kinder-Lernregel, ohne persönliche Kennungen offenzulegen.
+## Verifizierte produktive Fakten (20.10.2026)
+
+- Gruppensync per geschützter Quadlet-Änderung aktiviert, Open WebUI neugestartet/gesund und effektives ENV bestätigt: `STATUS=GROUP_SYNC_ENABLED`; `ok=16 changed=3 failed=0`.
+- Nach erneuter OIDC-Elternanmeldung: `ADULT_MEMBERS=1`, `FAMILY_MEMBERS=1`, `ADULT_USER_ROLES=1`, `CHILD_MEMBERS=0`. Der Auditor hat **nicht** selbst die rohen OIDC-Claims validiert.
+- Vor Modellanlage: beide Ollama-Tags vorhanden, vier Alias-Sollprofile und Prompt-Policy plausibilisiert; `STATUS=READY_FOR_PRIVATE_PROFILES` und getrenntes Admin-API-Stager-Audit `STATUS=EMPTY_READY`.
+- Produktiver Ansible-API-Apply via **bestehendem Administrator-Session-JWT**, ohne `sk-`-Schlüssel oder Aktivierung des globalen API-Key-Schalters: `STATUS=PRIVATE_PROFILES_STAGED`, `CREATED=4`, `CHANGED=True`, `ok=8 failed=0`. Gruppen-, OIDC- und Paperless-Konfiguration blieben unverändert.
+- Unabhängiger `mode=ro`-SQLite-Audit: `REGISTERED_MODELS=4`, `MODEL_GRANTS=4`, `PUBLIC_READ_GRANTS=0`, `CHILD_RAW_MODEL_READ_GRANTS=0`, `UNKNOWN_OR_FOREIGN_MODEL_GRANTS=0`. Qwen und Mistral jeweils 2 aktive Aliase, je 1 Erwachsenen-/Kinder-READ-Grant. Zwei Elternmodelle wurden außerdem im iPhone-Browser eines angemeldeten Elternkontos gezeigt.
+- **Nicht attestiert:** positiver Kinder-E2E-Test, direkte API-Deny-Tests von Kinder-/Pending- und Revoked-Sessions, fail-closed Rechteentzug bei leerem/fehlendem `groups`-Claim, Nachweis eines tatsächlichen Backup-Restores. Das `backup_verified=true` aus dem schreibenden Operator-Aufruf ist ein Freigabe-Boolean und **kein** unabhängiger Restorenachweis.
+
+## Ansible-Betrieb und Idempotenz
+
+Der aktuelle Sollzustand ist unter `main` nach dem Merge der gestapelten PRs versioniert. Auf `bp-controller` existieren private, ignorierte Inventory-/Site-Dateien und der ausschließlich lokal verschlüsselte Vault (`ansible/vars/ai-oidc.vault.yml`). Den eigenen Admin-Session-JWT dort nur für geschützte Schreibvorgänge als `vault_open_webui_admin_session_jwt` hinterlegen, nie an GitHub oder Chats senden. Keine SQL-Schreibzugriffe oder JWT-Fälschungen.
+
+### Unabhängiger, tokenfreier Sollzustand-Audit
 
 ~~~bash
-(
-set -euo pipefail
 BASE="$HOME/bergen-platform"
-WT="$HOME/bergen-platform-family-chat-live"
-BR="feat/bergen-ai-family-profiles-live-oidc-20261020"
-git -C "$BASE" fetch origin "$BR"
-if test -e "$WT/.git"; then
-  test -z "$(git -C "$WT" status --porcelain)"
-  git -C "$WT" switch --detach "origin/$BR"
-else
-  test ! -e "$WT"
-  git -C "$BASE" worktree add --detach "$WT" "origin/$BR"
-fi
-cd "$WT"
+cd "$BASE"
 "$BASE/.venv/bin/ansible-playbook" \
   -i ansible/inventory.yml \
   -i "$BASE/ansible/inventory.local.yml" \
-  ansible/playbooks/audit-bergen-ai-family-chat-readiness-readonly.yml \
+  ansible/playbooks/audit-bergen-ai-family-model-access-readonly.yml \
   -e "@$BASE/ansible/vars/bergen-ai-family-audit.local.yml" \
   --vault-id ai@prompt
-)
 ~~~
 
-Erwarteter Startbefund: `STATUS=READY_FOR_PRIVATE_PROFILES`,
-`ADULT_MEMBERS=1`, `FAMILY_MEMBERS=1`, `CHILD_MEMBERS=0`,
-`REQUIRED_BASE_MODELS_MISSING=0`,
-`REGISTERED_MODELS=0`, `MODEL_GRANTS=0`,
-`PUBLIC_MODEL_GRANTS=0`.
-Fehlt ein Ollama-Modell, abbrechen und erst dessen lokal installierte
-Version bestätigen. Hash-Fingerprint der geprüften Konfiguration ausgeben.
+Erwartet: genau 4 Aliase, 4 private Grants, 0 Public-/Raw-Kinder-/Foreign-Grants und `changed=0`. Dieser Audit ist **nicht** der Snapshot-Fingerprint des schreibenden Stagers.
 
-## 2. Vollautomatischer Ansible-Modell-Apply über vorhandene Admin-Sitzung (bevorzugt)
+### Reproduzierbarer, autorisierter Apply
 
-**Open WebUI 0.10.2 unterstützt JWT-Bearer für `POST /api/v1/models/create`:
-Eine gültige Sitzung des vorhandenen Administratorkontos ist ausreichend.
-Das Aktivieren von `ENABLE_API_KEYS` und die Erstellung eines `sk-`
-API-Schlüssels sind hierfür nicht erforderlich.** Die Ansible-Playbooks
-verwenden die autorisierte Admin-Sitzung, nicht fremde Credentials,
-Passwort-Bypass oder direkten SQLite-Write.
+`manage-bergen-ai-family-chat-profiles.yml` startet standardmäßig im `audit`-Modus und liefert den aktuellen API-Stager-Fingerprint. Für den **ersten** Apply braucht es bestätigte wiederherstellbare Sicherung der Daten von `/srv/ai/open-webui` inklusive konsistenter SQLite/WAL-Dateien, eine explizite Genehmigung, einen gültigen Admin-JWT und den Fingerprint eines unmittelbar vorherigen `EMPTY_READY`-Stager-Audits. Ein stale oder fremder Zustand bricht fail-closed ab. Die vier POSTs sind **nicht atomar**; nach einem Teil-Apply niemals blind wiederholen.
 
-Für den REST-Zugriff wird gleichwohl eine gültige **Admin-Authentifizierung**
-benötigt. Aus einer bestehenden, authentifizierten Admin-Session in
-Open WebUI unter **Einstellungen → Konto → JWT-Token** den eigenen
-aktuellen JWT lokal kopieren; keine andere Person oder Kinderkonto verwenden.
-Nicht in Chat, Screenshots, Git, Kommandozeile oder Logs schreiben.
-Eine vollständig abgemeldete oder abgelaufene Sitzung kann nicht
-wiederverwendet werden. Der JWT ist ein hochprivilegiertes temporäres
-Geheimnis. Diese einmalige Geheimnisübergabe ist kein manueller
-Modellkonfigurationsschritt.
-
-Im Basisklon auf `bp-controller`:
-
-~~~bash
-cd "$HOME/bergen-platform"
-ansible-vault edit --vault-id ai@prompt ansible/vars/ai-oidc.vault.yml
-~~~
-
-Die existierende Vault-Datei **ergänzen**, nicht überschreiben:
-
-~~~yaml
-vault_open_webui_admin_session_jwt: "HIER_NUR_LOKAL_DEN_EIGENEN_GUELTIGEN_ADMIN_JWT"
-~~~
-
-Das Playbook bevorzugt diese neue Variable; bestehender
-`vault_open_webui_admin_token` ist lediglich ein Legacy-Fallback.
-Diese Credentials werden mit `no_log` behandelt. Ausschließlich
-ein gültiger Admin-JWT kommt infrage; die Ansible-Anwendung ruft die
-geschützten Open-WebUI-Admin- und Modell-Endpunkte zur Prüfung auf.
-
-Der READ_ONLY Vorlauf benutzt **einen eigenen Snapshot-Fingerprint**,
-nicht den `CONFIG_SHA256` des rein lokalen
-`audit-bergen-ai-family-chat-readiness-readonly.yml`. Unbedingt
-erst den Stager-Audit separat ausführen:
+Nach erfolgreicher erster Ausführung kann derselbe **bewusst freigegebene** Ansible-Apply mit dem *alten Erst-Apply-Fingerprint* erneut ausgeführt werden. Der Stager überprüft vor einer potenziellen Mutation erneut alle **vier** IDs, Basis-IDs, Namen, aktiven Flags, Systemprompts sowie genau je eine korrekte private Gruppen-READ-Freigabe. Entsprechen alle dem Soll, meldet er **`STATUS=ALREADY_STAGED`, `CREATED=0`, `CHANGED=False`**, auch wenn der frühere Preimage-Fingerprint inzwischen nicht mehr gültig ist. Für *jede tatsächliche* Mutation (First Apply und genehmigtes Rollback) ist dagegen weiter der **aktuelle** Snapshot-Fingerprint erforderlich. Backup-/Approval-Gates bleiben auch beim No-op bestehen. Bei Drift **keine** automatischen Lösch-/Reparaturversuche.
 
 ~~~bash
 BASE="$HOME/bergen-platform"
-WT="$HOME/bergen-platform-family-chat-live"
-cd "$WT"
+cd "$BASE"
 "$BASE/.venv/bin/ansible-playbook" \
   -i ansible/inventory.yml \
   -i "$BASE/ansible/inventory.local.yml" \
   ansible/playbooks/manage-bergen-ai-family-chat-profiles.yml \
   -e "@$BASE/ansible/vars/bergen-ai-family-audit.local.yml" \
   -e "@$BASE/ansible/vars/ai-oidc.vault.yml" \
+  -e bergen_ai_family_model_mode=apply \
+  -e bergen_ai_family_model_approved=true \
+  -e bergen_ai_family_model_backup_verified=true \
+  -e bergen_ai_family_model_expected_sha256=8a9d608e2537a1483b2603ebbf4a5b20ef994f952ce0f5429d823bb7e9cc4501 \
   --vault-id ai@prompt
 ~~~
 
-Erwartung: `AUDIT=READ_ONLY`, `STATUS=EMPTY_READY`,
-`MODEL_COUNT=0`, `REQUIRED_MODELS_PRESENT=YES`,
-`CHANGED=False` und ein **neuer** `CONFIG_SHA256`.
-Bei fehlendem oder abgelaufenem Admin-JWT gibt es
-`API_UNAVAILABLE_OR_DENIED` / `FAMILY_MODEL_STAGE_GATE_DENIED`.
-Keine Berechtigungsumgehung vornehmen.
+**Die neue idempotente Second-Apply-Implementierung ist im CI synthetisch getestet; ein zweiter Live-Apply ist damit noch nicht nachgewiesen.** Den Befehl erst nach Audit, gültigem JWT und unabhängiger Backup-Freigabe ausführen. Nach erfolgreichem Deployment Admin-JWT aus Vault entfernen oder rotieren und die Sitzung beenden. Ein Rollback erfordert einen **eigenen** Approval-Gate und den zum aktuellen Vier-Profil-Zustand passenden Fingerprint; er löscht nur die vier Aliase, nicht OIDC oder Paperless.
 
-Erst nach unabhängig bestätigter wiederherstellbarer Datensicherung
-von `/srv/ai/open-webui/webui.db` und identischem Read-only-Snapshot
-eine **lokale ignorierte, chmod 0600** YAML-Freigabe anlegen,
-beispielsweise `$BASE/ansible/vars/bergen-ai-model-apply.local.yml`:
+## Offene Prüfpunkte und Releasegrenze
 
-~~~yaml
-bergen_ai_family_model_mode: apply
-bergen_ai_family_model_approved: true
-bergen_ai_family_model_backup_verified: true
-bergen_ai_family_model_expected_sha256: EXAKTER_FINGERPRINT_AUS_STAGER_AUDIT
-~~~
+1. Kinderkonto via Synology erneut anmelden; in `Familie` und `Kinder` bestätigen, ohne Elternmodell-Sichtbarkeit.
+2. Positive/negative *direkte* Modell-API-Tests für die vier Aliase und die raw Ollama-IDs mit Eltern-, Kinder-, Pending- und deaktivierter Sitzung durchführen. Nur die UI-Modellliste ist kein API-Deny-Beweis.
+3. Gruppenentzug, abgelaufene Sessions sowie fehlende/leere OIDC-Claims in v0.10.2 separat fail-closed testen und gegebenenfalls technisch härten.
+4. Konsistentes Backup inklusive WAL sowie Restore-Test nachweisen.
+5. Individuelle Modellbeschreibungen nur per separatem geschütztem, idempotentem Metadaten-Update ergänzen.
 
-Den **identischen** Stager-Audit-Befehl mit
-`-e "@$BASE/ansible/vars/bergen-ai-model-apply.local.yml"`
-zusätzlich ausführen. Ein erfolgreicher Apply soll exakt
-`STATUS=PRIVATE_PROFILES_STAGED`, `CREATED=4`,
-`CHANGED=True` melden; danach muss der unabhängige
-`audit-bergen-ai-family-model-access-readonly.yml` genau vier
-Modelle und vier gruppenbezogene Lesefreigaben ohne öffentliche
-Leserechte nachweisen. Beim ersten abgebrochenen Teil-Apply
-**nicht blind wiederholen**; Bestandsstatus zuerst read-only prüfen.
-
-Nach dem Anwenden den hochprivilegierten temporären JWT aus der
-lokalen Vault-Datei wieder entfernen (oder erneuern) und möglichst
-die zugehörige Anwendungssitzung beenden; niemals im Repository ablegen.
-
----
-
-## 2. Profile tatsächlich erstellen
-
-**Wichtig: OIDC-ENV ist nicht dasselbe wie die Modelle-REST-API.**
-Schalter und OIDC konnten tokenlos per Ansible/Quadlet geändert werden.
-Das Erstellen eines Workspace-Modells über die unterstützte
-`POST /api/v1/models/create`-Schnittstelle benötigt dagegen eine
-**authentifizierte berechtigte Open-WebUI-Sitzung**. Das letzte
-Read-only-Audit kann ohne Token überprüfen; ein produktiver schreibender
-REST-Apply benötigt legitime Admin-Authentifizierung. Die Anwendung soll
-nicht durch direktes Schreiben in SQLite oder Fälschen eines Admin-JWT
-umgangen werden.
-
-Zwei sichere Betriebswege:
-
-- **Ohne neue API-Key-Einstellung:** Im bereits angemeldeten Open-WebUI-
-  Administratorkonto `Workspace → Models → Create`; viermal Alias-ID,
-  Anzeigename, vorhandenes Basismodell, Systemanweisung und private
-  Zugriffsgruppe (nur `Eltern` bzw. nur `Kinder`) konfigurieren.
-  Weder `Familie` noch `Public` freigeben. Die genaue
-  standortspezifische Gruppenbezeichnung wie im vorhandenen lokalen
-  `bergen_ai_family_group_expected` auswählen. Nach dem Speichern
-  den read-only Audit erneut ausführen, damit kein unerwarteter
-  Modellbestand oder öffentlicher Grant unentdeckt bleibt.
-- **Vollständig per Ansible über REST:** Der bereits vorbereitete
-  `manage-bergen-ai-family-chat-profiles.yml`-Stager in diesem Branch
-  akzeptiert nun aktiven OIDC-Gruppensync und vorhandene Eltern-
-  Mitgliedschaften; er prüft einen stabilen privaten Gruppen-Roster
-  und dessen Snapshot-Fingerprint. Sein schreibender Teil benötigt
-  weiterhin ausdrücklich einen *autorisierten* Admin-Bearer
-  (üblicherweise kurzlebiger API-Key oder bestehende Admin-Session)
-  als verschlüsselte lokale Vault-Variable. Das Playbook erzeugt
-  selbst **keinen** Schlüssel und schaltet den globalen API-Key-Schalter
-  nicht um. Nicht ohne tatsächlich vorhandene sichere
-  Admin-Authentifizierung ausführen. Kein direkter SQLite-Write.
-
-Die unterstützte UI-Methode ist derzeit der unmittelbare tokenlose Weg.
-Keine vorsorglichen Public-/Raw-Model-Grants vergeben, auch nicht um
-Model-Not-Found-Fehler zu umgehen. Bei der Open-WebUI-Autorisierung
-kann die Basismodellberechtigung zusätzlich erforderlich sein:
-danach mit normalem Elternkonto positive und mit Kinderkonto negative
-API-Zugriffstests durchführen.
-
-## 3. Nachweis
-
-Unmittelbar nach einer Anlage:
-- Read-only Modelle/Grants + korrekte Besitzergruppe prüfen;
-- Elternkonto: genau die zwei Elternprofile und keine Kinderprofile;
-- Kinderkonto nach dessen separater OIDC-Neuanmeldung: genau die zwei
-  Kinderprofile und keine Elternprofile;
-- Kinderprofile zu echter Hausaufgabe testen: Hilfe mit Denkschritten
-  statt fertiger Abschreibantwort;
-- auch Direkt-API-Zugriff und Zugriff auf raw Ollama, Knowledge,
-  fremde Chats und Paperless prüfen, nicht nur den Modellpicker.
-
-Der Kinder-SSO-Test, API-Verweigerungstests und Gruppenentzug bei leeren
-OIDC-Claims bleiben offene Freigabe-Gates. Das Aktivieren des
-Gruppenschalters allein hebt diese Einschränkungen nicht auf.
-
-**Bisheriger Bereitstellungsstand:** GitHub/CI-/Playbook-Vorbereitung,
-aber noch kein produktives Chatmodell angelegt. Niemals `ok/changed`
-aus dem Read-only-Preflight als Beleg für Modellanlage ausgeben.
+**Akzeptanz:** vier Profile produktiv und Eltern-Sichtbarkeit nachgewiesen, Sicherheits-E2E für Kinder und Rechteentzug noch nicht freigegeben. Keine Aussage über vollumfängliche Sicherheit sämtlicher Zugriffswege.
