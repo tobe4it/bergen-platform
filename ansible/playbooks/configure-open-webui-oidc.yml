@@ -14,6 +14,18 @@
           - open_webui_oidc_local_admin_confirmed | default(false) | bool
         fail_msg: Confirm a current data backup and working local administrator before activation.
 
+    - name: Require independent authorization for activating existing OIDC group sync
+      ansible.builtin.assert:
+        that:
+          - inventory_hostname == 'bergen-ai'
+          - ansible_play_hosts_all | length == 1
+          - open_webui_oidc_group_sync_approved | default(false) | bool
+          - open_webui_oidc_group_sync_backup_verified | default(false) | bool
+          - open_webui_oidc_group_sync_membership_reviewed | default(false) | bool
+          - not ansible_check_mode
+        fail_msg: OIDC_GROUP_SYNC_APPLY_REQUIRES_INDEPENDENT_APPROVAL
+      no_log: true
+
     - name: Validate OIDC values without exposing secrets
       ansible.builtin.assert:
         that:

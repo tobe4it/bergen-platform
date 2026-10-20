@@ -1,0 +1,194 @@
+---
+# Review the running container OIDC environment as a source of configuration without an
+# admin API token. It CANNOT attest to the in-process memory defaults. Never print
+# IdP tokens, individual/group names, OAuth secrets, or user identifiers.
+- name: Audit effective Open WebUI OAuth group authorization in live container
+  hosts: bergen-ai
+  gather_facts: false
+  serial: 1
+  tasks:
+    - name: Require only the intended existing Bergen-AI host
+      ansible.builtin.assert:
+        that:
+          - inventory_hostname == 'bergen-ai'
+          - ansible_play_hosts_all | length == 1
+
+    - name: Verify running Open WebUI release over guest-local loopback
+      ansible.builtin.uri:
+        url: http://127.0.0.1:3000/api/version
+        method: GET
+        status_code: 200
+        use_proxy: false
+        follow_redirects: none
+        timeout: 10
+        return_content: false
+      register: bp_oidc_effective_version
+      changed_when: false
+      check_mode: false
+      no_log: true
+
+    - name: Require version matching audited OAuth callback implementation
+      ansible.builtin.assert:
+        that:
+          - bp_oidc_effective_version.json is mapping
+          - bp_oidc_effective_version.json.version in ['0.10.2', 'v0.10.2']
+        fail_msg: OPEN_WEBUI_OAUTH_RUNTIME_VERSION_UNREVIEWED
+      no_log: true
+
+    - name: Probe container Python execution without reading application data
+      ansible.builtin.command:
+        argv:
+          - podman
+          - exec
+          - open-webui
+          - python3
+          - -c
+          - "print('BERGEN_PYTHON_EXEC_V1:OK')"
+      register: bp_oidc_python_exec
+      changed_when: false
+      failed_when: false
+      check_mode: false
+      no_log: true
+
+    - name: Probe whether the application Python module is discoverable
+      ansible.builtin.command:
+        argv:
+          - podman
+          - exec
+          - open-webui
+          - python3
+          - -c
+          - "import importlib.util; print('BERGEN_PYTHON_APP_V1:' + ('PRESENT' if importlib.util.find_spec('open_webui') else 'ABSENT'))"
+      register: bp_oidc_python_module
+      changed_when: false
+      failed_when: false
+      check_mode: false
+      no_log: true
+
+    - name: Report only allowlisted container runtime probe results
+      ansible.builtin.debug:
+        msg:
+          - >-
+            CONTAINER_PYTHON_EXEC={{
+              'OK' if bp_oidc_python_exec.rc == 0 and
+                      'BERGEN_PYTHON_EXEC_V1:OK' in bp_oidc_python_exec.stdout_lines
+              else 'FAILED'
+            }}
+          - >-
+            OPEN_WEBUI_MODULE={{
+              'PRESENT' if bp_oidc_python_module.rc == 0 and
+                           'BERGEN_PYTHON_APP_V1:PRESENT' in bp_oidc_python_module.stdout_lines
+              else 'ABSENT' if bp_oidc_python_module.rc == 0 and
+                                'BERGEN_PYTHON_APP_V1:ABSENT' in bp_oidc_python_module.stdout_lines
+              else 'PROBE_FAILED'
+            }}
+      changed_when: false
+
+    - name: Refuse container Python failures before reading environment source
+      ansible.builtin.assert:
+        that:
+          - bp_oidc_python_exec.rc == 0
+          - "'BERGEN_PYTHON_EXEC_V1:OK' in bp_oidc_python_exec.stdout_lines"
+          - bp_oidc_python_module.rc == 0
+          - "'BERGEN_PYTHON_APP_V1:PRESENT' in bp_oidc_python_module.stdout_lines"
+        fail_msg: CONTAINER_PYTHON_EXEC_OR_MODULE_UNAVAILABLE
+      no_log: true
+
+    - name: Audit Open WebUI v0.10.2 environment source with standard-library Python
+      ansible.builtin.command:
+        argv:
+          - podman
+          - exec
+          - open-webui
+          - python3
+          - -c
+          - "{{ lookup('ansible.builtin.file', playbook_dir ~ '/../files/bergen_ai/audit_oidc_effective_runtime_v0102.py') }}"
+      register: bp_oidc_effective_raw
+      changed_when: false
+      failed_when: false
+      check_mode: false
+      no_log: true
+
+    - name: Require unique bounded non-identifying environment source frame
+      ansible.builtin.set_fact:
+        bp_oidc_effective_frames: >-
+          {{ bp_oidc_effective_raw.stdout_lines |
+             select('match', '^BERGEN_OIDC_EFFECTIVE_RUNTIME_V1:') | list }}
+      no_log: true
+      changed_when: false
+
+    - name: Classify a failed container audit without exposing raw stderr or OAuth data
+      ansible.builtin.debug:
+        msg:
+          - "DIAGNOSTIC=READ_ONLY_FAILURE"
+          - "COMMAND_EXIT={{ 'NONZERO' if bp_oidc_effective_raw.rc != 0 else 'ZERO' }}"
+          - "STATUS_FRAME_COUNT={{ bp_oidc_effective_frames | length }}"
+          - >-
+            FAILURE_CATEGORY={{
+              'OAUTH_PERSISTENCE_NOT_COVERED'
+              if (bp_oidc_effective_frames | length == 1 and
+                  '"STATUS": "OAUTH_PERSISTENCE_NOT_COVERED"' in bp_oidc_effective_frames[0])
+              else 'BLOCKED_GROUPS_FORMAT_UNREVIEWED'
+              if (bp_oidc_effective_frames | length == 1 and
+                  '"STATUS": "BLOCKED_GROUPS_FORMAT_UNREVIEWED"' in bp_oidc_effective_frames[0])
+              else 'UNEXPECTED_RUNTIME_FAILURE'
+              if (bp_oidc_effective_frames | length == 1 and
+                  '"STATUS": "UNEXPECTED_RUNTIME_FAILURE"' in bp_oidc_effective_frames[0])
+              else 'MISSING_OR_MALFORMED_FRAME'
+            }}
+      changed_when: false
+      when: bp_oidc_effective_raw.rc != 0 or bp_oidc_effective_frames | length != 1
+
+    - name: Reject missing frames, nonzero exit and unsafe output
+      ansible.builtin.assert:
+        that:
+          - bp_oidc_effective_raw.rc == 0
+          - bp_oidc_effective_frames | length == 1
+          - bp_oidc_effective_frames[0] | length < 1200
+        fail_msg: OPEN_WEBUI_RUNTIME_READONLY_AUDIT_UNAVAILABLE
+      no_log: true
+
+    - name: Decode only bounded OAuth runtime status
+      ansible.builtin.set_fact:
+        bp_oidc_effective: >-
+          {{ bp_oidc_effective_frames[0] |
+             regex_replace('^BERGEN_OIDC_EFFECTIVE_RUNTIME_V1:', '') |
+             from_json }}
+      no_log: true
+
+    - name: Require read-only status with non-secret allowlisted categories
+      ansible.builtin.assert:
+        that:
+          - bp_oidc_effective.CONFIG_BASIS == 'RUNNING_CONTAINER_ENV_V0_10_2'
+          - bp_oidc_effective.IN_PROCESS_EFFECTIVE_CONFIG == 'NOT_MEASURED'
+          - bp_oidc_effective.PERSISTENT_OAUTH_CONFIG == 'OFF'
+          - bp_oidc_effective.AUDIT == 'READ_ONLY'
+          - bp_oidc_effective.CHANGED == false
+          - bp_oidc_effective.GROUP_MANAGEMENT_ENV in ['ON', 'OFF']
+          - bp_oidc_effective.GROUP_MANAGEMENT_SOURCE in ['ON', 'OFF']
+          - bp_oidc_effective.GROUP_CREATION_SOURCE in ['ON', 'OFF']
+          - bp_oidc_effective.ROLE_MANAGEMENT_SOURCE in ['ON', 'OFF']
+          - bp_oidc_effective.GROUP_CLAIM in ['GROUPS', 'OTHER']
+          - bp_oidc_effective.BLOCKED_GROUPS in ['EMPTY', 'NONEMPTY', 'UNREVIEWED']
+          - bp_oidc_effective.DEFAULT_USER_ROLE in ['PENDING', 'OTHER']
+        fail_msg: OPEN_WEBUI_OAUTH_RUNTIME_STATUS_UNREVIEWED
+      no_log: true
+
+    - name: Report environment source values without claiming current in-process runtime
+      ansible.builtin.debug:
+        msg:
+          - "AUDIT=READ_ONLY"
+          - "CONFIG_BASIS=RUNNING_CONTAINER_ENV_V0_10_2"
+          - "IN_PROCESS_EFFECTIVE_CONFIG=NOT_MEASURED"
+          - "CHANGED=False"
+          - "GROUP_MANAGEMENT_ENV={{ bp_oidc_effective.GROUP_MANAGEMENT_ENV }}"
+          - "GROUP_MANAGEMENT_SOURCE={{ bp_oidc_effective.GROUP_MANAGEMENT_SOURCE }}"
+          - "GROUP_CREATION_SOURCE={{ bp_oidc_effective.GROUP_CREATION_SOURCE }}"
+          - "ROLE_MANAGEMENT_SOURCE={{ bp_oidc_effective.ROLE_MANAGEMENT_SOURCE }}"
+          - "PERSISTENT_OAUTH_CONFIG={{ bp_oidc_effective.PERSISTENT_OAUTH_CONFIG }}"
+          - "GROUP_CLAIM={{ bp_oidc_effective.GROUP_CLAIM }}"
+          - "BLOCKED_GROUPS={{ bp_oidc_effective.BLOCKED_GROUPS }}"
+          - "DEFAULT_USER_ROLE={{ bp_oidc_effective.DEFAULT_USER_ROLE }}"
+          - "OIDC_CALLBACK_OBSERVED=NOT_MEASURED"
+          - "OIDC_GROUP_CLAIMS_OBSERVED=NOT_MEASURED"
+          - "MEMBERSHIP_WRITE_OBSERVED=NOT_MEASURED"
