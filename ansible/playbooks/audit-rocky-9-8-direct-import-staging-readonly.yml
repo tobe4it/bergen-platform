@@ -1,0 +1,225 @@
+---
+# Two-host no-write preflight for staging exactly one authenticated Rocky 9.8
+# rootfs archive as a Proxmox container template. NO COPY OR PCT CREATE.
+- name: Verify exact source Rocky 9.8 image before any transport
+  hosts: bp-controller
+  connection: local
+  become: false
+  gather_facts: false
+  any_errors_fatal: true
+  tasks:
+    - name: Read controller short hostname
+      ansible.builtin.command:
+        argv: [hostname, -s]
+      changed_when: false
+      register: rocky_direct_source_host
+
+    - name: Read controller execution user
+      ansible.builtin.command:
+        argv: [id, -un]
+      changed_when: false
+      register: rocky_direct_source_user
+
+    - name: Refuse unexpected source execution identity
+      ansible.builtin.assert:
+        that:
+          - inventory_hostname == 'bp-controller'
+          - rocky_direct_source_host.stdout == 'bp-controller'
+          - rocky_direct_source_user.stdout == 'ansible'
+
+    - name: Check the pinned SHA256 and entire tar structure again
+      ansible.builtin.command:
+        argv:
+          - python3
+          - "{{ playbook_dir }}/../files/nextcloud/audit_rocky_lxc_rootfs.py"
+      register: rocky_direct_source_audit
+      changed_when: false
+
+    - name: Require signed pinned Rocky image is structurally acceptable
+      ansible.builtin.assert:
+        that:
+          - (rocky_direct_source_audit.stdout | from_json).result == 'ROCKY_LXC_ROOTFS_STRUCTURAL_AUDIT_PASS'
+          - (rocky_direct_source_audit.stdout | from_json).rocky_version == '9.8'
+          - (rocky_direct_source_audit.stdout | from_json).sha256_verified
+          - (rocky_direct_source_audit.stdout | from_json).regular_count == 11408
+          - (rocky_direct_source_audit.stdout | from_json).hardlink_count == 1603
+          - (rocky_direct_source_audit.stdout | from_json).symlink_count == 2151
+          - (rocky_direct_source_audit.stdout | from_json).pinned_missing_link_exception_count == 7
+          - (rocky_direct_source_audit.stdout | from_json).privileged_mode_regular_count == 14
+          - not (rocky_direct_source_audit.stdout | from_json).archive_extracted
+          - not (rocky_direct_source_audit.stdout | from_json).template_import_authorized
+          - not (rocky_direct_source_audit.stdout | from_json).ct701_changed
+
+- name: Audit venombox template staging eligibility with no writes
+  hosts: venombox
+  become: true
+  gather_facts: false
+  any_errors_fatal: true
+  vars:
+    rocky_target_vmid: 790
+    rocky_future_runtime_vmid: 791
+    rocky_future_restore_vmid: 702
+    rocky_template_cache: /var/lib/vz/template/cache
+    rocky_staged_archive_name: rockylinux-9.8-lxc_20261018_amd64.tar.xz
+    rocky_staged_archive: /var/lib/vz/template/cache/rockylinux-9.8-lxc_20261018_amd64.tar.xz
+  tasks:
+    - name: Read exact destination hostname
+      ansible.builtin.command:
+        argv: [hostname, -s]
+      changed_when: false
+      register: rocky_direct_host
+
+    - name: Read exact PVE version
+      ansible.builtin.command:
+        argv: [pveversion]
+      changed_when: false
+      register: rocky_direct_version
+
+    - name: Require the specific approved planning boundary
+      ansible.builtin.assert:
+        that:
+          - inventory_hostname == 'venombox'
+          - rocky_direct_host.stdout == 'venombox'
+          - rocky_direct_version.stdout is match('^pve-manager/9[.]')
+          - rocky_target_vmid == 790
+          - rocky_future_runtime_vmid == 791
+          - rocky_future_restore_vmid == 702
+          - rocky_staged_archive_name == 'rockylinux-9.8-lxc_20261018_amd64.tar.xz'
+          - rocky_staged_archive == rocky_template_cache ~ '/' ~ rocky_staged_archive_name
+
+    - name: Check existing template cache parent directories without following symlinks
+      ansible.builtin.stat:
+        path: "{{ item }}"
+        follow: false
+        get_checksum: false
+      loop:
+        - /var/lib/vz
+        - /var/lib/vz/template
+        - /var/lib/vz/template/cache
+      register: rocky_direct_cache_dirs
+
+    - name: Require existing root-owned real template cache directories
+      ansible.builtin.assert:
+        that:
+          - item.stat.isdir | default(false)
+          - not (item.stat.islnk | default(false))
+          - item.stat.pw_name == 'root'
+        fail_msg: A local PVE staging directory differs from the reviewed layout.
+      loop: "{{ rocky_direct_cache_dirs.results }}"
+      loop_control:
+        label: "{{ item.item }}"
+
+    - name: Inspect exact destination template file without following links
+      ansible.builtin.stat:
+        path: "{{ rocky_staged_archive }}"
+        follow: false
+        get_checksum: false
+      register: rocky_direct_target_file
+
+    - name: Refuse overwriting any existing staged file or symlink
+      ansible.builtin.assert:
+        that:
+          - not rocky_direct_target_file.stat.exists
+        fail_msg: Pinned template destination already occupied; no overwrite permitted.
+
+    - name: Read all cluster VM IDs without allocating anything
+      ansible.builtin.command:
+        argv: [pvesh, get, /cluster/resources, --type, vm, --output-format, json]
+      changed_when: false
+      register: rocky_direct_cluster
+
+    - name: Demand all three proposed IDs still free cluster-wide
+      ansible.builtin.assert:
+        that:
+          - >-
+            ((rocky_direct_cluster.stdout | from_json) |
+             selectattr('vmid', 'in', [702, 790, 791]) | list | length) == 0
+
+    - name: Inspect target local LXC config path
+      ansible.builtin.stat:
+        path: /etc/pve/lxc/790.conf
+        follow: false
+      register: rocky_direct_lxc_cfg
+
+    - name: Inspect target local VM config path
+      ansible.builtin.stat:
+        path: /etc/pve/qemu-server/790.conf
+        follow: false
+      register: rocky_direct_vm_cfg
+
+    - name: Refuse any local VMID 790 configuration collision
+      ansible.builtin.assert:
+        that:
+          - not rocky_direct_lxc_cfg.stat.exists
+          - not rocky_direct_vm_cfg.stat.exists
+
+    - name: Inspect current protected Nextcloud guest configuration
+      ansible.builtin.command:
+        argv: [pct, config, '701']
+      changed_when: false
+      no_log: true
+      register: rocky_direct_701_config
+
+    - name: Assert no changes to the protected Nextcloud guest
+      ansible.builtin.assert:
+        that:
+          - "'hostname: nextcloud-restore-701' in rocky_direct_701_config.stdout"
+          - "'unprivileged: 1' in rocky_direct_701_config.stdout"
+          - "'protection: 1' in rocky_direct_701_config.stdout"
+          - "'onboot: 0' in rocky_direct_701_config.stdout"
+          - "not (rocky_direct_701_config.stdout is search('(?m)^(?:net[0-9]+|lxc\\.net):'))"
+
+    - name: Check active local template and ZFS storage
+      ansible.builtin.command:
+        argv: [pvesm, status]
+      changed_when: false
+      register: rocky_direct_storage
+
+    - name: Demand local and local-zfs both online
+      ansible.builtin.assert:
+        that:
+          - "rocky_direct_storage.stdout is search('(?m)^local[ ]+dir[ ]+active[ ]+')"
+          - "rocky_direct_storage.stdout is search('(?m)^local-zfs[ ]+zfspool[ ]+active[ ]+')"
+
+    - name: Verify pool health without modifying it
+      ansible.builtin.command:
+        argv: [zpool, status, -x]
+      changed_when: false
+      register: rocky_direct_pools
+
+    - name: Refuse degraded ZFS
+      ansible.builtin.assert:
+        that:
+          - rocky_direct_pools.stdout is search('all pools are healthy')
+
+    - name: Determine local staging available bytes without writing
+      ansible.builtin.command:
+        argv:
+          - python3
+          - -c
+          - "import os; s=os.statvfs('/var/lib/vz/template/cache'); print(s.f_bavail*s.f_frsize)"
+      changed_when: false
+      register: rocky_direct_free
+
+    - name: Require sufficient space for the pinned archive plus margin
+      ansible.builtin.assert:
+        that:
+          - rocky_direct_free.stdout | int > 1024 * 1024 * 1024
+
+    - name: Report no-write readiness for separate transfer design
+      ansible.builtin.debug:
+        msg:
+          status: ROCKY_9_8_DIRECT_TEMPLATE_STAGING_READ_ONLY_READY
+          source_rootfs_sha256: 1fd0ade221871319d5ae7bed9ece57c001d79ef950c1263814d5b8d48779b7e5
+          source_rootfs_bytes: 107425612
+          destination_storage_volume: local:vztmpl/rockylinux-9.8-lxc_20261018_amd64.tar.xz
+          proposed_disposable_guest_vmid: 790
+          existing_701_changed: false
+          source_archive_transferred: false
+          new_template_created: false
+          new_guest_created: false
+          new_network_attached: false
+          network_egress_authorized: false
+          template_staging_apply_authorized: false
+          pct_create_authorized: false
+          next_gate: Review explicitly gated immutable source-to-venombox transport.
