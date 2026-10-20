@@ -34,6 +34,7 @@ on:
       - 'ansible/playbooks/audit-bergen-ai-ct110-isolated-restore-feasibility-readonly.yml'
       - 'ansible/playbooks/audit-bergen-ai-ct110-archived-restore-config-readonly.yml'
       - 'ansible/playbooks/apply-bergen-ai-vmbr90-transport-once.yml'
+      - 'ansible/playbooks/audit-bergen-ai-vmbr90-apply-gates-readonly.yml'
       - 'docs/BERGEN-AI-PRIVATE-PROXMOX-BRIDGE.md'
       - 'tests/test_bergen_ai_private_bridge_preflight.py'
       - 'tests/test_bergen_ai_private_bridge_external_gates.py'
@@ -49,6 +50,7 @@ on:
       - 'tests/test_bergen_ai_ct110_isolated_restore_feasibility_readonly.py'
       - 'tests/test_bergen_ai_ct110_archived_restore_config_readonly.py'
       - 'tests/test_bergen_ai_vmbr90_scoped_apply.py'
+      - 'tests/test_bergen_ai_vmbr90_apply_gates_readonly.py'
       - 'docs/examples/bergen-ai-bridge-ipam.local.json.example'
       - '.github/workflows/bergen-ai-private-bridge.yml'
   push:
@@ -85,6 +87,7 @@ on:
       - 'ansible/playbooks/audit-bergen-ai-ct110-isolated-restore-feasibility-readonly.yml'
       - 'ansible/playbooks/audit-bergen-ai-ct110-archived-restore-config-readonly.yml'
       - 'ansible/playbooks/apply-bergen-ai-vmbr90-transport-once.yml'
+      - 'ansible/playbooks/audit-bergen-ai-vmbr90-apply-gates-readonly.yml'
       - 'tests/test_bergen_ai_private_bridge_preflight.py'
       - 'tests/test_bergen_ai_private_bridge_external_gates.py'
       - 'tests/test_bergen_ai_private_bridge_backup_inventory.py'
@@ -99,6 +102,7 @@ on:
       - 'tests/test_bergen_ai_ct110_isolated_restore_feasibility_readonly.py'
       - 'tests/test_bergen_ai_ct110_archived_restore_config_readonly.py'
       - 'tests/test_bergen_ai_vmbr90_scoped_apply.py'
+      - 'tests/test_bergen_ai_vmbr90_apply_gates_readonly.py'
       - 'docs/examples/bergen-ai-bridge-ipam.local.json.example'
 
 jobs:
@@ -129,6 +133,7 @@ jobs:
           python -m unittest discover -s tests -p 'test_bergen_ai_ct110_isolated_restore_feasibility_readonly.py' -v
           python -m unittest discover -s tests -p 'test_bergen_ai_ct110_archived_restore_config_readonly.py' -v
           python -m unittest discover -s tests -p 'test_bergen_ai_vmbr90_scoped_apply.py' -v
+          python -m unittest discover -s tests -p 'test_bergen_ai_vmbr90_apply_gates_readonly.py' -v
       - name: Validate read-only Proxmox inventory playbook syntax
         run: |
           ansible-playbook -i ansible/inventory.yml \
@@ -163,3 +168,5 @@ jobs:
             ansible/playbooks/audit-bergen-ai-ct110-archived-restore-config-readonly.yml --syntax-check
           ansible-playbook -i ansible/inventory.yml \
             ansible/playbooks/apply-bergen-ai-vmbr90-transport-once.yml --syntax-check
+          ansible-playbook -i ansible/inventory.yml \
+            ansible/playbooks/audit-bergen-ai-vmbr90-apply-gates-readonly.yml --syntax-check
