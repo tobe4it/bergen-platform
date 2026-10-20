@@ -2168,3 +2168,84 @@ these audits.
 
 The unresolved scheduled CT126 backup rc 255 and
 Ollama wildcard-port exposure remain separate issues.
+
+## Second review-required document confirmed – 2026-10-20 15:47
+
+Operator investigated document 16 with the existing
+`audit-paperless-ai-catalog-review-readonly.yml`:
+
+```text
+AUDIT=READ_ONLY
+STATUS=INSPECTED
+JOURNAL_STATE=REQUIRES_REVIEW
+SNAPSHOT_MATCH=MATCH
+DIFFERENCE_CATEGORY=NONE
+INBOX_TAG=PRESENT
+JOURNAL_AFTER_SNAPSHOT=ABSENT
+MODEL_INFERENCE=NO
+DOCUMENTS_CHANGED=NO
+CHANGED=False
+venombox ok=9 changed=0 failed=0
+```
+
+Documents 11 and 16 are both durable `REQUIRES_REVIEW`
+entries and their current protected metadata match their
+respective saved pre-inference journal snapshots. This
+does *not* establish a specific underlying classifier
+failure; no live OCR, AI prompt, model response or
+exception message is retained by these redacted
+audits. A second independent `REQUIRES_REVIEW` case
+warrants treating the bulk workflow as **paused**, not
+as authorization to bypass the one-document fail-stop.
+
+Known results from the authorized eight-ID set:
+- 2, 5, 10: `APPLIED=1` in prior individual executions
+  (verified previously via `CONFIRMED=3/8`).
+- 11, 16: `REQUIRES_REVIEW`, matching baseline, inbox
+  still tagged.
+- 21, 22, 29: not executed in the two observed loops;
+  earlier journal presence is **not yet established**.
+
+### Next non-mutating action: inventory exactly the eight pinned IDs
+
+A purpose-built read-only playbook at
+`ansible/playbooks/audit-paperless-ai-catalog-journal-inventory-readonly.yml`
+takes a **caller-provided** positive-integer ID list, max
+eight, and reads only those statuses through the existing
+Paperless Django runtime and `sqlite3 mode=ro` with
+`PRAGMA query_only=ON`. Output contains only exact
+operator-specified numeric IDs and status enums
+`APPLIED`, `REQUIRES_REVIEW`, `PROCESSING`,
+`ROLLED_BACK`, `NOT_RECORDED`. No OCR/metadata is
+queried or logged, no inference is run, and no journal
+or document changes are authorized.
+
+From `bp-controller` using the ignored local site
+variables, after updating the detached worktree:
+
+```bash
+(
+set -euo pipefail
+BASE="$HOME/bergen-platform"
+WT="$HOME/bergen-platform-paperless-ai-catalog"
+git -C "$WT" fetch origin feat/paperless-native-ai-inbox-catalog-20261018
+git -C "$WT" switch --detach origin/feat/paperless-native-ai-inbox-catalog-20261018
+cd "$WT"
+"$BASE/.venv/bin/ansible-playbook" \
+  -i ansible/inventory.yml \
+  -i "$BASE/ansible/inventory.local.yml" \
+  ansible/playbooks/audit-paperless-ai-catalog-journal-inventory-readonly.yml \
+  --vault-id ai@prompt \
+  -e "@$BASE/ansible/vars/paperless-ai-catalog.local.yml" \
+  -e '{"paperless_ai_catalog_journal_document_ids":[2,5,10,11,16,21,22,29]}'
+)
+```
+
+This inventories previous journal states without requesting
+another classification of previously attempted documents.
+Even if IDs 21/22/29 are `NOT_RECORDED`, any additional
+writes remain separately considered after diagnosing the
+repeated review outcomes. Do not manually delete any
+`catalog.sqlite3` row or reset the journal. Open
+CT126 daily backup failure and unauthenticated Ollama
+TCP/11434 surface remain separate unresolved findings.
