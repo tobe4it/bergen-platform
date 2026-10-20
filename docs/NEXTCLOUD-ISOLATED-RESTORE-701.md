@@ -1276,3 +1276,37 @@ this fix.
 Resume by re-fetching the reviewed branch and running the **same
 stage-rocky-9-8-lxc-rootfs.yml without an apply flag**, preserving
 non-multiplexed SSH and `--vault-id infra@prompt`, as documented above.
+
+
+### Rocky 9.8 staging read-only preflight passed (2026-10-20)
+
+The operator executed `ansible/playbooks/stage-rocky-9-8-lxc-rootfs.yml`
+**without** `rocky_rootfs_staging_apply=true` and observed:
+
+- `bp-controller: ok=5 changed=0 unreachable=0 failed=0`
+- `venombox: ok=28 changed=0 unreachable=0 failed=0 skipped=8`
+- `ROCKY_9_8_DIRECT_TEMPLATE_STAGING_READ_ONLY_READY`
+- `ROCKY_9_8_ROOTFS_STAGING_READ_ONLY_READY`
+- `source_rootfs_bytes=107425612`
+- `source_rootfs_sha256=1fd0ade221871319d5ae7bed9ece57c001d79ef950c1263814d5b8d48779b7e5`
+- `source_archive_transferred=false`, `pct_create_authorized=false`,
+  `template_staging_apply_authorized=false`.
+
+The eight skipped tasks are the deliberately disabled mutation and
+post-transfer-verification branch. Existing CT701 remained isolated
+and protected; no Proxmox template was staged, no CT was created, and
+no network or package change was made.
+
+**Next approval boundary:** explicitly authorize only staging the
+exact rootfs file to `venombox` using the separately gated
+`rocky_rootfs_staging_apply=true`. Approval must not be inferred
+from read-only PASS. The staging playbook performs a fresh source
+integrity and destination check before copying, requires an absent
+temporary and final file, verifies the exact destination SHA256,
+and publishes without overwriting. If a partial file or a final
+file is found, stop for separate read-only reconciliation; do
+not remove or replace it automatically.
+
+**Not authorized:** extracting the archive, calling `pct create`,
+starting CT790, modifying protected CT701, enabling a network
+connection, importing Nextcloud data, or changing production mx1/mx2.
