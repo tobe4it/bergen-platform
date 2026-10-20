@@ -60,7 +60,26 @@ jobs:
           REPO="$GITHUB_REPOSITORY"
           COMMIT="$GITHUB_SHA"
           # A pre-existing tag must never be moved or silently replaced.
-          existing_tag_sha="$(gh api "repos/$REPO/git/ref/tags/$TAG" --jq '.object.sha' 2>/dev/null || true)"
+          # Do not confuse an HTTP 404 response with jq's literal "null".
+          # Unexpected HTTP/transport failures must stop publication.
+          tag_http_code="$(curl -sS \
+            --header "Authorization: Bearer $GH_TOKEN" \
+            --header 'Accept: application/vnd.github+json' \
+            --output "$RUNNER_TEMP/bergen-v0.15.0-tag-ref.json" \
+            --write-out '%{http_code}' \
+            "https://api.github.com/repos/$REPO/git/ref/tags/$TAG")"
+          case "$tag_http_code" in
+            200)
+              existing_tag_sha="$(jq -er '.object.sha' "$RUNNER_TEMP/bergen-v0.15.0-tag-ref.json")"
+              ;;
+            404)
+              existing_tag_sha=''
+              ;;
+            *)
+              echo "Refusing: GitHub tag-ref lookup returned HTTP $tag_http_code" >&2
+              exit 1
+              ;;
+          esac
           if [[ -n "$existing_tag_sha" && "$existing_tag_sha" != "$COMMIT" ]]; then
             echo 'Refusing: release tag already points to another Git object' >&2
             exit 1
