@@ -730,3 +730,40 @@ modification to protected CT701 is authorized yet. Before any
 rootfs consumption as root, audit all tar entry paths, symlink
 chains, hardlinks, special node types and ownership/permissions;
 use an approved, disposable networkless guest boot test.
+
+
+## LXC image signing key provenance and missing local verification tool
+
+On 2026-10-20 the operator reported on bp-controller that
+`gpg` and `gpgv` are not installed. The local downloaded
+`SHA256SUMS.asc` was identified by `file` as an OpenPGP
+signature (armored PGP signature). The previously empty
+`gpg --list-packets` filtered output was caused by the missing
+command, **not** proof of a broken signature.
+
+The independently published Linux Containers community discussions
+identify the historic image-signing key as:
+
+    E7FB0CAEC8173D669066514CBAEFF88C22F6E216
+    LXC pre-built images <lxc-devel@lists.linuxcontainers.org>
+
+External cross-references:
+https://discuss.linuxcontainers.org/t/3-0-unable-to-fetch-gpg-key-from-keyserver/2015
+https://discuss.linuxcontainers.org/t/invalid-gpg-signature-on-index-file-of-downloadable-images/12330
+
+These are prior attestations for the image-signing key, **not**
+successful verification of this October 2026 SHA256SUMS signature.
+The operator should install GnuPG on the **non-production controller
+only if approved**, use a new isolated GnuPG home, download the public
+key from an independent key distribution service such as
+keyserver.ubuntu.com, match its **entire** fingerprint to the value
+above, import it only into that isolated keyring, and demand a
+successful detached signature verification of local SHA256SUMS.asc
+over local SHA256SUMS with exactly this fingerprint before considering
+the archive authenticated. Reject any mismatch or unverifiable key;
+never add a key to a global trusted system keyring or waive signature
+verification. Retain separate archive SHA256 verification.
+
+No template import, rootfs extraction, guest network, package
+installation in CT701, or mx2/mx1 operation follows from this
+key-discovery result.
