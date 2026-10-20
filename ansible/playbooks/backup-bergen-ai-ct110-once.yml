@@ -70,6 +70,13 @@
           changed_when: true
           no_log: true
 
+        - name: Require successful async backup completion status
+          ansible.builtin.assert:
+            that:
+              - "oneoff_backup_exec.rc | default(-1) | int == 0"
+              - "not (oneoff_backup_exec.failed | default(false) | bool)"
+          no_log: true
+
         - name: Read CT110 state after backup without starting or restarting
           ansible.builtin.command:
             argv: [pct, status, '110']
@@ -80,7 +87,7 @@
         - name: Require CT110 is still running
           ansible.builtin.assert:
             that:
-              - ct110_after.stdout | trim == 'status: running'
+              - "ct110_after.stdout | trim == 'status: running'"
           no_log: true
 
         - name: Read selected NFS storage backup metadata after success
