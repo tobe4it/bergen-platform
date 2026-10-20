@@ -198,6 +198,54 @@ class ArchivedRestoreConfigTests(TestCase):
         self.assertEqual(a.device_details(None)["CGROUP_DEVICE_RULE_CLASS"], "UNVERIFIED")
         self.assertEqual(a.device_details(None)["CGROUP_POLICY_ACTION"], "UNVERIFIED")
 
+    def test_pct_documented_keyed_and_positional_device_path_forms(self):
+        # pct.conf documents dev[n]: [[path=]<Path>],uid=...,gid=...,
+        # mode=...,deny-write=...; these are only audit labels, not approval.
+        for value, kind, form in (
+            ("path=/dev/dri/renderD128,gid=104,mode=0660", "GPU_RENDER", "KEYED_PATH"),
+            ("path=/dev/dri/card0,uid=0,gid=44,deny-write=1", "GPU_CARD", "KEYED_PATH"),
+            ("/dev/dri/renderD128,gid=104,mode=0660", "GPU_RENDER", "POSITIONAL_PATH"),
+            ("path=/dev/fuse,mode=0666", "FUSE", "KEYED_PATH"),
+            ("path=/dev/net/tun", "TUN", "KEYED_PATH"),
+            ("path=/dev/kfd", "GPU_KFD", "KEYED_PATH"),
+            ("path=/dev/sda", "OTHER_DEVICE", "KEYED_PATH"),
+        ):
+            with self.subTest(value=value):
+                self.assertEqual(a.parsed_device(value), (kind, form))
+                self.assertNotIn(value, str(a.device_details(
+                    a.parse_config(SAMPLE + "dev0: " + value + "\n"))))
+        report = a.profile(a.parse_config(SAMPLE + (
+            "dev0: path=/dev/dri/renderD128,gid=104,mode=0660\n"
+            "dev1: /dev/dri/card0,deny-write=1\n"
+            "lxc.cgroup2.devices.allow: c 10:229 rwm\n"
+        )))
+        self.assertEqual(report["DEV0_CLASS"], "GPU_RENDER")
+        self.assertEqual(report["DEV0_FORMAT"], "KEYED_PATH")
+        self.assertEqual(report["DEV1_CLASS"], "GPU_CARD")
+        self.assertEqual(report["DEV1_FORMAT"], "POSITIONAL_PATH")
+        self.assertEqual(report["CGROUP_DEVICE_RULE_CLASS"], "FUSE")
+        self.assertEqual(report["STATUS"], "REVIEW_REQUIRED")
+        self.assertNotIn("/dev/dri", str(report))
+
+    def test_malformed_dev_options_are_never_silently_normalized(self):
+        examples = (
+            "path=/dev/dri/renderD128,bad-option=1",
+            "path=/dev/dri/renderD128,gid=100,gid=101",
+            "path=/dev/dri/renderD128,mode=9999",
+            "path=/dev/dri/renderD128,deny-write=maybe",
+            "path=/dev/dri/renderD128,path=/dev/fuse",
+            "/home/host/private/file",
+            "path=relative/path",
+            "path=/dev/dri/renderD128,,mode=0660",
+        )
+        for value in examples:
+            with self.subTest(value=value):
+                self.assertEqual(
+                    a.parsed_device(value),
+                    ("UNRECOGNIZED_FORMAT", "UNRECOGNIZED_FORMAT"))
+        unknown = a.device_details(None)
+        self.assertEqual(unknown["DEV0_FORMAT"], "UNVERIFIED")
+
     def test_extra_device_indices_and_multiple_cgroup_rules_are_not_normalized(self):
         values = a.parse_config(SAMPLE + (
             "dev0: /dev/dri/card0\n"
