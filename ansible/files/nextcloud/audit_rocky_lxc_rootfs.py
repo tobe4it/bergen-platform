@@ -80,6 +80,7 @@ def follow_inside_root(start, link_target, links):
 def inspect_archive(handle):
     names = set()
     symlinks = {}
+    implicit_directories = set()
     dirs, regular, total_bytes, executable_privileged = 0, 0, 0, 0
     release = {}
     with tarfile.open(fileobj=handle, mode="r|xz") as archive:
@@ -90,6 +91,9 @@ def inspect_archive(handle):
                 continue
             require(name not in names, "DUPLICATE_MEMBER")
             names.add(name)
+            parts = name.split("/")
+            for idx in range(1, len(parts)):
+                implicit_directories.add("/".join(parts[:idx]))
             require(len(names) <= MAX_FILES, "TOO_MANY_MEMBERS")
             require(member.uid >= 0 and member.gid >= 0,
                     "INVALID_UID_GID")
@@ -124,15 +128,15 @@ def inspect_archive(handle):
     require("etc/os-release" in symlinks
             and symlinks["etc/os-release"] == "../usr/lib/os-release",
             "OS_RELEASE_SYMLINK_MISMATCH")
+    require(not (implicit_directories & symlinks.keys()),
+            "MEMBER_UNDER_SYMLINK")
     for name, target in symlinks.items():
-        require(not any(name.startswith(link + "/") for link in symlinks if link != name),
-                "MEMBER_UNDER_SYMLINK")
         parent = name.rpartition("/")[0]
         resolved = follow_inside_root(parent, target, symlinks)
         require(bool(resolved), "LINK_TARGET_ARCHIVE_ROOT")
         # Some directory paths are implicit in tar archives; accept targets
         # only when represented by an entry or a documented child entry.
-        require(resolved in names or any(n.startswith(resolved + "/") for n in names),
+        require(resolved in names or resolved in implicit_directories,
                 "DANGLING_SYMLINK")
     return {
         "result": "ROCKY_LXC_ROOTFS_STRUCTURAL_AUDIT_PASS",
