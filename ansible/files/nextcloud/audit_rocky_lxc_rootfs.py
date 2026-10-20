@@ -31,8 +31,7 @@ def require(condition, code):
 
 
 def relative_name(name):
-    require(bool(name) and not name.startswith("/") and "\\" not in name
-            and "\x00" not in name, "UNSAFE_MEMBER_NAME")
+    require(bool(name) and not name.startswith("/") and "\x00" not in name, "UNSAFE_MEMBER_NAME")
     while name.startswith("./"):
         name = name[2:]
     if name == ".":
@@ -46,13 +45,13 @@ def relative_name(name):
 
 
 def follow_inside_root(start, link_target, links):
-    """Resolve a symlink target in filesystem order without escaping root."""
-    require(bool(link_target) and not link_target.startswith("/")
-            and "\\" not in link_target and "\x00" not in link_target,
-            "ABSOLUTE_OR_INVALID_SYMLINK")
+    """Resolve symlinks using Linux rootfs semantics; never touch the host filesystem."""
+    require(bool(link_target) and "\\x00" not in link_target
+            and not any(ord(c) < 32 or ord(c) == 127 for c in link_target),
+            "INVALID_SYMLINK_TARGET")
     pending = list(link_target.split("/"))
-    resolved = start.split("/") if start else []
-    visited = 0
+    resolved = [] if link_target.startswith("/") else (start.split("/") if start else [])
+    traversals = 0
     while pending:
         part = pending.pop(0)
         if part in ("", "."):
@@ -61,27 +60,32 @@ def follow_inside_root(start, link_target, links):
             require(bool(resolved), "SYMLINK_ESCAPES_ROOT")
             resolved.pop()
             continue
-        require(not any(ord(c) < 32 or ord(c) == 127 for c in part),
-                "CONTROL_CHAR_IN_LINK")
         resolved.append(part)
         current = "/".join(resolved)
         if current in links:
-            visited += 1
-            require(visited <= MAX_LINK_DEPTH, "SYMLINK_LOOP_OR_DEPTH")
+            traversals += 1
+            require(traversals <= MAX_LINK_DEPTH, "SYMLINK_LOOP_OR_DEPTH")
             target = links[current]
-            require(bool(target) and not target.startswith("/")
-                    and "\\" not in target and "\x00" not in target,
-                    "ABSOLUTE_OR_INVALID_SYMLINK")
-            resolved.pop()
+            require(bool(target) and "\\x00" not in target
+                    and not any(ord(c) < 32 or ord(c) == 127 for c in target),
+                    "INVALID_SYMLINK_TARGET")
+            if target.startswith("/"):
+                resolved = []
+            else:
+                resolved.pop()
             pending = target.split("/") + pending
     return "/".join(resolved)
 
 
 def inspect_archive(handle):
     names = set()
+    types = {}
+    regular_seen = set()
     symlinks = {}
     implicit_directories = set()
-    dirs, regular, total_bytes, executable_privileged = 0, 0, 0, 0
+    dirs, regular, hardlinks, total_bytes, executable_privileged = 0, 0, 0, 0, 0
+    absolute_symlinks = 0
+    backslash_regular = 0
     release = {}
     with tarfile.open(fileobj=handle, mode="r|xz") as archive:
         for member in archive:
@@ -103,8 +107,14 @@ def inspect_archive(handle):
             require(member.mode & ~0o7777 == 0, "UNEXPECTED_MODE_BITS")
             if member.isdir():
                 dirs += 1
+                types[name] = "directory"
             elif member.isfile():
                 regular += 1
+                regular_seen.add(name)
+                types[name] = "regular"
+                if "\\\\" in name:
+                    # On Linux the backslash is a filename character, not a separator.
+                    backslash_regular += 1
                 if member.mode & 0o6000:
                     executable_privileged += 1
                 if name in ("etc/rocky-release", "usr/lib/os-release"):
@@ -112,11 +122,22 @@ def inspect_archive(handle):
                     content = archive.extractfile(member)
                     require(content is not None, "RELEASE_MARKER_UNREADABLE")
                     release[name] = content.read(4097).decode("utf-8")
+            elif member.islnk():
+                # TAR hardlink targets are root-relative archive member names,
+                # never relative to the hardlink's parent directory.
+                target = relative_name(member.linkname)
+                require(bool(target) and target in regular_seen,
+                        "HARDLINK_TARGET_NOT_EARLIER_REGULAR")
+                require(member.size == 0, "HARDLINK_NONZERO_SIZE")
+                hardlinks += 1
+                types[name] = "hardlink"
             elif member.issym():
                 symlinks[name] = member.linkname
+                types[name] = "symlink"
+                if member.linkname.startswith("/"):
+                    absolute_symlinks += 1
             else:
-                # No hardlinks, device nodes, FIFO or unknown header types
-                # can be passed to a privileged Proxmox import unattended.
+                # Device nodes, FIFOs and unknown types never pass this gate.
                 raise AuditBlocked("UNREVIEWED_NONREGULAR_MEMBER")
     require(regular > 1000 and dirs > 100, "INCOMPLETE_ROOTFS")
     require(release.get("etc/rocky-release", "").strip()
@@ -130,12 +151,14 @@ def inspect_archive(handle):
             "OS_RELEASE_SYMLINK_MISMATCH")
     require(not (implicit_directories & symlinks.keys()),
             "MEMBER_UNDER_SYMLINK")
+    require(not (implicit_directories &
+                 {name for name, kind in types.items()
+                  if kind in ("regular", "hardlink")}),
+            "MEMBER_UNDER_NON_DIRECTORY")
     for name, target in symlinks.items():
         parent = name.rpartition("/")[0]
         resolved = follow_inside_root(parent, target, symlinks)
         require(bool(resolved), "LINK_TARGET_ARCHIVE_ROOT")
-        # Some directory paths are implicit in tar archives; accept targets
-        # only when represented by an entry or a documented child entry.
         require(resolved in names or resolved in implicit_directories,
                 "DANGLING_SYMLINK")
     return {
@@ -144,9 +167,13 @@ def inspect_archive(handle):
         "sha256_verified": True,
         "regular_count": regular,
         "directory_count": dirs,
+        "hardlink_count": hardlinks,
         "symlink_count": len(symlinks),
+        "absolute_symlink_count": absolute_symlinks,
+        "backslash_named_regular_count": backslash_regular,
         "privileged_mode_regular_count": executable_privileged,
-        "hardlinks_devices_fifos_allowed": False,
+        "hardlink_targets_verified": True,
+        "devices_fifos_allowed": False,
         "archive_extracted": False,
         "template_imported": False,
         "ct701_changed": False,
