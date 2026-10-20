@@ -94,3 +94,69 @@ def plan_changes(current, suggestions, tags, correspondent_id, document_type_id)
         demand(type(document_type_id) is int and document_type_id > 0, "DOCUMENT_TYPE_INVALID")
         changes["document_type_id"] = document_type_id
     return changes
+
+
+def has_metadata_changes(changes):
+    """Pure decision: valid classification with empty diff is not a failed job."""
+    demand(isinstance(changes, dict) and set(changes) ==
+           {"title", "correspondent_id", "document_type_id", "add_tag_ids"},
+           "CHANGES_INVALID")
+    return bool(changes["title"] is not None
+                or changes["correspondent_id"] is not None
+                or changes["document_type_id"] is not None
+                or changes["add_tag_ids"])
+
+
+def bounded_ai_labels(values):
+    """Untrusted model names for one owner's human-readable Paperless note only.
+
+    Never store OCR, prompt, model JSON, unrelated owner metadata, or arbitrary
+    multiline output. Reject schema violations rather than copying them.
+    """
+    demand(isinstance(values, list) and len(values) <= 12,
+           "NOTE_SUGGESTIONS_INVALID")
+    out = []
+    for value in values:
+        demand(isinstance(value, str) and len(value) <= 128,
+               "NOTE_SUGGESTIONS_INVALID")
+        clean = " ".join(value.split())
+        demand(all(ord(c) >= 32 and ord(c) != 127 for c in clean),
+               "NOTE_SUGGESTIONS_INVALID")
+        if clean and clean.casefold() not in [x.casefold() for x in out]:
+            out.append(clean)
+        demand(len(out) <= 6, "NOTE_SUGGESTIONS_INVALID")
+    return out
+
+
+def review_note_text(suggestions, resolved_type_name=None,
+                     resolved_tag_names=None):
+    """Compact, explicitly non-authoritative local AI note; no OCR in it.
+
+    Group labels describe original LLM names, not authorization to create
+    new taxonomy objects. Resolved labels must be the owner's visible ones.
+    """
+    demand(isinstance(suggestions, dict), "NOTE_SUGGESTIONS_INVALID")
+    choices = suggestions.get("document_types")
+    tags = suggestions.get("tags")
+    demand(isinstance(choices, dict) and isinstance(tags, dict),
+           "NOTE_SUGGESTIONS_INVALID")
+    type_names = bounded_ai_labels(choices.get("new_names"))
+    tag_names = bounded_ai_labels(tags.get("new_names"))
+    visible_type = bounded_ai_labels(
+        [resolved_type_name] if resolved_type_name is not None else [])
+    visible_tags = bounded_ai_labels(
+        resolved_tag_names if resolved_tag_names is not None else [])
+    lines = [
+        "Bergen-AI | Vorschlaege zur manuellen Pruefung",
+        "Nicht freigegebene KI-Vorschlaege; keine neuen Kategorien angelegt.",
+        "LLM-Dokumenttyp: " + (", ".join(type_names) or "(kein Namensvorschlag)"),
+        "LLM-Tags: " + (", ".join(tag_names) or "(keine Namensvorschlaege)"),
+        "Bestehender zugeordneter Typ: "
+        + (", ".join(visible_type) or "(keiner)"),
+        "Bestehende zugeordnete Tags: "
+        + (", ".join(visible_tags) or "(keine)"),
+        "Bitte pruefen und erst danach das Posteingangs-Tag entfernen.",
+    ]
+    result = "\n".join(lines)
+    demand(len(result) <= 2048, "NOTE_SUGGESTIONS_INVALID")
+    return result
