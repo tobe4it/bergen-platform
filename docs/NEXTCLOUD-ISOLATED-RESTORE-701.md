@@ -1375,3 +1375,80 @@ no CT start, no bridge/net0, no guest package installs,
 no Nextcloud restore or production mx1/mx2 changes.
 A separate human approval and guest-creation runbook will
 be needed after this inspection.
+
+
+## Rocky 9.8: Proxmox template recognition PASS and CT790 creation preflight
+
+On 2026-10-20 the operator completed the independent staged-template
+read-only audit on venombox:
+
+- `ROCKY_9_8_STAGED_TEMPLATE_READ_ONLY_VERIFIED`
+- `ok=25 changed=0 unreachable=0 failed=0`
+- Exact rootfs file size `107425612`, SHA256 matched the independently
+  signed rootfs digest `1fd0ade221871319d5ae7bed9ece57c001d79ef950c1263814d5b8d48779b7e5`.
+- Root-owned regular template file, mode `0600`, no unfinished partial
+  staging archive; `pvesm path` and `pveam list local` both recognized
+  the exact template on the expected local cache path.
+- VMIDs 702, 790 and 791 remained free at audit time; CT701 remained
+  unprivileged, protected and disconnected. Storage and ZFS passed.
+
+The next gate is a **separate zero-write compatibility preflight**,
+`ansible/playbooks/audit-rocky-9-8-ct790-create-readonly.yml`.
+It imports the complete existing staged-template audit; on the
+controller it opens the original pinned archive with O_NOFOLLOW,
+verifies its exact SHA256 and repeats structural checks, and reports
+bounded UID/GID minimum/maximum values and aggregate PAX/xattr
+metadata. It refuses numeric owner IDs outside the default 0..65535
+guest user namespace mapping.
+
+On venombox the same-run preflight verifies locally supported
+`pct help create` options; verifies one usable root subordinate
+UID/GID allocation of at least 65,536 IDs in both `/etc/subuid`
+and `/etc/subgid`; and verifies active PVE `local-zfs` storage
+advertises `rootdir` content. None of these operations allocates
+or mounts a guest. Source identity and template SHA256 proofs
+must be present in this same invocation. It does not claim that
+an actual unpack will succeed.
+
+Use the detached branch worktree on bp-controller (no apply flag):
+
+    BASE="$HOME/bergen-platform"
+    WT="$HOME/bergen-platform-nextcloud-restore"
+    BRANCH="feat/nextcloud-isolated-restore-701-20261019"
+    SSH_ARGS="-C -o ControlMaster=no -o ControlPath=none -o ConnectTimeout=10 -o ServerAliveInterval=10 -o ServerAliveCountMax=2"
+    if [ -n "$(git -C "$WT" status --porcelain)" ]; then
+      echo "STOP: dirty worktree"
+    else
+      git -C "$WT" fetch origin "$BRANCH" &&
+      git -C "$WT" switch --detach "origin/$BRANCH" &&
+      ANSIBLE_SSH_ARGS="$SSH_ARGS" "$BASE/.venv/bin/ansible-playbook" \
+        -i "$BASE/ansible/inventory.yml" \
+        -i "$BASE/ansible/inventory.local.yml" \
+        "$WT/ansible/playbooks/audit-rocky-9-8-ct790-create-readonly.yml" \
+        --limit bp-controller,venombox --vault-id infra@prompt
+    fi
+
+Expected if all checks pass:
+`ROCKY_9_8_CT790_CREATE_PREFLIGHT_READ_ONLY_READY`, `changed=0`,
+`failed=0`, `pct_create_authorized=false`.
+
+### Planned CT790 creation, NOT YET AUTHORIZED
+
+The eventual disposable base guest must be a freshly allocated
+VMID `790`, unprivileged, stopped, protected, with no `--net0`,
+no additional NIC, no onboot start, and an expressly sized
+`local-zfs` root filesystem. Creation must reverify the exact
+template SHA256, cluster-wide VMID availability, storage and ZFS
+health, and confirm CT701 unchanged immediately before mutation.
+No `--ignore-unpack-errors`, no host-root `tar -x`, no guest
+start or networking, and no automatic destructive rollback. A
+partially failed `pct create` must stop and be inspected rather
+than automatically cleaned up.
+
+If the next read-only preflight passes, review a separate,
+explicitly approved, one-VMID provisioning playbook and
+rollback/recovery plan before running a mutation. The user has
+approved **only archival transfer**, which is already completed.
+This record does not extend approval to container creation,
+network interfaces, rootfs extraction, installing guest packages,
+restoring Nextcloud data or removing the production instance.
