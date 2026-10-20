@@ -848,3 +848,66 @@ fingerprint pinned from an external Linux Containers community
 source, `gpg --verify SHA256SUMS.asc SHA256SUMS`, and a repeat
 rootfs SHA256 comparison. No production guest/network/host
 modification is involved.
+
+
+## Signed Rocky 9.8 image VERIFIED (2026-10-20)
+
+The operator's local GnuPG run on bp-controller succeeded against
+the exact downloaded detached signature and checksum text:
+
+- GOODSIG and VALIDSIG for independently pinned signing key
+  `E7FB0CAEC8173D669066514CBAEFF88C22F6E216`.
+- Signer: `LXC pre-built images <lxc-devel@lists.linuxcontainers.org>`.
+- Signature creation: 2026-10-18 19:10:03 UTC.
+- The literal checksum line for rootfs.tar.xz matched pinned digest
+  `1fd0ade221871319d5ae7bed9ece57c001d79ef950c1263814d5b8d48779b7e5`.
+- `sha256sum -c` on local rootfs returned `OK`.
+- End-of-proof marker:
+  `ROCKY_9_8_IMAGE_SIGNATURE_AND_SHA256_VERIFIED`.
+
+GnuPG printed TRUST_UNDEFINED because the key was imported only
+into an isolated keyring without Web-of-Trust certifications.
+That is normal for an intentionally narrow trust root, and is
+**distinct from a failed detached signature**. Trust is supplied
+by the independently checked full key fingerprint; the end-to-end
+signature check succeeded. Do not confuse a good signature with a
+security assessment of every file or symlink in an external rootfs.
+
+### Subsequent archive-structure audit, no container creation
+
+The repository now includes two independent, no-write components:
+`ansible/files/nextcloud/audit_rocky_lxc_rootfs.py` and
+`ansible/playbooks/audit-rocky-9-lxc-rootfs-readonly.yml`.
+The former refuses execution as root or on an unexpected host;
+opens the exact archive read-only with O_NOFOLLOW, checks exact
+size and pinned SHA256, streams every xz-tar entry without
+extraction, checks relative paths and unsafe traversal, duplicate
+names, release markers, tar type classifications, symlink chains,
+dangling or escaping symbolic links, and counts privileged-mode
+files. It refuses hardlinks, device nodes, FIFOs, unknown records,
+and archive members underneath symlink prefixes. It reports
+counts and a bounded result with no member names. The latter
+runs on bp-controller, connection=local, become=false, changed=0.
+
+To invoke from the controller's isolated restore worktree:
+
+    BASE="$HOME/bergen-platform"
+    WT="$HOME/bergen-platform-nextcloud-restore"
+    BR="feat/nextcloud-isolated-restore-701-20261019"
+    test -z "$(git -C "$WT" status --porcelain)"
+    git -C "$BASE" fetch origin "$BR"
+    git -C "$WT" switch --detach "origin/$BR"
+    "$BASE/.venv/bin/ansible-playbook" \
+      -i "$BASE/ansible/inventory.yml" \
+      -i "$BASE/ansible/inventory.local.yml" \
+      "$WT/ansible/playbooks/audit-rocky-9-lxc-rootfs-readonly.yml" \
+      --limit bp-controller \
+      --vault-id infra@prompt
+
+Expected if all safety criteria are met:
+`ROCKY_LXC_ROOTFS_STRUCTURAL_AUDIT_PASS`, changed=0.
+If the signed distribution includes an unsupported archive type
+or incompatible symlink, the audit **must block**; that is a
+review gate, not a reason to auto-bypass it. Only then decide
+whether a constrained, disconnected disposable PVE guest can
+be built. No template or other VMID is created in this phase.
