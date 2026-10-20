@@ -942,17 +942,20 @@ current reviewed feature branch; refuse dirty worktrees:
     BASE="$HOME/bergen-platform"
     WT="$HOME/bergen-platform-nextcloud-restore"
     BRANCH="feat/nextcloud-isolated-restore-701-20261019"
-    test -z "$(git -C "$WT" status --porcelain)" || exit 1
-    git -C "$WT" fetch origin "$BRANCH"
-    git -C "$WT" switch --detach "origin/$BRANCH"
+    if [ -n "$(git -C "$WT" status --porcelain)" ]; then
+      echo "STOP: worktree contains local changes"
+    else
+      git -C "$WT" fetch origin "$BRANCH" &&
+      git -C "$WT" switch --detach "origin/$BRANCH" &&
+      "$BASE/.venv/bin/ansible-playbook" \
+        -i "$BASE/ansible/inventory.yml" \
+        -i "$BASE/ansible/inventory.local.yml" \
+        "$WT/ansible/playbooks/diagnose-rocky-9-lxc-rootfs-symlinks-readonly.yml" \
+        --limit bp-controller --vault-id infra@prompt
+    fi
 
-Then run the read-only diagnostic:
-
-    "$BASE/.venv/bin/ansible-playbook" \
-      -i "$BASE/ansible/inventory.yml" \
-      -i "$BASE/ansible/inventory.local.yml" \
-      "$WT/ansible/playbooks/diagnose-rocky-9-lxc-rootfs-symlinks-readonly.yml" \
-      --limit bp-controller --vault-id infra@prompt
+The conditional ensures that a failed fetch or refused worktree switch
+also prevents invoking an older diagnostic.
 
 Expected: `ROCKY_LXC_ROOTFS_SYMLINK_DIAGNOSTIC_COMPLETE`,
 `changed=0`, `archive_extracted=false`, `ct701_changed=false`, and
