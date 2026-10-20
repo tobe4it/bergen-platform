@@ -63,6 +63,14 @@
     rocky_staged_archive_name: rockylinux-9.8-lxc_20261018_amd64.tar.xz
     rocky_staged_archive: /var/lib/vz/template/cache/rockylinux-9.8-lxc_20261018_amd64.tar.xz
   tasks:
+    - name: Require same-run controller source audit before any destination readiness
+      ansible.builtin.assert:
+        that:
+          - hostvars['bp-controller'].rocky_direct_source_audit is defined
+          - (hostvars['bp-controller'].rocky_direct_source_audit.stdout | from_json).result == 'ROCKY_LXC_ROOTFS_STRUCTURAL_AUDIT_PASS'
+          - (hostvars['bp-controller'].rocky_direct_source_audit.stdout | from_json).sha256_verified
+        fail_msg: Refuse destination-only preflight without source SHA256 and structure proof.
+
     - name: Read exact destination hostname
       ansible.builtin.command:
         argv: [hostname, -s]
