@@ -109,7 +109,7 @@
       check_mode: false
       no_log: true
 
-    - name: Require unique bounded non-identifying effective OAuth frame
+    - name: Require unique bounded non-identifying environment source frame
       ansible.builtin.set_fact:
         bp_oidc_effective_frames: >-
           {{ bp_oidc_effective_raw.stdout_lines |
@@ -127,10 +127,10 @@
             FAILURE_CATEGORY={{
               'OAUTH_PERSISTENCE_NOT_COVERED'
               if (bp_oidc_effective_frames | length == 1 and
-                  '"STATUS": "MODULE_IMPORT_FAILED"' in bp_oidc_effective_frames[0])
+                  '"STATUS": "OAUTH_PERSISTENCE_NOT_COVERED"' in bp_oidc_effective_frames[0])
               else 'BLOCKED_GROUPS_FORMAT_UNREVIEWED'
               if (bp_oidc_effective_frames | length == 1 and
-                  '"STATUS": "RUNTIME_CONFIG_RESOLUTION_FAILED"' in bp_oidc_effective_frames[0])
+                  '"STATUS": "BLOCKED_GROUPS_FORMAT_UNREVIEWED"' in bp_oidc_effective_frames[0])
               else 'UNEXPECTED_RUNTIME_FAILURE'
               if (bp_oidc_effective_frames | length == 1 and
                   '"STATUS": "UNEXPECTED_RUNTIME_FAILURE"' in bp_oidc_effective_frames[0])
@@ -174,7 +174,7 @@
         fail_msg: OPEN_WEBUI_OAUTH_RUNTIME_STATUS_UNREVIEWED
       no_log: true
 
-    - name: Report effective OAuth group status without credentials or identities
+    - name: Report environment source values without claiming current in-process runtime
       ansible.builtin.debug:
         msg:
           - "AUDIT=READ_ONLY"
