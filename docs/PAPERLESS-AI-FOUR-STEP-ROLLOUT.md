@@ -200,3 +200,45 @@ archive; this recurring backup reliability must be resolved for
 long-term production operation. Ollama still exposes unauthenticated
 TCP/11434 beyond the intended Paperless guest; no bridge/firewall
 changes were authorized by this feature.
+
+## Live read-only preview of document 29 – 2026-10-20 19:23
+
+The operator executed `manage-paperless-ai-inbox-catalog.yml` in
+`mode=preview` against explicitly selected document 29 on the
+live 3.3.0 Paperless service, after granting the two parent Note
+model permissions and enabling the native Paperless AI UI.
+
+```text
+AUDIT=READ_ONLY
+STATUS=READY
+PAPERLESS_VERSION=3.3.0
+ELIGIBLE_SAMPLE=1
+APPLIED=0
+NO_CHANGE=0
+NOTES_ADDED=0
+ERROR_STAGE=NONE
+ERROR_CODE=NONE
+REVIEW_REQUIRED=0
+ALREADY_RECORDED=0
+ROLLED_BACK=0
+CHANGED=False
+venombox ok=9 changed=0 failed=0 skipped=2
+```
+
+**Decision gate:** This proves current eligibility and configuration,
+**not** that the new Note writer, local Ollama model inference, or
+post-inference transaction is runtime-validated. The successful
+`preview` does not check persistent journal occupancy; read-only
+inventory last showed document 29 `NOT_RECORDED`, but it should be
+checked again immediately before the one-document `apply` if there
+may have been other operator activity. Do not start the automatic timer
+solely on this preview.
+
+The next reviewed trial may invoke exactly `pilot_ids=[29]`,
+`batch_size=1`, `mode=apply`, `approved=true`,
+`verified_backup=true`, `notes_enabled=true` and
+`notes_approved=true`. A successful, verified outcome is either
+`APPLIED=1` or `NO_CHANGE=1`, plus `NOTES_ADDED=1`,
+`REVIEW_REQUIRED=0`, `ALREADY_RECORDED=0`. Inspect the
+real Note and remaining Inbox tag in the Paperless UI before
+timer rollout. An unexpected result is a stop, never a retry.
