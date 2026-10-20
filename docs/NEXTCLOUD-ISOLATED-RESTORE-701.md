@@ -660,3 +660,38 @@ does NOT eliminate the later need for a separately validated
 PHP/MariaDB RPM dependency supply chain to build the Nextcloud
 runtime template. Keep CT701 protected, with no NIC and without
 modifications; do not make a downloaded image part of its rootfs.
+
+
+## Candidate Rocky 9 amd64 LXC rootfs, HTTP-only evidence (2026-10-20)
+
+The operator checked the *specific, time-pinned* public URL
+https://images.linuxcontainers.org/images/rockylinux/9/amd64/default/20261018_03:16
+
+On bp-controller, curl HEAD followed a redirect and returned HTTP 200
+for rootfs.tar.xz; Content-Length=107425612 bytes. The published
+SHA256SUMS names rootfs.tar.xz with digest:
+
+    1fd0ade221871319d5ae7bed9ece57c001d79ef950c1263814d5b8d48779b7e5
+
+SHA256SUMS.asc HEAD also returned 200; Content-Length=833.
+**This does not yet establish authenticity, actual downloaded
+archive integrity, release minor version, or Proxmox suitability.**
+No rootfs download, VMID allocation or guest changes have been
+reported. The Linux Containers image service warns that past
+builds are retained briefly, so pinning the exact archival bytes
+matters. The service publishes unofficial Linux distribution images
+built with distrobuilder.
+
+Next read-only gate on the already-networked bp-controller:
+fetch only small upstream SHA256SUMS, SHA256SUMS.asc,
+image.yaml (if available) and build.log (if available)
+into a restricted scratch directory, identify the signing key
+fingerprint from the signature *without treating it as trusted*,
+then compare the signer against independently authenticated
+Linux Containers project material. Never auto-import a key
+obtained solely from the same image host and declare success.
+Download rootfs.tar.xz only with deliberate approval, then
+verify its digest against the signed checksum manifest before
+inspecting tar member types and the embedded OS release marker.
+Do not extract an unverified tar as root or import it into PVE.
+Production mx1/mx2 and guest 701 remain unchanged.
