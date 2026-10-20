@@ -35,6 +35,9 @@ class FakeFilter:
     def filter(self, **kw):
         return FakeMatch(self.allowed)
 
+    def exists(self):
+        return self.allowed
+
 
 class FakeDocument:
     def __init__(self, *, owner=True, active=True, privileged=False,
