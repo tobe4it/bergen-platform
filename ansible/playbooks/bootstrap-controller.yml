@@ -24,17 +24,61 @@
       - python3-venv
       - python3-pip
       - openssh-client
+      - gnupg
+      - gpgv
+      - file
 
   tasks:
+    - name: Nur den vorgesehenen Debian-Controller fuer Paketabgleich zulassen
+      ansible.builtin.assert:
+        that:
+          - inventory_hostname == 'bp-controller'
+          - ansible_facts['distribution'] == 'Debian'
+          - ansible_facts['distribution_major_version'] == '13'
+        fail_msg: Kein Paketabgleich ausserhalb des vorgesehenen Debian-13-Controllers.
+      tags:
+        - controller_packages
+
     - name: Paketindex aktualisieren
       ansible.builtin.apt:
         update_cache: true
         cache_valid_time: 3600
+      tags:
+        - controller_packages
 
     - name: Grundpakete installieren
       ansible.builtin.apt:
         name: "{{ controller_packages }}"
         state: present
+      tags:
+        - controller_packages
+
+    - name: Installierte Signaturwerkzeuge lokal pruefen
+      ansible.builtin.stat:
+        path: "{{ item }}"
+        follow: true
+      loop:
+        - /usr/bin/gpg
+        - /usr/bin/gpgv
+        - /usr/bin/file
+      register: controller_signature_binaries
+      when: not ansible_check_mode
+      tags:
+        - controller_packages
+
+    - name: Vollstaendige Signaturwerkzeuge nach Paketabgleich verlangen
+      ansible.builtin.assert:
+        that:
+          - controller_signature_binaries.results | length == 3
+          - >-
+            (controller_signature_binaries.results
+             | selectattr('stat.isreg', 'defined')
+             | selectattr('stat.isreg', 'equalto', true)
+             | list | length) == 3
+        fail_msg: GPG/GPGV/file nicht vollstaendig vorhanden.
+      when: not ansible_check_mode
+      tags:
+        - controller_packages
 
     - name: Benutzer ansible anlegen
       ansible.builtin.user:
