@@ -1862,3 +1862,51 @@ Do not start a pilot `apply` on this diagnosis alone:
 a separate document-scoped operator approval and review of
 rollback/integrity evidence remain necessary. Keep global AI,
 embeddings, timer and network/firewall changes disabled.
+
+## Live one-document catalog preview READY (20.10.2026)
+
+After the separate private pilot selection audit showed `PILOT_ELIGIBILITY=ELIGIBLE`, the operator executed the **actual**
+`manage-paperless-ai-inbox-catalog.yml` in read-only preview mode for
+exactly one reviewed Paperless inbox document. Observed output:
+
+```text
+AUDIT=READ_ONLY
+STATUS=READY
+PAPERLESS_VERSION=3.3.0
+ELIGIBLE_SAMPLE=1
+APPLIED=0
+REVIEW_REQUIRED=0
+ALREADY_RECORDED=0
+ROLLED_BACK=0
+CHANGED=False
+```
+
+The existing Paperless 3.3.0 Ollama configuration, the selected
+Qwen model and the document scope all passed. **No LLM
+classification was invoked and no metadata was changed.**
+The selected numeric document ID and its content are not
+stored in Git.
+
+**Remaining deliberate operator gate:** Explicit approval
+to run one production AI classification that may alter the
+selected document's title, correspondent, type and additive
+existing tags, writing a protected processing journal.
+The manually accepted 19 Oct CT126 archive passed
+Zstd/TAR structure checks but was not full-restore tested;
+the scheduled 20 Oct backup failed (rc 255).
+The Ollama unauthenticated wildcard IPv4/IPv6 access
+remains a separate acknowledged, unresolved risk.
+
+Once the owner explicitly approves a **single** document
+metadata pilot, use the pre-existing `manage-paperless-ai-inbox-catalog.yml`
+with the reviewed **unchanged single** `paperless_ai_catalog_pilot_ids`,
+batch size one and per-invocation extra vars:
+`paperless_ai_catalog_mode=apply`,
+`paperless_ai_catalog_approved=true`,
+`paperless_ai_catalog_verified_backup=true`
+(the latter only under the operator's explicit acceptance
+of the pinned backup for this distinct document-write
+change). Never enable a timer or process the eight candidates
+as a batch. Afterward inspect the real Paperless UI and
+journal category before contemplating a separately gated
+rollback or automatic processing.
