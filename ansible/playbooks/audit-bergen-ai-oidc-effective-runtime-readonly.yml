@@ -58,6 +58,28 @@
       no_log: true
       changed_when: false
 
+    - name: Classify a failed container audit without exposing raw stderr or OAuth data
+      ansible.builtin.debug:
+        msg:
+          - "DIAGNOSTIC=READ_ONLY_FAILURE"
+          - "COMMAND_EXIT={{ 'NONZERO' if bp_oidc_effective_raw.rc != 0 else 'ZERO' }}"
+          - "STATUS_FRAME_COUNT={{ bp_oidc_effective_frames | length }}"
+          - >-
+            FAILURE_CATEGORY={{
+              'MODULE_IMPORT_FAILED'
+              if (bp_oidc_effective_frames | length == 1 and
+                  '"STATUS": "MODULE_IMPORT_FAILED"' in bp_oidc_effective_frames[0])
+              else 'RUNTIME_CONFIG_RESOLUTION_FAILED'
+              if (bp_oidc_effective_frames | length == 1 and
+                  '"STATUS": "RUNTIME_CONFIG_RESOLUTION_FAILED"' in bp_oidc_effective_frames[0])
+              else 'UNEXPECTED_RUNTIME_FAILURE'
+              if (bp_oidc_effective_frames | length == 1 and
+                  '"STATUS": "UNEXPECTED_RUNTIME_FAILURE"' in bp_oidc_effective_frames[0])
+              else 'MISSING_OR_MALFORMED_FRAME'
+            }}
+      changed_when: false
+      when: bp_oidc_effective_raw.rc != 0 or bp_oidc_effective_frames | length != 1
+
     - name: Reject failed imports, duplicate frames and unsafe output
       ansible.builtin.assert:
         that:
