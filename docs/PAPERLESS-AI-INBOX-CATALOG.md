@@ -1826,3 +1826,39 @@ approval/timer flags false, then repeat the original
 read-only preview. Expected `ELIGIBLE_SAMPLE=1` is
 necessary before separately approving a one-document
 metadata write. No inference has run.
+
+
+## Live 2026-10-20 – eligible one-document pilot selected
+
+Operator re-ran the narrowly scoped read-only eligibility diagnostic
+on the one document selected in the private local site variables:
+
+```text
+AUDIT=READ_ONLY
+CHANGED=False
+STATUS=INSPECTED
+PILOT_SELECTION_COUNT=1
+PILOT_ELIGIBILITY=ELIGIBLE
+ELIGIBLE_CANDIDATE_COUNT_SHOWN=8
+MODEL_INFERENCE=NO
+DOCUMENTS_CHANGED=NO
+```
+
+The operator additionally received exactly eight numeric alternative
+candidate IDs on the private `bp-controller` terminal. IDs and
+document metadata are intentionally **not recorded in Git**.
+The selected owner now satisfies the non-staff/non-superuser parent
+scope, inbox-tag, OCR-length and no-version eligibility predicates.
+This only proves present **eligibility**, not permission to write,
+a successful native classification or presence of applicable metadata
+suggestions.
+
+Next, with the exact approved candidate ID retained in the ignored
+local variables file, run `manage-paperless-ai-inbox-catalog.yml`
+in explicit `paperless_ai_catalog_mode=preview`. Require
+`STATUS=READY`, `ELIGIBLE_SAMPLE=1`,
+`APPLIED=0`, `CHANGED=False`.
+Do not start a pilot `apply` on this diagnosis alone:
+a separate document-scoped operator approval and review of
+rollback/integrity evidence remain necessary. Keep global AI,
+embeddings, timer and network/firewall changes disabled.
