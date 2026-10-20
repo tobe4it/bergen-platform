@@ -181,6 +181,31 @@ zusätzliches `-e @/pfad/zu/approval.local.yml` hinzufügen.
 effektiven API-Apply. Anschließend im AUDIT-Modus und durch echte
 Neuanmeldungen die Gruppenzuordnung prüfen.
 
+## Diagnosekorrektur 20.10.2026: keine weiteren WebUI-Modulimporte
+
+Der Betreiber hat `CONTAINER_PYTHON_EXEC=OK` und
+`OPEN_WEBUI_MODULE=PRESENT` nachgewiesen. Der alte Prüfcode erzeugte jedoch
+keinen auswertbaren Frame (`COMMAND_EXIT=NONZERO`,
+`STATUS_FRAME_COUNT=0`). Die genaue Exception wurde nicht festgestellt.
+Daraus lässt sich **keine** OIDC-Konfigurationsstörung ableiten.
+
+Der Inspektor `audit_oidc_effective_runtime_v0102.py` wurde deshalb auf
+die reine Python-Standardbibliothek und die **Container-Umgebung**
+reduziert. Das funktioniert ohne Open-WebUI-Anwendungsimport und ohne
+Admin-API-Token. Das Ergebnis
+`CONFIG_BASIS=RUNNING_CONTAINER_ENV_V0_10_2` gibt eine
+Konfigurationsquelle an, **nicht** eine authentifiziert ausgelesene
+laufende Prozesskonfiguration:
+`IN_PROCESS_EFFECTIVE_CONFIG=NOT_MEASURED`.
+
+Mit deaktiviertem `ENABLE_OAUTH_PERSISTENT_CONFIG` verwendet
+Open WebUI v0.10.2 die Env-Konfigurationswerte als Defaults; aber
+administrative In-Process-Änderungen und OIDC-Callback-Verhalten
+sind durch ein neues Python-Subprocess nicht beweisbar.
+**Der maßgebliche End-to-End-Test ist die frische Anmeldung eines
+normalen Eltern-/Kinderkontos mit anschließender READ_ONLY-
+Mitgliedschaftsprüfung.** Keine Public-Grants als Umgehung.
+
 ## Nach Live-Aktivierung: Zuordnung ist noch leer (Betreiberlog)
 
 Der Betreiber hat den tokenlosen Quadlet-Apply erfolgreich abgeschlossen:
