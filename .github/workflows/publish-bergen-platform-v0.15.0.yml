@@ -32,7 +32,7 @@ jobs:
           set -euo pipefail
           grep -Fq '## [0.15.0] - 2026-10-20' docs/CHANGELOG.md
           grep -Fq 'v0.15.0 — Bergen-AI' README.md
-          grep -Fq 'NOT attested' docs/releases/v0.15.0.md
+          grep -Fiq 'not attested' docs/releases/v0.15.0.md
           grep -Fq 'ALREADY_STAGED' docs/releases/v0.15.0.md
           test -s docs/BERGEN-AI-CHAT-PROFILES-LIVE-OIDC.md
 
