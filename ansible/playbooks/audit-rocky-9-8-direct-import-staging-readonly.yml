@@ -186,18 +186,35 @@
           - "'onboot: 0' in rocky_direct_701_config.stdout"
           - "not (rocky_direct_701_config.stdout is search('(?m)^(?:net[0-9]+|lxc\\.net):'))"
 
-    - name: Inspect local PVE template-content eligibility without changes
+    - name: Inspect PVE storage configuration using supported read-only API
       ansible.builtin.command:
-        argv: [pvesm, config, local]
+        argv: [pvesh, get, /storage, --output-format, json]
       register: rocky_direct_local_config
       changed_when: false
 
-    - name: Require local storage explicitly configured for vztmpl content
+    - name: Require exactly one local storage configuration in PVE API
       ansible.builtin.assert:
         that:
-          - "'content' in rocky_direct_local_config.stdout"
-          - "rocky_direct_local_config.stdout is search('(?m)^[ ]*content[ ]+[^\\n]*\\bvztmpl\\b')"
-        fail_msg: local PVE storage does not advertise container template content.
+          - >-
+            ((rocky_direct_local_config.stdout | from_json)
+             | selectattr('storage', 'equalto', 'local') | list | length) == 1
+        fail_msg: Expected exactly one PVE local storage definition.
+
+    - name: Require local directory storage to admit vztmpl without node restrictions
+      ansible.builtin.assert:
+        that:
+          - rocky_local_storage.type == 'dir'
+          - rocky_local_storage.path == '/var/lib/vz'
+          - "'vztmpl' in rocky_local_storage.content.split(',')"
+          - not (rocky_local_storage.disable | default(false) | bool)
+          - >-
+            (rocky_local_storage.nodes is not defined)
+            or ('venombox' in rocky_local_storage.nodes.split(','))
+        fail_msg: Local PVE storage path or container template content is not authorized.
+      vars:
+        rocky_local_storage: >-
+          {{ ((rocky_direct_local_config.stdout | from_json)
+               | selectattr('storage', 'equalto', 'local') | list | first) }}
 
     - name: Check active local template and ZFS storage
       ansible.builtin.command:
