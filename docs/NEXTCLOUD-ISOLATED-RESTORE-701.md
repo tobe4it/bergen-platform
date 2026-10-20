@@ -1489,3 +1489,73 @@ and `--vault-id infra@prompt` commands documented above.
 Never rerun the signed-rootfs staging/transfer playbook;
 the transferred template file is already present and verified.
 The PVE CT790 creation gate remains closed.
+
+
+## Rocky 9.8: CT790 creation-readiness PASS; gated no-write provisioning proposal
+
+On 2026-10-20 the corrected signed-rootfs CT790 creation-readiness
+audit completed fully on the operator's infrastructure:
+
+- `ROCKY_9_8_CT790_CREATE_PREFLIGHT_READ_ONLY_READY`
+- `bp-controller: ok=6 changed=0 unreachable=0 failed=0`
+- `venombox: ok=33 changed=0 unreachable=0 failed=0`
+- The Rocky 9.8 template remained recognized and SHA256-verified.
+- All recorded archive owner UID/GID values fit into the checked
+  default user namespace range; required Proxmox subuid/subgid
+  allocation resources were available.
+- `pct help create` exposed the required flags and `local-zfs`
+  advertised rootdir content. The existing CT701 was unchanged,
+  with no NIC. No VMID790 was created.
+- The result explicitly retains `pct_create_authorized=false`.
+
+A new reviewed but **NOT authorized** proposal lives in
+`ansible/playbooks/create-rocky-9-8-ct790-offline.yml`.
+It imports the complete three-play read-only preflight
+(including source-hash/UID/GID and staged-template checks) on
+every execution, plus same-run exact VMID790/CT701 assertions.
+With no apply variable, it only prints
+`ROCKY_9_8_CT790_CREATE_PLAN_READ_ONLY_READY` and performs
+no writes. The implementation pins a disposable first-boot
+base CT `790`, hostname `rocky9-base-790`, Rocky 9.8 archive
+`local:vztmpl/rockylinux-9.8-lxc_20261018_amd64.tar.xz`,
+`local-zfs:16` root filesystem, two CPU cores, 2048 MiB RAM,
+zero MiB swap, unprivileged userns, `--ostype centos`,
+`nesting=0`, `onboot=0`, `start=0`, `protection=1`, **no
+netN options**. Do not assume a custom Rocky template will unpack
+correctly just because PVE recognizes its metadata: unpacking itself
+is a mutating action that requires its own explicit authorization.
+
+The future (not yet approved) action is doubly gated:
+`rocky_ct790_create_apply=true` plus the *exact* separate
+`rocky_ct790_create_confirm` approval value in the reviewed
+playbook. No provisioning is permitted merely because a CI,
+staging, ownership or read-only check passed. PVE creation failures
+must **not** trigger automatic destructive cleanup; inspect
+any partially allocated CT/ZFS rootfs before deciding recovery.
+
+Use **no apply flag** to review the proposal on bp-controller:
+
+    BASE="$HOME/bergen-platform"
+    WT="$HOME/bergen-platform-nextcloud-restore"
+    BRANCH="feat/nextcloud-isolated-restore-701-20261019"
+    SSH_ARGS="-C -o ControlMaster=no -o ControlPath=none -o ConnectTimeout=10 -o ServerAliveInterval=10 -o ServerAliveCountMax=2"
+    if [ -n "$(git -C "$WT" status --porcelain)" ]; then
+      echo "STOP: worktree contains local changes"
+    else
+      git -C "$WT" fetch origin "$BRANCH" &&
+      git -C "$WT" switch --detach "origin/$BRANCH" &&
+      ANSIBLE_SSH_ARGS="$SSH_ARGS" "$BASE/.venv/bin/ansible-playbook" \
+        -i "$BASE/ansible/inventory.yml" \
+        -i "$BASE/ansible/inventory.local.yml" \
+        "$WT/ansible/playbooks/create-rocky-9-8-ct790-offline.yml" \
+        --limit bp-controller,venombox --vault-id infra@prompt
+    fi
+
+Expected: `ROCKY_9_8_CT790_CREATE_PLAN_READ_ONLY_READY`,
+`changed=0 failed=0`, `pct_create_authorized=false`.
+The operator must separately approve **CT790 creation only**
+after reviewing that complete fresh output. Until then,
+nothing is authorized beyond the already completed template
+file transport. Converting CT790 to a PVE template, starting it,
+attaching networking, provisioning application dependencies, touching
+CT701 or production mx1/mx2 are independent future gates.
