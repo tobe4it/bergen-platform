@@ -2249,3 +2249,55 @@ repeated review outcomes. Do not manually delete any
 `catalog.sqlite3` row or reset the journal. Open
 CT126 daily backup failure and unauthenticated Ollama
 TCP/11434 surface remain separate unresolved findings.
+
+
+## Authoritative eight-ID journal inventory 2026-10-20 15:55
+
+Operator ran the newly introduced read-only, bounded journal
+inventory against exactly the eight IDs from the pre-approved
+Paperless AI candidate set. All nine tasks passed,
+`changed=0`, and no model inference occurred:
+
+```text
+AUDIT=READ_ONLY
+STATUS=INSPECTED
+SCOPED_COUNT=8
+ID_AND_STATE=[
+  {"document_id":2,"state":"APPLIED"},
+  {"document_id":5,"state":"APPLIED"},
+  {"document_id":10,"state":"APPLIED"},
+  {"document_id":11,"state":"REQUIRES_REVIEW"},
+  {"document_id":16,"state":"REQUIRES_REVIEW"},
+  {"document_id":21,"state":"NOT_RECORDED"},
+  {"document_id":22,"state":"NOT_RECORDED"},
+  {"document_id":29,"state":"NOT_RECORDED"}
+]
+MODEL_INFERENCE=NO
+DOCUMENTS_CHANGED=NO
+CHANGED=False
+venombox ok=9 changed=0 failed=0
+```
+
+This establishes the durable journal status, not the
+subjective *quality* of the three successfully applied
+AI classifications. Review actual Paperless metadata in
+the UI; manual inbox-tag removal remains exclusively
+the operator's decision. Documents 11 and 16 remain
+blocked pending documented, separately gated recovery;
+their preimage audits show `MATCH` and inbox tag present.
+The journal did not retain the original Python exception,
+so the root cause cannot be asserted from these results.
+
+The remaining IDs 21,22,29 have **no existing journal
+entries**, so they can be handled only as separate
+one-document, user-approved operations with the same
+policy, backup acknowledgement and fail-stop assertions.
+Never include 11 or 16, retry their journal entries,
+wipe any journal row, or activate the timer implicitly.
+Given two failures among five prior attempts, treat further
+`REQUIRES_REVIEW` as a meaningful recurring incident:
+stop again immediately on the first non-success;
+do not claim remaining files were attempted.
+Alternatively, pause all mutations to first investigate
+the classifier's error modes. Both choices preserve the
+original explicit fixed-eight scope.
