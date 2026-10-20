@@ -2558,3 +2558,67 @@ rerun the read-only audit. If transport fails,
 investigate the Ansible control node, SSH daemon,
 route and host resource state **without** changing
 Paperless permissions or restarting guest services.
+
+## Live taxonomy visibility VERIFIED after manual additions to Document 10 (2026-10-20 16:41)
+
+The operator retried `audit-paperless-ai-taxonomy-visibility-readonly.yml`
+after a successful Ansible `venombox` ping and obtained the
+following bounded live evidence. All nine tasks passed,
+`changed=0`, with no LLM inference:
+
+```text
+AUDIT=READ_ONLY
+STATUS=INSPECTED
+POST_AI_TYPE_CHANGED=True
+REFERENCE_TYPE_IS_ZERTIFIKAT=True
+POST_AI_TAGS_ADDED_COUNT=1
+POST_AI_TAGS_REMOVED_COUNT=1
+TARGET_VISIBILITY=[
+  {"document_id":11,"OWNER":"SAME","TYPE_VISIBLE":"YES","ADDED_TAGS_VISIBLE":"1/1"},
+  {"document_id":16,"OWNER":"SAME","TYPE_VISIBLE":"YES","ADDED_TAGS_VISIBLE":"1/1"},
+  {"document_id":21,"OWNER":"SAME","TYPE_VISIBLE":"YES","ADDED_TAGS_VISIBLE":"1/1"},
+  {"document_id":22,"OWNER":"SAME","TYPE_VISIBLE":"YES","ADDED_TAGS_VISIBLE":"1/1"},
+  {"document_id":29,"OWNER":"SAME","TYPE_VISIBLE":"YES","ADDED_TAGS_VISIBLE":"1/1"}
+]
+MODEL_INFERENCE=NO
+DOCUMENTS_CHANGED=NO
+CHANGED=False
+```
+
+**Confirmed:** After successful Qwen catalogue processing,
+Document 10 was manually assigned the newly created
+document type named `Zertifikat`; one tag was added
+and a different tag removed. The owner of Document 10
+is the same owner as all five candidate documents, and
+that owner can view both the current Doc10 type and
+the post-AI-added tag. The hypothesis of a missing
+object-level VIEW permission for either newly created
+taxonomy object is **ruled out for these exact owners
+and objects at audit time**. No change to ACLs, users
+or category ownership is justified by this evidence.
+
+**Not proven:** Whether Doc10 was included by the
+similar-document retrieval for any failed ID;
+whether the v3.3.0 classifier returned valid AI
+suggestions, partial suggestions, schema-invalid
+responses, a timeout, or nothing; and whether the
+old worker's `NO_APPLICABLE_SUGGESTIONS` policy
+was the exact failure for any ID. Earlier blanket
+`except Exception` erased the cause, and the
+audit cannot reconstruct it. Do not assert the
+manual edit caused the failures, or that it changed
+Qwen's trained weights.
+
+Doc10's protected AI journal postimage now intentionally
+differs from its manually corrected live taxonomy state.
+Rollback guard must remain fail-closed: do not run
+`rollback` or overwrite the human corrections.
+
+**Recommended next engineering milestone, branch only:**
+separate valid `NO_CHANGE` classification from
+`REQUIRES_REVIEW` and persist an allowlisted
+failure stage/reason in the private journal on future
+attempts. Use a non-mutating, version-pinned proof and
+offline regression tests before authorizing any further
+live inference, note creation or new pilot writes. Keep
+the scheduled timer disabled and ID29 unprocessed.
