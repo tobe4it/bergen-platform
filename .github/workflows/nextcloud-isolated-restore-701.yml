@@ -17,6 +17,9 @@ on:
       - 'ansible/playbooks/inspect-nextcloud-restore-701-running-readonly.yml'
       - 'ansible/playbooks/audit-nextcloud-restore-offline-package-sources.yml'
       - 'ansible/playbooks/audit-rocky-9-lxc-template-builder-readonly.yml'
+      - 'ansible/playbooks/audit-rocky-9-lxc-rootfs-readonly.yml'
+      - 'ansible/files/nextcloud/audit_rocky_lxc_rootfs.py'
+      - 'tests/test_rocky_lxc_rootfs_structural_audit.py'
       - 'ansible/playbooks/bootstrap-controller.yml'
       - 'ansible/files/nextcloud/inspect_restore_rpm_inventory.py'
       - 'tests/test_nextcloud_restore_701_iface_count.py'
@@ -77,6 +80,11 @@ jobs:
             --syntax-check
           ansible-playbook -i localhost, \
             ansible/playbooks/bootstrap-controller.yml \
+            --syntax-check
+          python3 -m py_compile ansible/files/nextcloud/audit_rocky_lxc_rootfs.py
+          python3 -m unittest discover -s tests -p 'test_rocky_lxc_rootfs_structural_audit.py'
+          ansible-playbook -i localhost, \
+            ansible/playbooks/audit-rocky-9-lxc-rootfs-readonly.yml \
             --syntax-check
       - name: Verify offline-only initial provisioning
         run: |
@@ -215,6 +223,29 @@ jobs:
               (["pct", "create"], ["pct", "set"], ["pct", "start"])
               for task in tagged
           )
+          structural = yaml.safe_load(Path("ansible/playbooks/audit-rocky-9-lxc-rootfs-readonly.yml").read_text())
+          assert len(structural) == 1
+          assert structural[0]["hosts"] == "bp-controller"
+          assert structural[0]["connection"] == "local"
+          assert structural[0]["become"] is False
+          struct_tasks = structural[0]["tasks"]
+          assert all(not any(key in task for key in (
+              "ansible.builtin.shell", "ansible.builtin.raw",
+              "ansible.builtin.script", "ansible.builtin.copy",
+              "ansible.builtin.file", "ansible.builtin.template",
+              "ansible.builtin.apt", "ansible.builtin.dnf",
+              "ansible.builtin.systemd", "ansible.builtin.service",
+          )) for task in struct_tasks)
+          assert all("ansible.builtin.command" not in task or
+                     task.get("changed_when") is False for task in struct_tasks)
+          structural_code = Path("ansible/files/nextcloud/audit_rocky_lxc_rootfs.py").read_text()
+          assert "tarfile.open(fileobj=handle, mode=\"r|xz\")" in structural_code
+          assert "O_NOFOLLOW" in structural_code
+          assert "ARCHIVE_SHA256_MISMATCH" in structural_code
+          assert "ROCKY_LXC_ROOTFS_STRUCTURAL_AUDIT_PASS" in structural_code
+          assert "archive_extracted\": False" in structural_code
+          assert "ct701_changed\": False" in structural_code
+          print("ROCKY_9_8_ROOTFS_OFFLINE_AUDIT_BOUNDARIES=PASS")
           print("CONTROLLER_SIGNATURE_PACKAGE_BASELINE=PASS")
           print("NEXTCLOUD_701_OFFLINE_STATIC_BOUNDARIES=PASS")
           PY
