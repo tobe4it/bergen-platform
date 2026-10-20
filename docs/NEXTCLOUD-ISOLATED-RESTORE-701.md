@@ -1559,3 +1559,43 @@ nothing is authorized beyond the already completed template
 file transport. Converting CT790 to a PVE template, starting it,
 attaching networking, provisioning application dependencies, touching
 CT701 or production mx1/mx2 are independent future gates.
+
+
+## Rocky 9.8: CT790 creation proposal read-only PASS
+
+On 2026-10-20 the operator executed
+`ansible/playbooks/create-rocky-9-8-ct790-offline.yml` WITHOUT
+either CT790 create approval parameter. The three-phase read-only
+preflight and proposed creation runbook completed:
+
+- `ROCKY_9_8_CT790_CREATE_PLAN_READ_ONLY_READY`
+- `bp-controller: ok=6 changed=0 unreachable=0 failed=0`
+- `venombox: ok=35 changed=0 unreachable=0 failed=0 skipped=8`
+- Exact pinned archive
+  `local:vztmpl/rockylinux-9.8-lxc_20261018_amd64.tar.xz`.
+- Proposed new VMID `790`, hostname `rocky9-base-790`,
+  `local-zfs:16` rootfs, 2 cores, 2048 MiB RAM, 0 swap,
+  unprivileged, `protection=1`, `onboot=0`,
+  `start=0`, zero network interfaces.
+- All eight mutation/post-creation tasks skipped as expected.
+  No new CT exists and CT701 remains protected and disconnected.
+
+This completes **design readiness only**, not unpack/runtime
+compatibility or live CT configuration verification. The only
+possible next approved mutation is the explicitly gated,
+single-VMID CT790 creation with **no** initial boot, NIC,
+production connections, or CT701 modifications.
+Any `pct create` failure requires a separate read-only
+inspection of VMID790, CT configuration and ZFS subvolumes.
+Do not perform destructive rollback automatically, retry
+a partially failed create blindly, or attempt a start.
+An additional explicit operator decision is required before
+supplying the two apply approvals.
+
+Upstream Proxmox PCT manual documents the reviewed
+`--ostype centos`, `--rootfs`, `--unprivileged`,
+`--protection`, `--onboot`, and `--start` flags:
+https://github.com/proxmox/pve-docs/blob/master/generated/pct.1-synopsis.adoc
+
+The production mx2 mail service, old mx1, protected CT701,
+network policy, and main branch remain untouched.
