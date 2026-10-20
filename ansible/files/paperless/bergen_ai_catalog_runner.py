@@ -319,6 +319,9 @@ def process_one(doc_id, group, minimum, pilot, db, *, notes_enabled=False):
                 set(post["tag_ids"]) - set(before["tag_ids"])
             )
             after = stable_snapshot(post)
+            # Native Paperless Note writes cannot be silently undone by our
+            # existing metadata-only rollback route.
+            changes["review_note_created"] = bool(notes_added)
             state = "APPLIED" if has_changes else "NO_CHANGE"
         stage = "JOURNAL"
         db.execute(
@@ -360,6 +363,8 @@ def rollback_one(doc_id, group, db):
     ).fetchone()
     demand(row and row[0] == "APPLIED" and row[2], "ROLLBACK_UNAVAILABLE")
     before, after, changes = json.loads(row[1]), row[2], json.loads(row[3])
+    demand(not changes.get("review_note_created", False),
+           "ROLLBACK_REVIEW_REQUIRED")
     with transaction.atomic():
         doc = Document.objects.select_for_update().get(pk=doc_id)
         demand(eligible(doc, group, 0, True), "ROLLBACK_REVIEW_REQUIRED")
