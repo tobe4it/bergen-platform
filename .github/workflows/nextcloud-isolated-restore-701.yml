@@ -20,6 +20,8 @@ on:
       - 'ansible/playbooks/audit-rocky-9-lxc-rootfs-readonly.yml'
       - 'ansible/playbooks/audit-rocky-9-lxc-rootfs-privileged-modes-readonly.yml'
       - 'ansible/playbooks/audit-rocky-9-8-direct-import-staging-readonly.yml'
+      - 'ansible/playbooks/stage-rocky-9-8-lxc-rootfs.yml'
+      - 'tests/test_rocky_lxc_rootfs_stage.py'
       - 'tests/test_rocky_lxc_direct_staging_readonly.py'
       - 'ansible/files/nextcloud/audit_rocky_lxc_rootfs_privileged_modes.py'
       - 'tests/test_rocky_lxc_rootfs_privileged_modes.py'
@@ -94,6 +96,10 @@ jobs:
           python3 -m py_compile ansible/files/nextcloud/audit_rocky_lxc_rootfs_privileged_modes.py
           python3 -m unittest discover -s tests -p 'test_rocky_lxc_rootfs_privileged_modes.py'
           python3 -m unittest discover -s tests -p 'test_rocky_lxc_direct_staging_readonly.py'
+          python3 -m unittest discover -s tests -p 'test_rocky_lxc_rootfs_stage.py'
+          ansible-playbook -i localhost, \
+            ansible/playbooks/stage-rocky-9-8-lxc-rootfs.yml \
+            --syntax-check
           ansible-playbook -i localhost, \
             ansible/playbooks/audit-rocky-9-8-direct-import-staging-readonly.yml \
             --syntax-check
