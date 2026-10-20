@@ -73,6 +73,11 @@
           - (rocky_audit.stdout | from_json).sha256_verified
           - not (rocky_audit.stdout | from_json).archive_extracted
           - not (rocky_audit.stdout | from_json).template_imported
+          - (rocky_audit.stdout | from_json).pinned_missing_link_exception_count == 7
+          - (rocky_audit.stdout | from_json).pinned_runtime_link_exception_count == 3
+          - (rocky_audit.stdout | from_json).pinned_build_id_link_exception_count == 4
+          - not (rocky_audit.stdout | from_json).template_import_authorized
+          - not (rocky_audit.stdout | from_json).guest_restore_authorized
           - not (rocky_audit.stdout | from_json).ct701_changed
         fail_msg: Rocky rootfs integrity, version or archive-structure audit failed.
 
