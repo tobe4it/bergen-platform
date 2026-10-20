@@ -1130,3 +1130,75 @@ configuration can be separately operator-approved with its own safe
 backup, model, endpoint and fingerprint prerequisites. The deferred
 access restriction remains an open finding and must not be called fixed
 or masked by a successful Paperless backend configuration.
+
+## Live follow-up 2026-10-20 10:52 – native endpoint preflight passed
+
+Operator re-ran both independently pinned read-only audits
+from the existing PR worktree on `bp-controller`:
+
+```text
+audit-paperless-ai-ollama-private-path-readonly.yml
+  STATUS=PAPERLESS_PRIVATE_PATH_READY
+  OLLAMA_LISTENER=WILDCARD
+  PRIVATE_IPV4_CANDIDATES=ONE
+  QWEN14_FROM_PAPERLESS_PODMAN=MODEL_PRESENT
+  NETWORK_EXPOSURE_REVIEW=REQUIRED
+  venombox ok=7 changed=0 failed=0
+
+manage-paperless-ai-local-ollama.yml (default action audit)
+  AUDIT=READ_ONLY
+  STATUS=INSPECTED
+  CURRENT_SHA256=940974cca3becf2fb0d71e54b66437aba1e9c5ca8b8ea01d8071433148c5a7bc
+  AI_UI_ENABLED=NO
+  EMBEDDINGS=OFF
+  CHANGED=False
+  venombox ok=9 changed=0 failed=0 skipped=1
+```
+
+The initial invocations had a wrong Vault decryption entry;
+the subsequently successful runs show the password was correctly
+supplied. These are connection/configuration **readiness checks**:
+**no** native Paperless LLM backend setting, catalogue metadata,
+Proxmox network or Ollama/firewall configuration was changed.
+
+### Operator next steps – no guessed URI or backup attestation
+
+Use `ansible/playbooks/audit-paperless-existing-backend-readonly.yml`
+to recheck that the *actual* CT126 rootfs and persistently mounted
+Paperless data volume both have backup participation enabled.
+This is a configuration-only check, **not** proof a current,
+recoverable archive exists.
+
+The currently selected single real CT110 private IPv4
+must be obtained locally through the already approved
+`venombox` Ansible transport (e.g. `pct exec 110 -- ip -o -4 addr
+show scope global`); match the *actual* one reached by
+Paperless-Podman, not the example `192.168.0.100`.
+Keep internal URI and the real `Eltern@...` group in the
+ignored `$HOME/bergen-platform/ansible/vars/paperless-ai-catalog.local.yml`
+with 0600 permissions.
+
+Once the **actual current Paperless DB/files backup and a viable
+rollback path have been independently checked**, the operator
+may choose to set `paperless_ai_catalog_verified_backup: true`
+and separately set `paperless_ai_catalog_config_approved: true`,
+`paperless_ai_catalog_config_action: apply`, along with
+`paperless_ai_catalog_config_expected_sha256` equal to the
+live fingerprint observed at approval time.
+The prior 10:52 SHA is **historical**; if application state
+changes before apply the guarded transaction must reject it.
+
+Apply only `manage-paperless-ai-local-ollama.yml` using the
+ignored reviewed variables file. This modifies only
+`llm_backend`, `llm_model` and `llm_endpoint`;
+it must not set `paperless_ai_catalog_approved` for
+document writes or activate any timers.
+
+Afterwards re-run that same playbook with its default
+`audit` action (no site local approval variables)
+and verify Paperless UI/embeddings remain OFF.
+Recheck private Ollama model reachability if needed.
+The wildcard unauthenticated TCP/11434 exposure to
+bp-controller on both address families **remains unresolved**,
+and classification of real documents is still blocked
+until its separate, explicit approval and security review.
