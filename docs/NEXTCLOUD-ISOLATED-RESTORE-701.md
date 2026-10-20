@@ -1452,3 +1452,40 @@ approved **only archival transfer**, which is already completed.
 This record does not extend approval to container creation,
 network interfaces, rootfs extraction, installing guest packages,
 restoring Nextcloud data or removing the production instance.
+
+
+### CT790 metadata auditor: PAX key-counter correction (2026-10-20)
+
+The first operator run of the CT790 read-only ownership-metadata preflight
+completed the staged-template inspection on venombox successfully
+(`ok=25 changed=0 failed=0`), then failed on bp-controller's
+`audit_rocky_lxc_idmap_metadata.py` after 3 successful controller
+tasks, with `ROCKY_9_8_UID_GID_METADATA_AUDIT_BLOCKED` and generic
+`ARCHIVE_READ_ERROR`. This was a **code defect**, not evidence of
+an invalid or corrupted Rocky image. No writes or guest allocation
+occurred.
+
+Root cause: POSIX TAR PAX extended headers are a dictionary
+`{name: string_value}`. The audit called
+`collections.Counter.update(member.pax_headers)`, which
+interpreted string metadata values as numeric counts; repeated
+fields can cause Python `TypeError` and the summary calculation
+could also fail. This now counts **header key occurrences** using
+`counter.update(headers.keys())`, with checks for dictionary
+shape and string names. Synthetic regression tests cover repeated
+PAX metadata and expected numeric category counts. The error path
+also distinguishes `AUDITOR_INTERNAL_ERROR` for unexpected code/data
+type failures rather than mislabeling them `ARCHIVE_READ_ERROR`.
+
+The existing rootfs and Proxmox template hash proofs remain valid;
+however, the UID/GID ownership audit is **not yet passed** until
+the corrected read-only preflight runs to completion on both hosts.
+
+Operator recovery: fetch the reviewed feature branch in the clean
+worktree, and rerun only
+`ansible/playbooks/audit-rocky-9-8-ct790-create-readonly.yml`
+without any apply variable, using the existing nonmultiplexed SSH
+and `--vault-id infra@prompt` commands documented above.
+Never rerun the signed-rootfs staging/transfer playbook;
+the transferred template file is already present and verified.
+The PVE CT790 creation gate remains closed.
