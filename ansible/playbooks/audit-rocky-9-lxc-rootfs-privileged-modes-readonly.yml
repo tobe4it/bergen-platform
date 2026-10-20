@@ -1,0 +1,53 @@
+---
+# No-write targeted review of fourteen SUID/SGID files in the SHA-pinned rootfs.
+# Human review required; no template import or guest mutation follows.
+- name: Inspect Rocky 9.8 privileged file modes without extraction
+  hosts: bp-controller
+  connection: local
+  become: false
+  gather_facts: false
+  any_errors_fatal: true
+  tasks:
+    - name: Inspect controller identity without changes
+      ansible.builtin.command:
+        argv: [hostname, -s]
+      changed_when: false
+      register: rocky_priv_hostname
+
+    - name: Inspect controller user without changes
+      ansible.builtin.command:
+        argv: [id, -un]
+      changed_when: false
+      register: rocky_priv_user
+
+    - name: Require dedicated controller and unprivileged identity
+      ansible.builtin.assert:
+        that:
+          - inventory_hostname == 'bp-controller'
+          - rocky_priv_hostname.stdout == 'bp-controller'
+          - rocky_priv_user.stdout == 'ansible'
+
+    - name: Verify immutable Rocky rootfs and inspect SUID SGID metadata
+      ansible.builtin.command:
+        argv:
+          - python3
+          - "{{ playbook_dir }}/../files/nextcloud/audit_rocky_lxc_rootfs_privileged_modes.py"
+      changed_when: false
+      register: rocky_priv_report
+
+    - name: Require strictly read-only bounded permission report
+      ansible.builtin.assert:
+        that:
+          - (rocky_priv_report.stdout | from_json).result == 'ROCKY_ROOTFS_PRIVILEGED_MODE_REVIEW_REQUIRED'
+          - (rocky_priv_report.stdout | from_json).sha256_verified
+          - (rocky_priv_report.stdout | from_json).structural_audit_passed
+          - (rocky_priv_report.stdout | from_json).privileged_file_count == 14
+          - (rocky_priv_report.stdout | from_json).files_for_review | length == 14
+          - not (rocky_priv_report.stdout | from_json).archive_extracted
+          - not (rocky_priv_report.stdout | from_json).template_imported
+          - not (rocky_priv_report.stdout | from_json).template_import_authorized
+          - not (rocky_priv_report.stdout | from_json).ct701_changed
+
+    - name: Report exact fourteen system paths and permission bits for review
+      ansible.builtin.debug:
+        msg: "{{ rocky_priv_report.stdout | from_json }}"
