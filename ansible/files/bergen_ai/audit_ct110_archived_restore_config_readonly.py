@@ -220,7 +220,8 @@ def device_details(values):
         return dict(DEV0_CLASS="UNVERIFIED", DEV1_CLASS="UNVERIFIED",
                     PVE_DEVICE_INDEX_PROFILE="UNVERIFIED",
                     CGROUP_DEVICE_RULE_CLASS="UNVERIFIED",
-                    CGROUP_DEVICE_RULE_SCOPE="UNVERIFIED")
+                    CGROUP_DEVICE_RULE_SCOPE="UNVERIFIED",
+                    CGROUP_POLICY_ACTION="UNVERIFIED")
     indices = sorted(k for k in values if re.fullmatch(r"dev[0-9]+", k))
     index_class = "EXACT_DEV0_DEV1" if indices == ["dev0", "dev1"] else (
         "NO_PVE_DEVICES" if not indices else "OTHER_DEVICE_INDICES")
@@ -229,14 +230,17 @@ def device_details(values):
         "lxc.cgroup.devices.deny", "lxc.cgroup2.devices.deny")]
     if len(rule_keys) == 1 and len(values[rule_keys[0]]) == 1:
         rule_class, rule_scope = cgroup_device_rule(values[rule_keys[0]][0])
+        rule_action = "ALLOW" if rule_keys[0].endswith(".allow") else "DENY"
     else:
         rule_class, rule_scope = ("NONE" if not rule_keys else "OTHER_OR_MULTIPLE", "UNVERIFIED")
+        rule_action = "NONE" if not rule_keys else "OTHER_OR_MULTIPLE"
     return dict(
         DEV0_CLASS=device_type(one(values, "dev0")) if "dev0" in values else "ABSENT",
         DEV1_CLASS=device_type(one(values, "dev1")) if "dev1" in values else "ABSENT",
         PVE_DEVICE_INDEX_PROFILE=index_class,
         CGROUP_DEVICE_RULE_CLASS=rule_class,
-        CGROUP_DEVICE_RULE_SCOPE=rule_scope)
+        CGROUP_DEVICE_RULE_SCOPE=rule_scope,
+        CGROUP_POLICY_ACTION=rule_action)
 
 
 def profile(values):
