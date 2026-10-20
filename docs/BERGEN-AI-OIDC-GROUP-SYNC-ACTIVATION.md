@@ -1,5 +1,7 @@
 # Bergen-AI – administrative API-Schlüssel und OIDC-Gruppensynchronisierung
 
+> **Produktivstand 20.10.2026:** Gruppensync wurde über Quadlet aktiviert, nach erneuter Synology-OIDC-Anmeldung wurde eine Elternmitgliedschaft in `Eltern` und `Familie` nachgewiesen. Die vollständige aktuelle Architektur einschließlich der vier privaten Chatprofile sowie offener Rechteentzugs-Tests steht in [BERGEN-AI-CHAT-PROFILES-LIVE-OIDC.md](BERGEN-AI-CHAT-PROFILES-LIVE-OIDC.md). Die folgenden Schritte dokumentieren den abgesicherten Erst-Rollout; sie dürfen nicht mit dem heutigen Änderungsbedarf gleichgesetzt werden.
+
 ## Aktualisierung: Verwaltung ohne neuen API-Schlüssel (20.10.2026)
 
 **Bevorzugter Ansatz:** Die produktive Open-WebUI-OIDC-Konfiguration wird
