@@ -66,6 +66,97 @@ Erwarteter Startbefund: `STATUS=READY_FOR_PRIVATE_PROFILES`,
 Fehlt ein Ollama-Modell, abbrechen und erst dessen lokal installierte
 Version bestätigen. Hash-Fingerprint der geprüften Konfiguration ausgeben.
 
+## 2. Vollautomatischer Ansible-Modell-Apply über vorhandene Admin-Sitzung (bevorzugt)
+
+**Open WebUI 0.10.2 unterstützt JWT-Bearer für `POST /api/v1/models/create`:
+Eine gültige Sitzung des vorhandenen Administratorkontos ist ausreichend.
+Das Aktivieren von `ENABLE_API_KEYS` und die Erstellung eines `sk-`
+API-Schlüssels sind hierfür nicht erforderlich.** Die Ansible-Playbooks
+verwenden die autorisierte Admin-Sitzung, nicht fremde Credentials,
+Passwort-Bypass oder direkten SQLite-Write.
+
+Für den REST-Zugriff wird gleichwohl eine gültige **Admin-Authentifizierung**
+benötigt. Aus einer bestehenden, authentifizierten Admin-Session in
+Open WebUI unter **Einstellungen → Konto → JWT-Token** den eigenen
+aktuellen JWT lokal kopieren; keine andere Person oder Kinderkonto verwenden.
+Nicht in Chat, Screenshots, Git, Kommandozeile oder Logs schreiben.
+Eine vollständig abgemeldete oder abgelaufene Sitzung kann nicht
+wiederverwendet werden. Der JWT ist ein hochprivilegiertes temporäres
+Geheimnis. Diese einmalige Geheimnisübergabe ist kein manueller
+Modellkonfigurationsschritt.
+
+Im Basisklon auf `bp-controller`:
+
+~~~bash
+cd "$HOME/bergen-platform"
+ansible-vault edit --vault-id ai@prompt ansible/vars/ai-oidc.vault.yml
+~~~
+
+Die existierende Vault-Datei **ergänzen**, nicht überschreiben:
+
+~~~yaml
+vault_open_webui_admin_session_jwt: "HIER_NUR_LOKAL_DEN_EIGENEN_GUELTIGEN_ADMIN_JWT"
+~~~
+
+Das Playbook bevorzugt diese neue Variable; bestehender
+`vault_open_webui_admin_token` ist lediglich ein Legacy-Fallback.
+Diese Credentials werden mit `no_log` behandelt. Ausschließlich
+ein gültiger Admin-JWT kommt infrage; die Ansible-Anwendung ruft die
+geschützten Open-WebUI-Admin- und Modell-Endpunkte zur Prüfung auf.
+
+Der READ_ONLY Vorlauf benutzt **einen eigenen Snapshot-Fingerprint**,
+nicht den `CONFIG_SHA256` des rein lokalen
+`audit-bergen-ai-family-chat-readiness-readonly.yml`. Unbedingt
+erst den Stager-Audit separat ausführen:
+
+~~~bash
+BASE="$HOME/bergen-platform"
+WT="$HOME/bergen-platform-family-chat-live"
+cd "$WT"
+"$BASE/.venv/bin/ansible-playbook" \
+  -i ansible/inventory.yml \
+  -i "$BASE/ansible/inventory.local.yml" \
+  ansible/playbooks/manage-bergen-ai-family-chat-profiles.yml \
+  -e "@$BASE/ansible/vars/bergen-ai-family-audit.local.yml" \
+  -e "@$BASE/ansible/vars/ai-oidc.vault.yml" \
+  --vault-id ai@prompt
+~~~
+
+Erwartung: `AUDIT=READ_ONLY`, `STATUS=EMPTY_READY`,
+`MODEL_COUNT=0`, `REQUIRED_MODELS_PRESENT=YES`,
+`CHANGED=False` und ein **neuer** `CONFIG_SHA256`.
+Bei fehlendem oder abgelaufenem Admin-JWT gibt es
+`API_UNAVAILABLE_OR_DENIED` / `FAMILY_MODEL_STAGE_GATE_DENIED`.
+Keine Berechtigungsumgehung vornehmen.
+
+Erst nach unabhängig bestätigter wiederherstellbarer Datensicherung
+von `/srv/ai/open-webui/webui.db` und identischem Read-only-Snapshot
+eine **lokale ignorierte, chmod 0600** YAML-Freigabe anlegen,
+beispielsweise `$BASE/ansible/vars/bergen-ai-model-apply.local.yml`:
+
+~~~yaml
+bergen_ai_family_model_mode: apply
+bergen_ai_family_model_approved: true
+bergen_ai_family_model_backup_verified: true
+bergen_ai_family_model_expected_sha256: EXAKTER_FINGERPRINT_AUS_STAGER_AUDIT
+~~~
+
+Den **identischen** Stager-Audit-Befehl mit
+`-e "@$BASE/ansible/vars/bergen-ai-model-apply.local.yml"`
+zusätzlich ausführen. Ein erfolgreicher Apply soll exakt
+`STATUS=PRIVATE_PROFILES_STAGED`, `CREATED=4`,
+`CHANGED=True` melden; danach muss der unabhängige
+`audit-bergen-ai-family-model-access-readonly.yml` genau vier
+Modelle und vier gruppenbezogene Lesefreigaben ohne öffentliche
+Leserechte nachweisen. Beim ersten abgebrochenen Teil-Apply
+**nicht blind wiederholen**; Bestandsstatus zuerst read-only prüfen.
+
+Nach dem Anwenden den hochprivilegierten temporären JWT aus der
+lokalen Vault-Datei wieder entfernen (oder erneuern) und möglichst
+die zugehörige Anwendungssitzung beenden; niemals im Repository ablegen.
+
+---
+
 ## 2. Profile tatsächlich erstellen
 
 **Wichtig: OIDC-ENV ist nicht dasselbe wie die Modelle-REST-API.**
