@@ -153,3 +153,72 @@ Paperless-Ollama-Endpoints erfordern einen
 separaten, dokumentierten und geprüften
 Apply. Keine allgemeine automatische Paperless-
 LLM-Katalogisierung oder Timeraktivierung.
+
+
+## Phase 1.1 – Live-Apply vor erster Änderung blockiert (20.10.2026, 09:41)
+
+Der Betreiber hat das ausdrücklich autorisierte Oneoff-Playbook
+ausgeführt. Alle vier wiederholten read-only-Preflights erreichten
+die finale Apply-Gate-Assertion; insbesondere meldete die aktive
+WireGuard-Prüfung `NO_OVERLAP_IN_INSPECTED_LIVE_WG_PEERS`.
+
+Die erste Gate-Assertion brach mit
+`VMBR90_IPAM_OOB_BACKUP_OR_LIVE_AUDIT_GATES_NOT_SATISFIED`
+ab. Ergebnis:
+`localhost ok=6 changed=0 failed=0`,
+`venombox ok=28 changed=0 failed=1`.
+**Keinerlei Netzwerkschreibaufgabe wurde erreicht.**
+Es wurde weder die Bridge noch `net1` angelegt,
+noch ein Rollback benötigt. Nicht erneut den
+mutierenden Oneoff-Apply starten, bis die blockierende
+Bedingung untersucht und real behoben wurde.
+
+`no_log: true` ist notwendig, um private ursprüngliche
+Netzwerk-, Host- und Backupdaten nicht offenzulegen.
+Daher wird ein **separater, nur lesender** Playbook-
+Audit `ansible/playbooks/audit-bergen-ai-vmbr90-apply-gates-readonly.yml`
+eingesetzt. Er wiederholt dieselben Netzwerk-/Host-
+Preflights, verzichtet vollständig auf den
+Freigabe-/Apply-Teil und gibt nur benannte
+`PASS`/`BLOCKED`-Kategorien für jede
+technische Bedingung aus. Sein zweiter, ebenfalls
+lesender Test prüft die strengere `ifupdown2`-/
+Host- und `net0`-Baseline.
+
+**Diagnose auf bp-controller (nur dieser read-only-Run):**
+
+```bash
+(
+set -euo pipefail
+BASE="$HOME/bergen-platform"
+WT="$HOME/bergen-platform-ai-private-bridge"
+git -C "$WT" fetch origin feat/bergen-ai-private-bridge-20261019
+git -C "$WT" switch --detach origin/feat/bergen-ai-private-bridge-20261019
+cd "$WT"
+"$BASE/.venv/bin/ansible-playbook" \
+  -i ansible/inventory.yml \
+  -i "$BASE/ansible/inventory.local.yml" \
+  ansible/playbooks/audit-bergen-ai-vmbr90-apply-gates-readonly.yml \
+  --vault-id ai@prompt
+)
+```
+
+Die erwarteten Schlüsselfelder umfassen
+`IPAM_SCOPE_COMPLETE`,
+`IPAM_DECLARED_RANGES`,
+`CT110_RECENT_BACKUP_METADATA`,
+`CT126_RECENT_BACKUP_METADATA`,
+`HOST_IFUPDOWN2_DROPIN_PRECHECK` und
+`CT110_CT126_RUNNING_NET0_ONLY`. Die Diagnose
+kann **keinen** unabhängigen physischen
+Konsolenzugang attestieren und macht aus
+einem bloß manuell gesetzten `complete: true`
+keinen objektiven IPAM-Nachweis.
+
+Selbst bei allen technischen `PASS`-Meldungen
+bleibt `APPLY_AUTHORIZED=False` – der
+Read-only-Audit nimmt keine Approvals entgegen.
+Erst nach realer Fehlerbehebung, tatsächlicher
+IPAM-Vervollständigung und verfügbarer OOB-Konsole
+kann ein separater, verantworteter neuer
+Netz-Apply-Lauf genehmigt werden.
