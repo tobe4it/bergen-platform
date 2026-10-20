@@ -1,0 +1,116 @@
+---
+# Inspect exactly operator-provided Paperless document IDs in the existing
+# private SQLite AI catalogue journal; no document metadata or journal writes.
+- name: Inventory scoped Paperless AI catalogue journal states without writes
+  hosts: venombox
+  become: true
+  gather_facts: false
+  vars:
+    bp_journal_payload:
+      protocol: catalog-journal-inventory-v1
+      document_ids: "{{ paperless_ai_catalog_journal_document_ids | default([]) }}"
+  tasks:
+    - name: Demand bounded operator-provided ID scope and disable writes
+      ansible.builtin.assert:
+        that:
+          - inventory_hostname == 'venombox'
+          - paperless_ai_catalog_journal_document_ids is defined
+          - paperless_ai_catalog_journal_document_ids | length >= 1
+          - paperless_ai_catalog_journal_document_ids | length <= 8
+          - (paperless_ai_catalog_journal_document_ids | unique | list | length) == (paperless_ai_catalog_journal_document_ids | length)
+          - paperless_ai_catalog_mode | default('audit') in ['audit', 'preview']
+          - not (paperless_ai_catalog_approved | default(false) | bool)
+          - not (paperless_ai_catalog_timer_activate | default(false) | bool)
+        fail_msg: JOURNAL_INVENTORY_READONLY_SCOPE_REQUIRED
+      no_log: true
+
+    - name: Confirm exact Paperless unprivileged guest
+      ansible.builtin.command:
+        argv: [pct, config, '126']
+      register: bp_journal_guest
+      changed_when: false
+      no_log: true
+
+    - name: Refuse unexpected or privileged guest
+      ansible.builtin.assert:
+        that:
+          - bp_journal_guest.rc == 0
+          - "'hostname: bergen-paperless' in bp_journal_guest.stdout_lines"
+          - "'unprivileged: 1' in bp_journal_guest.stdout_lines"
+          - "'lxc.apparmor.profile: unconfined' not in bp_journal_guest.stdout"
+        fail_msg: JOURNAL_INVENTORY_GUEST_UNVERIFIED
+      no_log: true
+
+    - name: Read only existing bounded journal records through Django shell
+      ansible.builtin.command:
+        argv:
+          - pct
+          - exec
+          - '126'
+          - --
+          - podman
+          - exec
+          - -i
+          - bergen-paperless
+          - python
+          - /usr/src/paperless/src/manage.py
+          - shell
+          - --verbosity=0
+          - -c
+          - "{{ lookup('ansible.builtin.file', playbook_dir ~ '/../files/paperless/audit_ai_catalog_journal_inventory_readonly.py', rstrip=False) ~ '\nmain()' }}"
+        stdin: "{{ bp_journal_payload | to_json }}"
+        stdin_add_newline: true
+      register: bp_journal_raw
+      changed_when: false
+      failed_when: false
+      no_log: true
+
+    - name: Extract only one sanitized journal inventory frame
+      ansible.builtin.set_fact:
+        bp_journal_frames: >-
+          {{ bp_journal_raw.stdout_lines | default([]) |
+             select('match', '^BERGEN_PAPERLESS_CATALOG_JOURNAL_INVENTORY_V1:') | list }}
+      no_log: true
+
+    - name: Refuse ambiguous or oversized runtime output
+      ansible.builtin.assert:
+        that:
+          - bp_journal_raw.rc == 0
+          - bp_journal_frames | length == 1
+          - bp_journal_frames[0] | length < 1800
+        fail_msg: JOURNAL_INVENTORY_RESULT_MISSING
+      no_log: true
+
+    - name: Decode only journal status classifications
+      ansible.builtin.set_fact:
+        bp_journal_record: >-
+          {{ bp_journal_frames[0] |
+             regex_replace('^BERGEN_PAPERLESS_CATALOG_JOURNAL_INVENTORY_V1:', '') |
+             from_json }}
+      no_log: true
+
+    - name: Require precise scope and vetted read-only status values
+      ansible.builtin.assert:
+        that:
+          - bp_journal_record.AUDIT == 'READ_ONLY'
+          - bp_journal_record.CHANGED == false
+          - bp_journal_record.MODEL_INFERENCE == 'NO'
+          - bp_journal_record.DOCUMENTS_CHANGED == 'NO'
+          - bp_journal_record.STATUS == 'INSPECTED'
+          - bp_journal_record.SCOPED_COUNT | int == (paperless_ai_catalog_journal_document_ids | length)
+          - bp_journal_record.STATES | length == (paperless_ai_catalog_journal_document_ids | length)
+          - (bp_journal_record.STATES | map(attribute='document_id') | list) == paperless_ai_catalog_journal_document_ids
+          - (bp_journal_record.STATES | map(attribute='state') | list | difference(['NOT_RECORDED', 'PROCESSING', 'REQUIRES_REVIEW', 'APPLIED', 'ROLLED_BACK']) | length) == 0
+        fail_msg: JOURNAL_INVENTORY_SCOPE_OR_STATUS_INVALID
+      no_log: true
+
+    - name: Display only explicitly selected document ID and state pairs
+      ansible.builtin.debug:
+        msg:
+          - AUDIT=READ_ONLY
+          - STATUS=INSPECTED
+          - "SCOPED_COUNT={{ bp_journal_record.SCOPED_COUNT }}"
+          - "ID_AND_STATE={{ bp_journal_record.STATES | to_json }}"
+          - MODEL_INFERENCE=NO
+          - DOCUMENTS_CHANGED=NO
+          - CHANGED=False
