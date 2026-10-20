@@ -1640,3 +1640,53 @@ Ollama TCP/11434 IPv4/IPv6 exposure remain separate
 open security/operational findings. The operator accepted
 the 19 Oct archive for the earlier **config-only** apply;
 that does not grant unattended document classification.
+
+
+## Operator live 2026-10-20 13:12 – catalog worker READY
+
+The first post-apply read-only catalogue-worker audit completed
+successfully on the actual Paperless guest after the separate
+Ollama native-configuration apply:
+
+```text
+AUDIT=READ_ONLY
+STATUS=READY
+PAPERLESS_VERSION=3.3.0
+ELIGIBLE_SAMPLE=8
+APPLIED=0
+REVIEW_REQUIRED=0
+ALREADY_RECORDED=0
+ROLLED_BACK=0
+CHANGED=False
+venombox ok=9 changed=0 failed=0 skipped=1
+```
+
+**Interpretation:** The existing Paperless-native AI client now
+matches the reviewed private Ollama endpoint and installed Qwen
+model, and the operator's exact Paperless parent group exists.
+Eight OCR-eligible inbox documents appear in the bounded
+read-only set. No model classification or document write was
+performed by this audit. The catalogue timer is still OFF;
+no one-document pilot has been approved or run yet.
+
+**Next safe gate:** The operator selects **one actual document**
+in the Paperless inbox UI which belongs to an active
+non-staff parent, retains its inbox tag, has OCR text and is
+not manually pre-reviewed. Put its existing positive integer
+Paperless document ID in the private gitignored
+`paperless_ai_catalog_pilot_ids` (single-element list),
+set `paperless_ai_catalog_mode: preview`, leave
+`paperless_ai_catalog_approved: false` and
+`paperless_ai_catalog_timer_activate: false`, and re-run
+`manage-paperless-ai-inbox-catalog.yml` with the private
+vars file. Expected `AUDIT=READ_ONLY`,
+`STATUS=READY`, `ELIGIBLE_SAMPLE=1`,
+`APPLIED=0` and `CHANGED=False`.
+
+The preview validates scope; it does not show an LLM proposal,
+run inference, or make changes. No implicit approval to
+set `mode: apply` follows. Any actual one-document
+pilot still needs explicit, scoped document-write consent,
+review of backup/rollback and the outstanding access-control
+risk that the user elected to defer; do not claim that
+deferred TCP/11434 exposure has been fixed.
