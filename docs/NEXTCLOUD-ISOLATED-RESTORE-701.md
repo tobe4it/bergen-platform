@@ -1202,19 +1202,19 @@ failed=0 and unreachable=0. It reverified the signed, SHA256-pinned
 Rocky 9.8 rootfs and all destination conditions; no file was
 transferred, no guest created and CT701 remained unchanged. The
 expected source archive is 107425612 bytes with SHA256
-\`1fd0ade221871319d5ae7bed9ece57c001d79ef950c1263814d5b8d48779b7e5\`.
+`1fd0ade221871319d5ae7bed9ece57c001d79ef950c1263814d5b8d48779b7e5`.
 
-The new \`ansible/playbooks/stage-rocky-9-8-lxc-rootfs.yml\` imports
+The new `ansible/playbooks/stage-rocky-9-8-lxc-rootfs.yml` imports
 the **entire** two-host read-only preflight on every invocation.
 Its default is **read-only**. Only an explicit, separately authorized
-\`rocky_rootfs_staging_apply=true\` may copy the source into a new
-root-only \`.part\` file, verify exact SHA256 and byte count again
+`rocky_rootfs_staging_apply=true` may copy the source into a new
+root-only `.part` file, verify exact SHA256 and byte count again
 on venombox, and publish by an atomic hardlink creation that cannot
 replace an existing destination. The final SHA256 is independently
 verified via Ansible stat. This operation only places the file in
-\`/var/lib/vz/template/cache/\`, never extracts it or calls \`pct create\`.
+`/var/lib/vz/template/cache/`, never extracts it or calls `pct create`.
 The updated source preflight also rejects an existing partial file,
-and requires the local Proxmox storage to advertise \`vztmpl\`
+and requires the local Proxmox storage to advertise `vztmpl`
 template content.
 
 **Run now WITHOUT an apply flag** on bp-controller:
@@ -1235,8 +1235,8 @@ template content.
         --vault-id infra@prompt
     fi
 
-Expected: \`ROCKY_9_8_ROOTFS_STAGING_READ_ONLY_READY\`,
-\`changed=0 failed=0\`. No transfer takes place. The operator must
+Expected: `ROCKY_9_8_ROOTFS_STAGING_READ_ONLY_READY`,
+`changed=0 failed=0`. No transfer takes place. The operator must
 personally review results before any separate apply approval. Do not
 run with the apply flag based solely on this documentation.
 
