@@ -820,3 +820,31 @@ the Nextcloud archives or alter production Nextcloud/mx2.
 After installation require command -v gpg, gpgv and file to work,
 then resume signature verification using the isolated keyring
 with a separately verified image-signing key fingerprint.
+
+
+## bp-controller package baseline proof (2026-10-20)
+
+The operator executed the existing controller's Ansible package-only
+bootstrap, targeting bp-controller with tag controller_packages,
+after an Ansible --check run predicted installation of 17 packages
+(0 upgrades, 0 removals). An observed subsequent real run
+reported:
+
+    PLAY RECAP bp-controller: ok=6 changed=0 unreachable=0 failed=0
+
+The package version inventory was already converged by this
+observed execution: the apt package task was `ok`, and post-install
+stat checks passed for `/usr/bin/gpg`, `/usr/bin/gpgv`,
+`/usr/bin/file`. The operator independently confirmed binaries
+via `command -v`, and `gpg --version` reported GnuPG 2.4.7
+(libgcrypt 1.11.0). As that run had changed=0, **do not
+infer that it itself installed packages**; it confirms their
+presence and that the IaC package baseline is idempotent.
+
+Next step is the local, independent OpenPGP signature check,
+with an isolated restrictive GnuPG home, a full
+`E7FB0CAEC8173D669066514CBAEFF88C22F6E216` primary signer
+fingerprint pinned from an external Linux Containers community
+source, `gpg --verify SHA256SUMS.asc SHA256SUMS`, and a repeat
+rootfs SHA256 comparison. No production guest/network/host
+modification is involved.
