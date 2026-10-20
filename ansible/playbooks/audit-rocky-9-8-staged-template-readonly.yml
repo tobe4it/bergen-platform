@@ -1,0 +1,211 @@
+---
+# This gate is ONLY valid AFTER signed Rocky 9.8 image was already staged.
+# Read-only on PVE host. Never import, extract, run pct create or alter CT701.
+- name: Audit signed Rocky 9.8 staging receipt and Proxmox template recognition
+  hosts: venombox
+  become: true
+  gather_facts: false
+  any_errors_fatal: true
+  vars:
+    rocky_staged_name: rockylinux-9.8-lxc_20261018_amd64.tar.xz
+    rocky_staged_volid: local:vztmpl/rockylinux-9.8-lxc_20261018_amd64.tar.xz
+    rocky_staged_path: /var/lib/vz/template/cache/rockylinux-9.8-lxc_20261018_amd64.tar.xz
+    rocky_staged_partial: /var/lib/vz/template/cache/.incoming-rockylinux-9.8-lxc_20261018_amd64.tar.xz.part
+    rocky_expected_bytes: 107425612
+    rocky_expected_sha256: 1fd0ade221871319d5ae7bed9ece57c001d79ef950c1263814d5b8d48779b7e5
+  tasks:
+    - name: Identify actual Proxmox host without changes
+      ansible.builtin.command:
+        argv: [hostname, -s]
+      changed_when: false
+      register: rocky_after_host
+
+    - name: Read installed Proxmox major without changes
+      ansible.builtin.command:
+        argv: [pveversion]
+      changed_when: false
+      register: rocky_after_pve
+
+    - name: Refuse any unreviewed host and archive target
+      ansible.builtin.assert:
+        that:
+          - inventory_hostname == 'venombox'
+          - rocky_after_host.stdout == 'venombox'
+          - rocky_after_pve.stdout is match('^pve-manager/9[.]')
+          - rocky_staged_name == 'rockylinux-9.8-lxc_20261018_amd64.tar.xz'
+          - rocky_staged_volid == 'local:vztmpl/' ~ rocky_staged_name
+          - rocky_staged_path == '/var/lib/vz/template/cache/' ~ rocky_staged_name
+          - rocky_staged_partial == '/var/lib/vz/template/cache/.incoming-' ~ rocky_staged_name ~ '.part'
+          - rocky_expected_bytes == 107425612
+          - rocky_expected_sha256 == '1fd0ade221871319d5ae7bed9ece57c001d79ef950c1263814d5b8d48779b7e5'
+
+    - name: Inspect cache directories without following symlinks
+      ansible.builtin.stat:
+        path: "{{ item }}"
+        follow: false
+        get_checksum: false
+      loop:
+        - /var/lib/vz
+        - /var/lib/vz/template
+        - /var/lib/vz/template/cache
+      register: rocky_after_dirs
+
+    - name: Require existing root-owned genuine template directories
+      ansible.builtin.assert:
+        that:
+          - item.stat.isdir | default(false)
+          - not (item.stat.islnk | default(false))
+          - item.stat.pw_name == 'root'
+          - item.stat.mode in ['0755', '0700']
+        fail_msg: Unexpected PVE template directory or permissions.
+      loop: "{{ rocky_after_dirs.results }}"
+      loop_control:
+        label: "{{ item.item }}"
+
+    - name: Inspect staged file with SHA256, refusing symlink following
+      ansible.builtin.stat:
+        path: "{{ rocky_staged_path }}"
+        follow: false
+        get_checksum: true
+        checksum_algorithm: sha256
+      register: rocky_after_file
+
+    - name: Require exact immutable root-only staged rootfs
+      ansible.builtin.assert:
+        that:
+          - rocky_after_file.stat.isreg | default(false)
+          - not (rocky_after_file.stat.islnk | default(false))
+          - rocky_after_file.stat.pw_name == 'root'
+          - rocky_after_file.stat.gr_name == 'root'
+          - rocky_after_file.stat.mode == '0600'
+          - rocky_after_file.stat.nlink == 1
+          - rocky_after_file.stat.size == rocky_expected_bytes
+          - rocky_after_file.stat.checksum == rocky_expected_sha256
+        fail_msg: Refuse missing, linked, modified or incorrectly owned Rocky rootfs.
+
+    - name: Inspect temporary transfer file without following links
+      ansible.builtin.stat:
+        path: "{{ rocky_staged_partial }}"
+        follow: false
+        get_checksum: false
+      register: rocky_after_partial
+
+    - name: Require no unfinished temporary staging file
+      ansible.builtin.assert:
+        that:
+          - not rocky_after_partial.stat.exists
+        fail_msg: A leftover .part file needs separate investigation.
+
+    - name: Resolve the Proxmox volume ID to its actual filesystem path
+      ansible.builtin.command:
+        argv: [pvesm, path, "{{ rocky_staged_volid }}"]
+      changed_when: false
+      register: rocky_after_resolved_path
+
+    - name: Refuse path translation outside the reviewed cache file
+      ansible.builtin.assert:
+        that:
+          - rocky_after_resolved_path.stdout | trim == rocky_staged_path
+        fail_msg: PVE volume resolves to an unexpected path.
+
+    - name: List locally recognized container templates without mutations
+      ansible.builtin.command:
+        argv: [pveam, list, local]
+      changed_when: false
+      register: rocky_after_pveam
+
+    - name: Require the exact staged rootfs appears as a recognized template
+      ansible.builtin.assert:
+        that:
+          - >-
+            rocky_after_pveam.stdout is search(
+              '(?m)^' ~ (rocky_staged_volid | regex_escape) ~ '[ ]+')
+        fail_msg: Proxmox pveam does not recognize the staged Rocky template.
+
+    - name: Verify all planned VMIDs remain unused in the cluster
+      ansible.builtin.command:
+        argv: [pvesh, get, /cluster/resources, --type, vm, --output-format, json]
+      changed_when: false
+      register: rocky_after_cluster
+
+    - name: Refuse any cluster VMID conflicts
+      ansible.builtin.assert:
+        that:
+          - >-
+            ((rocky_after_cluster.stdout | from_json)
+             | selectattr('vmid', 'in', [702, 790, 791]) | list | length) == 0
+
+    - name: Inspect CT790 Proxmox config path without changes
+      ansible.builtin.stat:
+        path: /etc/pve/lxc/790.conf
+        follow: false
+      register: rocky_after_ct790_config
+
+    - name: Inspect VM790 Proxmox config path without changes
+      ansible.builtin.stat:
+        path: /etc/pve/qemu-server/790.conf
+        follow: false
+      register: rocky_after_vm790_config
+
+    - name: Refuse conflicting local VMID790 configuration files
+      ansible.builtin.assert:
+        that:
+          - not rocky_after_ct790_config.stat.exists
+          - not rocky_after_vm790_config.stat.exists
+
+    - name: Read existing protected Nextcloud CT701 config
+      ansible.builtin.command:
+        argv: [pct, config, '701']
+      changed_when: false
+      no_log: true
+      register: rocky_after_ct701
+
+    - name: Verify protected CT701 remains unprivileged and networkless
+      ansible.builtin.assert:
+        that:
+          - "'hostname: nextcloud-restore-701' in rocky_after_ct701.stdout"
+          - "'unprivileged: 1' in rocky_after_ct701.stdout"
+          - "'protection: 1' in rocky_after_ct701.stdout"
+          - "'onboot: 0' in rocky_after_ct701.stdout"
+          - "not (rocky_after_ct701.stdout is search('(?m)^(?:net[0-9]+|lxc\\.net):'))"
+
+    - name: Check existing PVE storage availability
+      ansible.builtin.command:
+        argv: [pvesm, status]
+      changed_when: false
+      register: rocky_after_storage
+
+    - name: Require local image and ZFS rootdir storage online
+      ansible.builtin.assert:
+        that:
+          - "rocky_after_storage.stdout is search('(?m)^local[ ]+dir[ ]+active[ ]+')"
+          - "rocky_after_storage.stdout is search('(?m)^local-zfs[ ]+zfspool[ ]+active[ ]+')"
+
+    - name: Verify ZFS storage health without mutations
+      ansible.builtin.command:
+        argv: [zpool, status, -x]
+      changed_when: false
+      register: rocky_after_zpool
+
+    - name: Refuse unhealthy ZFS for any future disposable container
+      ansible.builtin.assert:
+        that:
+          - rocky_after_zpool.stdout is search('all pools are healthy')
+
+    - name: Report only verified template metadata and remaining closed gates
+      ansible.builtin.debug:
+        msg:
+          status: ROCKY_9_8_STAGED_TEMPLATE_READ_ONLY_VERIFIED
+          template: "{{ rocky_staged_volid }}"
+          exact_sha256_verified: true
+          file_bytes: 107425612
+          root_only_file_mode: '0600'
+          pve_template_recognized: true
+          pve_template_path_verified: true
+          vmids_702_790_791_free: true
+          ct701_unchanged: true
+          network_egress_authorized: false
+          new_guest_created: false
+          archive_extracted: false
+          pct_create_authorized: false
+          next_gate: Separately review unprivileged PVE TAR extraction and CT790 creation plan.
