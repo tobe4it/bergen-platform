@@ -17,6 +17,7 @@ on:
       - 'ansible/playbooks/inspect-nextcloud-restore-701-running-readonly.yml'
       - 'ansible/playbooks/audit-nextcloud-restore-offline-package-sources.yml'
       - 'ansible/playbooks/audit-rocky-9-lxc-template-builder-readonly.yml'
+      - 'ansible/playbooks/bootstrap-controller.yml'
       - 'ansible/files/nextcloud/inspect_restore_rpm_inventory.py'
       - 'tests/test_nextcloud_restore_701_iface_count.py'
       - 'docs/NEXTCLOUD-ISOLATED-RESTORE-701.md'
@@ -71,6 +72,9 @@ jobs:
           python3 -m py_compile ansible/files/nextcloud/inspect_restore_rpm_inventory.py
           ansible-playbook -i localhost, \
             ansible/playbooks/audit-rocky-9-lxc-template-builder-readonly.yml \
+            --syntax-check
+          ansible-playbook -i localhost, \
+            ansible/playbooks/bootstrap-controller.yml \
             --syntax-check
       - name: Verify offline-only initial provisioning
         run: |
@@ -182,5 +186,33 @@ jobs:
           assert "ROCKY_9_8_LXC_TEMPLATE_BUILDER_READ_ONLY_READY" in Path(
               "ansible/playbooks/audit-rocky-9-lxc-template-builder-readonly.yml"
           ).read_text()
+          controller = yaml.safe_load(Path("ansible/playbooks/bootstrap-controller.yml").read_text())
+          assert len(controller) == 1 and controller[0]["hosts"] == "bp-controller"
+          assert set(("gnupg", "gpgv", "file")).issubset(set(controller[0]["vars"]["controller_packages"]))
+          tagged = [
+              task for task in controller[0]["tasks"]
+              if "controller_packages" in task.get("tags", [])
+          ]
+          assert len(tagged) == 5
+          assert tagged[0]["ansible.builtin.assert"]["that"] == [
+              "inventory_hostname == 'bp-controller'",
+              "ansible_facts['distribution'] == 'Debian'",
+              "ansible_facts['distribution_major_version'] == '13'",
+          ]
+          assert all(
+              "ansible.builtin.apt" in task or
+              "ansible.builtin.assert" in task or
+              "ansible.builtin.stat" in task
+              for task in tagged
+          )
+          apt_tasks = [task["ansible.builtin.apt"] for task in tagged if "ansible.builtin.apt" in task]
+          assert len(apt_tasks) == 2
+          assert apt_tasks[1]["state"] == "present"
+          assert all(
+              task.get("ansible.builtin.command", {}).get("argv", [])[:2] not in
+              (["pct", "create"], ["pct", "set"], ["pct", "start"])
+              for task in tagged
+          )
+          print("CONTROLLER_SIGNATURE_PACKAGE_BASELINE=PASS")
           print("NEXTCLOUD_701_OFFLINE_STATIC_BOUNDARIES=PASS")
           PY
