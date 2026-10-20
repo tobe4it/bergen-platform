@@ -1,0 +1,81 @@
+---
+# Audits pinned, signed-by-operator Rocky 9.8 image downloaded onto bp-controller.
+# No extraction, guest creation, host network, root access, or restore writes.
+- name: Read-only structural audit of pinned Rocky 9.8 rootfs
+  hosts: bp-controller
+  connection: local
+  become: false
+  gather_facts: false
+  any_errors_fatal: true
+  vars:
+    rocky_lxc_download_dir: /home/ansible/rocky9-lxc-20261018
+    rocky_lxc_archive: /home/ansible/rocky9-lxc-20261018/rootfs.tar.xz
+  tasks:
+    - name: Identify local host without changes
+      ansible.builtin.command:
+        argv: [hostname, -s]
+      register: rocky_local_hostname
+      changed_when: false
+
+    - name: Identify execution account
+      ansible.builtin.command:
+        argv: [id, -un]
+      register: rocky_local_user
+      changed_when: false
+
+    - name: Refuse unexpected execution location and identity
+      ansible.builtin.assert:
+        that:
+          - inventory_hostname == 'bp-controller'
+          - rocky_local_hostname.stdout == 'bp-controller'
+          - rocky_local_user.stdout == 'ansible'
+        fail_msg: This audit must run locally as ansible on bp-controller.
+
+    - name: Stat the restricted download directory without following links
+      ansible.builtin.stat:
+        path: "{{ rocky_lxc_download_dir }}"
+        follow: false
+        get_checksum: false
+      register: rocky_dir
+
+    - name: Stat the pinned rootfs archive without following links
+      ansible.builtin.stat:
+        path: "{{ rocky_lxc_archive }}"
+        follow: false
+        get_checksum: false
+      register: rocky_file
+
+    - name: Require the restricted, pinned archive on the controller
+      ansible.builtin.assert:
+        that:
+          - rocky_dir.stat.isdir | default(false)
+          - rocky_dir.stat.pw_name == 'ansible'
+          - rocky_dir.stat.mode == '0700'
+          - rocky_file.stat.isreg | default(false)
+          - not (rocky_file.stat.islnk | default(false))
+          - rocky_file.stat.pw_name == 'ansible'
+          - rocky_file.stat.size == 107425612
+        fail_msg: Rocky 9.8 rootfs staging or archive changed; refuse inspection.
+
+    - name: Verify SHA256 and stream-audit the exact xz tar without extraction
+      ansible.builtin.command:
+        argv:
+          - python3
+          - "{{ playbook_dir }}/../files/nextcloud/audit_rocky_lxc_rootfs.py"
+      register: rocky_audit
+      changed_when: false
+
+    - name: Demand a complete and immutable Rocky 9.8 audit
+      ansible.builtin.assert:
+        that:
+          - (rocky_audit.stdout | from_json).result == 'ROCKY_LXC_ROOTFS_STRUCTURAL_AUDIT_PASS'
+          - (rocky_audit.stdout | from_json).rocky_version == '9.8'
+          - (rocky_audit.stdout | from_json).sha256_verified
+          - not (rocky_audit.stdout | from_json).archive_extracted
+          - not (rocky_audit.stdout | from_json).template_imported
+          - not (rocky_audit.stdout | from_json).ct701_changed
+        fail_msg: Rocky rootfs integrity, version or archive-structure audit failed.
+
+    - name: Display safe aggregate review metrics only
+      ansible.builtin.debug:
+        msg: "{{ rocky_audit.stdout | from_json }}"
