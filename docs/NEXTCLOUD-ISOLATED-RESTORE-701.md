@@ -1083,3 +1083,34 @@ must follow; a list of SUID/SGID files is not proof of exploitation.
 
 Prior to a mutable phase, check the precise PVE host and storage
 configuration live; previous inventories can become stale.
+
+
+### Privileged-bit audit result and next read-only builder preflight
+
+Operator log on 2026-10-20 confirms the dedicated privilege inventory
+completed: bp-controller `ok=6 changed=0 unreachable=0 failed=0`,
+`privileged_file_count=14`, `setuid_count=11`, `setgid_count=3`,
+`world_writable_privileged_count=0`, SHA256 verified and structural
+audit passed. Both `template_imported` and
+`template_import_authorized` remain false. The shared log excerpt
+contains the final six file records, not all 14; do not claim the
+remaining eight file paths individually reviewed. The Ansible gate
+now also asserts the observed counts and that none of the privileged
+regular files is world-writable.
+
+The next existing strictly read-only planning gate is
+`ansible/playbooks/audit-rocky-9-lxc-template-builder-readonly.yml`
+against `venombox`. It checks the PVE major, cluster VMID
+availability for 702/790/791, current source PVE template checksum,
+bridge `vmbr2` state and controller reference, storage and ZFS health,
+and that CT701 remains protected without any configured NIC.
+`network_egress_authorized: false` remains a design result;
+the preflight does not authorize connecting a builder to production
+networks or creating a container.
+
+The separate SHA256-pinned Linux Containers rootfs archive on
+bp-controller is **not** the same artifact as the older PVE-local
+Rocky 9 template checked by this builder preflight. A clean
+PVE-managed import path, verified staging transfer, signature and
+hash provenance, and PVE template acceptance/metadata semantics
+must be independently established before any guest creation.
