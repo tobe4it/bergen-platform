@@ -1744,3 +1744,77 @@ cd "$WT"
   --vault-id ai@prompt
 )
 ```
+
+### Phase 0f.7 – Snapshot abgeschlossen, Ansible-Postcheck wegen YAML-String fehlgeschlagen (20.10.2026, 06:15)
+
+Der Betreiber hat das bereits genehmigte, einzige `vzdump 110`
+auf `bergen-synology-backup` angestoßen. Alle unabhängigen
+Same-Run-Gates und die ausdrückliche Einmalfreigabe waren
+erfolgreich. Der Async-Task meldete:
+
+```text
+ASYNC OK on venombox: jid=None
+changed: [venombox]
+```
+
+**Danach** war `pct status 110` erfolgreich lesbar. Die
+folgende `ansible.builtin.assert`-Bedingung hatte jedoch einen
+YAML-Quoting-Fehler und brach ab mit
+`Conditional expressions must be strings`. Der Rescue-Pfad
+berichtete `CT110_RUNNING=True`. Die späteren
+Archiv-Metadaten-Aufgaben wurden **nicht** ausgeführt.
+Play-Recap: `ok=21 changed=1 failed=1 rescued=1`.
+
+Das ist **kein Beleg eines fehlgeschlagenen `vzdump`**;
+der asynchrone Ansible-Task meldete OK. Dennoch war
+das Archiv auf dem NFS-Ziel noch nicht nachgewiesen.
+
+**Korrektur im Draft-PR #119:** Die Postcheck-Bedingung wird
+nun als kompletter YAML-String quotiert:
+
+```yaml
+- "ct110_after.stdout | trim == 'status: running'"
+```
+
+Außerdem wird `oneoff_backup_exec.rc == 0` ausdrücklich
+assertiert. Das mutierende Oneoff-Playbook darf **nicht**
+erneut ausgeführt werden; das bereits erzeugte Archiv
+muss separat geprüft werden. Ein zweiter Versuch wäre
+ohne manuelle Bestandsprüfung potenziell redundant.
+
+**Neuer ausschließlich lesender Postbackup-Audit:**
+`ansible/playbooks/audit-bergen-ai-ct110-postbackup-archive-readonly.yml`.
+Er fragt nur `pct status 110`, das aktive NFS-Mount und
+die PVE-Storage-Metadaten ab. Er gibt in einem begrenzten
+Statusrahmen aus:
+
+- `CT110_STATE` und `BACKUP_TARGET`;
+- `CT110_ARCHIVE_COUNT` am ausgewählten NFS-Ziel;
+- `CT110_ARCHIVE_METADATA`: höchstens
+  `ONE_NONEMPTY_ZSTD_ARCHIVE_VISIBLE`, **nicht**
+  `BACKUP_INTEGRITY=TESTED` und **kein** Restore-Beleg.
+
+Der Audit öffnet, entpackt oder verändert Archive nicht;
+er startet weder `vzdump` noch einen LXC-Neustart und
+weist alle Netzwerk-Freigaben weiterhin zurück. Die
+Bedingungen für einen späteren Archiv-Integritätscheck
+sind gesondert zu definieren. Der PR bleibt Draft.
+
+Auf `bp-controller` nach dem gewohnten Branch-Fetch
+**ausschließlich** dieses Read-only-Playbook ausführen:
+
+```bash
+(
+set -euo pipefail
+BASE="$HOME/bergen-platform"
+WT="$HOME/bergen-platform-ai-private-bridge"
+git -C "$WT" fetch origin feat/bergen-ai-private-bridge-20261019
+git -C "$WT" switch --detach origin/feat/bergen-ai-private-bridge-20261019
+cd "$WT"
+"$BASE/.venv/bin/ansible-playbook" \
+  -i ansible/inventory.yml \
+  -i "$BASE/ansible/inventory.local.yml" \
+  ansible/playbooks/audit-bergen-ai-ct110-postbackup-archive-readonly.yml \
+  --vault-id ai@prompt
+)
+```
