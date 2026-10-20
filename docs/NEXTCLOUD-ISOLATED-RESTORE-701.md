@@ -1003,3 +1003,83 @@ and 4 pinned build-ID exceptions, a SHA256 pass, and `changed=0`.
 are explicitly asserted. Separately inspect the offline template-builder
 and plan a Proxmox-safe guest-confined importer; never extract this archive
 onto the controller or PVE host root. Keep CT 701, mx1 and mx2 unchanged.
+
+## Rocky 9.8 rootfs structural PASS and privileged-bit review gate
+
+On 2026-10-20 the operator ran the pinned, signed Rocky 9.8 rootfs structural
+audit on bp-controller with `changed=0 failed=0`. Recorded metrics:
+11,408 regular files; 2,900 non-root directories plus root marker;
+1,603 validated hardlinks; 2,151 symlinks including 59 absolute;
+exactly 3 pinned runtime-target exemptions and 4 pinned .build-id exemptions;
+one regular filename containing a literal Linux backslash;
+and **14 regular files carrying SUID/SGID bits**. No extraction or
+CT701 changes. Both `template_import_authorized` and
+`guest_restore_authorized` remained false.
+
+The next **read-only** gate inventories only those fourteen system files,
+without printing their contents, touching the Proxmox host or altering
+the signed archive. It independently rehashes the pinned archive in one
+`O_NOFOLLOW` descriptor, reruns the rootfs structural checks, counts
+privileged modes and prints at most 14 path/mode/UID/GID records for
+operator review. This is intended to identify unexpected world-writable,
+root-owned, or SUID/SGID binaries, not to approve execution.
+
+On bp-controller as `ansible`:
+
+    BASE="$HOME/bergen-platform"
+    WT="$HOME/bergen-platform-nextcloud-restore"
+    BRANCH="feat/nextcloud-isolated-restore-701-20261019"
+    if [ -n "$(git -C "$WT" status --porcelain)" ]; then
+      echo "STOP: worktree contains local changes"
+    else
+      git -C "$WT" fetch origin "$BRANCH" &&
+      git -C "$WT" switch --detach "origin/$BRANCH" &&
+      "$BASE/.venv/bin/ansible-playbook" \
+        -i "$BASE/ansible/inventory.yml" \
+        -i "$BASE/ansible/inventory.local.yml" \
+        "$WT/ansible/playbooks/audit-rocky-9-lxc-rootfs-privileged-modes-readonly.yml" \
+        --limit bp-controller --vault-id infra@prompt
+    fi
+
+Required diagnostic result:
+`ROCKY_ROOTFS_PRIVILEGED_MODE_REVIEW_REQUIRED`, `changed=0`,
+`privileged_file_count=14`, and no import approval. Human review
+must follow; a list of SUID/SGID files is not proof of exploitation.
+
+### Separate offline import design (no apply implementation yet)
+
+1. Keep the previously verified signed rootfs read-only on bp-controller.
+   Explicitly authorize a transport phase only after rechecking
+   `venombox` identity, cluster-wide VMID availability, current
+   `local` template storage, `local-zfs` capacity, ZFS health,
+   destination path and the exact source SHA256. Never use production
+   mx1/mx2 hosts as import builders.
+2. Stage in a private root-only *file* on the PVE node, under a
+   non-overwriting destination and with full post-transfer SHA256
+   verification. Do not extract to a PVE host directory or bind it into
+   a running guest. Do not infer validity from only file size or filename.
+3. Review PVE 9 `pct create` unpack behavior for the exact signed
+   archive, the unprivileged UID/GID map, xattrs/capabilities, the
+   14 privileged modes, symlink semantics and cleanup on partial
+   create. Establish an explicit rollback/recovery plan before any
+   PVE operation with write effects.
+4. Only on *separate explicit approval* consider a newly allocated,
+   stopped, unprivileged, protected and networkless disposable base
+   guest **790** from the verified PVE-local archive. Recheck 790
+   cluster-wide immediately before creation. PVE-managed unpack
+   is preferable to a host-root `tar -x`, but not automatically safe;
+   no actual `pct create` command is approved by this document.
+5. Keep **701** as the existing protected isolated restore test,
+   **791** as a separately approved future Nextcloud runtime template,
+   and **702** as a separately approved future restore candidate.
+   Do not change, overwrite, upgrade or network CT701 implicitly.
+6. After isolated guest creation under a later apply gate, verify
+   zero NICs, stopped state, unprivileged mapping, filesystem metadata,
+   package database coherence, and safe boot under separate review.
+   Avoid importing live Nextcloud data or any production credentials.
+7. A structural PASS and SUID inventory do **not** grant a template,
+   package-installation, guest-start, SQL-restore, production DNS,
+   or mx1 decommission authorization.
+
+Prior to a mutable phase, check the precise PVE host and storage
+configuration live; previous inventories can become stale.
