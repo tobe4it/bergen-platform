@@ -1786,3 +1786,43 @@ The current read-only route/metadata checks do not
 authorize a one-document AI write. The unresolved Ollama
 wildcard TCP/11434 exposure and the CT126 20 Oct backup
 failure remain independent, documented operational risks.
+
+
+## Pilot selection diagnosis: privileged owner (2026-10-20)
+
+The operator executed the bounded, non-writing Paperless Django
+eligibility audit for a single pilot document:
+
+```text
+AUDIT=READ_ONLY
+CHANGED=False
+STATUS=INSPECTED
+PILOT_SELECTION_COUNT=1
+PILOT_ELIGIBILITY=OWNER_PRIVILEGED
+ELIGIBLE_CANDIDATE_COUNT_SHOWN=8
+MODEL_INFERENCE=NO
+DOCUMENTS_CHANGED=NO
+```
+
+The selected pilot's owner has Paperless `is_staff` or
+`is_superuser` privileges. The first-matching failure
+category does **not** disclose which privilege flag is set;
+the worker intentionally excludes both. This is a
+document-owner authorization scope failure, not an Ollama
+readiness or model connection issue. Do **not** strip
+administrative rights, transfer ownership automatically,
+broaden the approved parent group, or bypass the policy to
+force the initial pilot.
+
+The query also verified **eight alternative candidate IDs**
+within the bounded, parent-owned, OCR-complete inbox scope.
+The operator's excerpt did not include the optional actual
+numeric ID list: if requested, the final debug task displays
+`ELIGIBLE_CANDIDATE_IDS` locally. Choose exactly one of
+those alternatives in the Paperless UI and the ignored
+`paperless_ai_catalog_pilot_ids: [ID]`, leave
+`paperless_ai_catalog_mode: preview` and all
+approval/timer flags false, then repeat the original
+read-only preview. Expected `ELIGIBLE_SAMPLE=1` is
+necessary before separately approving a one-document
+metadata write. No inference has run.
