@@ -17,6 +17,68 @@ The project follows **Semantic Versioning (SemVer)** and the changelog format is
 
 ---
 
+
+## [0.15.0] - 2026-10-20
+
+Bergen-AI family OIDC group synchronization and four scoped private chat
+profiles. This is a **functional deployment release**; it is **not** a final
+attestation of all authorization and revocation paths.
+
+### Added
+- Three existing Synology OIDC family roles (family, parents, children) mapped
+  into Open WebUI 0.10.2 at login using guarded Ansible/Quadlet configuration.
+  Automatic group *creation* and role *management* remain disabled.
+- Four private workspace chat aliases over two locally installed Ollama
+  models: two parent-only assistants, two child-only learning/language
+  assistants. Child system prompts use the shared reviewed "Vorsagen untersagt"
+  learning policy. No public, family-wide, or raw model read grants.
+- Read-only, tokenless model/ACL and live-OIDC readiness audits, version-pinned
+  configuration and private Ansible API staging with operator approval,
+  snapshot preimage, site-local secrets and rollback gates.
+- Authenticated model provisioning with the existing admin session JWT;
+  enabling global API-key generation is not necessary.
+- A consolidated as-operated [runbook](BERGEN-AI-CHAT-PROFILES-LIVE-OIDC.md),
+  checked into Git with offline regression tests.
+
+### Changed
+- The model staging playbook is safe to re-run after success: an already
+  matching four-profile inventory returns `ALREADY_STAGED`, `CREATED=0`,
+  `CHANGED=False` even with the original first-apply preimage hash. Actual
+  first writes and rollback still demand a current matching fingerprint.
+  Foreign/partial model inventories fail closed.
+- Historical zero-member/pre-OIDC staging instructions now point to the
+  live deployment runbook.
+
+### Verified in the existing deployment (2026-10-20)
+- OIDC group-sync enablement and application restart completed successfully.
+- One normal parent login synchronized both family and parent groups; the
+  parent account had user role, not admin.
+- Ollama required model tags present. Protected API apply created exactly
+  four models. Independent read-only SQLite audit reported four model grants,
+  zero public/raw-child/unknown grants, no adult/child group overlap.
+- Parent-facing UI displayed only the two parent assistants.
+- CI tested the repeat-apply no-op and guarded initial/rollback scenarios.
+  The new implementation was **not yet rerun live** for a second apply.
+
+### Not yet proven / release boundaries
+- No positive child OIDC login nor negative direct API access test with
+  parent/child/pending/revoked identities has been attested.
+- Missing/empty OIDC `groups` claims, group removal, and already active
+  sessions may not revoke access fail-closed on v0.10.2; remediation and
+  revocation E2E remain separate mandatory controls.
+- Backup precondition was confirmed through a protected Boolean approval,
+  but a consistent database/WAL backup **and tested restore** were not
+  independently evidenced in this release's operator log.
+- The four aliases currently share the generic description "Privates
+  Bergen-AI Gruppenmodell"; bespoke per-profile descriptions are not yet
+  deployed metadata.
+
+Related PRs: #122, #123, #124, #125 (with net state carried into a
+conflict-free release integration from current main). Deployment already
+occurred before source integration; merging is not another live apply.
+
+---
+
 ## [0.14.0] - 2026-10-19
 
 Headless Proxmox and Synology Wake-on-LAN recovery preparation. This is a
