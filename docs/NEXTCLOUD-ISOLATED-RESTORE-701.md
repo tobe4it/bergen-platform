@@ -1310,3 +1310,68 @@ not remove or replace it automatically.
 **Not authorized:** extracting the archive, calling `pct create`,
 starting CT790, modifying protected CT701, enabling a network
 connection, importing Nextcloud data, or changing production mx1/mx2.
+
+
+## Rocky 9.8 staging transfer verified; post-transfer PVE gate
+
+The operator explicitly authorized only file-based archive staging
+on 2026-10-20. The observed `stage-rocky-9-8-lxc-rootfs.yml`
+apply returned:
+
+- `ROCKY_9_8_ROOTFS_STAGED_SHA256_VERIFIED`
+- `bp-controller ok=5 changed=0 unreachable=0 failed=0`
+- `venombox ok=35 changed=2 unreachable=0 failed=0 skipped=1`
+- Destination:
+  `local:vztmpl/rockylinux-9.8-lxc_20261018_amd64.tar.xz`
+- Exact bytes: `107425612`, destination SHA256 check passed:
+  `1fd0ade221871319d5ae7bed9ece57c001d79ef950c1263814d5b8d48779b7e5`
+- Verified source archive copy, atomic publication, final SHA256
+  and mode/ownership assertion completed successfully.
+- No extraction, CT creation, network change, production change or
+  modification of existing protected CT701.
+
+**Do not rerun the staging/transfer playbook:** the expected
+file now exists, so its correct fail-closed preflight will refuse
+another transfer. Do not remove, rename or overwrite it.
+
+The next separate `ansible/playbooks/audit-rocky-9-8-staged-template-readonly.yml`
+checks the file at its final path independently. It verifies
+non-symlink root-owned `0600` file metadata, single-link count,
+size and SHA256, absent .part file, root-owned storage directories,
+`pvesm path` translation, `pveam list local` recognition,
+still-unused cluster VMIDs 702/790/791, protected networkless CT701,
+active storage and healthy ZFS. No TAR extraction or Proxmox
+configuration change is performed.
+
+Execute on bp-controller, without any apply flag:
+
+    BASE="$HOME/bergen-platform"
+    WT="$HOME/bergen-platform-nextcloud-restore"
+    BRANCH="feat/nextcloud-isolated-restore-701-20261019"
+    SSH_ARGS="-C -o ControlMaster=no -o ControlPath=none -o ConnectTimeout=10 -o ServerAliveInterval=10 -o ServerAliveCountMax=2"
+
+    if [ -n "$(git -C "$WT" status --porcelain)" ]; then
+      echo "STOP: Worktree contains local changes."
+    else
+      git -C "$WT" fetch origin "$BRANCH" &&
+      git -C "$WT" switch --detach "origin/$BRANCH" &&
+      ANSIBLE_SSH_ARGS="$SSH_ARGS" "$BASE/.venv/bin/ansible-playbook" \
+        -i "$BASE/ansible/inventory.yml" \
+        -i "$BASE/ansible/inventory.local.yml" \
+        "$WT/ansible/playbooks/audit-rocky-9-8-staged-template-readonly.yml" \
+        --limit venombox --vault-id infra@prompt
+    fi
+
+Expected `ROCKY_9_8_STAGED_TEMPLATE_READ_ONLY_VERIFIED`,
+`changed=0`, `failed=0`, `pve_template_recognized=true`.
+This only verifies discovery of the archive as a Proxmox system
+container template. Proxmox unpack support, unprivileged UID/GID
+mapping, rootfs ownership/capability bits and the behavior of
+the future Rocky 9.8 guest have **not** been tested.
+
+**Still closed:** `pct_create_authorized=false`,
+no VMID790 allocation, no `pct create`, no `pct template`,
+no CT start, no bridge/net0, no guest package installs,
+no Nextcloud restore or production mx1/mx2 changes.
+A separate human approval and guest-creation runbook will
+be needed after this inspection.
