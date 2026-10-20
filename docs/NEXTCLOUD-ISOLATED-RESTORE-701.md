@@ -911,3 +911,54 @@ or incompatible symlink, the audit **must block**; that is a
 review gate, not a reason to auto-bypass it. Only then decide
 whether a constrained, disconnected disposable PVE guest can
 be built. No template or other VMID is created in this phase.
+
+
+## Rocky 9.8 rootfs: dangling symbolic-link diagnosis (20 Oct 2026)
+
+The pinned 107425612-byte rootfs tar.xz passed its SHA-256 check, but the
+full structural audit still blocks on `DANGLING_SYMLINK`. Earlier
+classification measured 11408 regular files, 2901 directories, 1603
+hardlinks to earlier regular files, 2151 symbolic links (59 absolute), and
+one regular file containing a Linux-literal backslash in its name.
+No devices/FIFOs or archive extraction were observed.
+
+This is **not** an import failure to work around by disabling symlink
+checks. A missing archived target can be an ordinary broken link, an
+alternative installed only in another environment, or a path materialized
+when proc/sys/dev/run is mounted inside an actual guest. Do not infer which
+one applies from the previous error alone.
+
+A separate diagnostic reads the *same* pinned archive on bp-controller as
+unprivileged user ansible, checks SHA-256/size before parsing, applies
+O_NOFOLLOW and an unchanged-file check, and outputs **only** aggregate
+counts of resolved, implicit-directory, root-target, dangling, looping or
+escaping symlinks. Dangling targets are categorized into fixed broad
+rootfs tree classes, without exposing names or link targets. CI runs
+synthetic tests for expected, missing, runtime and adversarial targets.
+
+From the existing detached restore worktree, first fetch and switch to the
+current reviewed feature branch; refuse dirty worktrees:
+
+    BASE="$HOME/bergen-platform"
+    WT="$HOME/bergen-platform-nextcloud-restore"
+    BRANCH="feat/nextcloud-isolated-restore-701-20261019"
+    test -z "$(git -C "$WT" status --porcelain)" || exit 1
+    git -C "$WT" fetch origin "$BRANCH"
+    git -C "$WT" switch --detach "origin/$BRANCH"
+
+Then run the read-only diagnostic:
+
+    "$BASE/.venv/bin/ansible-playbook" \
+      -i "$BASE/ansible/inventory.yml" \
+      -i "$BASE/ansible/inventory.local.yml" \
+      "$WT/ansible/playbooks/diagnose-rocky-9-lxc-rootfs-symlinks-readonly.yml" \
+      --limit bp-controller --vault-id infra@prompt
+
+Expected: `ROCKY_LXC_ROOTFS_SYMLINK_DIAGNOSTIC_COMPLETE`,
+`changed=0`, `archive_extracted=false`, `ct701_changed=false`, and
+`import_gate=BLOCKED_PENDING_STRUCTURAL_AUDIT`. The diagnosis is *not*
+`ROCKY_LXC_ROOTFS_STRUCTURAL_AUDIT_PASS` and does not authorize import,
+creation, extraction, changing network configuration, modifying CT 701,
+or removal of mx1. Only after reviewing the actual missing-target
+classification may the structural auditor and the separate guest-confined
+import design be reconsidered.
