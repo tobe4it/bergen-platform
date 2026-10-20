@@ -1192,3 +1192,62 @@ Direct Rocky 9.8 boot might avoid enabling outbound networking
 just to update Rocky 9.4 to 9.8. Future Nextcloud runtime PHP/RPM
 dependency acquisition still requires its own separate, approved
 offline supply-chain process.
+
+
+## Rocky 9.8 staging transport: protected no-overwrite gate
+
+The operator's direct staging read-only preflight on 2026-10-20 completed
+with **bp-controller ok=5** and **venombox ok=22**, both changed=0,
+failed=0 and unreachable=0. It reverified the signed, SHA256-pinned
+Rocky 9.8 rootfs and all destination conditions; no file was
+transferred, no guest created and CT701 remained unchanged. The
+expected source archive is 107425612 bytes with SHA256
+\`1fd0ade221871319d5ae7bed9ece57c001d79ef950c1263814d5b8d48779b7e5\`.
+
+The new \`ansible/playbooks/stage-rocky-9-8-lxc-rootfs.yml\` imports
+the **entire** two-host read-only preflight on every invocation.
+Its default is **read-only**. Only an explicit, separately authorized
+\`rocky_rootfs_staging_apply=true\` may copy the source into a new
+root-only \`.part\` file, verify exact SHA256 and byte count again
+on venombox, and publish by an atomic hardlink creation that cannot
+replace an existing destination. The final SHA256 is independently
+verified via Ansible stat. This operation only places the file in
+\`/var/lib/vz/template/cache/\`, never extracts it or calls \`pct create\`.
+The updated source preflight also rejects an existing partial file,
+and requires the local Proxmox storage to advertise \`vztmpl\`
+template content.
+
+**Run now WITHOUT an apply flag** on bp-controller:
+
+    BASE="$HOME/bergen-platform"
+    WT="$HOME/bergen-platform-nextcloud-restore"
+    BRANCH="feat/nextcloud-isolated-restore-701-20261019"
+    SSH_ARGS="-C -o ControlMaster=no -o ControlPath=none -o ConnectTimeout=10 -o ServerAliveInterval=10 -o ServerAliveCountMax=2"
+    if [ -n "$(git -C "$WT" status --porcelain)" ]; then
+      echo "STOP: dirty worktree"
+    else
+      git -C "$WT" fetch origin "$BRANCH" &&
+      git -C "$WT" switch --detach "origin/$BRANCH" &&
+      ANSIBLE_SSH_ARGS="$SSH_ARGS" "$BASE/.venv/bin/ansible-playbook" \
+        -i "$BASE/ansible/inventory.yml" \
+        -i "$BASE/ansible/inventory.local.yml" \
+        "$WT/ansible/playbooks/stage-rocky-9-8-lxc-rootfs.yml" \
+        --vault-id infra@prompt
+    fi
+
+Expected: \`ROCKY_9_8_ROOTFS_STAGING_READ_ONLY_READY\`,
+\`changed=0 failed=0\`. No transfer takes place. The operator must
+personally review results before any separate apply approval. Do not
+run with the apply flag based solely on this documentation.
+
+If a later approved transfer fails after the temporary file was
+created, **do not rerun with an apply flag** blindly. The partial file
+must be examined and any cleanup explicitly approved. If the final
+filename already exists, do not overwrite it or use the original
+preflight as a receipt; use a separately reviewed, read-only SHA256
+and ownership audit to establish whether the stage completed.
+
+Neither a successful file transfer nor rootfs structural PASS
+authorizes a PVE guest create, import, start, network connection,
+package download, Nextcloud SQL restore or production mx1 cleanup.
+The source archive is distinct from the older PVE Rocky 9 image.
