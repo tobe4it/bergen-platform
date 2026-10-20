@@ -1,0 +1,125 @@
+---
+# Exact read-only Paperless type/tag visibility audit after manual edit to Doc10.
+# Compares private 0600 journal post-image against current metadata and tests
+# current Paperless object ACLs for other explicitly approved document owners.
+- name: Audit human-created type and tag visibility for Paperless AI users
+  hosts: venombox
+  gather_facts: false
+  become: true
+  vars:
+    bp_taxonomy_payload:
+      protocol: taxonomy-visibility-v1
+      reference_id: 10
+      target_ids: [11, 16, 21, 22, 29]
+  tasks:
+    - name: Require solely reviewed read-only scope
+      ansible.builtin.assert:
+        that:
+          - inventory_hostname == 'venombox'
+          - paperless_ai_catalog_mode | default('audit') in ['audit', 'preview']
+          - not (paperless_ai_catalog_approved | default(false) | bool)
+          - not (paperless_ai_catalog_timer_activate | default(false) | bool)
+        fail_msg: TAXONOMY_AUDIT_READONLY_SCOPE_REQUIRED
+      no_log: true
+
+    - name: Confirm the expected Paperless guest on the Proxmox node
+      ansible.builtin.command:
+        argv: [pct, config, '126']
+      register: bp_taxonomy_guest
+      changed_when: false
+      no_log: true
+
+    - name: Refuse a privileged or unexpected Paperless guest
+      ansible.builtin.assert:
+        that:
+          - bp_taxonomy_guest.rc == 0
+          - "'hostname: bergen-paperless' in bp_taxonomy_guest.stdout_lines"
+          - "'unprivileged: 1' in bp_taxonomy_guest.stdout_lines"
+          - "'lxc.apparmor.profile: unconfined' not in bp_taxonomy_guest.stdout"
+        fail_msg: TAXONOMY_AUDIT_GUEST_UNVERIFIED
+      no_log: true
+
+    - name: Compare Doc10 journal postimage and current taxonomy ACLs without writes
+      ansible.builtin.command:
+        argv:
+          - pct
+          - exec
+          - '126'
+          - --
+          - podman
+          - exec
+          - -i
+          - bergen-paperless
+          - python
+          - /usr/src/paperless/src/manage.py
+          - shell
+          - --verbosity=0
+          - -c
+          - "{{ lookup('ansible.builtin.file', playbook_dir ~ '/../files/paperless/audit_ai_catalog_taxonomy_visibility_readonly.py', rstrip=False) ~ '\nmain()' }}"
+        stdin: "{{ bp_taxonomy_payload | to_json }}"
+        stdin_add_newline: true
+      register: bp_taxonomy_raw
+      changed_when: false
+      failed_when: false
+      no_log: true
+
+    - name: Extract only exactly one sanitized audit frame
+      ansible.builtin.set_fact:
+        bp_taxonomy_frames: >-
+          {{ bp_taxonomy_raw.stdout_lines | default([]) |
+             select('match', '^BERGEN_PAPERLESS_TAXONOMY_VISIBILITY_V1:') | list }}
+      no_log: true
+
+    - name: Refuse absent or ambiguous report
+      ansible.builtin.assert:
+        that:
+          - bp_taxonomy_raw.rc == 0
+          - bp_taxonomy_frames | length == 1
+          - bp_taxonomy_frames[0] | length < 2000
+        fail_msg: TAXONOMY_AUDIT_FRAME_UNVERIFIED
+      no_log: true
+
+    - name: Parse only limited non-identifying report
+      ansible.builtin.set_fact:
+        bp_taxonomy_report: >-
+          {{ bp_taxonomy_frames[0] |
+             regex_replace('^BERGEN_PAPERLESS_TAXONOMY_VISIBILITY_V1:', '') |
+             from_json }}
+      no_log: true
+
+    - name: Verify read-only scope and bounded boolean/permission results
+      ansible.builtin.assert:
+        that:
+          - bp_taxonomy_report.AUDIT == 'READ_ONLY'
+          - bp_taxonomy_report.CHANGED == false
+          - bp_taxonomy_report.MODEL_INFERENCE == 'NO'
+          - bp_taxonomy_report.DOCUMENTS_CHANGED == 'NO'
+          - bp_taxonomy_report.STATUS == 'INSPECTED'
+          - bp_taxonomy_report.REFERENCE_STATE == 'APPLIED'
+          - bp_taxonomy_report.POST_AI_TYPE_CHANGED is boolean
+          - bp_taxonomy_report.REFERENCE_TYPE_IS_ZERTIFIKAT is boolean
+          - bp_taxonomy_report.POST_AI_TAGS_ADDED_COUNT | int >= 0
+          - bp_taxonomy_report.POST_AI_TAGS_ADDED_COUNT | int <= 8
+          - bp_taxonomy_report.POST_AI_TAGS_REMOVED_COUNT | int >= 0
+          - bp_taxonomy_report.POST_AI_TAGS_REMOVED_COUNT | int <= 8
+          - bp_taxonomy_report.TARGET_SCOPE_COUNT == 5
+          - bp_taxonomy_report.TARGET_VISIBILITY | length == 5
+          - (bp_taxonomy_report.TARGET_VISIBILITY | map(attribute='document_id') | list) == [11, 16, 21, 22, 29]
+          - (bp_taxonomy_report.TARGET_VISIBILITY | map(attribute='OWNER') | list | difference(['SAME', 'DIFFERENT', 'ABSENT']) | length) == 0
+          - (bp_taxonomy_report.TARGET_VISIBILITY | map(attribute='TYPE_VISIBLE') | list | difference(['YES', 'NO', 'NOT_CHECKED']) | length) == 0
+        fail_msg: TAXONOMY_AUDIT_RESULT_INVALID
+      no_log: true
+
+    - name: Display bounded document ID and category permission classifications
+      ansible.builtin.debug:
+        msg:
+          - AUDIT=READ_ONLY
+          - STATUS=INSPECTED
+          - "POST_AI_TYPE_CHANGED={{ bp_taxonomy_report.POST_AI_TYPE_CHANGED }}"
+          - "REFERENCE_TYPE_IS_ZERTIFIKAT={{ bp_taxonomy_report.REFERENCE_TYPE_IS_ZERTIFIKAT }}"
+          - "POST_AI_TAGS_ADDED_COUNT={{ bp_taxonomy_report.POST_AI_TAGS_ADDED_COUNT }}"
+          - "POST_AI_TAGS_REMOVED_COUNT={{ bp_taxonomy_report.POST_AI_TAGS_REMOVED_COUNT }}"
+          - "TARGET_VISIBILITY={{ bp_taxonomy_report.TARGET_VISIBILITY | to_json }}"
+          - MODEL_INFERENCE=NO
+          - DOCUMENTS_CHANGED=NO
+          - CHANGED=False
