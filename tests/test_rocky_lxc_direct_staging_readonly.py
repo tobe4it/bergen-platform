@@ -62,6 +62,26 @@ class DirectRockyTemplateStagingTests(unittest.TestCase):
         self.assertIn("not rocky_direct_target_file.stat.exists",
                       self.source)
 
+    def test_pve_storage_api_and_strict_local_template_validation(self):
+        tasks = self.plays[1]["tasks"]
+        queries = [
+            t for t in tasks
+            if t.get("ansible.builtin.command", {}).get("argv") ==
+            ["pvesh", "get", "/storage", "--output-format", "json"]
+        ]
+        self.assertEqual(len(queries), 1)
+        self.assertIs(queries[0].get("changed_when"), False)
+        self.assertNotIn("pvesm, config, local", self.source)
+        self.assertIn("selectattr('storage', 'equalto', 'local')", self.source)
+        self.assertIn("rocky_local_storage.type == 'dir'", self.source)
+        self.assertIn("rocky_local_storage.path == '/var/lib/vz'", self.source)
+        self.assertIn("'vztmpl' in rocky_local_storage.content.split(',')",
+                      self.source)
+        self.assertIn("rocky_local_storage.disable | default(false) | bool",
+                      self.source)
+        self.assertIn("'venombox' in rocky_local_storage.nodes.split(',')",
+                      self.source)
+
     def test_no_template_or_guest_import_is_authorized(self):
         self.assertEqual(self.plays[1]["vars"]["rocky_target_vmid"], 790)
         self.assertEqual(self.plays[1]["vars"]["rocky_future_runtime_vmid"], 791)
