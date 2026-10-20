@@ -42,6 +42,9 @@
           - (rocky_priv_report.stdout | from_json).sha256_verified
           - (rocky_priv_report.stdout | from_json).structural_audit_passed
           - (rocky_priv_report.stdout | from_json).privileged_file_count == 14
+          - (rocky_priv_report.stdout | from_json).setuid_count == 11
+          - (rocky_priv_report.stdout | from_json).setgid_count == 3
+          - (rocky_priv_report.stdout | from_json).world_writable_privileged_count == 0
           - (rocky_priv_report.stdout | from_json).files_for_review | length == 14
           - not (rocky_priv_report.stdout | from_json).archive_extracted
           - not (rocky_priv_report.stdout | from_json).template_imported
