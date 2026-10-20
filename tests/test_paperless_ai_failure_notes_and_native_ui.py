@@ -18,6 +18,7 @@ WORKER_PLAY = ROOT / "ansible/playbooks/manage-paperless-ai-inbox-catalog.yml"
 UI_PLAY = ROOT / "ansible/playbooks/manage-paperless-native-ai-suggestions-ui.yml"
 NOTES_PLAY = ROOT / "ansible/playbooks/manage-paperless-ai-native-notes.yml"
 TIMER_PLAY = ROOT / "ansible/playbooks/deploy-paperless-ai-inbox-catalog-timer.yml"
+TIMER_READY = ROOT / "ansible/files/paperless/bergen_ai_catalog_timer_readiness.py"
 
 
 def policy():
@@ -114,6 +115,13 @@ class TwoPhaseAiTests(unittest.TestCase):
         self.assertIn('WATERMARK_MUST_EQUAL_LIVE_MAX_DOCUMENT_ID', src)
         self.assertIn('paperless_ai_catalog_timer_activate', src)
         self.assertIn('paperless_ai_catalog_notes_enabled', WORKER_PLAY.read_text())
+        readiness = TIMER_READY.read_text()
+        ast.parse(readiness)
+        self.assertIn("cfg.ai_enabled", readiness)
+        self.assertIn("not cfg.llm_embedding_backend", readiness)
+        self.assertIn("documents.add_note", readiness)
+        self.assertIn("Eltern@bergen.intern", readiness)
+        self.assertIn("bergen_ai_catalog_timer_readiness.py", src)
 
 
 if __name__ == "__main__":
