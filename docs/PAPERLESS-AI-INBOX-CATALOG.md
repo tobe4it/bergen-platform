@@ -2374,3 +2374,88 @@ for an indeterminate or partially committed write.
 No automatic replay of failed IDs, journal reset,
 simulated error cause, or new inference is authorized
 by this documentation.
+
+
+## Operator clarified post-AI changes to document 10: NEW document type and tag
+
+Operator clarified that after Qwen successfully classified
+Document **10**, they **created** a new Paperless document type
+named `Zertifikat` and a new tag (name not supplied),
+then assigned those newly created taxonomy objects to
+Document 10. These are newly created *matching objects*,
+not merely a choice between pre-existing categories.
+
+This change cannot retrain the installed Ollama Qwen weights,
+but can influence Paperless-ngx 3.3 retrieval-assisted AI
+classification: its classification flow derives eligible
+tag/type candidates from visible similar documents, even
+when embeddings are disabled (Tantivy full-text fallback).
+
+Importantly, in Paperless tags and document types are
+separate owner-/object-permission-protected objects.
+Bergen's native v3.3 catalogue runner invokes the
+classifier as the **target document owner** and uses
+permission-aware `resolve_*_ids` / `match_*_by_name`
+and `create_missing=False`; newly created private
+taxonomy objects may be visible on manually edited
+Document 10 but not matchable by other owners. This is
+a live-testable hypothesis, **not** proof that it caused
+the subsequent LLM or no-op failures. No raw AI response
+or sanitized error stage was retained by the old worker.
+
+To verify the precise category visibility safely, this
+branch adds the read-only scoped
+`audit-paperless-ai-taxonomy-visibility-readonly.yml`.
+It compares Document 10's protected journal *post-AI*
+`after_json` with its current type/tag IDs, then uses
+Paperless's own `permitted_object_ids` for document owners
+11, 16, 21, 22, 29. It only displays operator-known
+document IDs, owner-equality classification, yes/no
+document-type view permission and count of the
+post-AI-added tags visible to each owner. It also
+reports whether the current Doc 10 type really equals
+`Zertifikat`; it never emits the new tag name, real
+tag IDs, owner IDs, title, OCR or journal JSON, never
+performs inference and does not change metadata or
+Paperless permissions.
+
+```bash
+(
+set -euo pipefail
+BASE="$HOME/bergen-platform"
+WT="$HOME/bergen-platform-paperless-ai-catalog"
+test -z "$(git -C "$WT" status --porcelain)" || {
+  echo "STOP: uncommitted worktree changes"; exit 1;
+}
+git -C "$WT" fetch origin feat/paperless-native-ai-inbox-catalog-20261018
+git -C "$WT" switch --detach origin/feat/paperless-native-ai-inbox-catalog-20261018
+cd "$WT"
+"$BASE/.venv/bin/ansible-playbook" \
+  -i ansible/inventory.yml \
+  -i "$BASE/ansible/inventory.local.yml" \
+  ansible/playbooks/audit-paperless-ai-taxonomy-visibility-readonly.yml \
+  --vault-id ai@prompt \
+  -e "@$BASE/ansible/vars/paperless-ai-catalog.local.yml"
+)
+```
+
+Interpretation: `POST_AI_TYPE_CHANGED=True` and a
+positive `POST_AI_TAGS_ADDED_COUNT` confirm the
+post-AI manual changes relative to a prior saved
+journal state. `TYPE_VISIBLE=NO` or only partial
+`ADDED_TAGS_VISIBLE` among the failing targets
+supports a taxonomy ACL mismatch that needs
+further causal investigation. If all categories are
+visible to all owners, prioritize the current worker
+`NO_APPLICABLE_SUGGESTIONS` semantic flaw and
+unclassified LLM/matching exceptions. Do not
+automatically alter permissions: a private type/tag
+may be intentionally restricted.
+
+**Outstanding:** Document 29 is unattempted, and
+11/16/21/22 are under review by operator report.
+Do not start new classification, reset journal rows,
+or change the classification code in production
+until separate validation/release. The scheduled
+20 October CT126 backup failure and Ollama
+network exposure remain independent work items.
