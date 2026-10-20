@@ -105,15 +105,80 @@ def fuse_only(values):
             and "bind" in opts and "create=file" in opts)
 
 
+def sensitive_categories(values):
+    """Count each sensitive directive key once, never emit key/value pairs.
+
+    Original v1 count double-counted some lxc.* keys because they were both
+    in DANGEROUS and in the unknown-lxc catch-all. Preserve that older
+    metric for comparison while providing precise non-overlapping classes.
+    No category grants permission for a restore.
+    """
+    keys = list(values)
+    explicit = {k for k in keys if k in DANGEROUS}
+    lxc = {k for k in keys if k.startswith("lxc.") and k != "lxc.mount.entry"}
+    pve_device = {k for k in keys if re.fullmatch(r"dev[0-9]+", k)}
+    sensitive = explicit | lxc | pve_device
+    categories = {
+        "HOOK": set(),
+        "APPARMOR": set(),
+        "LXC_MOUNT_POLICY": set(),
+        "CGROUP_DEVICE_POLICY": set(),
+        "CAPABILITY_POLICY": set(),
+        "ID_MAPPING": set(),
+        "LXC_NETWORK": set(),
+        "PVE_DEVICE": set(),
+        "OTHER_LXC": set(),
+        "OTHER": set(),
+    }
+    for k in sensitive:
+        if k == "hookscript" or k.startswith("lxc.hook."):
+            kind = "HOOK"
+        elif k.startswith("lxc.apparmor."):
+            kind = "APPARMOR"
+        elif k.startswith("lxc.mount."):
+            kind = "LXC_MOUNT_POLICY"
+        elif k.startswith("lxc.cgroup."):
+            kind = "CGROUP_DEVICE_POLICY"
+        elif k.startswith("lxc.cgroup2."):
+            kind = "CGROUP_DEVICE_POLICY"
+        elif k.startswith("lxc.cap."):
+            kind = "CAPABILITY_POLICY"
+        elif k.startswith("lxc.idmap"):
+            kind = "ID_MAPPING"
+        elif k.startswith("lxc.net."):
+            kind = "LXC_NETWORK"
+        elif k in pve_device:
+            kind = "PVE_DEVICE"
+        elif k.startswith("lxc."):
+            kind = "OTHER_LXC"
+        else:
+            kind = "OTHER"
+        categories[kind].add(k)
+    out = {f"SENSITIVE_{kind}_COUNT": len(members)
+           for kind, members in categories.items()}
+    out["SENSITIVE_UNIQUE_COUNT"] = len(sensitive)
+    out["SENSITIVE_DUPLICATE_OVERCOUNT"] = (
+        len(explicit) + len(lxc) + len(pve_device) - len(sensitive))
+    return out
+
+
 def profile(values):
     if values is None:
+        fields = {f"SENSITIVE_{kind}_COUNT": "UNVERIFIED"
+                  for kind in (
+                      "HOOK", "APPARMOR", "LXC_MOUNT_POLICY",
+                      "CGROUP_DEVICE_POLICY", "CAPABILITY_POLICY",
+                      "ID_MAPPING", "LXC_NETWORK", "PVE_DEVICE",
+                      "OTHER_LXC", "OTHER")}
+        fields["SENSITIVE_UNIQUE_COUNT"] = "UNVERIFIED"
+        fields["SENSITIVE_DUPLICATE_OVERCOUNT"] = "UNVERIFIED"
         return dict(CONFIG_READ="UNVERIFIED", NETWORK_INTERFACE_COUNT="UNVERIFIED",
                     ONBOOT="UNVERIFIED", EXTERNAL_MP_COUNT="UNVERIFIED",
                     DEVICE_MOUNT_PROFILE="UNVERIFIED",
                     DANGEROUS_CONFIG_DIRECTIVES="UNVERIFIED",
                     SOURCE_HOSTNAME="UNVERIFIED",
                     SOURCE_ROOTFS="UNVERIFIED", SOURCE_UNPRIVILEGED="UNVERIFIED",
-                    STATUS="UNVERIFIED")
+                    STATUS="UNVERIFIED", **fields)
     keys = list(values)
     networks = [k for k in keys if re.fullmatch(r"net[0-9]+", k)]
     mounts = [k for k in keys if re.fullmatch(r"mp[0-9]+", k)]
@@ -157,6 +222,7 @@ def profile(values):
         DEVICE_MOUNT_PROFILE="EXACT_FUSE_DEVICE_ONLY" if fuse_only(values)
                              else "UNKNOWN_OR_EXTRA_DEVICE",
         DANGEROUS_CONFIG_DIRECTIVES=len(sensitive),
+        **sensitive_categories(values),
         SOURCE_HOSTNAME="EXPECTED_ORIGINAL" if hostname == "bergen-ai"
                         else "OTHER_OR_MISSING",
         SOURCE_ROOTFS="EXPECTED_LOCAL_ZFS" if root_expected
