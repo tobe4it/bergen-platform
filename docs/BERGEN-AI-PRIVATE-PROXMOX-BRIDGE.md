@@ -2136,3 +2136,96 @@ Genehmigung. VMID 910 ist nicht reserviert; unmittelbar
 vor einer möglichen Anlage muss erneut konfliktfrei
 geprüft werden. Keine Änderung an produktivem CT110,
 VMIDs 800–899, NFS-Archiv oder `vmbr90`.
+
+
+### Phase 0f.11 – Live-Konfigurationsaudit findet drei prüfpflichtige Treffer (20.10.2026, 06:59)
+
+Der Betreiber hat den ausschließlich lesenden
+`audit-bergen-ai-ct110-archived-restore-config-readonly.yml` erfolgreich
+ausgeführt (`venombox ok=14 changed=0 failed=0`):
+
+```text
+STATUS=REVIEW_REQUIRED
+ARCHIVE_SELECTION=ONE_EXACT_BACKUP_CONFIG_SELECTED
+CONFIG_READ=PARSED
+SOURCE_HOSTNAME=EXPECTED_ORIGINAL
+SOURCE_ROOTFS=EXPECTED_LOCAL_ZFS
+SOURCE_UNPRIVILEGED=YES
+NETWORK_INTERFACE_COUNT=1
+ONBOOT=ENABLED
+EXTERNAL_MP_COUNT=0
+DEVICE_MOUNT_PROFILE=EXACT_FUSE_DEVICE_ONLY
+DANGEROUS_CONFIG_DIRECTIVES=3
+ARCHIVE_CONFIG_SANITIZATION=NOT_PROVEN
+NETWORK_ISOLATION=NOT_PROVEN
+RESTORE_AUTHORIZED=False
+RESTORE_EXECUTED=False
+GUEST_CREATED=False
+GUEST_STARTED=False
+RESTORE_TEST=NOT_ATTESTED
+ROLLBACK_CLEARANCE=NOT_PROVEN
+APPLY_AUTHORIZED=False
+```
+
+**Wichtig:** Die Zählung `DANGEROUS_CONFIG_DIRECTIVES=3`
+ist im ursprünglichen Quelltext nicht disjunkt: Einträge
+in der expliziten Risikoliste, die ebenfalls `lxc.*`
+sind, werden dort **zweimal** gezählt. Aus dem Wert 3
+alleine lässt sich daher weder die tatsächliche Anzahl
+einzigartiger Direktiven noch deren Risikoklasse ableiten.
+Es ist nicht belegt, dass tatsächlich drei unterschiedliche
+Direktiven vorliegen. Die `REVIEW_REQUIRED`-Sperre
+wird nicht gelockert.
+
+Der Audit wurde um eine **nur diagnostische**, disjunkte
+Zählung der sensiblen Konfigurationsschlüssel ergänzt.
+`SENSITIVE_UNIQUE_COUNT` und
+`SENSITIVE_DUPLICATE_OVERCOUNT` differenzieren echte
+Schlüsselanzahl und Doppelzählung. Weitere
+`SENSITIVE_*_COUNT`-Felder geben ausschließlich
+numerische Summen in festen Klassen zurück:
+
+- Hooks;
+- AppArmor-Profil-Einstellungen;
+- LXC-Mount-Richtlinien;
+- Cgroup-/Device-Richtlinien;
+- Capability-Regeln, ID-Mapping, LXC-Netzwerk;
+- PVE-Geräte sowie übrige, unbekannte LXC-/sonstige
+  explizit auffällige Direktiven.
+
+Es werden **keine** Werte, Original-Netzkonfiguration,
+Hostpfade, AppArmor-Profilnamen, MAC- oder IP-Adressen
+oder unklassifizierten Schlüssel ausgegeben. Der neue
+Audit liest weiterhin nur `pvesm extractconfig` und
+führt `pct restore`, `pct start` und `pct set`
+nicht aus. Sämtliche Restore-/Netzwerk-Apply-Gates
+bleiben ausdrücklich gesperrt.
+
+**Operator-Aufruf (bp-controller, unverändert read-only):**
+
+```bash
+(
+set -euo pipefail
+BASE="$HOME/bergen-platform"
+WT="$HOME/bergen-platform-ai-private-bridge"
+git -C "$WT" fetch origin feat/bergen-ai-private-bridge-20261019
+git -C "$WT" switch --detach origin/feat/bergen-ai-private-bridge-20261019
+cd "$WT"
+"$BASE/.venv/bin/ansible-playbook" \
+  -i ansible/inventory.yml \
+  -i "$BASE/ansible/inventory.local.yml" \
+  ansible/playbooks/audit-bergen-ai-ct110-archived-restore-config-readonly.yml \
+  --vault-id ai@prompt
+)
+```
+
+Erst nach Identifizierung der sensiblen Klassen kann
+ein konkreter, **netzloser und zunächst ausgeschalteter**
+Restore-Plan geprüft werden. Ein `onboot=1` aus dem
+Originalarchiv darf keinesfalls unverändert in einem
+Testcontainer aktiviert werden. Auch die historische
+`net0`-Konfiguration muss vor einer eventuellen
+Gastaktivierung ausgeschlossen werden; ein bloßes
+`pct stop` nach dem Restore genügt als Isolations-
+Nachweis nicht. VMID 910 bleibt unreservierter Kandidat;
+CT110 und seine Sicherung werden nicht verändert.
