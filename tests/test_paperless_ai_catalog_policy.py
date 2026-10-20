@@ -500,7 +500,10 @@ class CatalogPolicyTest(unittest.TestCase):
         self.assertNotIn('obj.ai_enabled = True', source)
         self.assertNotIn('obj.llm_embedding_backend =', source)
         self.assertNotIn('setattr(locked, "ai_enabled"', source)
-        self.assertIn("not config.ai_enabled", RUNNER.read_text())
+        # Optional native AI UI is now independent; Bergen worker requires
+        # Ollama and disabled embeddings, not global AI master OFF.
+        self.assertIn('config.llm_backend == "ollama"', RUNNER.read_text())
+        self.assertNotIn("not config.ai_enabled", RUNNER.read_text())
 
     def test_versioned_ansible_llm_configuration_has_backup_and_fingerprint_gates(self):
         plays = yaml.safe_load(CONFIG_PLAY.read_text())
