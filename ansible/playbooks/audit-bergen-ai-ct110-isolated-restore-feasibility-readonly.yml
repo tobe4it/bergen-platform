@@ -1,0 +1,88 @@
+---
+# No restoration, no guest creation, no network changes, no data writes.
+- name: Inspect isolated CT110 restore candidate feasibility without modification
+  hosts: venombox
+  become: true
+  gather_facts: false
+  tasks:
+    - name: Require exact Proxmox host
+      ansible.builtin.assert:
+        that:
+          - "inventory_hostname == 'venombox'"
+
+    - name: Inspect dedicated guest ID, local ZFS, and the existing backup only
+      ansible.builtin.command:
+        argv:
+          - python3
+          - -c
+          - "{{ lookup('ansible.builtin.file', playbook_dir ~ '/../files/bergen_ai/audit_ct110_isolated_restore_feasibility_readonly.py', rstrip=False) }}"
+      register: restore_feasibility_raw
+      changed_when: false
+      failed_when: false
+      check_mode: false
+      no_log: true
+
+    - name: Extract exactly one sanitized restoration feasibility frame
+      ansible.builtin.set_fact:
+        restore_feasibility_frames: >-
+          {{ restore_feasibility_raw.stdout_lines | default([]) |
+             select('match', '^BERGEN_AI_CT110_RESTORE_FEASIBILITY_V1:') | list }}
+      no_log: true
+
+    - name: Fail closed on missing duplicate or oversized audit frames
+      ansible.builtin.assert:
+        that:
+          - "restore_feasibility_raw.rc == 0"
+          - "restore_feasibility_frames | length == 1"
+          - "restore_feasibility_frames[0] | length < 2200"
+      no_log: true
+
+    - name: Parse fixed restore feasibility categories
+      ansible.builtin.set_fact:
+        restore_feasibility: >-
+          {{ (restore_feasibility_frames[0] |
+             regex_replace('^BERGEN_AI_CT110_RESTORE_FEASIBILITY_V1:', '')) | from_json }}
+      no_log: true
+
+    - name: Refuse misleading authorization and any mutation
+      ansible.builtin.assert:
+        that:
+          - "restore_feasibility.AUDIT == 'READ_ONLY'"
+          - "not restore_feasibility.CHANGED"
+          - "not restore_feasibility.RESTORE_EXECUTED"
+          - "not restore_feasibility.RESTORE_AUTHORIZED"
+          - "not restore_feasibility.NEW_GUEST_CREATED"
+          - "not restore_feasibility.GUEST_STARTED"
+          - "not restore_feasibility.APPLY_AUTHORIZED"
+          - "restore_feasibility.RESTORE_TEST == 'NOT_ATTESTED'"
+          - "restore_feasibility.ROLLBACK_CLEARANCE == 'NOT_PROVEN'"
+          - "restore_feasibility.NETWORK_CHANGES == 'NONE'"
+          - "restore_feasibility.NETWORK_ISOLATION == 'NOT_PROVEN'"
+          - "restore_feasibility.ARCHIVE_CONFIG_SANITIZATION == 'NOT_PROVEN'"
+          - "restore_feasibility.STATUS in ['RESTORE_ENVIRONMENT_CANDIDATE', 'REVIEW_REQUIRED', 'UNVERIFIED']"
+          - "restore_feasibility.CANDIDATE_VMID == 910"
+          - "restore_feasibility.CANDIDATE_VMID_STATE in ['UNUSED_AT_CHECK_TIME', 'IN_USE', 'UNVERIFIED']"
+          - "restore_feasibility.TARGET_STORAGE_CLASS in ['ACTIVE_ROOTDIR_ZFS_WITH_BUFFER', 'STORAGE_INACTIVE', 'NOT_ROOTDIR_ZFS_STORAGE', 'INSUFFICIENT_CAPACITY_WITH_BUFFER', 'UNVERIFIED']"
+          - "restore_feasibility.CT110_ARCHIVE_METADATA in ['ONE_NONEMPTY_CT110_ZSTD_ARCHIVE', 'NO_UNIQUE_CT110_ARCHIVE', 'ARCHIVE_METADATA_UNEXPECTED', 'UNVERIFIED']"
+      no_log: true
+
+    - name: Print only read-only feasibility results and remaining gates
+      ansible.builtin.debug:
+        msg:
+          - AUDIT=READ_ONLY
+          - "STATUS={{ restore_feasibility.STATUS }}"
+          - "SOURCE_CT110_STATE={{ restore_feasibility.SOURCE_CT110_STATE }}"
+          - "CANDIDATE_VMID={{ restore_feasibility.CANDIDATE_VMID }}"
+          - "CANDIDATE_VMID_STATE={{ restore_feasibility.CANDIDATE_VMID_STATE }}"
+          - "TARGET_STORAGE_CLASS={{ restore_feasibility.TARGET_STORAGE_CLASS }}"
+          - "CT110_ARCHIVE_METADATA={{ restore_feasibility.CT110_ARCHIVE_METADATA }}"
+          - "ARCHIVE_STREAM_CHECK={{ restore_feasibility.ARCHIVE_STREAM_CHECK }}"
+          - ARCHIVE_CONFIG_SANITIZATION=NOT_PROVEN
+          - NETWORK_ISOLATION=NOT_PROVEN
+          - RESTORE_EXECUTED=False
+          - RESTORE_AUTHORIZED=False
+          - NEW_GUEST_CREATED=False
+          - GUEST_STARTED=False
+          - RESTORE_TEST=NOT_ATTESTED
+          - ROLLBACK_CLEARANCE=NOT_PROVEN
+          - APPLY_AUTHORIZED=False
