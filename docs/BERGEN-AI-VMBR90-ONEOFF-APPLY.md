@@ -222,3 +222,98 @@ Erst nach realer Fehlerbehebung, tatsächlicher
 IPAM-Vervollständigung und verfügbarer OOB-Konsole
 kann ein separater, verantworteter neuer
 Netz-Apply-Lauf genehmigt werden.
+
+## Phase 1.2 – Live-Gatediagnose 20.10.2026, 09:47
+
+Der Betreiber führte `audit-bergen-ai-vmbr90-apply-gates-readonly.yml`
+auf `bp-controller` aus: `localhost ok=6 changed=0 failed=0`,
+`venombox ok=36 changed=0 failed=0`.
+
+```text
+IPAM_DECLARED_RANGES=PASS
+IPAM_SCOPE_COMPLETE=BLOCKED
+BRIDGE_UNUSED=PASS
+CT110_CT126_CT120_NIC_BASELINE=PASS
+LXC_PODMAN_NETWORK_RANGES=PASS
+LIVE_WIREGUARD_RANGES=PASS
+HOST_AND_CT_CONFIG_READABLE=PASS
+BACKUP_NFS=PASS
+CT110_RECENT_BACKUP_METADATA=PASS
+CT126_RECENT_BACKUP_METADATA=PASS
+HOST_IFUPDOWN2_DROPIN_PRECHECK=PASS
+CT110_CT126_RUNNING_NET0_ONLY=PASS
+HOST_SOURCE_DIAGNOSTIC=EXPLICIT_SOURCE_NO_PENDING_EDIT
+CT110_LAYOUT_DIAGNOSTIC=RUNNING_NET0_ONLY
+CT126_LAYOUT_DIAGNOSTIC=RUNNING_NET0_ONLY
+INDEPENDENT_CONSOLE_ACCESS=NOT_ATTESTED_BY_THIS_AUDIT
+FULL_NETWORK_CLEARANCE=NOT_PROVEN
+NETWORK_CHANGES=NONE
+APPLY_AUTHORIZED=False
+```
+
+**Eindeutig lokalisierter technischer Blocker:**
+Das manuelle, ausschließlich auf dem `bp-controller`
+gehaltene IPAM-Manifest ist noch nicht für alle drei
+Netzwerkbereiche als vollständig bestätigt. Alle
+elf anderen technischen Gate-Kategorien bestanden.
+Der frühere mutierende Apply blieb `changed=0`;
+Bridge, NICs und Anwendungskonfigurationen blieben unberührt.
+
+Das erneute Apply ist **nicht** deshalb zulässig,
+weil elf von zwölf Gates bestanden haben. Für
+`ansible/vars/bergen-ai-bridge-ipam.local.json`
+müssen die tatsächlich erfassten Netzbereiche
+`unifi`, `vpn`, `other_hosts` fachlich
+überprüft, fehlende IPv4-CIDRs ergänzt und erst
+danach die jeweiligen `complete`-Werte bestätigt
+werden. Das bloße Umschalten auf `true` ohne
+vollständige Netzwerkprüfung wäre keine
+technische Freigabe. Die drei Bereiche umfassen:
+
+- UniFi: VLANs, Netze, manuelle/statische Routen;
+- VPN: aktive und ruhende WireGuard-/OpenVPN-
+  oder andere Site-to-Site-Netze samt relevanten
+  Peer-Präfixen und Remote-Netzen;
+- Andere Hosts: NAS, Hypervisoren, VMs, Podman-/
+  Docker-Overlays und externe statische Routen.
+
+**Datensparsamer Inspektionsbefehl (bp-controller,
+read-only, keine IP-Adressen in der Ausgabe):**
+
+```bash
+python3 - <<'PY'
+import json
+from pathlib import Path
+p = Path.home() / "bergen-platform-ai-private-bridge/ansible/vars/bergen-ai-bridge-ipam.local.json"
+if p.is_symlink() or not p.is_file():
+    raise SystemExit("IPAM_FILE=ABSENT_OR_UNSAFE")
+v = json.loads(p.read_text())
+for name in ("unifi", "vpn", "other_hosts"):
+    entry = v["scopes"][name]
+    print(f"{name.upper()}_COMPLETE={entry['complete']}")
+    print(f"{name.upper()}_NETWORK_COUNT={len(entry['networks'])}")
+PY
+```
+
+Für die eigentliche Bearbeitung
+`nano ~/bergen-platform-ai-private-bridge/ansible/vars/bergen-ai-bridge-ipam.local.json`
+oder einen anderen lokalen Editor benutzen. Das
+Dokument bleibt gitignoriert; IPAM-Einträge,
+VPN-Peer-Daten und private Netzwerkkonfigurationen
+nicht ins Repository oder öffentliche Logs kopieren.
+
+Der unabhängige Proxmox-Konsolenzugang muss
+zusätzlich **tatsächlich getestet und durch den
+Betreiber bestätigt** sein; die Diagnose
+`NOT_ATTESTED_BY_THIS_AUDIT` ist keine Aussage,
+dass er vorhanden oder funktionsfähig wäre.
+
+**Nächste sichere Reihenfolge:** bestehendes
+IPAM-Manifest read-only auf fehlende Kategorien
+prüfen; Quellen vervollständigen; das schon
+vorhandene `audit-bergen-ai-vmbr90-apply-gates-readonly.yml`
+neu ausführen; erst bei **allen zwölf PASS** und
+real geprüfter unabhängiger Konsole den Oneoff-Apply
+separat autorisieren. Die eigentliche Ollama-
+und Paperless-Endpunktumstellung ist anschließend
+weiterhin ein anderer Change.
