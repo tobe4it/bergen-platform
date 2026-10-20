@@ -125,6 +125,17 @@
           }}
       when: bp_catalog_raw.rc != 0
 
+    - name: Show sanitized phase and code for failed BAI document classification
+      ansible.builtin.debug:
+        msg:
+          - "BAI_FAILURE_STAGE={{ bp_catalog_result.ERROR_STAGE if bp_catalog_result.ERROR_STAGE | default('') in ['INFERENCE', 'RESOLUTION', 'VALIDATION', 'DB_WRITE', 'JOURNAL'] else 'UNCLASSIFIED' }}"
+          - "BAI_FAILURE_CODE={{ bp_catalog_result.ERROR_CODE if bp_catalog_result.ERROR_CODE | default('') in ['LLM_FAILURE', 'MATCHING_FAILURE', 'VALIDATION_FAILURE', 'PERSISTENCE_FAILURE', 'JOURNAL_COMMIT_FAILURE', 'UNCLASSIFIED_FAILURE', 'DOCUMENT_CHANGED', 'INBOX_TAG_REMOVED', 'SNAPSHOT_INVALID', 'UNEXPECTED_DOCUMENT_CHANGE', 'NOTE_PERMISSION_DENIED', 'NOTE_SUGGESTIONS_INVALID', 'CHANGES_INVALID', 'SUGGESTIONS_INVALID', 'TAGS_INVALID', 'INBOX_REMOVED', 'CORRESPONDENT_INVALID', 'DOCUMENT_TYPE_INVALID'] else 'UNCLASSIFIED' }}"
+          - DOCUMENT_METADATA_CHANGED=NOT_CLAIMED
+          - JOURNAL_REVIEW_REQUIRED=YES
+      when:
+        - bp_catalog_raw.rc == 0
+        - bp_catalog_result.REVIEW_REQUIRED | default(0) | int > 0
+
     - name: Fail closed if runtime rejected a configuration or write attempt
       ansible.builtin.assert:
         that:
@@ -150,6 +161,8 @@
           - "APPLIED={{ bp_catalog_result.APPLIED | default(0) }}"
           - "NO_CHANGE={{ bp_catalog_result.NO_CHANGE | default(0) }}"
           - "NOTES_ADDED={{ bp_catalog_result.NOTES_ADDED | default(0) }}"
+          - "ERROR_STAGE={{ bp_catalog_result.ERROR_STAGE | default('NONE') }}"
+          - "ERROR_CODE={{ bp_catalog_result.ERROR_CODE | default('NONE') }}"
           - "REVIEW_REQUIRED={{ bp_catalog_result.REVIEW_REQUIRED | default(0) }}"
           - "ALREADY_RECORDED={{ bp_catalog_result.ALREADY_RECORDED | default(0) }}"
           - "ROLLED_BACK={{ bp_catalog_result.ROLLED_BACK | default(0) }}"
