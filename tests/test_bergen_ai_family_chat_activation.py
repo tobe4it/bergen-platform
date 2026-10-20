@@ -130,6 +130,35 @@ class StageContract(TestCase):
             ["a", "c", "a", "c"]
         )
 
+    def test_second_approved_apply_is_idempotent_with_original_fingerprint(self):
+        # The first apply changes the snapshot; repeated invocation with the
+        # same previously approved pre-image must now be an honest no-op.
+        out, writes = self.execute(self.payload(
+            "apply", approved=True, backup_verified=True,
+            expected_sha256="a" * 64), initial="ALREADY_STAGED")
+        self.assertIn('"STATUS": "ALREADY_STAGED"', out)
+        self.assertIn('"CREATED": 0', out)
+        self.assertIn('"CHANGED": false', out)
+        self.assertEqual(writes, [])
+
+    def test_idempotent_noop_still_requires_backup_and_operator_approval(self):
+        for approved, backup_verified in ((False, False), (True, False),
+                                          (False, True)):
+            with self.subTest(approved=approved, backup=backup_verified):
+                out, writes = self.execute(self.payload(
+                    "apply", approved=approved, backup_verified=backup_verified,
+                    expected_sha256="a" * 64), initial="ALREADY_STAGED")
+                self.assertIn("APPROVAL_OR_BACKUP_MISSING", out)
+                self.assertEqual(writes, [])
+
+    def test_rollback_still_requires_current_matching_preimage(self):
+        out, writes = self.execute(self.payload(
+            "rollback", approved=True, backup_verified=True,
+            rollback_approved=True, expected_sha256="stale"),
+            initial="ALREADY_STAGED")
+        self.assertIn("SNAPSHOT_CHANGED", out)
+        self.assertEqual(writes, [])
+
     def test_never_mutate_existing_unreviewed_profiles(self):
         result, writes = self.execute(self.payload(
             "apply", approved=True, backup_verified=True,
@@ -150,8 +179,9 @@ class StageContract(TestCase):
         diagnostics = next(t for t in play["tasks"]
                            if t.get("name") == "Report non-secret prerequisites before protected gate")
         safe_debug = str(diagnostics["ansible.builtin.debug"])
-        self.assertIn("VAULT_ADMIN_TOKEN_DEFINED", safe_debug)
-        self.assertIn("VAULT_ADMIN_TOKEN_MIN_LENGTH_OK", safe_debug)
+        self.assertIn("ADMIN_BEARER_SOURCE", safe_debug)
+        self.assertIn("ADMIN_BEARER_PRESENT", safe_debug)
+        self.assertIn("GLOBAL_API_KEY_SWITCH_REQUIRED=NO", safe_debug)
         self.assertIn("THREE_GROUP_NAMES", safe_debug)
         self.assertNotIn("Bearer ", safe_debug)
         gates_task = next(t for t in play["tasks"]
@@ -161,7 +191,7 @@ class StageContract(TestCase):
                      "bergen_ai_family_model_backup_verified",
                      "bergen_ai_family_model_expected_sha256",
                      "bergen_ai_family_model_rollback_approved",
-                     "vault_open_webui_admin_token"):
+                     "bp_family_model_admin_bearer"):
             self.assertIn(name, gates)
         cmd = next(t for t in play["tasks"]
                    if "Run version-locked WebUI API audit" in t.get("name", ""))
