@@ -1818,3 +1818,97 @@ cd "$WT"
   --vault-id ai@prompt
 )
 ```
+
+### Phase 0f.8 – CT110-Einmalbackup als Archiv nachgewiesen (20.10.2026, 06:21)
+
+Nach dem Ansible-Quoting-Fehler in der ursprünglichen Postcheck-
+Stufe hat der Betreiber den strikt lesenden
+`audit-bergen-ai-ct110-postbackup-archive-readonly.yml`
+ausgeführt. Live-Recap `venombox ok=7 changed=0 failed=0`:
+
+```text
+STATUS=ARCHIVE_PRESENT_NOT_VALIDATED
+CT110_STATE=RUNNING
+BACKUP_TARGET=EXPECTED_ACTIVE_NFS
+CT110_ARCHIVE_COUNT=1
+CT110_ARCHIVE_METADATA=ONE_NONEMPTY_ZSTD_ARCHIVE_VISIBLE
+BACKUP_EXECUTED_BY_THIS_AUDIT=False
+ARCHIVE_CONTENTS_CHECKED=False
+BACKUP_INTEGRITY=NOT_TESTED
+RESTORE_TEST=NOT_ATTESTED
+ROLLBACK_CLEARANCE=NOT_PROVEN
+APPLY_AUTHORIZED=False
+```
+
+**Bestätigt:** genau ein nicht leeres CT110-`.tar.zst`-Archiv
+ist auf dem aktiven Synology-NFS-Ziel über die PVE-Storage-
+Metadaten sichtbar, und CT110 läuft weiterhin. Eine
+zweite Sicherung ist nicht erforderlich und darf nicht
+ohne separate Neufreigabe ausgeführt werden.
+
+**Grenze:** Volid, Größe und PVE-Metadaten beweisen weder
+die Zstandard-Stream-Integrität noch die Lesbarkeit der
+enthaltenen TAR-Struktur, geschweige denn eine gelungene
+Wiederherstellung.
+
+### Phase 0f.9 – Vollständige Read-only-Archivstromprüfung vorbereitet
+
+Neues, separat aufzurufendes Playbook:
+`ansible/playbooks/verify-bergen-ai-ct110-archive-stream-readonly.yml`.
+Es beginnt mit einem frischen Gast-, NFS- und PVE-Metadaten-
+Nachweis: genau ein Archiv mit stimmigem Namen, positiver
+und gegenüber dem Dateisystem unveränderter Größe,
+reguläre (nicht symbolische) Datei auf dem erwarteten
+NFS-Mount. Andere Storage-IDs, leere Archive, fehlende
+Tools und während der Prüfung wechselnde Metadaten
+führen zu `REVIEW_REQUIRED` bzw.
+`CHECK_FAILED_OR_UNAVAILABLE`.
+
+Die Prüfung liest das **eine bestehende Archiv zweimal
+vollständig** über NFS, ohne Änderungen:
+
+1. `zstd -q -t -- <Archiv>` validiert den komprimierten
+   Datenstrom einschließlich vorhandener Zstandard-
+   Prüfsummen.
+2. `tar -I zstd -tf <Archiv>` prüft die vollständig
+   lesbare TAR-Verzeichnisstruktur. Die Member-Liste und
+   sämtliche Fehlermeldungen werden verworfen, nicht
+   in Ansible-Logs oder andere Dateien geschrieben.
+
+Beide Subprozesse werden einzeln zeitlich begrenzt
+und eine gesamte Prozessgruppe bei Ablauf abgebrochen;
+der Ansible-Aufruf verwendet einen längeren
+Async-Zeitraum. Die Prüfung kann auf NFS **spürbare
+Leselast** verursachen (zwei vollständige Durchläufe)
+und soll nur einmal gezielt gestartet werden. Es
+werden **keine** TAR-Inhalte extrahiert, keine Container
+gestoppt/neu gestartet, keine Backups erneut gestartet,
+keine Dienste, Netzwerke oder Bridge-Konfiguration
+verändert.
+
+Nur bei vollständigem Erfolg heißt der Status
+`COMPRESSED_STREAM_AND_TAR_READABLE`; weiterhin
+`RESTORE_TEST=NOT_ATTESTED`,
+`ROLLBACK_CLEARANCE=NOT_PROVEN` und
+`APPLY_AUTHORIZED=False`. Die Wiederherstellbarkeit
+muss gesondert in einer isolierten Testumgebung
+nachgewiesen werden. Ein erfolgreicher Stream-Check
+ersetzt weder Restore-Test noch betriebliche Freigabe.
+
+**Operator-Aufruf (einmal, auf bp-controller, tmux empfohlen):**
+
+```bash
+(
+set -euo pipefail
+BASE="$HOME/bergen-platform"
+WT="$HOME/bergen-platform-ai-private-bridge"
+git -C "$WT" fetch origin feat/bergen-ai-private-bridge-20261019
+git -C "$WT" switch --detach origin/feat/bergen-ai-private-bridge-20261019
+cd "$WT"
+"$BASE/.venv/bin/ansible-playbook" \
+  -i ansible/inventory.yml \
+  -i "$BASE/ansible/inventory.local.yml" \
+  ansible/playbooks/verify-bergen-ai-ct110-archive-stream-readonly.yml \
+  --vault-id ai@prompt
+)
+```
