@@ -72,6 +72,7 @@ class DirectRockyTemplateStagingTests(unittest.TestCase):
                      "new_guest_created: false",
                      "source_archive_transferred: false"):
             self.assertIn(gate, self.source)
+        self.assertIn("hostvars['bp-controller'].rocky_direct_source_audit is defined", self.source)
         self.assertIn("rocky_direct_701_config", self.source)
         self.assertIn("local-zfs", self.source)
         self.assertIn("zpool, status, -x", self.source)
