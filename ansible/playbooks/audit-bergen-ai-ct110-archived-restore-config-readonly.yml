@@ -74,6 +74,18 @@
           - "archive_config.NETWORK_INTERFACE_COUNT == 'UNVERIFIED' or (archive_config.NETWORK_INTERFACE_COUNT | type_debug == 'int' and archive_config.NETWORK_INTERFACE_COUNT >= 0 and archive_config.NETWORK_INTERFACE_COUNT <= 10)"
           - "archive_config.EXTERNAL_MP_COUNT == 'UNVERIFIED' or (archive_config.EXTERNAL_MP_COUNT | type_debug == 'int' and archive_config.EXTERNAL_MP_COUNT >= 0 and archive_config.EXTERNAL_MP_COUNT <= 100)"
           - "archive_config.DANGEROUS_CONFIG_DIRECTIVES == 'UNVERIFIED' or (archive_config.DANGEROUS_CONFIG_DIRECTIVES | type_debug == 'int' and archive_config.DANGEROUS_CONFIG_DIRECTIVES >= 0 and archive_config.DANGEROUS_CONFIG_DIRECTIVES <= 100)"
+          - "archive_config.SENSITIVE_UNIQUE_COUNT == 'UNVERIFIED' or (archive_config.SENSITIVE_UNIQUE_COUNT | type_debug == 'int' and archive_config.SENSITIVE_UNIQUE_COUNT >= 0 and archive_config.SENSITIVE_UNIQUE_COUNT <= 220)"
+          - "archive_config.SENSITIVE_DUPLICATE_OVERCOUNT == 'UNVERIFIED' or (archive_config.SENSITIVE_DUPLICATE_OVERCOUNT | type_debug == 'int' and archive_config.SENSITIVE_DUPLICATE_OVERCOUNT >= 0 and archive_config.SENSITIVE_DUPLICATE_OVERCOUNT <= 220)"
+          - "archive_config.SENSITIVE_HOOK_COUNT == 'UNVERIFIED' or (archive_config.SENSITIVE_HOOK_COUNT | type_debug == 'int' and archive_config.SENSITIVE_HOOK_COUNT >= 0 and archive_config.SENSITIVE_HOOK_COUNT <= 220)"
+          - "archive_config.SENSITIVE_APPARMOR_COUNT == 'UNVERIFIED' or (archive_config.SENSITIVE_APPARMOR_COUNT | type_debug == 'int' and archive_config.SENSITIVE_APPARMOR_COUNT >= 0 and archive_config.SENSITIVE_APPARMOR_COUNT <= 220)"
+          - "archive_config.SENSITIVE_LXC_MOUNT_POLICY_COUNT == 'UNVERIFIED' or (archive_config.SENSITIVE_LXC_MOUNT_POLICY_COUNT | type_debug == 'int' and archive_config.SENSITIVE_LXC_MOUNT_POLICY_COUNT >= 0 and archive_config.SENSITIVE_LXC_MOUNT_POLICY_COUNT <= 220)"
+          - "archive_config.SENSITIVE_CGROUP_DEVICE_POLICY_COUNT == 'UNVERIFIED' or (archive_config.SENSITIVE_CGROUP_DEVICE_POLICY_COUNT | type_debug == 'int' and archive_config.SENSITIVE_CGROUP_DEVICE_POLICY_COUNT >= 0 and archive_config.SENSITIVE_CGROUP_DEVICE_POLICY_COUNT <= 220)"
+          - "archive_config.SENSITIVE_CAPABILITY_POLICY_COUNT == 'UNVERIFIED' or (archive_config.SENSITIVE_CAPABILITY_POLICY_COUNT | type_debug == 'int' and archive_config.SENSITIVE_CAPABILITY_POLICY_COUNT >= 0 and archive_config.SENSITIVE_CAPABILITY_POLICY_COUNT <= 220)"
+          - "archive_config.SENSITIVE_ID_MAPPING_COUNT == 'UNVERIFIED' or (archive_config.SENSITIVE_ID_MAPPING_COUNT | type_debug == 'int' and archive_config.SENSITIVE_ID_MAPPING_COUNT >= 0 and archive_config.SENSITIVE_ID_MAPPING_COUNT <= 220)"
+          - "archive_config.SENSITIVE_LXC_NETWORK_COUNT == 'UNVERIFIED' or (archive_config.SENSITIVE_LXC_NETWORK_COUNT | type_debug == 'int' and archive_config.SENSITIVE_LXC_NETWORK_COUNT >= 0 and archive_config.SENSITIVE_LXC_NETWORK_COUNT <= 220)"
+          - "archive_config.SENSITIVE_PVE_DEVICE_COUNT == 'UNVERIFIED' or (archive_config.SENSITIVE_PVE_DEVICE_COUNT | type_debug == 'int' and archive_config.SENSITIVE_PVE_DEVICE_COUNT >= 0 and archive_config.SENSITIVE_PVE_DEVICE_COUNT <= 220)"
+          - "archive_config.SENSITIVE_OTHER_LXC_COUNT == 'UNVERIFIED' or (archive_config.SENSITIVE_OTHER_LXC_COUNT | type_debug == 'int' and archive_config.SENSITIVE_OTHER_LXC_COUNT >= 0 and archive_config.SENSITIVE_OTHER_LXC_COUNT <= 220)"
+          - "archive_config.SENSITIVE_OTHER_COUNT == 'UNVERIFIED' or (archive_config.SENSITIVE_OTHER_COUNT | type_debug == 'int' and archive_config.SENSITIVE_OTHER_COUNT >= 0 and archive_config.SENSITIVE_OTHER_COUNT <= 220)"
       no_log: true
 
     - name: Report configuration shape without original network or private values
@@ -91,6 +103,18 @@
           - "EXTERNAL_MP_COUNT={{ archive_config.EXTERNAL_MP_COUNT }}"
           - "DEVICE_MOUNT_PROFILE={{ archive_config.DEVICE_MOUNT_PROFILE }}"
           - "DANGEROUS_CONFIG_DIRECTIVES={{ archive_config.DANGEROUS_CONFIG_DIRECTIVES }}"
+          - "SENSITIVE_UNIQUE_COUNT={{ archive_config.SENSITIVE_UNIQUE_COUNT }}"
+          - "SENSITIVE_DUPLICATE_OVERCOUNT={{ archive_config.SENSITIVE_DUPLICATE_OVERCOUNT }}"
+          - "SENSITIVE_HOOK_COUNT={{ archive_config.SENSITIVE_HOOK_COUNT }}"
+          - "SENSITIVE_APPARMOR_COUNT={{ archive_config.SENSITIVE_APPARMOR_COUNT }}"
+          - "SENSITIVE_LXC_MOUNT_POLICY_COUNT={{ archive_config.SENSITIVE_LXC_MOUNT_POLICY_COUNT }}"
+          - "SENSITIVE_CGROUP_DEVICE_POLICY_COUNT={{ archive_config.SENSITIVE_CGROUP_DEVICE_POLICY_COUNT }}"
+          - "SENSITIVE_CAPABILITY_POLICY_COUNT={{ archive_config.SENSITIVE_CAPABILITY_POLICY_COUNT }}"
+          - "SENSITIVE_ID_MAPPING_COUNT={{ archive_config.SENSITIVE_ID_MAPPING_COUNT }}"
+          - "SENSITIVE_LXC_NETWORK_COUNT={{ archive_config.SENSITIVE_LXC_NETWORK_COUNT }}"
+          - "SENSITIVE_PVE_DEVICE_COUNT={{ archive_config.SENSITIVE_PVE_DEVICE_COUNT }}"
+          - "SENSITIVE_OTHER_LXC_COUNT={{ archive_config.SENSITIVE_OTHER_LXC_COUNT }}"
+          - "SENSITIVE_OTHER_COUNT={{ archive_config.SENSITIVE_OTHER_COUNT }}"
           - ARCHIVE_CONFIG_SANITIZATION=NOT_PROVEN
           - NETWORK_ISOLATION=NOT_PROVEN
           - GUEST_START_POLICY=NOT_PROVEN
