@@ -2317,3 +2317,88 @@ Geräteklassifizierung bedeutet ausdrücklich **nicht**
 nur, welche Original-Richtlinien bei einer späteren,
 gesondert freizugebenden, netzlosen Restore-Probe
 auszuschließen oder zu neutralisieren sind.
+
+
+### Phase 0f.13 – FUSE-Regel bestätigt, `dev0`/`dev1` bislang unerkannte Schreibweise (20.10.2026, 07:28)
+
+Der Operator meldet aus dem schreibgeschützten
+Archivkonfigurationsaudit (`venombox ok=14 changed=0 failed=0`):
+
+```text
+STATUS=REVIEW_REQUIRED
+SENSITIVE_UNIQUE_COUNT=3
+SENSITIVE_DUPLICATE_OVERCOUNT=0
+SENSITIVE_CGROUP_DEVICE_POLICY_COUNT=1
+SENSITIVE_PVE_DEVICE_COUNT=2
+DEV0_CLASS=UNRECOGNIZED_FORMAT
+DEV1_CLASS=UNRECOGNIZED_FORMAT
+PVE_DEVICE_INDEX_PROFILE=EXACT_DEV0_DEV1
+CGROUP_DEVICE_RULE_CLASS=FUSE
+CGROUP_DEVICE_RULE_SCOPE=SINGLE_MINOR
+CGROUP_POLICY_ACTION=ALLOW
+NETWORK_INTERFACE_COUNT=1
+ONBOOT=ENABLED
+RESTORE_AUTHORIZED=False
+RESTORE_EXECUTED=False
+```
+
+Die einzelne Cgroup-Regel gestattet den charakteristischen
+FUSE-Char-Device-Knoten; das passt zum bekannten
+Podman-/FUSE-Betrieb. Die beiden `devN`-Werte waren
+im bisherigen Parser unlesbar, **nicht** bereits als
+gefahrlos eingestuft.
+
+Die offizielle Proxmox-Konfigurationsgrammatik erlaubt
+`dev[n]: [[path=]<Path>],...`: Neben einem positionsbasierten
+Gerätepfad kann also `path=/dev/...` stehen.
+Der bisherige Parser prüfte nur die erste Schreibweise.
+Quelle: https://github.com/proxmox/pve-docs/blob/master/generated/pct.conf.5-opts.adoc
+
+In der neuen Diagnose `parsed_device` werden beide
+zulässigen Pfadschreibweisen normalisiert. Zulässig sind
+nur die dokumentierten Optionen `uid`, `gid`,
+`mode` und `deny-write` mit streng geprüfter
+Form und ohne doppelte Optionsschlüssel. Andernfalls
+bleibt `UNRECOGNIZED_FORMAT`. Die Ausgabe bleibt
+**rein kategorial**:
+
+- `DEV0_CLASS`, `DEV1_CLASS` (z.B. `GPU_RENDER`,
+  `GPU_CARD`, `FUSE`, `TUN`, `USB`,
+  `OTHER_DEVICE`, `UNRECOGNIZED_FORMAT`);
+- `DEV0_FORMAT`, `DEV1_FORMAT`
+  (`KEYED_PATH`, `POSITIONAL_PATH`,
+  `UNRECOGNIZED_FORMAT`).
+
+Weder Host-Gerätepfade noch Geräte-IDs, MAC-/IP-Adressen
+oder andere Originalkonfigurationswerte werden sichtbar.
+Auch bei einer erfolgreich klassifizierten Gerätedurchreichung
+bleiben **alle drei** Gast-Device-/Cgroup-Direktiven
+beim geplanten Test-Restore zunächst ausgeschlossen.
+Die produktive `net0` und das archivierte `onboot=1`
+dürfen nicht in einer aktivierbaren Testkonfiguration
+übernommen werden.
+
+**Weiterhin vollständig gesperrt:** `pct restore`,
+`pct start`, Netzwerk-/Bridge-Änderungen,
+`RESTORE_AUTHORIZED=False`,
+`ARCHIVE_CONFIG_SANITIZATION=NOT_PROVEN`,
+`NETWORK_ISOLATION=NOT_PROVEN`.
+
+Nächster Operator-Aufruf auf `bp-controller`,
+nur schreibgeschützter Audit:
+
+```bash
+(
+set -euo pipefail
+BASE="$HOME/bergen-platform"
+WT="$HOME/bergen-platform-ai-private-bridge"
+git -C "$WT" fetch origin feat/bergen-ai-private-bridge-20261019
+git -C "$WT" switch --detach origin/feat/bergen-ai-private-bridge-20261019
+cd "$WT"
+"$BASE/.venv/bin/ansible-playbook" \
+  -i ansible/inventory.yml \
+  -i "$BASE/ansible/inventory.local.yml" \
+  ansible/playbooks/audit-bergen-ai-ct110-archived-restore-config-readonly.yml \
+  --vault-id ai@prompt
+)
+```
