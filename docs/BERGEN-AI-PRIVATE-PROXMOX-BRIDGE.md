@@ -1,6 +1,8 @@
 # Bergen-AI – isolierte interne Proxmox-Bridge (Konzept / Preflight)
 
-**Stand 19.10.2026. Kein produktiver Apply freigegeben.**
+**Stand 20.10.2026. Der gesondert genehmigungspflichtige Transport-Apply ist in der Feature-Branch vorbereitet, aber nicht auf `venombox` ausgeführt.**
+
+Neuer operatorgesteuerter Ablauf: [Bergen-AI vmbr90 – einmaliger Transport-Apply](BERGEN-AI-VMBR90-ONEOFF-APPLY.md). Er benötigt vollständiges IPAM, getesteten unabhängigen Konsolenzugang und frische, positive Same-Run-Preflights. Die Ollama-/Paperless-Endpoint-Umstellung bleibt ein späterer eigener Change.
 
 ## Ziel
 
