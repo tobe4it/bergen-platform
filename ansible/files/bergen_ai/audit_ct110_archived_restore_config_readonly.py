@@ -162,29 +162,70 @@ def sensitive_categories(values):
     return out
 
 
-def device_type(value):
-    """Categorize the host device name without exporting path or properties."""
-    if not isinstance(value, str) or len(value) > 2048:
-        return "UNVERIFIED"
-    path = value.split(",", 1)[0].strip()
+def parsed_device(value):
+    """Validate the documented pct dev[n] syntax, retain category only.
+
+    Proxmox accepts both path=/dev/... and positional /dev/... for the
+    required first component. Other options must be in its limited schema.
+    Unrecognized content must never be guessed into a harmless device class.
+    """
+    if not isinstance(value, str) or not 0 < len(value) <= 2048:
+        return ("UNVERIFIED", "UNVERIFIED")
+    pieces = value.strip().split(",")
+    if not 1 <= len(pieces) <= 6 or any(not item or item != item.strip() for item in pieces):
+        return ("UNRECOGNIZED_FORMAT", "UNRECOGNIZED_FORMAT")
+    first = pieces[0]
+    if first.startswith("path="):
+        path = first[5:]
+        form = "KEYED_PATH"
+    else:
+        path = first
+        form = "POSITIONAL_PATH"
+    if not path.startswith("/dev/") or any(ch.isspace() for ch in path):
+        return ("UNRECOGNIZED_FORMAT", "UNRECOGNIZED_FORMAT")
+    seen = set()
+    for option in pieces[1:]:
+        if "=" not in option:
+            return ("UNRECOGNIZED_FORMAT", "UNRECOGNIZED_FORMAT")
+        key, val = option.split("=", 1)
+        if key in seen:
+            return ("UNRECOGNIZED_FORMAT", "UNRECOGNIZED_FORMAT")
+        seen.add(key)
+        if key in ("uid", "gid"):
+            if not re.fullmatch(r"[0-9]{1,10}", val):
+                return ("UNRECOGNIZED_FORMAT", "UNRECOGNIZED_FORMAT")
+        elif key == "mode":
+            if not re.fullmatch(r"0?[0-7]{3,4}", val):
+                return ("UNRECOGNIZED_FORMAT", "UNRECOGNIZED_FORMAT")
+        elif key == "deny-write":
+            if val not in ("0", "1"):
+                return ("UNRECOGNIZED_FORMAT", "UNRECOGNIZED_FORMAT")
+        else:
+            return ("UNRECOGNIZED_FORMAT", "UNRECOGNIZED_FORMAT")
     if re.fullmatch(r"/dev/dri/renderD[0-9]+", path):
-        return "GPU_RENDER"
-    if re.fullmatch(r"/dev/dri/card[0-9]+", path):
-        return "GPU_CARD"
-    if path == "/dev/kfd":
-        return "GPU_KFD"
-    if re.fullmatch(r"/dev/video[0-9]+", path):
-        return "VIDEO"
-    if path.startswith("/dev/bus/usb/") or re.fullmatch(
+        kind = "GPU_RENDER"
+    elif re.fullmatch(r"/dev/dri/card[0-9]+", path):
+        kind = "GPU_CARD"
+    elif path == "/dev/kfd":
+        kind = "GPU_KFD"
+    elif re.fullmatch(r"/dev/video[0-9]+", path):
+        kind = "VIDEO"
+    elif path.startswith("/dev/bus/usb/") or re.fullmatch(
             r"/dev/(?:ttyUSB|ttyACM)[0-9]+", path):
-        return "USB"
-    if path == "/dev/net/tun":
-        return "TUN"
-    if path == "/dev/fuse":
-        return "FUSE"
-    if path.startswith("/dev/"):
-        return "OTHER_DEVICE"
-    return "UNRECOGNIZED_FORMAT"
+        kind = "USB"
+    elif path == "/dev/net/tun":
+        kind = "TUN"
+    elif path == "/dev/fuse":
+        kind = "FUSE"
+    else:
+        kind = "OTHER_DEVICE"
+    return (kind, form)
+
+
+def device_type(value):
+    """For compatibility: export only the sanitized device class."""
+    return parsed_device(value)[0]
+
 
 
 def cgroup_device_rule(value):
@@ -218,6 +259,7 @@ def cgroup_device_rule(value):
 def device_details(values):
     if values is None:
         return dict(DEV0_CLASS="UNVERIFIED", DEV1_CLASS="UNVERIFIED",
+                    DEV0_FORMAT="UNVERIFIED", DEV1_FORMAT="UNVERIFIED",
                     PVE_DEVICE_INDEX_PROFILE="UNVERIFIED",
                     CGROUP_DEVICE_RULE_CLASS="UNVERIFIED",
                     CGROUP_DEVICE_RULE_SCOPE="UNVERIFIED",
@@ -237,6 +279,8 @@ def device_details(values):
     return dict(
         DEV0_CLASS=device_type(one(values, "dev0")) if "dev0" in values else "ABSENT",
         DEV1_CLASS=device_type(one(values, "dev1")) if "dev1" in values else "ABSENT",
+        DEV0_FORMAT=parsed_device(one(values, "dev0"))[1] if "dev0" in values else "ABSENT",
+        DEV1_FORMAT=parsed_device(one(values, "dev1"))[1] if "dev1" in values else "ABSENT",
         PVE_DEVICE_INDEX_PROFILE=index_class,
         CGROUP_DEVICE_RULE_CLASS=rule_class,
         CGROUP_DEVICE_RULE_SCOPE=rule_scope,
