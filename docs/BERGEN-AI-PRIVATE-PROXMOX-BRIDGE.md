@@ -1912,3 +1912,106 @@ cd "$WT"
   --vault-id ai@prompt
 )
 ```
+
+### Phase 0f.9 – Archivstream und TAR vollständig bestanden (20.10.2026, 06:45)
+
+Der Betreiber führte auf `venombox` die getrennte
+`verify-bergen-ai-ct110-archive-stream-readonly.yml` aus.
+Nach 17 schreibgeschützten Async-Polls beendete die
+Prüfung erfolgreich: `ok=7 changed=0 failed=0`.
+
+```text
+AUDIT=READ_ONLY
+STATUS=COMPRESSED_STREAM_AND_TAR_READABLE
+VERIFY_STAGE=FINISHED
+ZSTD_STREAM_CHECK=PASS
+TAR_READ_CHECK=PASS
+FILE_STABLE_AFTER_CHECK=YES
+CT110_STATE_AFTER=RUNNING
+BACKUP_INTEGRITY=STREAM_AND_TAR_ONLY_NOT_RESTORE_VERIFIED
+BACKUP_EXECUTED=False
+BACKUP_RETRIED=False
+ARCHIVE_EXTRACTED=False
+RESTORE_TEST=NOT_ATTESTED
+ROLLBACK_CLEARANCE=NOT_PROVEN
+APPLY_AUTHORIZED=False
+```
+
+Der vorhandene CT110-Zstandard-Datenstrom wurde vollständig
+geprüft und die darin enthaltene TAR-Struktur ist komplett
+lesbar. Das Archiv blieb während beider NFS-Lesedurchgänge
+unverändert; der produktive CT110 läuft weiter. Es fand
+weder eine Extraktion noch ein Wiederherstellungsversuch statt.
+Dieses Ergebnis beweist **noch nicht**, dass ein isolierter
+Gast erfolgreich gestartet und dessen Anwendungskonfiguration
+vollständig wiederhergestellt werden kann.
+
+### Phase 0f.10 – Isolierten Wiederherstellungstest nur vorbereiten
+
+`pct restore` kann ursprüngliche Netz- und Gastkonfigurationen
+übernehmen. Deshalb ist ohne explizit geprüftes Netzwerk- und
+Startverbot **kein** Gast-Restore zulässig. <https://pve.proxmox.com/pve-docs/pct.html>
+
+Der neue read-only Infrastrukturcheck
+`audit-bergen-ai-ct110-isolated-restore-feasibility-readonly.yml`
+prüft jetzt lediglich:
+
+- Produktiver CT110 läuft weiterhin.
+- Der Vorschlag **VMID 910** ist in den Proxmox-
+  Clusterressourcen **und** dem lokalen LXC-Index
+  zum Prüfzeitpunkt unbenutzt. Die 800er-VMIDs bleiben
+  für Altcontainerübernahmen reserviert. Der Check
+  reserviert keine VMID (Race-Gate bleibt offen).
+- Der produktive Rootfs-Speicher lässt sich
+  als `local-zfs` mit begrenzter Rootfs-Kapazität
+  interpretieren. Dort ist aktiver `rootdir`-fähiger
+  ZFS-Speicher mit mindestens Original-Rootfs-Größe
+  plus 10 GiB Reserve vorhanden. Fehlende Angaben,
+  falscher Speichertyp oder geringer freier Platz
+  sperren die Kandidatenfreigabe.
+- Das Backup-NFS ist aktuell wirklich als `nfs`/
+  `nfs4` eingehängt und in PVE aktiv. Die PVE-
+  Metadaten zeigen weiterhin **genau ein**
+  nicht leeres CT110-Backup im erwarteten Format.
+
+Der Status `RESTORE_ENVIRONMENT_CANDIDATE` ist nur eine
+mögliche positive **Infrastrukturinventur**,
+**keine Wiederherstellungsfreigabe**.
+`ARCHIVE_CONFIG_SANITIZATION=NOT_PROVEN`,
+`NETWORK_ISOLATION=NOT_PROVEN`,
+`RESTORE_AUTHORIZED=False`,
+`RESTORE_TEST=NOT_ATTESTED`,
+`APPLY_AUTHORIZED=False` bleiben auch bei positivem
+Infrastrukturbefund bestehen. Keine automatische
+Erstellung/Start/Löschung irgendeines Gasts.
+
+**Operator-Aufruf auf bp-controller (read-only):**
+
+```bash
+(
+set -euo pipefail
+BASE="$HOME/bergen-platform"
+WT="$HOME/bergen-platform-ai-private-bridge"
+git -C "$WT" fetch origin feat/bergen-ai-private-bridge-20261019
+git -C "$WT" switch --detach origin/feat/bergen-ai-private-bridge-20261019
+cd "$WT"
+"$BASE/.venv/bin/ansible-playbook" \
+  -i ansible/inventory.yml \
+  -i "$BASE/ansible/inventory.local.yml" \
+  ansible/playbooks/audit-bergen-ai-ct110-isolated-restore-feasibility-readonly.yml \
+  --vault-id ai@prompt
+)
+```
+
+Erst danach separat prüfen: `pvesm extractconfig` der
+bestehenden Sicherung ohne Extraktion von Anwendungsdaten,
+eindeutige neutrale Gastidentität, `onboot=0`,
+keinerlei `netN`-/sonstiger Netzzugang,
+keine externe Bind-/Device-Mounts und
+ein Restore-Verfahren, das diese Eigenschaften
+**vor** einer etwaigen Gastaktivierung garantiert.
+Ein Restore darf nie VMID 110, existierende Test-VMIDs,
+Original-IP, das Originalvolume oder einen produktiven
+Dienst überschreiben. Weiterhin kein mutierendes
+Restore-Playbook, keine automatische Bereinigung und keine
+Netzwerk- oder Bridge-Freigabe.
