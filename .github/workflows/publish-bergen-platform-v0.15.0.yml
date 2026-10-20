@@ -39,7 +39,10 @@ jobs:
   publish:
     needs: validate
     # Never publish from PRs, arbitrary main commits, or future releases.
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main' && startsWith(github.event.head_commit.message, 'chore(release): publish Bergen Platform v0.15.0')
+    if: >-
+      github.event_name == 'push' &&
+      github.ref == 'refs/heads/main' &&
+      startsWith(github.event.head_commit.message, 'chore(release): publish Bergen Platform v0.15.0')
     runs-on: ubuntu-latest
     permissions:
       contents: write
