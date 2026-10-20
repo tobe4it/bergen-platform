@@ -242,3 +242,60 @@ The next reviewed trial may invoke exactly `pilot_ids=[29]`,
 `REVIEW_REQUIRED=0`, `ALREADY_RECORDED=0`. Inspect the
 real Note and remaining Inbox tag in the Paperless UI before
 timer rollout. An unexpected result is a stop, never a retry.
+
+## Live timer deployment observed 2026-10-20 19:25 – pilot verification missing
+
+Operator provided the complete final section of a successful
+`deploy-paperless-ai-inbox-catalog-timer.yml` execution. Live output:
+
+```text
+WATERMARK_MUST_EQUAL_LIVE_MAX_DOCUMENT_ID assertion: PASSED
+Native AI / parent Note rights readiness: PASSED
+Existing timer upgrade gate: PASSED
+Timer files, policy, launcher and service installed
+TIMER=ENABLED
+SCOPE=ONLY_NEW_POST_WATERMARK_ELTERN_INBOX_DOCUMENTS
+NOTES=ENABLED_FOR_VALIDATED_CLASSIFICATION_ONLY
+FAILURE=PRIVATE_JOURNAL_ONLY_NO_RETRY
+INBOX_TAG_REMOVAL=NEVER
+DOCUMENT_PERMISSIONS=UNCHANGED
+venombox ok=23 changed=6 failed=0 unreachable=0
+```
+
+**Operational discrepancy:** The last observable operation on
+Document 29 was a `mode=preview` run at 19:23 with
+`STATUS=READY`, `ELIGIBLE_SAMPLE=1`, and `CHANGED=False`.
+There is **no provided result** showing the required modified-worker
+`mode=apply` proof with `NOTES_ADDED=1`. The timer gate trusted
+caller-supplied `paperless_ai_catalog_pilot_passed=true`, not a
+cryptographically verified live evidence record. Timer activation
+thus succeeded even though its pilot proof is not demonstrated in
+this conversation; don't claim pilot or end-to-end note writes
+validated. Nor has anyone yet shown the timer service actually ran
+and classified an imported document.
+
+**Recommended controlled remediation:** Stop the timer schedule
+temporarily without deleting deployed files, modifying the journal,
+or killing an in-flight oneshot:
+
+```bash
+BASE="$HOME/bergen-platform"
+WT="$HOME/bergen-platform-paperless-ai-catalog"
+cd "$WT"
+"$BASE/.venv/bin/ansible" venombox \\
+  -i ansible/inventory.yml \\
+  -i "$BASE/ansible/inventory.local.yml" \\
+  --vault-id ai@prompt -b -m ansible.builtin.command \\
+  -a "systemctl stop bergen-ai-catalog.timer"
+```
+
+This is an operator-run, explicit reversible timer stop, not a
+modification performed by the GitHub PR. It does not in itself prove
+that an in-progress `bergen-ai-catalog.service` is absent. Confirm
+service and timer status with read-only `systemctl is-active` checks
+and review bounded, sanitized `journalctl` output (do not disclose
+OCR or full prompts). Determine whether any new documents were processed
+since activation. Verify the one-document changed-worker path and
+snapshot/note invariants before any restart of automation. The
+already accepted 19 October backup is not evidence of a successful
+post-change restore or a recently functioning 20 October backup.
