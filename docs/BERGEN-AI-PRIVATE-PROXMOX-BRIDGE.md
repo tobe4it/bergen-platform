@@ -2015,3 +2015,124 @@ Original-IP, das Originalvolume oder einen produktiven
 Dienst überschreiben. Weiterhin kein mutierendes
 Restore-Playbook, keine automatische Bereinigung und keine
 Netzwerk- oder Bridge-Freigabe.
+
+### Phase 0f.10 – Restore-Infrastruktur live freigeprüft (20.10.2026, 06:52)
+
+Der Betreiber führte den vollständig lesenden
+\`audit-bergen-ai-ct110-isolated-restore-feasibility-readonly.yml\`
+auf \`venombox\` aus. \`PLAY RECAP: ok=7 changed=0 failed=0\`.
+
+\`\`\`text
+STATUS=RESTORE_ENVIRONMENT_CANDIDATE
+SOURCE_CT110_STATE=RUNNING
+CANDIDATE_VMID=910
+CANDIDATE_VMID_STATE=UNUSED_AT_CHECK_TIME
+TARGET_STORAGE_CLASS=ACTIVE_ROOTDIR_ZFS_WITH_BUFFER
+BACKUP_NFS_STATE=EXPECTED_ACTIVE_NFS
+CT110_ARCHIVE_METADATA=ONE_NONEMPTY_CT110_ZSTD_ARCHIVE
+ARCHIVE_STREAM_CHECK=PREVIOUSLY_REPORTED_PASS_NOT_RECHECKED
+ARCHIVE_CONFIG_SANITIZATION=NOT_PROVEN
+NETWORK_ISOLATION=NOT_PROVEN
+RESTORE_EXECUTED=False
+RESTORE_AUTHORIZED=False
+NEW_GUEST_CREATED=False
+GUEST_STARTED=False
+RESTORE_TEST=NOT_ATTESTED
+ROLLBACK_CLEARANCE=NOT_PROVEN
+APPLY_AUTHORIZED=False
+\`\`\`
+
+Damit sind VMID 910 (nur zum Prüfzeitpunkt), aktives
+\`local-zfs\` einschließlich Kapazitätspuffer sowie das
+aktive Synology-Backup-NFS für einen späteren Restore
+**geeignete Kandidaten**. Der frühere Zstandard-/TAR-
+Integritätsnachweis gilt weiterhin, wurde hier jedoch
+nicht erneut durchgeführt. **Keine Gastanlage oder
+Netzwerkänderung hat stattgefunden.**
+
+### Phase 0f.11 – Archivierte LXC-Konfiguration getrennt und geheimnisschonend prüfen
+
+Offenes Risiko: Eine Standard-Wiederherstellung kann
+die im CT110-Archiv vorhandenen \`netN\`-Schnittstellen,
+die produktive Identität, \`onboot\`-Flags und
+Mount-/Device-Direktiven übernehmen. Der isolierte
+Restore darf deshalb *nicht* bereits auf Grundlage der
+Infrastrukturprüfung erfolgen.
+
+Ein weiteres strikt lesendes Playbook
+\`ansible/playbooks/audit-bergen-ai-ct110-archived-restore-config-readonly.yml\`
+importiert zuerst nochmals den rein lesenden
+Infrastruktur-Audit. Es liest dann mit dem dokumentierten
+Proxmox-Kommando \`pvesm extractconfig <volid>\` nur die
+gespeicherte LXC-Konfiguration aus **genau einem**
+CT110-Archiv und klassifiziert sie innerhalb des
+temporären Prüfprozesses. Die originale Konfiguration
+wird weder in Logs noch in Dateien geschrieben.
+
+Nur diese bereits bekannte bzw. begrenzte
+Prüfevidenz wird sichtbar:
+
+- \`CONFIG_READ=PARSED\` / \`UNVERIFIED\`,
+  \`STATUS=KNOWN_SOURCE_CONFIGURATION\` /
+  \`REVIEW_REQUIRED\` / \`UNVERIFIED\`;
+- Anzahl archivierter \`netN\`-Schnittstellen;
+- archivierter \`onboot\`-Wert als
+  \`ENABLED\`, \`DISABLED\`, \`ABSENT\`, \`OTHER\`;
+- erwarteter Ursprungshostname als Statusklasse,
+  \`local-zfs\`-Rootfs und \`unprivileged: 1\`;
+- Anzahl \`mpN\` und gefährlicher oder unbekannter
+  \`lxc.*\`-/Hook-/Device-Direktiven;
+- Nachweis, ob genau das historisch bereits bekannte
+  \`/dev/fuse\`-Device-Bind vorhanden ist.
+
+**Es werden keine Original-IP-Adressen, MACs, Bridge-
+Namen, Netzwerkrouten, Passwörter, Mount-Quellpfade
+oder vollständigen Konfigurationswerte ausgegeben.**
+Alle anderen Typen/zusätzlichen Mounts/Mehrfachwerte
+bleiben \`REVIEW_REQUIRED\`.
+
+Auch \`STATUS=KNOWN_SOURCE_CONFIGURATION\` bedeutet
+ausschließlich, dass die *ursprüngliche*
+LXC-Konfiguration dem erwarteten Profil entspricht,
+**nicht** dass die geplante Restore-Konfiguration
+netzlos ist. Deshalb bleiben die Gates auch dann:
+
+\`\`\`text
+ARCHIVE_CONFIG_SANITIZATION=NOT_PROVEN
+NETWORK_ISOLATION=NOT_PROVEN
+GUEST_START_POLICY=NOT_PROVEN
+RESTORE_EXECUTED=False
+RESTORE_AUTHORIZED=False
+RESTORE_TEST=NOT_ATTESTED
+ROLLBACK_CLEARANCE=NOT_PROVEN
+APPLY_AUTHORIZED=False
+\`\`\`
+
+**Nächster Operator-Schritt auf bp-controller**, nur
+den neuen schreibgeschützten Audit ausführen:
+
+\`\`\`bash
+(
+set -euo pipefail
+BASE="$HOME/bergen-platform"
+WT="$HOME/bergen-platform-ai-private-bridge"
+git -C "$WT" fetch origin feat/bergen-ai-private-bridge-20261019
+git -C "$WT" switch --detach origin/feat/bergen-ai-private-bridge-20261019
+cd "$WT"
+"$BASE/.venv/bin/ansible-playbook" \
+  -i ansible/inventory.yml \
+  -i "$BASE/ansible/inventory.local.yml" \
+  ansible/playbooks/audit-bergen-ai-ct110-archived-restore-config-readonly.yml \
+  --vault-id ai@prompt
+)
+\`\`\`
+
+Erst nach dieser Konfigurationsinventur ist zu entscheiden,
+wie die produktiven \`netN\`-/\`onboot\`-/Device-Parameter
+**vor einer eventuellen Aktivierung** garantiert
+neutralisiert werden könnten. Eine spätere mutierende
+Restore-Probe braucht eine gesonderte ausdrückliche
+Genehmigung. VMID 910 ist nicht reserviert; unmittelbar
+vor einer möglichen Anlage muss erneut konfliktfrei
+geprüft werden. Keine Änderung an produktivem CT110,
+VMIDs 800–899, NFS-Archiv oder \`vmbr90\`.
