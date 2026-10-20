@@ -1910,3 +1910,57 @@ change). Never enable a timer or process the eight candidates
 as a batch. Afterward inspect the real Paperless UI and
 journal category before contemplating a separately gated
 rollback or automatic processing.
+
+## Operator scope expansion: all currently eligible inbox documents (2026-10-20)
+
+Following the successful one-document read-only `ELIGIBLE_SAMPLE=1`
+preview, the operator explicitly approved **all eight**
+currently eligible parent-owned inbox candidates for local
+Paperless native Qwen classification. This supersedes the
+previously contemplated **one-document-only** pilot
+authorization for this one manual execution session;
+it is **not** an ongoing, scheduled, or future-document
+authorization. Preserve the reviewed set of eight exact
+numeric IDs in the operator's private local workflow only
+(do **not** write them to Git).
+
+Implementation constraints from the existing, unmodified
+`bergen_ai_catalog_runner.py`:
+- `MAX_BATCH=2`; use **one exact pilot ID per invocation**
+  with `batch_size=1` to fail-stop between documents.
+- Require operator-accepted 19 October CT126 `vzdump`
+  as the rollback reference; Zstd stream and TAR structure
+  passed but **no full-restore evidence** exists.
+- Per one-document apply, set only oneoff non-persistent
+  overrides: `paperless_ai_catalog_pilot_ids: [ID]`,
+  `paperless_ai_catalog_mode: apply`,
+  `paperless_ai_catalog_approved: true`,
+  `paperless_ai_catalog_verified_backup: true`,
+  `paperless_ai_catalog_batch_size: 1`.
+- Retain `paperless_ai_catalog_timer_activate=false` and
+  all permanent site-local write approvals false.
+- After each exit status 0, require exact
+  `STATUS=COMPLETED`, `APPLIED=1`,
+  `REVIEW_REQUIRED=0`, `ALREADY_RECORDED=0`
+  and `CHANGED=True`. Stop immediately on any mismatch
+  or nonzero Ansible status; do not infer a failed Ansible
+  run had no partial effect, as a document may remain
+  in the protected `REQUIRES_REVIEW` journal.
+- ORM `eligible()`, document optimistic snapshot
+  checks and journal idempotency are re-evaluated on
+  **each** apply; pilot IDs do not bypass owner,
+  staff/superuser, inbox, OCR, or version safeguards.
+- No automatic rollback on a failed step. Journal and
+  the actual document must be reviewed first, and
+  rollback is a separately gated action.
+- The selected Qwen LLM has no permissions beyond the
+  existing Paperless process identity by this apply.
+  The unauthenticated Ollama port exposure and the
+  20 October daily backup failure remain open incidents.
+
+The human has authorized the **scope**, but no one can
+claim that production documents were updated until
+`bp-controller` runs the per-ID commands and returns
+their actual `APPLIED` counts. The workflow must not
+silently process new inbox arrivals or all documents
+without the pinned candidate set.
