@@ -2301,3 +2301,76 @@ do not claim remaining files were attempted.
 Alternatively, pause all mutations to first investigate
 the classifier's error modes. Both choices preserve the
 original explicit fixed-eight scope.
+
+
+## Hypothesis after operator manually edited an AI-classified document – 2026-10-20
+
+The operator reports a **temporal correlation**:
+multiple `REQUIRES_REVIEW` outcomes occurred after
+a human manually edited one document already classified
+by Bergen's native Paperless/Ollama worker. The exact
+manually edited document and which metadata fields
+were changed have **not** been established. Do not
+state causality as proven.
+
+Two code paths deserve separate review:
+
+1. The native Paperless AI classifier may select
+   context/taxonomy candidates from similar documents
+   (Paperless v3.2+ introduced a Tantivy full-text
+   fallback when embeddings are off). A human edit can
+   change the source metadata or text considered by
+   subsequent similarity/taxonomy suggestions. However
+   the local Qwen model is **not fine-tuned or retrained**
+   by metadata edits; native Paperless's suggestion
+   context and deterministic Paperless classifier model
+   are different mechanisms.
+2. Our pinned `bergen_ai_catalog_runner.py`
+   **conflates a valid no-op with operational errors**:
+   `plan_changes` deliberately preserves manually
+   edited titles, does not override nonempty
+   correspondent/document type, creates no missing tags,
+   and appends only existing valid tags.
+   `process_one` raises
+   `PolicyError("NO_APPLICABLE_SUGGESTIONS")`
+   if all four change groups are empty. The blanket
+   `except Exception` catches this alongside
+   network/schema/LLM failures, marks a durable
+   `REQUIRES_REVIEW` row, and does **not** persist
+   a sanitized cause. The Ansible gate then correctly
+   aborts further processing. This is an actionable
+   semantic/observability design issue irrespective of
+   whether it caused any one earlier failure.
+
+The operator's later journal inventory had documented
+three `APPLIED`, two `REQUIRES_REVIEW`,
+three `NOT_RECORDED`; **subsequent** operator output
+confirmed additional `REQUIRES_REVIEW`-style failures
+for 21 and 22 but their newest journal states have
+not been independently re-inventoried. Do not assert
+all previously blocked documents now have proven
+identical live snapshots; only 11 and 16 had individual
+`SNAPSHOT_MATCH=MATCH` proofs.
+
+**Operational decision:** Pause all further AI
+document writes including ID 29; do not clear the
+existing `REQUIRES_REVIEW` SQLite entries.
+Do not alter Ollama, global AI configuration, owner
+roles, tags or the Paperless document versions
+while analyzing the correlation.
+
+**Required engineering change before further production
+pilots:** introduce explicit, safe, bounded phases
+(`LLM_CALL`, `RESOLVE_CHOICES`, `PLAN_CHANGES`,
+`OPTIMISTIC_SNAPSHOT`, `DB_UPDATE`,
+`JOURNAL_COMMIT`) and stable allowlisted error categories
+captured without OCR/document text/LLM prompts/raw
+exception messages. Treat a *validated, successful*
+classification whose planned metadata diff is empty
+as a separately reviewed `NO_CHANGE` terminal status,
+not as `REQUIRES_REVIEW`; retain protected journal and
+idempotency. Maintain a distinct review-required outcome
+for an indeterminate or partially committed write.
+No automatic replay of failed IDs, journal reset,
+simulated error cause, or new inference is authorized
+by this documentation.
