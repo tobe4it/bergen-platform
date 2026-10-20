@@ -18,6 +18,9 @@ on:
       - 'ansible/playbooks/audit-nextcloud-restore-offline-package-sources.yml'
       - 'ansible/playbooks/audit-rocky-9-lxc-template-builder-readonly.yml'
       - 'ansible/playbooks/audit-rocky-9-lxc-rootfs-readonly.yml'
+      - 'ansible/playbooks/audit-rocky-9-lxc-rootfs-privileged-modes-readonly.yml'
+      - 'ansible/files/nextcloud/audit_rocky_lxc_rootfs_privileged_modes.py'
+      - 'tests/test_rocky_lxc_rootfs_privileged_modes.py'
       - 'ansible/playbooks/diagnose-rocky-9-lxc-rootfs-symlinks-readonly.yml'
       - 'ansible/files/nextcloud/diagnose_rocky_lxc_rootfs_symlinks.py'
       - 'tests/test_rocky_lxc_rootfs_symlink_diagnostic.py'
@@ -86,6 +89,11 @@ jobs:
             --syntax-check
           python3 -m py_compile ansible/files/nextcloud/audit_rocky_lxc_rootfs.py
           python3 -m unittest discover -s tests -p 'test_rocky_lxc_rootfs_structural_audit.py'
+          python3 -m py_compile ansible/files/nextcloud/audit_rocky_lxc_rootfs_privileged_modes.py
+          python3 -m unittest discover -s tests -p 'test_rocky_lxc_rootfs_privileged_modes.py'
+          ansible-playbook -i localhost, \
+            ansible/playbooks/audit-rocky-9-lxc-rootfs-privileged-modes-readonly.yml \
+            --syntax-check
           python3 -m py_compile ansible/files/nextcloud/diagnose_rocky_lxc_rootfs_symlinks.py
           python3 -m unittest discover -s tests -p 'test_rocky_lxc_rootfs_symlink_diagnostic.py'
           ansible-playbook -i localhost, \
