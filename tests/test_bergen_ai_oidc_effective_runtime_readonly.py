@@ -21,6 +21,13 @@ class EffectiveOidcRuntimeAudit(unittest.TestCase):
         self.assertIn("OAUTH_BLOCKED_GROUPS", src)
         self.assertIn("OIDC_CALLBACK_OBSERVED", src)
         self.assertIn("NOT_MEASURED", src)
+        self.assertIn("MODULE_IMPORT_FAILED", src)
+        self.assertIn("RUNTIME_CONFIG_RESOLUTION_FAILED", src)
+        self.assertIn("UNEXPECTED_RUNTIME_FAILURE", src)
+        self.assertIn('"AUDIT": "FAILED_CLOSED"', src)
+        self.assertIn('raise SystemExit(2) from None', src)
+        self.assertNotIn("str(exc)", src)
+        self.assertNotIn("traceback.print_exc", src)
         self.assertNotIn("access_token", src)
         self.assertNotIn("client_secret", src)
         self.assertNotIn("userinfo", src)
@@ -48,6 +55,13 @@ class EffectiveOidcRuntimeAudit(unittest.TestCase):
                           "ansible.builtin.systemd:"):
             self.assertNotIn(forbidden, source)
         self.assertIn("MEMBERSHIP_WRITE_OBSERVED=NOT_MEASURED", source)
+        self.assertIn("DIAGNOSTIC=READ_ONLY_FAILURE", source)
+        self.assertIn("STATUS_FRAME_COUNT", source)
+        self.assertIn("RUNTIME_CONFIG_RESOLUTION_FAILED", source)
+        self.assertIn("MISSING_OR_MALFORMED_FRAME", source)
+        self.assertIn("Reject failed imports", source)
+        self.assertNotIn("bp_oidc_effective_raw.stderr", source)
+        self.assertNotIn("stdout | debug", source)
 
 
 if __name__ == "__main__":
