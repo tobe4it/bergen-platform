@@ -23,6 +23,18 @@ def classify_owner(uid, gid):
     return uid > MAX_CONTAINER_ID, gid > MAX_CONTAINER_ID
 
 
+def count_pax_header_keys(counter, headers):
+    """Count occurrences of keys, never their string values.
+
+    Counter.update(mapping) interprets PAX string values as counts,
+    producing a TypeError on repeated metadata (or at sum time).
+    """
+    rootfs.require(isinstance(headers, dict), "INVALID_PAX_HEADERS")
+    rootfs.require(all(isinstance(k, str) for k in headers),
+                   "INVALID_PAX_HEADER_KEY")
+    counter.update(headers.keys())
+
+
 def inspect_pinned_idmap_metadata():
     rootfs.require(os.geteuid() != 0, "REFUSE_ROOT_EXECUTION")
     rootfs.require(socket.gethostname().split(".")[0] == "bp-controller",
@@ -66,7 +78,7 @@ def inspect_pinned_idmap_metadata():
                 max_uid, max_gid = max(max_uid, member.uid), max(max_gid, member.gid)
                 if member.pax_headers:
                     pax_members += 1
-                    pax_keys.update(member.pax_headers)
+                    count_pax_header_keys(pax_keys, member.pax_headers)
                     if any(key.startswith(("SCHILY.xattr.", "LIBARCHIVE.xattr."))
                            for key in member.pax_headers):
                         xattr_members += 1
@@ -126,9 +138,14 @@ def main():
     try:
         print(json.dumps(inspect_pinned_idmap_metadata(), sort_keys=True))
     except (rootfs.AuditBlocked, OSError, tarfile.TarError,
-            UnicodeError, EOFError, ValueError, TypeError) as exc:
-        reason = (str(exc) if isinstance(exc, rootfs.AuditBlocked)
-                  else "ARCHIVE_READ_ERROR")
+            UnicodeError, EOFError, ValueError, TypeError, KeyError,
+            AttributeError) as exc:
+        if isinstance(exc, rootfs.AuditBlocked):
+            reason = str(exc)
+        elif isinstance(exc, (TypeError, KeyError, AttributeError)):
+            reason = "AUDITOR_INTERNAL_ERROR"
+        else:
+            reason = "ARCHIVE_READ_ERROR"
         print(json.dumps({
             "result": "ROCKY_9_8_UID_GID_METADATA_AUDIT_BLOCKED",
             "reason": reason,
