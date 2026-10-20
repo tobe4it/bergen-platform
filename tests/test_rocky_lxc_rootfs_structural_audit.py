@@ -49,10 +49,25 @@ class RockyLxcAuditTests(unittest.TestCase):
         with self.assertRaisesRegex(audit.AuditBlocked, "UNSAFE_MEMBER_SEGMENT"):
             audit.inspect_archive(make_archive([{"name": "../escape", "content": b"x"}]))
 
-    def test_absolute_link_refused(self):
-        with self.assertRaisesRegex(audit.AuditBlocked, "ABSOLUTE_OR_INVALID_SYMLINK"):
+    def test_absolute_link_inside_virtual_root_accepted(self):
+        result = audit.inspect_archive(make_archive([{
+            "name": "var/test-link", "kind": tarfile.SYMTYPE,
+            "link": "/usr/lib/os-release",
+        }]))
+        self.assertEqual(result["absolute_symlink_count"], 1)
+
+    def test_dangling_absolute_link_refused(self):
+        with self.assertRaisesRegex(audit.AuditBlocked, "DANGLING_SYMLINK"):
             audit.inspect_archive(make_archive([{
-                "name": "var/test-link", "kind": tarfile.SYMTYPE, "link": "/etc/passwd",
+                "name": "var/test-link", "kind": tarfile.SYMTYPE,
+                "link": "/nonexistent/target",
+            }]))
+
+    def test_absolute_link_escape_refused(self):
+        with self.assertRaisesRegex(audit.AuditBlocked, "SYMLINK_ESCAPES_ROOT"):
+            audit.inspect_archive(make_archive([{
+                "name": "var/test-link", "kind": tarfile.SYMTYPE,
+                "link": "/../../etc/passwd",
             }]))
 
     def test_link_escape_refused(self):
@@ -61,11 +76,47 @@ class RockyLxcAuditTests(unittest.TestCase):
                 "name": "var/test-link", "kind": tarfile.SYMTYPE, "link": "../../../etc/passwd",
             }]))
 
-    def test_hardlink_refused(self):
-        with self.assertRaisesRegex(audit.AuditBlocked, "UNREVIEWED_NONREGULAR_MEMBER"):
+    def test_hardlink_to_earlier_regular_accepted(self):
+        result = audit.inspect_archive(make_archive([{
+            "name": "test-link", "kind": tarfile.LNKTYPE,
+            "link": "etc/rocky-release",
+        }]))
+        self.assertEqual(result["hardlink_count"], 1)
+
+    def test_hardlink_missing_target_refused(self):
+        with self.assertRaisesRegex(audit.AuditBlocked, "HARDLINK_TARGET_NOT_EARLIER_REGULAR"):
             audit.inspect_archive(make_archive([{
-                "name": "test-link", "kind": tarfile.LNKTYPE, "link": "etc/rocky-release",
+                "name": "test-link", "kind": tarfile.LNKTYPE,
+                "link": "missing",
             }]))
+
+    def test_hardlink_symlink_target_refused(self):
+        with self.assertRaisesRegex(audit.AuditBlocked, "HARDLINK_TARGET_NOT_EARLIER_REGULAR"):
+            audit.inspect_archive(make_archive([{
+                "name": "test-link", "kind": tarfile.LNKTYPE,
+                "link": "etc/os-release",
+            }]))
+
+    def test_hardlink_unsafe_target_refused(self):
+        with self.assertRaisesRegex(audit.AuditBlocked, "UNSAFE_MEMBER_SEGMENT"):
+            audit.inspect_archive(make_archive([{
+                "name": "test-link", "kind": tarfile.LNKTYPE,
+                "link": "../etc/rocky-release",
+            }]))
+
+    def test_regular_backslash_filename_accepted(self):
+        result = audit.inspect_archive(make_archive([{
+            "name": r"dir000/literal\\backslash", "content": b"data",
+        }]))
+        self.assertEqual(result["backslash_named_regular_count"], 1)
+
+    def test_member_under_hardlink_refused(self):
+        with self.assertRaisesRegex(audit.AuditBlocked, "MEMBER_UNDER_NON_DIRECTORY"):
+            audit.inspect_archive(make_archive([
+                {"name": "file-link", "kind": tarfile.LNKTYPE,
+                 "link": "etc/rocky-release"},
+                {"name": "file-link/child", "content": b"x"},
+            ]))
 
     def test_duplicate_refused(self):
         with self.assertRaisesRegex(audit.AuditBlocked, "DUPLICATE_MEMBER"):
