@@ -1690,3 +1690,99 @@ pilot still needs explicit, scoped document-write consent,
 review of backup/rollback and the outstanding access-control
 risk that the user elected to defer; do not claim that
 deferred TCP/11434 exposure has been fixed.
+
+## Pilot preview 2026-10-20 13:21 – no eligible selection and private diagnosis
+
+The operator ran the protected `manage-paperless-ai-inbox-catalog.yml`
+with the local vars file and received:
+
+```text
+AUDIT=READ_ONLY
+STATUS=READY
+ELIGIBLE_SAMPLE=0
+APPLIED=0
+REVIEW_REQUIRED=0
+ALREADY_RECORDED=0
+ROLLED_BACK=0
+CHANGED=False
+venombox ok=9 changed=0 failed=0 skipped=1
+```
+
+The previously observed `ELIGIBLE_SAMPLE=8` was a
+**different earlier input state**. `STATUS=READY`
+confirms the model/configuration path; `ELIGIBLE_SAMPLE=0`
+means the current scoped preview chose no qualifying document.
+Neither output identifies *which* condition rejected a selected
+ID. Relevant upstream and local predicates: selected ID may
+not exist; document owner may be absent, inactive, privileged,
+or outside the exact approved Paperless Django parent group;
+the real inbox tag may be absent; OCR content may have fewer
+than 30 nonblank characters; or document version metadata
+may exclude it. When `pilot_ids` is empty, the
+`min_document_id` watermark can independently exclude
+documents. Do not guess the reason or automatically expand
+the allowed group.
+
+A new, narrow **read-only eligibility audit** is available in
+this branch at
+`ansible/playbooks/audit-paperless-ai-pilot-selection-readonly.yml`.
+It reads only the exact selected `pilot_ids` (max two)
+and up to thirty parent-owned inbox candidates through the
+existing Paperless Django ORM, matching the worker's
+eligibility logic. It does **not** run the model, create a
+journal, write document fields, or modify permission
+assignments. The normal report gives a reason category
+for the selected IDs, without exposing their numeric
+values or any document metadata. The user explicitly
+asked for alternate actual IDs; listing up to eight
+matching integer IDs requires an **additional, explicit**
+`paperless_ai_catalog_show_candidate_ids=true` flag
+and emits IDs **only into the operator's private terminal**.
+Do not commit or publish this output to GitHub, chat logs
+or the repository.
+
+From `bp-controller`, with the reviewed ignored local vars:
+
+```bash
+(
+set -euo pipefail
+BASE="$HOME/bergen-platform"
+WT="$HOME/bergen-platform-paperless-ai-catalog"
+git -C "$WT" fetch origin feat/paperless-native-ai-inbox-catalog-20261018
+git -C "$WT" switch --detach origin/feat/paperless-native-ai-inbox-catalog-20261018
+cd "$WT"
+"$BASE/.venv/bin/ansible-playbook" \
+  -i ansible/inventory.yml \
+  -i "$BASE/ansible/inventory.local.yml" \
+  ansible/playbooks/audit-paperless-ai-pilot-selection-readonly.yml \
+  --vault-id ai@prompt \
+  -e "@$BASE/ansible/vars/paperless-ai-catalog.local.yml" \
+  -e paperless_ai_catalog_show_candidate_ids=true
+)
+```
+
+Interpretation:
+- `PILOT_ELIGIBILITY=DOCUMENT_ABSENT`, `OWNER_INACTIVE`,
+  `OWNER_PRIVILEGED`, `OWNER_OUTSIDE_PARENT_GROUP`,
+  `INBOX_TAG_MISSING`, `OCR_INSUFFICIENT` or
+  `VERSIONED_DOCUMENT` specifies the **first** rejection.
+  `ELIGIBLE` means the exact selected ID qualifies on
+  current ORM state.
+- `PILOT_ELIGIBILITY=NOT_SELECTED` means that local
+  `pilot_ids` is empty. An active positive watermark,
+  changed data or a different local vars file may then
+  explain a count of zero in the original catalogue preview.
+- `ELIGIBLE_CANDIDATE_IDS=...` (opt-in) lists up to
+  eight currently valid **numeric candidate IDs**.
+  Choose exactly one, set the site's gitignored
+  `paperless_ai_catalog_pilot_ids: [ID]`,
+  keep `paperless_ai_catalog_mode: preview` and
+  **all** approval/timer flags false, then re-run the
+  original preview. Expected `ELIGIBLE_SAMPLE=1`.
+  An eligible ID list is a private operator-only
+  selection aid, not an approval for model inference.
+
+The current read-only route/metadata checks do not
+authorize a one-document AI write. The unresolved Ollama
+wildcard TCP/11434 exposure and the CT126 20 Oct backup
+failure remain independent, documented operational risks.
