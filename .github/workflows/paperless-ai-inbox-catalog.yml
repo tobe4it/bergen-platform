@@ -12,9 +12,11 @@ on:
       - 'ansible/files/paperless/audit_ai_catalog_observed_tcp_source.py'
       - 'ansible/files/paperless/audit_ai_catalog_pilot_candidates_readonly.py'
       - 'ansible/files/paperless/audit_ai_catalog_review_state_readonly.py'
+      - 'ansible/files/paperless/audit_ai_catalog_journal_inventory_readonly.py'
       - 'ansible/playbooks/manage-paperless-ai-inbox-catalog.yml'
       - 'ansible/playbooks/audit-paperless-ai-pilot-selection-readonly.yml'
       - 'ansible/playbooks/audit-paperless-ai-catalog-review-readonly.yml'
+      - 'ansible/playbooks/audit-paperless-ai-catalog-journal-inventory-readonly.yml'
       - 'ansible/playbooks/manage-paperless-ai-local-ollama.yml'
       - 'ansible/playbooks/audit-paperless-ai-catalog-runtime-readonly.yml'
       - 'ansible/playbooks/audit-paperless-ai-ollama-private-path-readonly.yml'
@@ -28,6 +30,7 @@ on:
       - 'tests/test_paperless_ai_catalog_policy.py'
       - 'tests/test_paperless_ai_pilot_candidates_readonly.py'
       - 'tests/test_paperless_ai_catalog_review_readonly.py'
+      - 'tests/test_paperless_ai_catalog_journal_inventory_readonly.py'
       - 'docs/PAPERLESS-AI-INBOX-CATALOG.md'
       - 'docs/examples/paperless-ai-catalog.local.yml.example'
       - '.github/workflows/paperless-ai-inbox-catalog.yml'
@@ -43,9 +46,11 @@ on:
       - 'ansible/files/paperless/audit_ai_catalog_observed_tcp_source.py'
       - 'ansible/files/paperless/audit_ai_catalog_pilot_candidates_readonly.py'
       - 'ansible/files/paperless/audit_ai_catalog_review_state_readonly.py'
+      - 'ansible/files/paperless/audit_ai_catalog_journal_inventory_readonly.py'
       - 'ansible/playbooks/manage-paperless-ai-inbox-catalog.yml'
       - 'ansible/playbooks/audit-paperless-ai-pilot-selection-readonly.yml'
       - 'ansible/playbooks/audit-paperless-ai-catalog-review-readonly.yml'
+      - 'ansible/playbooks/audit-paperless-ai-catalog-journal-inventory-readonly.yml'
       - 'ansible/playbooks/manage-paperless-ai-local-ollama.yml'
       - 'ansible/playbooks/audit-paperless-ai-catalog-runtime-readonly.yml'
       - 'ansible/playbooks/audit-paperless-ai-ollama-private-path-readonly.yml'
@@ -59,6 +64,7 @@ on:
       - 'tests/test_paperless_ai_catalog_policy.py'
       - 'tests/test_paperless_ai_pilot_candidates_readonly.py'
       - 'tests/test_paperless_ai_catalog_review_readonly.py'
+      - 'tests/test_paperless_ai_catalog_journal_inventory_readonly.py'
 
 jobs:
   policy-and-syntax:
@@ -78,11 +84,14 @@ jobs:
         run: python -m unittest discover -s tests -p 'test_paperless_ai_pilot_candidates_readonly.py' -v
       - name: Test no-write journal diagnostic and snapshot comparison
         run: python -m unittest discover -s tests -p 'test_paperless_ai_catalog_review_readonly.py' -v
+      - name: Test bounded read-only journal inventory and exact ID scope
+        run: python -m unittest discover -s tests -p 'test_paperless_ai_catalog_journal_inventory_readonly.py' -v
       - name: Validate read-only/pilot and separately gated automatic timer syntax
         run: |
           ansible-playbook -i ansible/inventory.yml ansible/playbooks/manage-paperless-ai-inbox-catalog.yml --syntax-check
           ansible-playbook -i ansible/inventory.yml ansible/playbooks/audit-paperless-ai-pilot-selection-readonly.yml --syntax-check
           ansible-playbook -i ansible/inventory.yml ansible/playbooks/audit-paperless-ai-catalog-review-readonly.yml --syntax-check
+          ansible-playbook -i ansible/inventory.yml ansible/playbooks/audit-paperless-ai-catalog-journal-inventory-readonly.yml --syntax-check
           ansible-playbook -i ansible/inventory.yml ansible/playbooks/manage-paperless-ai-local-ollama.yml --syntax-check
           ansible-playbook -i ansible/inventory.yml ansible/playbooks/audit-paperless-ai-catalog-runtime-readonly.yml --syntax-check
           ansible-playbook -i ansible/inventory.yml ansible/playbooks/audit-paperless-ai-ollama-private-path-readonly.yml --syntax-check
