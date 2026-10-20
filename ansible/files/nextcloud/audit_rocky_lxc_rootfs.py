@@ -46,7 +46,7 @@ def relative_name(name):
 
 def follow_inside_root(start, link_target, links):
     """Resolve symlinks using Linux rootfs semantics; never touch the host filesystem."""
-    require(bool(link_target) and "\\x00" not in link_target
+    require(bool(link_target) and "\x00" not in link_target
             and not any(ord(c) < 32 or ord(c) == 127 for c in link_target),
             "INVALID_SYMLINK_TARGET")
     pending = list(link_target.split("/"))
@@ -66,7 +66,7 @@ def follow_inside_root(start, link_target, links):
             traversals += 1
             require(traversals <= MAX_LINK_DEPTH, "SYMLINK_LOOP_OR_DEPTH")
             target = links[current]
-            require(bool(target) and "\\x00" not in target
+            require(bool(target) and "\x00" not in target
                     and not any(ord(c) < 32 or ord(c) == 127 for c in target),
                     "INVALID_SYMLINK_TARGET")
             if target.startswith("/"):
@@ -112,7 +112,7 @@ def inspect_archive(handle):
                 regular += 1
                 regular_seen.add(name)
                 types[name] = "regular"
-                if "\\\\" in name:
+                if "\\" in name:
                     # On Linux the backslash is a filename character, not a separator.
                     backslash_regular += 1
                 if member.mode & 0o6000:
