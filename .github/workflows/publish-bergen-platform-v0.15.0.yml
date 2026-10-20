@@ -1,0 +1,78 @@
+name: Publish Bergen Platform v0.15.0
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/publish-bergen-platform-v0.15.0.yml'
+      - 'docs/releases/v0.15.0.md'
+  push:
+    branches:
+      - main
+    paths:
+      - '.github/workflows/publish-bergen-platform-v0.15.0.yml'
+      - 'docs/releases/v0.15.0.md'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: publish-bergen-platform-v0.15.0
+  cancel-in-progress: false
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify fixed version and conservative release notes
+        shell: bash
+        run: |
+          set -euo pipefail
+          grep -Fq '## [0.15.0] - 2026-10-20' docs/CHANGELOG.md
+          grep -Fq 'v0.15.0 — Bergen-AI' README.md
+          grep -Fq 'NOT attested' docs/releases/v0.15.0.md
+          grep -Fq 'ALREADY_STAGED' docs/releases/v0.15.0.md
+          test -s docs/BERGEN-AI-CHAT-PROFILES-LIVE-OIDC.md
+
+  publish:
+    needs: validate
+    # Never publish from PRs, arbitrary main commits, or future releases.
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main' && startsWith(github.event.head_commit.message, 'chore(release): publish Bergen Platform v0.15.0')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Publish exactly the reviewed main SHA as v0.15.0
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          TAG='v0.15.0'
+          REPO="$GITHUB_REPOSITORY"
+          COMMIT="$GITHUB_SHA"
+          # A pre-existing tag must never be moved or silently replaced.
+          existing_tag_sha="$(gh api "repos/$REPO/git/ref/tags/$TAG" --jq '.object.sha' 2>/dev/null || true)"
+          if [[ -n "$existing_tag_sha" && "$existing_tag_sha" != "$COMMIT" ]]; then
+            echo 'Refusing: release tag already points to another Git object' >&2
+            exit 1
+          fi
+          if gh release view "$TAG" --repo "$REPO" >/dev/null 2>&1; then
+            echo 'Release already exists for expected tag; no changes made.'
+            exit 0
+          fi
+          if [[ -n "$existing_tag_sha" ]]; then
+            echo 'Refusing: existing orphan tag without a matching release' >&2
+            exit 1
+          fi
+          gh release create "$TAG" \
+            --repo "$REPO" \
+            --target "$COMMIT" \
+            --title 'Bergen Platform v0.15.0 — Bergen-AI family chat profiles' \
+            --notes-file docs/releases/v0.15.0.md
+          echo "Published v0.15.0 at $COMMIT" >> "$GITHUB_STEP_SUMMARY"
