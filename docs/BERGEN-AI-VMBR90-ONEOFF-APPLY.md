@@ -10,7 +10,7 @@ und kein Paperless.
 
 | Objekt | Ziel |
 | --- | --- |
-| venombox | `vmbr90` nur lokal, `bridge-ports none`, ohne Host-IP/Gateway |
+| venombox | `vmbr90` nur lokal, `bridge-ports none`, ohne Host-IP/Gateway (IPv6 am Host-Bridge-Interface deaktiviert) |
 | CT110 (bergen-ai) | `net1 eth1` auf `vmbr90`, `172.30.110.2/28`, `ip6=manual` |
 | CT126 (bergen-paperless) | `net1 eth1` auf `vmbr90`, `172.30.110.3/28`, `ip6=manual` |
 | CT120 (syslog) | unverändert |
@@ -110,7 +110,11 @@ Anschließend erzeugt er nur
 `/etc/network/interfaces.d/bergen-ai-vmbr90`
 und startet mittels `ifup vmbr90` **ausschließlich**
 die neue, von vorhandenen Bridge-Ports unabhängige
-Schnittstelle. **Kein `ifreload -a`, kein Reboot
+Schnittstelle.
+Vor dem Anschluss der LXCs prüft das Playbook außerdem, dass
+IPv6 auf der neuen **Host-Bridge** ausdrücklich deaktiviert ist
+und noch keine Ports an ihr hängen. Die IPv4/IPv6-Adressierung
+bestehender Host-Interfaces wird nicht geändert. **Kein `ifreload -a`, kein Reboot
 oder Neustart eines Containers.** Erst dann werden
 `pct set 110/126 --net1 ...` angewendet.
 
