@@ -375,3 +375,52 @@ CT110, CT126, Ollama und Paperless blieben unverändert.
 Die spätere Ollama-Endpunktbindung und native
 Paperless-LLM-Katalogisierung bleiben unabhängige
 Änderungen. PR bleibt Draft bis zur Produktionsverifikation.
+
+
+## Phase 1.4 – Pause ohne unabhängigen PVE-Konsolenzugang (20.10.2026)
+
+Der Betreiber hat ausdrücklich bestätigt, dass für `venombox`
+**kein getesteter, von SSH unabhängiger Konsolenzugang**
+zur Verfügung steht. Entscheidung: **vmbr90-Apply zurückstellen**.
+Der positive 12/12-Netz-Audit ersetzt weder den realen
+Out-of-band-Zugang noch die Fähigkeit, eine verlorene
+Managementverbindung bei einem Proxmox-Network-Change
+wiederherzustellen.
+
+Ab jetzt für die Bridge:
+- `apply-bergen-ai-vmbr90-transport-once.yml` nicht ausführen;
+  `CONSOLE_VERIFIED_AND_ROLLBACK_AVAILABLE` darf nicht bloß
+  zum Bestehen einer Assertion gesetzt werden.
+- Keine CT110-/CT126-`net1`-Schnittstelle, kein Bridge-Drop-in,
+  kein `ifup vmbr90`, keine Ollama-Bind-Änderung oder
+  neue Host-/Guest-Firewallregel über diesen Change.
+- Der bisherige Proxmox-/IPAM-/Backup-Audit ist als
+  **historische** nicht-mutierende Evidenz archiviert,
+  keine dauerhaft gültige Produktivfreigabe.
+- Eine spätere Wiederaufnahme erfordert eine neue
+  ausdrückliche Betreiberentscheidung, echte unabhängig
+  getestete Konsole, frische Same-Run-Preflights und
+  geprüfte Rückfallmöglichkeit.
+
+**Neuer priorisierter Arbeitsstrang:** Native Paperless-
+Posteingangskatalogisierung nach Draft-PR #114 über
+die bereits im echten Paperless-Podman-Namespace
+nachgewiesene Verbindung zur Bergen-AI-Ollama-API.
+Diese Änderung ist **nicht** durch den pausierten
+vmbr90-Apply freigegeben.
+
+**Separater Security-Blocker für Paperless:** Der aktuelle
+Ollama-Wildcard-Listener auf TCP/11434 war auch vom
+nicht autorisierten `bp-controller` über IPv4 und IPv6
+erreichbar (TCP-Test). Vor jeder produktiven
+Paperless-Modell-/Endpoint-Konfigurationsänderung oder
+Dokumentverarbeitung muss ein wirksames, auf die
+autorisierten Clients begrenztes Zugriffskonzept
+vorliegen und positiv/negativ getestet werden. Auch
+eine mögliche Firewall-Änderung darf nicht durch
+falsche OOB-Attestierungen oder einen ungeprüften
+Host-Network-Apply erzwungen werden.
+
+Bis dahin nur kontrollierte Read-only-Inspektionen
+und Code-/Testvorbereitung; keine Paperless-
+Metadatenänderung und keine Timeraktivierung.
