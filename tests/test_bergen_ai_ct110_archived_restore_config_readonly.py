@@ -147,6 +147,68 @@ class ArchivedRestoreConfigTests(TestCase):
         unknown = a.profile(None)
         self.assertEqual(unknown["SENSITIVE_UNIQUE_COUNT"], "UNVERIFIED")
 
+    def test_realistic_gpu_devices_and_cgroup_rule_are_diagnostic_only(self):
+        raw = SAMPLE + (
+            "dev0: /dev/dri/renderD128,gid=104,mode=0660\n"
+            "dev1: /dev/dri/card0,gid=104,mode=0660\n"
+            "lxc.cgroup2.devices.allow: c 226:* rwm\n"
+        )
+        profile = a.profile(a.parse_config(raw))
+        self.assertEqual(profile["SENSITIVE_UNIQUE_COUNT"], 3)
+        self.assertEqual(profile["PVE_DEVICE_INDEX_PROFILE"], "EXACT_DEV0_DEV1")
+        self.assertEqual(profile["DEV0_CLASS"], "GPU_RENDER")
+        self.assertEqual(profile["DEV1_CLASS"], "GPU_CARD")
+        self.assertEqual(profile["CGROUP_DEVICE_RULE_CLASS"], "DRM")
+        self.assertEqual(profile["CGROUP_DEVICE_RULE_SCOPE"], "ALL_MINORS")
+        self.assertEqual(profile["STATUS"], "REVIEW_REQUIRED")
+        self.assertNotIn("/dev/dri", str(profile))
+        self.assertNotIn("226", str(profile))
+
+    def test_device_labels_are_bounded_and_do_not_expose_host_paths(self):
+        examples = {
+            "/dev/kfd,gid=104": "GPU_KFD",
+            "/dev/video0": "VIDEO",
+            "/dev/bus/usb/001/001": "USB",
+            "/dev/ttyUSB0": "USB",
+            "/dev/net/tun": "TUN",
+            "/dev/fuse": "FUSE",
+            "/dev/sda": "OTHER_DEVICE",
+            "/home/private/key": "UNRECOGNIZED_FORMAT",
+            "/dev/dri/renderD128": "GPU_RENDER",
+            "/dev/dri/card1": "GPU_CARD",
+        }
+        for original, expected in examples.items():
+            self.assertEqual(a.device_type(original), expected)
+        for value, kind, scope in (
+            ("c 10:229 rwm", "FUSE", "SINGLE_MINOR"),
+            ("c 10:200 rwm", "TUN", "SINGLE_MINOR"),
+            ("c 189:* rwm", "USB", "ALL_MINORS"),
+            ("c 235:* rwm", "ACCELERATOR_POSSIBLE", "ALL_MINORS"),
+            ("c *:* rwm", "BROAD_ALL_DEVICES", "UNRESTRICTED_MAJOR"),
+            ("a *:* rwm", "BROAD_ALL_DEVICES", "UNRESTRICTED_MAJOR"),
+            ("b 8:* rwm", "OTHER_BLOCK_OR_TYPE", "ALL_MINORS"),
+            ("invalid 10:229 rwm", "OTHER_RULE_FORMAT", "UNVERIFIED"),
+        ):
+            self.assertEqual(a.cgroup_device_rule(value), (kind, scope))
+        for original in examples:
+            profile = a.profile(a.parse_config(SAMPLE + f"dev0: {original}\n"))
+            self.assertNotIn(original, str(profile))
+        self.assertEqual(a.device_details(None)["DEV0_CLASS"], "UNVERIFIED")
+        self.assertEqual(a.device_details(None)["CGROUP_DEVICE_RULE_CLASS"], "UNVERIFIED")
+
+    def test_extra_device_indices_and_multiple_cgroup_rules_are_not_normalized(self):
+        values = a.parse_config(SAMPLE + (
+            "dev0: /dev/dri/card0\n"
+            "dev1: /dev/dri/renderD128\n"
+            "dev2: /dev/net/tun\n"
+            "lxc.cgroup.devices.allow: c 10:200 rwm\n"
+            "lxc.cgroup2.devices.allow: c 10:229 rwm\n"
+        ))
+        details = a.device_details(values)
+        self.assertEqual(details["PVE_DEVICE_INDEX_PROFILE"], "OTHER_DEVICE_INDICES")
+        self.assertEqual(details["CGROUP_DEVICE_RULE_CLASS"], "OTHER_OR_MULTIPLE")
+        self.assertEqual(a.profile(values)["STATUS"], "REVIEW_REQUIRED")
+
     def test_script_and_playbook_are_read_only_and_no_log(self):
         source = SCRIPT.read_text()
         ast.parse(source)
