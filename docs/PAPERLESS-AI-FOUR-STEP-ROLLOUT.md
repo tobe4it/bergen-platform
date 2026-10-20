@@ -299,3 +299,72 @@ since activation. Verify the one-document changed-worker path and
 snapshot/note invariants before any restart of automation. The
 already accepted 19 October backup is not evidence of a successful
 post-change restore or a recently functioning 20 October backup.
+
+
+## Post-activation journal observability – read-only verification
+
+The operator observed many successful
+`bergen-ai-catalog.service` oneshot executions with 0 exit status
+at and after 2026-10-20 21:56 CEST. A query for the structured
+`BERGEN_PAPERLESS_AI_CATALOG_V1:` records in
+`journalctl -u bergen-ai-catalog.service` returned **zero matches**.
+The grep command's `|| true` suppresses a nonzero status for
+no matches. Therefore there is no positive evidence yet that a
+new document was classified or that a Note was written.
+
+The unit declares `StandardOutput=journal`, and the Django
+worker prints one sanitized frame per normal invocation. The
+missing frames remain an **unresolved logging/transport issue**,
+not proof of LLM failure or of a healthy catalogue. The short
+service execution is consistent with an empty post-watermark
+candidate set, but the watermark/document inventory must verify
+this independently.
+
+To avoid a new inference, manual replay, or any write to
+Paperless, run the additional version-pinned **read-only**
+`audit-paperless-ai-timer-journal-readonly.yml` from the pinned
+feature branch. It reads the root-only installed service policy
+(never displays its endpoint or actual watermark), then uses
+the Paperless ORM to count newly created documents, parent-owned
+Inbox documents and those with OCR, plus a read-only SQLite
+query for post-watermark journal states. It also counts native
+BAI notes only as an aggregate and never discloses note contents,
+document IDs or private owner mappings.
+
+```bash
+(
+set -euo pipefail
+BASE="$HOME/bergen-platform"
+WT="$HOME/bergen-platform-paperless-ai-catalog"
+test -z "$(git -C "$WT" status --porcelain)"
+git -C "$WT" fetch origin feat/paperless-native-ai-inbox-catalog-20261018
+git -C "$WT" switch --detach origin/feat/paperless-native-ai-inbox-catalog-20261018
+cd "$WT"
+"$BASE/.venv/bin/ansible-playbook" \
+  -i ansible/inventory.yml \
+  -i "$BASE/ansible/inventory.local.yml" \
+  ansible/playbooks/audit-paperless-ai-timer-journal-readonly.yml \
+  --vault-id ai@prompt \
+  -e "@$BASE/ansible/vars/paperless-ai-catalog.local.yml"
+)
+```
+
+Interpretation:
+
+- `NEW_DOCUMENTS=0` and `POST_WATERMARK_JOURNAL_TOTAL=0`:
+  no documents were created since activation, so no work was expected.
+- Positive `NEW_PARENT_INBOX_WITH_OCR` with zero journal entries:
+  new candidate documents exist, but the reason for no worker
+  processing remains to be investigated (additional eligibility
+  rules may apply).
+- `APPLIED` or `NO_CHANGE` positive: a BAI worker attempt
+  reached a journal-confirmed success state; `NEW_PARENT_AI_NOTES`
+  independently shows attributable stored native notes.
+- `REQUIRES_REVIEW` or `PROCESSING` positive:
+  investigate error stage and protected entry in a separate
+  bounded, explicit read-only audit; **never auto-retry**.
+- All zeros do not by themselves establish missing logs as
+  a defect; improve observability separately.
+
+Do not disable, redeploy or trigger the timer merely
+because the systemd logs have no framed records.
