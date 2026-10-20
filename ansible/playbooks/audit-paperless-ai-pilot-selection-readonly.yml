@@ -59,7 +59,7 @@
           - shell
           - --verbosity=0
           - -c
-          - "{{ lookup('ansible.builtin.file', playbook_dir ~ '/../files/paperless/audit_ai_catalog_pilot_candidates_readonly.py', rstrip=False) ~ '\\nmain()' }}"
+          - "{{ lookup('ansible.builtin.file', playbook_dir ~ '/../files/paperless/audit_ai_catalog_pilot_candidates_readonly.py', rstrip=False) ~ '\nmain()' }}"
         stdin: "{{ bp_pilot_inspection_payload | to_json }}"
         stdin_add_newline: true
       register: bp_pilot_result_raw
