@@ -1,0 +1,51 @@
+---
+# Strictly read-only classification of unresolved Rocky 9.8 rootfs symlinks.
+# Never releases the import gate; no extraction, PVE guest or host writes.
+- name: Diagnose pinned Rocky 9.8 rootfs symlinks without extraction
+  hosts: bp-controller
+  connection: local
+  become: false
+  gather_facts: false
+  any_errors_fatal: true
+  tasks:
+    - name: Read local short hostname
+      ansible.builtin.command:
+        argv: [hostname, -s]
+      register: rocky_hostname
+      changed_when: false
+
+    - name: Read local account
+      ansible.builtin.command:
+        argv: [id, -un]
+      register: rocky_user
+      changed_when: false
+
+    - name: Require controller and unprivileged execution
+      ansible.builtin.assert:
+        that:
+          - inventory_hostname == 'bp-controller'
+          - rocky_hostname.stdout == 'bp-controller'
+          - rocky_user.stdout == 'ansible'
+        fail_msg: Refuse execution outside unprivileged bp-controller.
+
+    - name: Diagnose verified archive link graph without extraction
+      ansible.builtin.command:
+        argv:
+          - python3
+          - "{{ playbook_dir }}/../files/nextcloud/diagnose_rocky_lxc_rootfs_symlinks.py"
+      register: rocky_link_report
+      changed_when: false
+
+    - name: Refuse incomplete or non-read-only diagnostics
+      ansible.builtin.assert:
+        that:
+          - (rocky_link_report.stdout | from_json).result == 'ROCKY_LXC_ROOTFS_SYMLINK_DIAGNOSTIC_COMPLETE'
+          - (rocky_link_report.stdout | from_json).sha256_verified
+          - not (rocky_link_report.stdout | from_json).archive_extracted
+          - not (rocky_link_report.stdout | from_json).template_imported
+          - not (rocky_link_report.stdout | from_json).ct701_changed
+          - (rocky_link_report.stdout | from_json).import_gate == 'BLOCKED_PENDING_STRUCTURAL_AUDIT'
+
+    - name: Display only aggregate link-classification counters
+      ansible.builtin.debug:
+        msg: "{{ rocky_link_report.stdout | from_json }}"
