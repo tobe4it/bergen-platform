@@ -122,6 +122,3 @@ def main():
     except Exception:
         emit(STATUS="UNVERIFIED")
 
-
-if __name__ == "__main__":
-    main()
