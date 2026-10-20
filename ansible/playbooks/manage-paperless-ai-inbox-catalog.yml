@@ -20,6 +20,7 @@
       pilot_ids: "{{ paperless_ai_catalog_pilot_ids | default([]) }}"
       batch_size: "{{ paperless_ai_catalog_batch_size | default(1) | int }}"
       approved: "{{ paperless_ai_catalog_approved | default(false) | bool }}"
+      notes_enabled: "{{ paperless_ai_catalog_notes_enabled | default(false) | bool }}"
   tasks:
     - name: Require reviewed settings and explicit approval before any metadata write
       ansible.builtin.assert:
@@ -35,6 +36,7 @@
           - not bp_catalog_apply or (paperless_ai_catalog_rollback_approved | default(false) | bool) or bp_catalog_mode != 'rollback'
           - not bp_catalog_apply or ((paperless_ai_catalog_pilot_ids | default([]) | length) > 0)
           - (paperless_ai_catalog_batch_size | default(1) | int) <= 2
+          - not (paperless_ai_catalog_notes_enabled | default(false) | bool) or not bp_catalog_apply or (paperless_ai_catalog_notes_approved | default(false) | bool)
         fail_msg: CATALOG_GATES_NOT_SATISFIED
       no_log: true
 
@@ -146,6 +148,8 @@
           - "PAPERLESS_VERSION={{ bp_catalog_result.PAPERLESS_VERSION | default('3.3.0') }}"
           - "ELIGIBLE_SAMPLE={{ bp_catalog_result.ELIGIBLE_SAMPLE | default('N/A') }}"
           - "APPLIED={{ bp_catalog_result.APPLIED | default(0) }}"
+          - "NO_CHANGE={{ bp_catalog_result.NO_CHANGE | default(0) }}"
+          - "NOTES_ADDED={{ bp_catalog_result.NOTES_ADDED | default(0) }}"
           - "REVIEW_REQUIRED={{ bp_catalog_result.REVIEW_REQUIRED | default(0) }}"
           - "ALREADY_RECORDED={{ bp_catalog_result.ALREADY_RECORDED | default(0) }}"
           - "ROLLED_BACK={{ bp_catalog_result.ROLLED_BACK | default(0) }}"
