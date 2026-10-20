@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Static, synthetic safety tests for isolated CT790 creation-readiness gate."""
 import importlib.util
+from collections import Counter
 from pathlib import Path
 import sys
 import unittest
@@ -66,6 +67,39 @@ class Ct790CreateReadOnlyTests(unittest.TestCase):
         with self.assertRaisesRegex(
                 audit.rootfs.AuditBlocked, "INVALID_UID_GID"):
             audit.classify_owner(1, -1)
+
+    def test_pax_metadata_counts_keys_not_string_values(self):
+        # Real POSIX PAX metadata is a mapping of string names to string
+        # values. Treating this as a Counter mapping fails with TypeError
+        # for repeated keys and invalid values at sum().
+        headers = [
+            {"mtime": "1789484591.916", "SCHILY.xattr.security.capability": "AQID"},
+            {"mtime": "1789484592.222", "GNU.sparse.name": "file"},
+            {"LIBARCHIVE.xattr.user.comment": "encoded"},
+        ]
+        counts = Counter()
+        for member_headers in headers:
+            audit.count_pax_header_keys(counts, member_headers)
+        self.assertEqual(counts["mtime"], 2)
+        self.assertEqual(counts["SCHILY.xattr.security.capability"], 1)
+        self.assertEqual(counts["GNU.sparse.name"], 1)
+        self.assertEqual(counts["LIBARCHIVE.xattr.user.comment"], 1)
+        self.assertEqual(sum(counts.values()), 5)
+        self.assertTrue(all(isinstance(v, int) for v in counts.values()))
+        with self.assertRaisesRegex(
+                audit.rootfs.AuditBlocked, "INVALID_PAX_HEADERS"):
+            audit.count_pax_header_keys(counts, ["mtime"])
+        with self.assertRaisesRegex(
+                audit.rootfs.AuditBlocked, "INVALID_PAX_HEADER_KEY"):
+            audit.count_pax_header_keys(counts, {42: "mtime"})
+
+    def test_never_update_counter_with_pax_value_mapping(self):
+        source = (SRC / "audit_rocky_lxc_idmap_metadata.py").read_text()
+        self.assertIn("counter.update(headers.keys())", source)
+        self.assertIn("count_pax_header_keys(pax_keys, member.pax_headers)",
+                      source)
+        self.assertNotIn("pax_keys.update(member.pax_headers)", source)
+        self.assertIn('reason = "AUDITOR_INTERNAL_ERROR"', source)
 
     def test_rootfs_and_subid_checks_are_strict(self):
         for key in (
