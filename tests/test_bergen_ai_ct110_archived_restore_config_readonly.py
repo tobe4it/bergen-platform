@@ -160,6 +160,7 @@ class ArchivedRestoreConfigTests(TestCase):
         self.assertEqual(profile["DEV1_CLASS"], "GPU_CARD")
         self.assertEqual(profile["CGROUP_DEVICE_RULE_CLASS"], "DRM")
         self.assertEqual(profile["CGROUP_DEVICE_RULE_SCOPE"], "ALL_MINORS")
+        self.assertEqual(profile["CGROUP_POLICY_ACTION"], "ALLOW")
         self.assertEqual(profile["STATUS"], "REVIEW_REQUIRED")
         self.assertNotIn("/dev/dri", str(profile))
         self.assertNotIn("226", str(profile))
@@ -195,6 +196,7 @@ class ArchivedRestoreConfigTests(TestCase):
             self.assertNotIn(original, str(profile))
         self.assertEqual(a.device_details(None)["DEV0_CLASS"], "UNVERIFIED")
         self.assertEqual(a.device_details(None)["CGROUP_DEVICE_RULE_CLASS"], "UNVERIFIED")
+        self.assertEqual(a.device_details(None)["CGROUP_POLICY_ACTION"], "UNVERIFIED")
 
     def test_extra_device_indices_and_multiple_cgroup_rules_are_not_normalized(self):
         values = a.parse_config(SAMPLE + (
@@ -207,6 +209,7 @@ class ArchivedRestoreConfigTests(TestCase):
         details = a.device_details(values)
         self.assertEqual(details["PVE_DEVICE_INDEX_PROFILE"], "OTHER_DEVICE_INDICES")
         self.assertEqual(details["CGROUP_DEVICE_RULE_CLASS"], "OTHER_OR_MULTIPLE")
+        self.assertEqual(details["CGROUP_POLICY_ACTION"], "OTHER_OR_MULTIPLE")
         self.assertEqual(a.profile(values)["STATUS"], "REVIEW_REQUIRED")
 
     def test_script_and_playbook_are_read_only_and_no_log(self):
