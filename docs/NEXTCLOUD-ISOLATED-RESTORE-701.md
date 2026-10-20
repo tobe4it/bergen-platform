@@ -1251,3 +1251,28 @@ Neither a successful file transfer nor rootfs structural PASS
 authorizes a PVE guest create, import, start, network connection,
 package download, Nextcloud SQL restore or production mx1 cleanup.
 The source archive is distinct from the older PVE Rocky 9 image.
+
+
+### Proxmox storage capability API fix (2026-10-20)
+
+The first default-no-write staging workflow reached its venombox PVE
+storage-capability check, then blocked at an invalid CLI invocation,
+`pvesm config local`, returning rc=255
+(`ERROR: unknown command 'pvesm config'`). Controller/source audit
+succeeded; target preflight remained incomplete. The run reported
+bp-controller ok=5 changed=0 and venombox ok=16 changed=0 failed=1.
+No files transferred, guests created, or network settings changed.
+
+Proxmox VE 9.2 exposes configured datacenter storages through the
+documented `pvesh get /storage --output-format json` read-only API.
+The IaC now selects exactly one storage id `local` from JSON and
+demands directory type `dir`, expected path `/var/lib/vz`,
+`vztmpl` in the comma-delimited content list, not disabled, and
+either no node restriction or inclusion of `venombox`. The call and
+all assertions remain strictly read-only. CI rejects regression to
+the unsupported `pvesm config` CLI. No apply action is approved by
+this fix.
+
+Resume by re-fetching the reviewed branch and running the **same
+stage-rocky-9-8-lxc-rootfs.yml without an apply flag**, preserving
+non-multiplexed SSH and `--vault-id infra@prompt`, as documented above.
