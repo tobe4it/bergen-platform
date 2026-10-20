@@ -20,6 +20,26 @@ MAX_FILES = 400000
 MAX_BYTES = 16 * 1024**3
 MAX_LINK_DEPTH = 48
 
+# Exact link/name/resolved-target triples observed in the SHA256-pinned
+# Rocky Linux 9.8 LXC archive. These are NOT generic path-prefix exemptions.
+# The four .build-id links can point to binaries omitted from a minimal image;
+# their validity for installed RPMs must be checked separately.
+EXPECTED_PINNED_DANGLING_SYMLINKS = {
+    "etc/mtab": ("../proc/self/mounts", "proc/self/mounts"),
+    "etc/systemd/system/systemd-firstboot.service": ("/dev/null", "dev/null"),
+    "var/lock": ("../run/lock", "run/lock"),
+    "usr/lib/.build-id/28/809fc5a9ce55a93beda8e8fbd646cb14322f72":
+        ("../../../../usr/sbin/tc", "usr/sbin/tc"),
+    "usr/lib/.build-id/32/02d75dbdf2a9dad5b17d7a8a5051e47203b6c3":
+        ("../../../../usr/lib64/libncurses++w.so.6.2",
+         "usr/lib64/libncurses++w.so.6.2"),
+    "usr/lib/.build-id/76/9edc8f5e1dcba3720e42812ed9e01924426893":
+        ("../../../../usr/lib64/libncurses++.so.6.2",
+         "usr/lib64/libncurses++.so.6.2"),
+    "usr/lib/.build-id/a4/14e41f337d93ef691014891837788ccaf1c165":
+        ("../../../../usr/bin/coreutils.single", "usr/bin/coreutils.single"),
+}
+
 
 class AuditBlocked(Exception):
     pass
@@ -77,7 +97,7 @@ def follow_inside_root(start, link_target, links):
     return "/".join(resolved)
 
 
-def inspect_archive(handle):
+def inspect_archive(handle, *, allow_pinned_exceptions=False):
     names = set()
     types = {}
     regular_seen = set()
@@ -86,6 +106,7 @@ def inspect_archive(handle):
     dirs, regular, hardlinks, total_bytes, executable_privileged = 0, 0, 0, 0, 0
     absolute_symlinks = 0
     backslash_regular = 0
+    accepted_known_dangling = set()
     release = {}
     with tarfile.open(fileobj=handle, mode="r|xz") as archive:
         for member in archive:
@@ -159,8 +180,14 @@ def inspect_archive(handle):
         parent = name.rpartition("/")[0]
         resolved = follow_inside_root(parent, target, symlinks)
         require(bool(resolved), "LINK_TARGET_ARCHIVE_ROOT")
-        require(resolved in names or resolved in implicit_directories,
-                "DANGLING_SYMLINK")
+        if resolved not in names and resolved not in implicit_directories:
+            require(
+                allow_pinned_exceptions
+                and EXPECTED_PINNED_DANGLING_SYMLINKS.get(name)
+                == (target, resolved),
+                "DANGLING_SYMLINK",
+            )
+            accepted_known_dangling.add(name)
     return {
         "result": "ROCKY_LXC_ROOTFS_STRUCTURAL_AUDIT_PASS",
         "rocky_version": "9.8",
@@ -170,12 +197,27 @@ def inspect_archive(handle):
         "hardlink_count": hardlinks,
         "symlink_count": len(symlinks),
         "absolute_symlink_count": absolute_symlinks,
+        "pinned_missing_link_exception_count": len(accepted_known_dangling),
+        "pinned_runtime_link_exception_count": sum(
+            name in (
+                "etc/mtab",
+                "etc/systemd/system/systemd-firstboot.service",
+                "var/lock",
+            )
+            for name in accepted_known_dangling
+        ),
+        "pinned_build_id_link_exception_count": sum(
+            name.startswith("usr/lib/.build-id/")
+            for name in accepted_known_dangling
+        ),
         "backslash_named_regular_count": backslash_regular,
         "privileged_mode_regular_count": executable_privileged,
         "hardlink_targets_verified": True,
         "devices_fifos_allowed": False,
         "archive_extracted": False,
         "template_imported": False,
+        "template_import_authorized": False,
+        "guest_restore_authorized": False,
         "ct701_changed": False,
         "next_gate": "Review mode counts and offline PVE import design",
     }
@@ -198,7 +240,21 @@ def audit(path=ARCHIVE, expected_sha=SHA256, expected_size=SIZE):
             digest.update(block)
         require(digest.hexdigest() == expected_sha, "ARCHIVE_SHA256_MISMATCH")
         handle.seek(0)
-        result = inspect_archive(handle)
+        # Pinned exceptions are permitted only after verifying the actual
+        # canonical archive hash AND size, not synthetic test inputs.
+        pinned = expected_sha == SHA256 and expected_size == SIZE
+        result = inspect_archive(handle, allow_pinned_exceptions=pinned)
+        if pinned:
+            require(
+                result["pinned_missing_link_exception_count"]
+                == len(EXPECTED_PINNED_DANGLING_SYMLINKS),
+                "PINNED_MISSING_LINK_SET_CHANGED",
+            )
+            require(
+                result["pinned_runtime_link_exception_count"] == 3
+                and result["pinned_build_id_link_exception_count"] == 4,
+                "PINNED_MISSING_LINK_CLASS_MISMATCH",
+            )
         after = os.fstat(handle.fileno())
         require((before.st_size, before.st_mtime_ns, before.st_ctime_ns)
                 == (after.st_size, after.st_mtime_ns, after.st_ctime_ns),
