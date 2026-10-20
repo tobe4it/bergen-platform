@@ -102,8 +102,8 @@ class ArchivedRestoreConfigTests(TestCase):
         # the explicit high-risk set and the generic LXC catch-all.
         raw = (
             SAMPLE
-            + "lxc.apparmor.profile: generated-profile-with-private-value\\n"
-            + "lxc.cgroup2.devices.allow: c 10:229 rwm\\n"
+            + "lxc.apparmor.profile: generated-profile-with-private-value\n"
+            + "lxc.cgroup2.devices.allow: c 10:229 rwm\n"
         )
         values = a.parse_config(raw)
         self.assertIsNotNone(values)
@@ -123,13 +123,13 @@ class ArchivedRestoreConfigTests(TestCase):
 
     def test_disjoint_sensitive_risk_categories_are_never_restore_clearance(self):
         extra = (
-            "hookscript: local:snippets/unsafe.sh\\n"
-            "lxc.mount.auto: proc:rw\\n"
-            "lxc.cap.drop: sys_admin\\n"
-            "lxc.net.0.type: veth\\n"
-            "lxc.idmap: u 0 100000 65536\\n"
-            "lxc.seccomp.profile: /private/profile\\n"
-            "dev0: /dev/sda\\n"
+            "hookscript: local:snippets/unsafe.sh\n"
+            "lxc.mount.auto: proc:rw\n"
+            "lxc.cap.drop: sys_admin\n"
+            "lxc.net.0.type: veth\n"
+            "lxc.idmap: u 0 100000 65536\n"
+            "lxc.seccomp.profile: /private/profile\n"
+            "dev0: /dev/sda\n"
         )
         report = a.profile(a.parse_config(SAMPLE + extra))
         self.assertEqual(report["SENSITIVE_HOOK_COUNT"], 1)
