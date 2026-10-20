@@ -965,3 +965,41 @@ creation, extraction, changing network configuration, modifying CT 701,
 or removal of mx1. Only after reviewing the actual missing-target
 classification may the structural auditor and the separate guest-confined
 import design be reconsidered.
+
+## Rocky 9.8 rootfs: seven reviewed missing link targets (20 Oct 2026)
+
+The unprivileged, SHA256-confirmed graph inspection found exactly seven
+unresolved symlinks in the signed, size-pinned Rocky 9.8 rootfs:
+
+- `etc/mtab -> ../proc/self/mounts`: the procfs mount table appears only
+  when the container runtime mounts procfs.
+- `etc/systemd/system/systemd-firstboot.service -> /dev/null`:
+  conventional systemd unit masking; the device node belongs to the
+  container's device filesystem.
+- `var/lock -> ../run/lock`: a runtime directory.
+- Four entries beneath `usr/lib/.build-id/` refer to absent
+  `usr/sbin/tc`, two ncurses++ sonames and `usr/bin/coreutils.single`.
+  These are build-ID bookkeeping links, **not evidence that these binaries
+  are installed**. Their RPM ownership and runtime necessity must be
+  evaluated separately before assembling a Nextcloud runtime.
+
+The rootfs structural gate now accepts only these seven exact
+`(symlink name, original link target, resolved rootfs target)` triples.
+The exception is available only after verifying the one pinned 107425612-byte
+archive's SHA256. A change of names, destinations, unresolved counts, or
+unexpected missing link is rejected. All seven are required by the pinned
+real-archive audit, and tests reject unknown runtime links, arbitrary
+`.build-id` links and substituted targets. Device nodes, FIFO records,
+duplicate/traversing TAR members, hardlink escapes and symlink loops
+remain prohibited.
+
+Re-run `ansible/playbooks/audit-rocky-9-lxc-rootfs-readonly.yml`
+on `bp-controller` using the guarded fetch-and-switch instructions in the
+previous section. Success requires exactly 3 pinned runtime-link exceptions
+and 4 pinned build-ID exceptions, a SHA256 pass, and `changed=0`.
+
+**A successful structural audit is NOT import authorization.**
+`template_import_authorized=false` and `guest_restore_authorized=false`
+are explicitly asserted. Separately inspect the offline template-builder
+and plan a Proxmox-safe guest-confined importer; never extract this archive
+onto the controller or PVE host root. Keep CT 701, mx1 and mx2 unchanged.
