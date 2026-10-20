@@ -1,0 +1,86 @@
+---
+# Read-only, two complete NFS archive reads; requires operator invocation.
+# Does not start vzdump, restore, extract, or modify CT110 / vmbr90.
+- name: Verify CT110 archive zstd stream and TAR readability without extraction
+  hosts: venombox
+  become: true
+  gather_facts: false
+  tasks:
+    - name: Require exact Proxmox host
+      ansible.builtin.assert:
+        that:
+          - "inventory_hostname == 'venombox'"
+
+    - name: Read the one existing CT110 NFS archive twice without extraction
+      ansible.builtin.command:
+        argv:
+          - python3
+          - -c
+          - "{{ lookup('ansible.builtin.file', playbook_dir ~ '/../files/bergen_ai/verify_ct110_archive_stream_readonly.py', rstrip=False) }}"
+      async: 12600
+      poll: 60
+      register: ct110_stream_raw
+      changed_when: false
+      failed_when: false
+      check_mode: false
+      no_log: true
+
+    - name: Extract one sanitized bounded stream verification frame
+      ansible.builtin.set_fact:
+        ct110_stream_frames: >-
+          {{ ct110_stream_raw.stdout_lines | default([]) |
+             select('match', '^BERGEN_AI_CT110_ARCHIVE_STREAM_CHECK_V1:') | list }}
+      no_log: true
+
+    - name: Refuse incomplete missing repeated or oversized result frames
+      ansible.builtin.assert:
+        that:
+          - "ct110_stream_raw.rc | default(-1) | int == 0"
+          - "ct110_stream_frames | length == 1"
+          - "ct110_stream_frames[0] | length < 1800"
+      no_log: true
+
+    - name: Decode sanitized fixed-category archive verification result
+      ansible.builtin.set_fact:
+        ct110_stream: >-
+          {{ (ct110_stream_frames[0] |
+             regex_replace('^BERGEN_AI_CT110_ARCHIVE_STREAM_CHECK_V1:', '')) | from_json }}
+      no_log: true
+
+    - name: Require audit to remain read-only without false restore proof
+      ansible.builtin.assert:
+        that:
+          - "ct110_stream.AUDIT == 'READ_ONLY'"
+          - "not ct110_stream.CHANGED"
+          - "not ct110_stream.BACKUP_EXECUTED"
+          - "not ct110_stream.BACKUP_RETRIED"
+          - "not ct110_stream.ARCHIVE_EXTRACTED"
+          - "not ct110_stream.ARCHIVE_CONTENTS_EXPORTED"
+          - "not ct110_stream.APPLY_AUTHORIZED"
+          - "ct110_stream.RESTORE_TEST == 'NOT_ATTESTED'"
+          - "ct110_stream.ROLLBACK_CLEARANCE == 'NOT_PROVEN'"
+          - "ct110_stream.NETWORK_CHANGES == 'NONE'"
+          - "ct110_stream.STATUS in ['COMPRESSED_STREAM_AND_TAR_READABLE', 'REVIEW_REQUIRED', 'CHECK_FAILED_OR_UNAVAILABLE', 'UNVERIFIED']"
+          - "ct110_stream.ZSTD_STREAM_CHECK in ['PASS', 'NOT_COMPLETED']"
+          - "ct110_stream.TAR_READ_CHECK in ['PASS', 'FAIL_OR_UNAVAILABLE', 'NOT_COMPLETED']"
+          - "ct110_stream.FILE_STABLE_AFTER_CHECK in ['YES', 'NO', 'UNVERIFIED']"
+          - "ct110_stream.CT110_STATE_AFTER in ['RUNNING', 'NOT_VERIFIED_RUNNING', 'UNVERIFIED']"
+      no_log: true
+
+    - name: Print categorized archive verification without member names
+      ansible.builtin.debug:
+        msg:
+          - AUDIT=READ_ONLY
+          - "STATUS={{ ct110_stream.STATUS }}"
+          - "VERIFY_STAGE={{ ct110_stream.VERIFY_STAGE }}"
+          - "ZSTD_STREAM_CHECK={{ ct110_stream.ZSTD_STREAM_CHECK }}"
+          - "TAR_READ_CHECK={{ ct110_stream.TAR_READ_CHECK }}"
+          - "FILE_STABLE_AFTER_CHECK={{ ct110_stream.FILE_STABLE_AFTER_CHECK }}"
+          - "CT110_STATE_AFTER={{ ct110_stream.CT110_STATE_AFTER }}"
+          - "BACKUP_INTEGRITY={{ ct110_stream.BACKUP_INTEGRITY }}"
+          - BACKUP_EXECUTED=False
+          - BACKUP_RETRIED=False
+          - ARCHIVE_EXTRACTED=False
+          - RESTORE_TEST=NOT_ATTESTED
+          - ROLLBACK_CLEARANCE=NOT_PROVEN
+          - APPLY_AUTHORIZED=False
