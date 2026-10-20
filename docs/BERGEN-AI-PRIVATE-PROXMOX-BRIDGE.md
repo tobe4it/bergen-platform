@@ -2229,3 +2229,91 @@ Gastaktivierung ausgeschlossen werden; ein bloßes
 `pct stop` nach dem Restore genügt als Isolations-
 Nachweis nicht. VMID 910 bleibt unreservierter Kandidat;
 CT110 und seine Sicherung werden nicht verändert.
+
+
+### Phase 0f.12 – Drei gesonderte Geräteschlüssel in CT110-Archiv nachgewiesen (20.10.2026, 07:21)
+
+Der Betreiber hat die korrigierte, rein lesende
+Archiv-Konfigurationsanalyse erneut ausgeführt.
+`venombox ok=14 changed=0 failed=0`:
+
+```text
+STATUS=REVIEW_REQUIRED
+SENSITIVE_UNIQUE_COUNT=3
+SENSITIVE_DUPLICATE_OVERCOUNT=0
+SENSITIVE_CGROUP_DEVICE_POLICY_COUNT=1
+SENSITIVE_PVE_DEVICE_COUNT=2
+SENSITIVE_HOOK_COUNT=0
+SENSITIVE_APPARMOR_COUNT=0
+SENSITIVE_LXC_MOUNT_POLICY_COUNT=0
+SENSITIVE_ID_MAPPING_COUNT=0
+NETWORK_INTERFACE_COUNT=1
+ONBOOT=ENABLED
+EXTERNAL_MP_COUNT=0
+DEVICE_MOUNT_PROFILE=EXACT_FUSE_DEVICE_ONLY
+RESTORE_AUTHORIZED=False
+RESTORE_EXECUTED=False
+NETWORK_ISOLATION=NOT_PROVEN
+```
+
+Die drei ursprünglich gemeldeten Treffer sind **drei
+verschiedene Schlüssel**: eine `lxc.cgroup*.*devices.*`-
+Richtlinie und zwei `devN`-Gerätedurchreichungen. Es
+gibt weder zusätzliche `mpN` noch unerwartete
+AppArmor-/Hook-/LXC-Netzwerkdirektiven.
+Die Archiv-Dateisystemintegrität war zuvor erfolgreich
+geprüft. Dies bestätigt aber noch **keine** sichere
+Wiederherstellung.
+
+**Neu: nur kategorisierte Geräteidentifikation im
+gleichen Read-only-Audit.** Keine realen Gerätepfade,
+Gerätekennungen, Gruppen-IDs oder Rule-Major/Minor-
+Nummern werden exportiert:
+
+- `DEV0_CLASS` / `DEV1_CLASS`: z.B. `GPU_RENDER`,
+  `GPU_CARD`, `GPU_KFD`, `VIDEO`, `USB`, `TUN`,
+  `FUSE` oder `OTHER_DEVICE`;
+- `PVE_DEVICE_INDEX_PROFILE` unterscheidet exakt
+  `dev0`+`dev1`, keine Geräte oder zusätzliche/
+  andere Geräte-Indizes;
+- `CGROUP_DEVICE_RULE_CLASS` sowie
+  `CGROUP_DEVICE_RULE_SCOPE` ordnen die Regel als
+  z.B. DRM, FUSE, USB, TUN, allgemeines Device- oder
+  unbekanntes Major/Minor-Schema ein, ohne Werte;
+- `CGROUP_POLICY_ACTION` unterscheidet `ALLOW` und
+  `DENY`.
+
+Der Audit gibt **niemals** eine Restore-Freigabe.
+Insbesondere dürfen die zwei `devN`-Einträge,
+die Cgroup-Regel und das originale `net0`/Autostart-
+Profil nicht ungeprüft in eine Testinstanz übernommen
+werden. Die tatsächliche sichere Unterdrückung dieser
+Einstellungen **vor Gastaktivierung** ist weiterhin
+nicht nachgewiesen. Kein `pct restore`, kein `pct
+start`, keine Netzwerk- oder Speicheränderungen.
+
+**Operator (bp-controller):** Die gleiche, schreibgeschützte
+Konfigurationsprüfung nach Branch-Fetch erneut ausführen:
+
+```bash
+(
+set -euo pipefail
+BASE="$HOME/bergen-platform"
+WT="$HOME/bergen-platform-ai-private-bridge"
+git -C "$WT" fetch origin feat/bergen-ai-private-bridge-20261019
+git -C "$WT" switch --detach origin/feat/bergen-ai-private-bridge-20261019
+cd "$WT"
+"$BASE/.venv/bin/ansible-playbook" \
+  -i ansible/inventory.yml \
+  -i "$BASE/ansible/inventory.local.yml" \
+  ansible/playbooks/audit-bergen-ai-ct110-archived-restore-config-readonly.yml \
+  --vault-id ai@prompt
+)
+```
+
+**Positives Ergebnis** dieser rein diagnostischen
+Geräteklassifizierung bedeutet ausdrücklich **nicht**
+`ARCHIVE_CONFIG_SANITIZATION=PROVEN`, sondern zeigt
+nur, welche Original-Richtlinien bei einer späteren,
+gesondert freizugebenden, netzlosen Restore-Probe
+auszuschließen oder zu neutralisieren sind.
