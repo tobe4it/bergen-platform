@@ -11,11 +11,21 @@ import os
 FRAME = "BERGEN_OIDC_EFFECTIVE_RUNTIME_V1:"
 
 
-async def check():
-    from open_webui.models.config import Config
-    from open_webui.utils.oauth import get_oauth_runtime_config
+class AuditFailure(Exception):
+    """Only the predetermined stage code may leave this process."""
 
-    cfg = await get_oauth_runtime_config()
+
+async def check():
+    try:
+        from open_webui.models.config import Config
+        from open_webui.utils.oauth import get_oauth_runtime_config
+    except Exception:
+        raise AuditFailure("MODULE_IMPORT_FAILED") from None
+
+    try:
+        cfg = await get_oauth_runtime_config()
+    except Exception:
+        raise AuditFailure("RUNTIME_CONFIG_RESOLUTION_FAILED") from None
     block = cfg.OAUTH_BLOCKED_GROUPS
     try:
         blocked = json.loads(block)
@@ -48,4 +58,19 @@ async def check():
     print(FRAME + json.dumps(result, sort_keys=True), flush=True)
 
 
-asyncio.run(check())
+try:
+    asyncio.run(check())
+except AuditFailure as failure:
+    print(FRAME + json.dumps({
+        "AUDIT": "FAILED_CLOSED",
+        "STATUS": str(failure),
+        "CHANGED": False
+    }, sort_keys=True), flush=True)
+    raise SystemExit(2) from None
+except Exception:
+    print(FRAME + json.dumps({
+        "AUDIT": "FAILED_CLOSED",
+        "STATUS": "UNEXPECTED_RUNTIME_FAILURE",
+        "CHANGED": False
+    }, sort_keys=True), flush=True)
+    raise SystemExit(2) from None
