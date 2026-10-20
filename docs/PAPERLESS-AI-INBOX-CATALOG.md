@@ -2459,3 +2459,102 @@ or change the classification code in production
 until separate validation/release. The scheduled
 20 October CT126 backup failure and Ollama
 network exposure remain independent work items.
+
+
+## 2026-10-20 – Proposed reviewable AI taxonomy suggestions in native Paperless document notes
+
+The operator asked whether Paperless can attach notes to
+documents and whether local AI-suggested tags/document types
+can be presented there for review, particularly when Qwen
+proposes **not-yet-existing** objects. Paperless-ngx has
+native per-document notes in the document UI and a
+document-scoped endpoint
+`/api/documents/{id}/notes/` (POST example
+`{"note":"…"}`). Official search documentation
+indexes notes through `notes.note:`. Native
+notes are annotations, **not structured Tags or
+DocumentType entries** and cannot by themselves trigger
+their assignment or model retraining.
+
+### Proposed two-tier, human-reviewed workflow (DESIGN ONLY)
+
+1. Continue resolving allowed **existing** type and tag
+   objects with native Paperless owner-/object-level ACLs.
+   The worker may apply existing metadata **only** under
+   the already approved scoped classification policy;
+   never overwrite human-edited title, existing
+   correspondent/type, document owner, permissions, or
+   inbox tag. Do not create taxonomy objects automatically.
+2. Capture **unresolved or new name suggestions** (e.g.
+   new document type `Zertifikat`, new user-defined tag)
+   in the 0600 protected processing journal as a bounded,
+   versioned **proposal record**, with document ID,
+   model/version, suggested names, distinct
+   `EXISTING_VISIBLE`/`NEW_PROPOSED`/`INACCESSIBLE`
+   classifications and approval state. Never retain
+   full OCR, prompts, raw responses, or private file
+   names. Do not leak another owner's taxonomy names.
+3. Expose a concise native Paperless document note as
+   **one idempotently tracked AI review hint** containing
+   the *proposed* type/tag names and a clear
+   `NOT_APPLIED` marker. Attribute to an explicitly
+   authorized existing Paperless user; enforce
+   document note creation permission and note ownership.
+   Do not use an unbounded shared admin token or
+   run requests under an unrelated document owner's
+   identity. A note must not implicitly grant
+   view or change permissions for the document or
+   taxonomy objects.
+4. Human reviews the note and creates or assigns new
+   document types and tags with correct ownership and
+   object ACLs, adjusts the metadata if warranted,
+   and **manually** removes the inbox tag only
+   after approval. Existing documents do not become
+   future training data for Qwen weights; Paperless
+   may only use their updated metadata as context
+   for later suggestions.
+5. Successful, valid classification with no permissible
+   metadata diff is a terminal `NO_CHANGE` (review
+   note may still be added if there are proposals),
+   not a generic `REQUIRES_REVIEW`. Store bounded,
+   allowlisted failure-stage and reason code without
+   any exception text. Keep a write-indeterminate
+   `REQUIRES_REVIEW` journal state for safety.
+6. Notes are an extra **document write**. Provide a
+   per-document note-create approval and separate
+   regression tests before enabling. Ensure idempotency
+   across API retry/crash with journal key and note
+   existence check; never duplicate or overwrite human
+   notes. Coordinate note writes and metadata saves
+   against current document snapshot and audit log.
+   An upstream 2026 bug report (#12749, affecting
+   v2.20.15) described near-concurrent note POST and
+   metadata PATCH reverting document `created`
+   changes; do **not** assume its presence or absence
+   in our exact v3.3.0 runtime. Add pinned regression
+   tests for note creation/metadata invariants.
+
+None of the above changes is **implemented or authorized**
+by this documentation update; Paperless production note
+and metadata writes remain paused pending controlled
+review of failures in 11, 16, 21, 22, and unattempted 29.
+
+### Separate live connectivity failure
+
+The operator attempted the existing **read-only**
+`audit-paperless-ai-taxonomy-visibility-readonly.yml`
+after Git fetch to branch head. Tasks 1–3 succeeded;
+task 4 reported `UNREACHABLE` over SSH to
+`venombox` with `no_log` masking the transport
+exception. `ok=3, unreachable=1, failed=0, changed=0`.
+This **does not establish** the type or tag visibility
+result, and there is no reliable evidence that the
+Django script ran. Never infer a taxonomy ACL defect
+from this outcome.
+
+Next: check the Proxmox SSH transport with a harmless,
+bounded Ansible ping from `bp-controller`; if successful,
+rerun the read-only audit. If transport fails,
+investigate the Ansible control node, SSH daemon,
+route and host resource state **without** changing
+Paperless permissions or restarting guest services.
