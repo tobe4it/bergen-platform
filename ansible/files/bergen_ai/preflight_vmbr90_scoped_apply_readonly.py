@@ -32,6 +32,8 @@ def host_config():
             return "NO_EXPLICIT_SOURCE_GLOB"
         if Path("/etc/network/interfaces.new").exists():
             return "PENDING_PVE_NETWORK_EDIT"
+        if Path("/root/bergen-ai-vmbr90-prechange").exists():
+            return "ROLLBACK_EVIDENCE_DIR_ALREADY_EXISTS"
         if TARGET.is_symlink() or TARGET.exists():
             return "BRIDGE_DROPIN_ALREADY_PRESENT"
         if Path("/sys/class/net/vmbr90").exists():
@@ -59,7 +61,7 @@ def guest(vmid, hostname):
     entries = [line for line in lines if re.match(r"^net[0-9]+:\s", line)]
     if len(entries) != 1 or not entries[0].startswith("net0: "):
         return "UNEXPECTED_NETWORK_LAYOUT"
-    if not re.search(r"(?:^|,)name=eth0(?:,|$)", entries[0]):
+    if not re.search(r"(?:^|,)name=eth0(?:,|$)", entries[0][6:].strip()):
         return "UNEXPECTED_NETWORK_LAYOUT"
     if any("bridge=vmbr90" in line for line in lines):
         return "UNEXPECTED_NETWORK_LAYOUT"
