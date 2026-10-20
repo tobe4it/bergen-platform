@@ -170,9 +170,13 @@ attributed Note before advancing. No classification of documents
 
 After successful Stage D and a current read-only inventory:
 
-- Confirm current maximum existing document PK; set the private
-  `paperless_ai_catalog_min_document_id` to **exactly that** value.
-  The rollout fails closed if the live maximum has changed meanwhile.
+- For first activation, select the explicit one-time override
+  `paperless_ai_catalog_initial_use_current_max_id=true`.
+  The deployment captures the current maximum existing document ID
+  *on venombox* and persists that exact watermark. It refuses this
+  automatic selection if the timer is already enabled. Alternatively,
+  preselect an exact positive ID in the private configuration and
+  the playbook will require it equal the live maximum.
 - Set `paperless_ai_catalog_pilot_ids` to an empty list only for the
   scheduled rollout; never leave a reviewed pilot ID in a timer config.
 - Run `deploy-paperless-ai-inbox-catalog-timer.yml` with per-invocation,
@@ -183,7 +187,8 @@ After successful Stage D and a current read-only inventory:
   `paperless_ai_catalog_verified_backup=true`,
   `paperless_ai_catalog_notes_enabled=true`,
   `paperless_ai_catalog_notes_approved=true`,
-  `paperless_native_ai_ui_approved=true`.
+  `paperless_native_ai_ui_approved=true`, and for first activation
+  `paperless_ai_catalog_initial_use_current_max_id=true`.
 - The schedule is every five minutes, one newly eligible
   document per invocation. Unprocessed old docs and all
   recorded review cases are excluded. No timer activation
