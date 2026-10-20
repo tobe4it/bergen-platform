@@ -767,3 +767,56 @@ verification. Retain separate archive SHA256 verification.
 No template import, rootfs extraction, guest network, package
 installation in CT701, or mx2/mx1 operation follows from this
 key-discovery result.
+
+
+## GnuPG installation via existing controller IaC, not ad-hoc apt
+
+The existing controller OS is Debian 13 and was bootstrapped using
+ansible/playbooks/bootstrap-controller.yml. That playbook's
+controller_packages list has been extended with gnupg, gpgv and
+file, all installed via ansible.builtin.apt state=present.
+Its existing apt-cache refresh and package task, plus narrowly
+scoped Debian 13/bp-controller assertions and a post-install
+binary stat check, now carry the tag "controller_packages".
+This is **deliberately not a full controller re-bootstrap**:
+other tasks in the original playbook also manage authorized SSH
+keys, sudoers, venv and Galaxy collections; never accidentally
+rerun those merely to add GnuPG.
+
+From bp-controller in the existing restore worktree (whose branch
+contains the updated controller baseline), first check that the
+worktree is clean, then fetch and detach the current head:
+
+    BASE="$HOME/bergen-platform"
+    WT="$HOME/bergen-platform-nextcloud-restore"
+    BR="feat/nextcloud-isolated-restore-701-20261019"
+    test -z "$(git -C "$WT" status --porcelain)"
+    git -C "$BASE" fetch origin "$BR"
+    git -C "$WT" switch --detach "origin/$BR"
+
+Only bp-controller should be targeted, via explicit local connection;
+the production hosts mx1 and mx2 and Proxmox guest 701 are out of
+scope. Exact audit/installation command:
+
+    "$BASE/.venv/bin/ansible-playbook" \
+      -i "$BASE/ansible/inventory.yml" \
+      -i "$BASE/ansible/inventory.local.yml" \
+      "$WT/ansible/playbooks/bootstrap-controller.yml" \
+      --limit bp-controller \
+      --tags controller_packages \
+      -e ansible_connection=local \
+      --vault-id infra@prompt \
+      --check --diff
+
+Inspect the results. Repeat the exact command **without** --check
+--diff only on explicit operator authorization for controller package
+changes; afterwards rerun again to verify convergence.
+Note apt update_cache can report changed when cache is stale;
+the meaningful idempotence gate is that package installation
+reports changed=0 on the second apply.
+
+The tagged run cannot create an LXC, attach guest networking, touch
+the Nextcloud archives or alter production Nextcloud/mx2.
+After installation require command -v gpg, gpgv and file to work,
+then resume signature verification using the isolated keyring
+with a separately verified image-signing key fingerprint.
