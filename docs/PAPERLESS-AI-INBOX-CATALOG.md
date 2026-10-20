@@ -1404,3 +1404,77 @@ The existing native Paperless Ollama route and parent
 group audit remain successful (`ELIGIBLE_SAMPLE=8`)
 but neither document classification nor the protected
 ORM connection apply has been executed.
+
+
+## Backup job failure diagnosed as outstanding incident (2026-10-20)
+
+Operator's read-only Proxmox check after the NFS metadata inventory:
+
+```text
+bergen-paperless-vzdump.timer:
+  LoadState=loaded
+  ActiveState=active
+  UnitFileState=enabled
+  LastTriggerUSec=Tue 2026-10-20 03:00:02 CEST
+  NextElapseUSecRealtime=Wed 2026-10-21 03:00:00 CEST
+
+bergen-paperless-vzdump.service:
+  Result=exit-code
+  ExecMainStatus=255
+  ExecMainStartTimestamp=Tue 2026-10-20 03:00:02 CEST
+  ExecMainExitTimestamp=Tue 2026-10-20 06:00:02 CEST
+
+2026-10-19 CT126 vzdump archive:
+  ZSTD_INTEGRITY=PASS
+  TAR_STRUCTURE=PASS
+  BACKUP_CHECK=COMPLETED_READ_ONLY
+```
+
+**Incident:** The enabled Paperless `vzdump` service exited
+with failure code 255 at exactly 3 hours on 20 October.
+The underlying failure reason is **not established**.
+Do not assert a systemd timer timeout: `Result=exit-code`
+means the process terminated with nonzero exit code; a
+systemd-enforced timeout typically appears as
+`Result=timeout`. A backup stop, NFS stall,
+quota, `vzdump` error or effective unit override must be
+distinguished using job logs and unit runtime metadata.
+The archive from the previous date passed stream/TAR
+checks only; database recoverability remains unproven.
+
+Before the next night run, investigate with strictly
+read-only commands on `venombox`:
+
+```bash
+systemctl show bergen-paperless-vzdump.service \
+  -p Result -p ExecMainCode -p ExecMainStatus \
+  -p TimeoutStartUSec -p RuntimeMaxUSec \
+  -p FragmentPath -p DropInPaths
+systemctl cat bergen-paperless-vzdump.service
+pct status 126
+journalctl -u bergen-paperless-vzdump.service \
+  --since '2026-10-20 02:55:00' \
+  --until '2026-10-20 06:10:00' \
+  --no-pager -o short-iso
+```
+
+Treat logs as private infrastructure data; redact network
+locations, storage paths and any sensitive material before
+external sharing. Read the corresponding Proxmox `vzdump`
+task log locally if the systemd journal lacks the cause.
+Check the current three Paperless services; do not
+assume a failed `--mode stop` backup necessarily
+restarted the guest. Do **not** manually rerun the
+`vzdump` job, change retention, restart CT126, or
+disable/edit the timer as a side effect of diagnosis.
+Any of those actions require separate operational review.
+
+The 20 October failure keeps
+`paperless_ai_catalog_verified_backup=false` and
+the native Paperless Ollama ORM config `apply` unexecuted
+pending a reviewed recovery/backup verification.
+The planned connection already works at TCP/HTTP model
+discovery level and is **not** the cause of the
+backup failure. All Paperless document metadata, AI
+UI, RAG/embeddings, scheduled AI and `vmbr90`
+remain unchanged by these audits.
