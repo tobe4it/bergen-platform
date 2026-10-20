@@ -35,6 +35,65 @@
         fail_msg: OPEN_WEBUI_OAUTH_RUNTIME_VERSION_UNREVIEWED
       no_log: true
 
+    - name: Probe container Python execution without reading application data
+      ansible.builtin.command:
+        argv:
+          - podman
+          - exec
+          - open-webui
+          - python3
+          - -c
+          - "print('BERGEN_PYTHON_EXEC_V1:OK')"
+      register: bp_oidc_python_exec
+      changed_when: false
+      failed_when: false
+      check_mode: false
+      no_log: true
+
+    - name: Probe whether the application Python module is discoverable
+      ansible.builtin.command:
+        argv:
+          - podman
+          - exec
+          - open-webui
+          - python3
+          - -c
+          - "import importlib.util; print('BERGEN_PYTHON_APP_V1:' + ('PRESENT' if importlib.util.find_spec('open_webui') else 'ABSENT'))"
+      register: bp_oidc_python_module
+      changed_when: false
+      failed_when: false
+      check_mode: false
+      no_log: true
+
+    - name: Report only allowlisted container runtime probe results
+      ansible.builtin.debug:
+        msg:
+          - >-
+            CONTAINER_PYTHON_EXEC={{
+              'OK' if bp_oidc_python_exec.rc == 0 and
+                      'BERGEN_PYTHON_EXEC_V1:OK' in bp_oidc_python_exec.stdout_lines
+              else 'FAILED'
+            }}
+          - >-
+            OPEN_WEBUI_MODULE={{
+              'PRESENT' if bp_oidc_python_module.rc == 0 and
+                           'BERGEN_PYTHON_APP_V1:PRESENT' in bp_oidc_python_module.stdout_lines
+              else 'ABSENT' if bp_oidc_python_module.rc == 0 and
+                                'BERGEN_PYTHON_APP_V1:ABSENT' in bp_oidc_python_module.stdout_lines
+              else 'PROBE_FAILED'
+            }}
+      changed_when: false
+
+    - name: Refuse runtime interpreter problems before processing OAuth configuration
+      ansible.builtin.assert:
+        that:
+          - bp_oidc_python_exec.rc == 0
+          - "'BERGEN_PYTHON_EXEC_V1:OK' in bp_oidc_python_exec.stdout_lines"
+          - bp_oidc_python_module.rc == 0
+          - "'BERGEN_PYTHON_APP_V1:PRESENT' in bp_oidc_python_module.stdout_lines"
+        fail_msg: CONTAINER_PYTHON_EXEC_OR_MODULE_UNAVAILABLE
+      no_log: true
+
     - name: Read same Open WebUI effective OAuth runtime resolver as the callback
       ansible.builtin.command:
         argv:
