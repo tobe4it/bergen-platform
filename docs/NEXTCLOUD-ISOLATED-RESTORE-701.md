@@ -1114,3 +1114,81 @@ Rocky 9 template checked by this builder preflight. A clean
 PVE-managed import path, verified staging transfer, signature and
 hash provenance, and PVE template acceptance/metadata semantics
 must be independently established before any guest creation.
+
+
+## Rocky 9.8: successful builder preflight and direct signed-image staging gate
+
+On 2026-10-20 the operator re-ran the Rocky builder feasibility
+playbook on venombox with non-multiplexed SSH and the correct Vault ID,
+and observed `ROCKY_9_8_LXC_TEMPLATE_BUILDER_READ_ONLY_READY`,
+`ok=18 changed=0 failed=0 unreachable=0`. The host was Proxmox VE
+9.2.20; cluster VMIDs 702/790/791 were unused at check time; local
+template and local-zfs storage were active, pools healthy, vmbr2 was
+up, and existing CT701 remained protected and networkless. No guest
+was created or changed. `network_egress_authorized=false`
+and `network_rules_reviewed=false`.
+
+The preflight tested the *older* Rocky 9 locally on the PVE host,
+SHA256 `1388b51286e88639f63a5ac8440f838b65ff84d23b9b8f0b69ce03b54a91db70`.
+That is NOT the separate, previously signature-checked Rocky 9.8
+Linux Containers rootfs, SHA256
+`1fd0ade221871319d5ae7bed9ece57c001d79ef950c1263814d5b8d48779b7e5`.
+
+Before connecting any builder to vmbr2, check a direct staging path
+for the signed Rocky 9.8 tar.xz. Proxmox system container images are
+compressed rootfs TAR archives that `pct create` can consume via a
+`local:vztmpl/...` storage volume, but this fact does not prove this
+specific archive is safely importable or that all ownership, xattrs
+and systemd behavior will survive extraction. Documentation:
+https://github.com/proxmox/pve-docs/blob/master/pct.adoc
+
+A new controller/venombox **read-only** staging preflight checks:
+- Source: exact SHA256/size, full link/path audit, SUID/SGID count,
+  fixed Rocky 9.8 release and `template_import_authorized=false`.
+- Destination: exact Proxmox host and 9.x version, currently free
+  VMIDs 702/790/791, absent target filename and absent local VMID
+  790 configurations, root-owned real template cache directories,
+  adequate free staging capacity, active local/local-zfs and healthy ZFS.
+- Isolation: existing CT701 remains unprivileged, protected, onboot=0,
+  with zero configured NICs; no bridge rule, interface or egress is
+  modified by this playbook.
+
+Proposed **future** PVE-local staging path:
+`local:vztmpl/rockylinux-9.8-lxc_20261018_amd64.tar.xz`.
+The preflight does not copy, extract, create guests, or authorize an
+apply operation. VMID 790 would be a future isolated base CT until
+`pct template 790` is separately authorized; 791/702 are only
+reserved candidate numbers in the architecture, not actual PVE
+reservations.
+
+On bp-controller, in the existing detached restore worktree:
+
+    BASE="$HOME/bergen-platform"
+    WT="$HOME/bergen-platform-nextcloud-restore"
+    BRANCH="feat/nextcloud-isolated-restore-701-20261019"
+    SSH_ARGS="-C -o ControlMaster=no -o ControlPath=none -o ConnectTimeout=10 -o ServerAliveInterval=10 -o ServerAliveCountMax=2"
+    if [ -n "$(git -C "$WT" status --porcelain)" ]; then
+      echo "STOP: worktree contains local changes"
+    else
+      git -C "$WT" fetch origin "$BRANCH" &&
+      git -C "$WT" switch --detach "origin/$BRANCH" &&
+      ANSIBLE_SSH_ARGS="$SSH_ARGS" "$BASE/.venv/bin/ansible-playbook" \
+        -i "$BASE/ansible/inventory.yml" \
+        -i "$BASE/ansible/inventory.local.yml" \
+        "$WT/ansible/playbooks/audit-rocky-9-8-direct-import-staging-readonly.yml" \
+        --vault-id infra@prompt
+    fi
+
+Expected on successful current-state checks:
+`ROCKY_9_8_DIRECT_TEMPLATE_STAGING_READ_ONLY_READY`,
+`changed=0 failed=0`, no guest or archive copy.
+The next gate is an authenticated, size- and SHA256-pinned,
+strictly non-overwriting file transport from bp-controller to venombox
+with post-transfer verification and explicit user approval for any
+write. **Do not** stage/import the archive or call `pct create`
+based on this read-only preflight alone.
+
+Direct Rocky 9.8 boot might avoid enabling outbound networking
+just to update Rocky 9.4 to 9.8. Future Nextcloud runtime PHP/RPM
+dependency acquisition still requires its own separate, approved
+offline supply-chain process.
