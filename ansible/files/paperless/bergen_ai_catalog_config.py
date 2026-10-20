@@ -74,7 +74,7 @@ def main():
         mode = req["mode"]
         if mode == "audit":
             status(AUDIT="READ_ONLY", STATUS="INSPECTED",
-                   AI_UI_ENABLED="YES" if effective.ai_enabled else "NO", EMBEDDINGS="OFF",
+                   AI_UI_ENABLED="YES" if AIConfig().ai_enabled else "NO", EMBEDDINGS="OFF",
                    CURRENT_SHA256=fingerprint, CHANGED=False)
             return
         demand(req.get("approved") is True, "APPROVAL_REQUIRED")
