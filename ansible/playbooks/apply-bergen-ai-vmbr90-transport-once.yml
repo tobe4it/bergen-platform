@@ -184,6 +184,8 @@
                   bridge-ports none
                   bridge-stp off
                   bridge-fd 0
+                  # Prevent even link-local IPv6 on the PVE host-facing bridge.
+                  post-up echo 1 > /proc/sys/net/ipv6/conf/vmbr90/disable_ipv6
           register: scoped_dropin_written
 
         - name: Bring up only the new vmbr90 interface without global network reload
@@ -191,6 +193,27 @@
             argv: [ifup, vmbr90]
           register: scoped_bridge_ifup
           changed_when: true
+          no_log: true
+
+        - name: Verify bridge-host IPv6 has been disabled before attaching any guest
+          ansible.builtin.command:
+            argv: [cat, /proc/sys/net/ipv6/conf/vmbr90/disable_ipv6]
+          register: scoped_bridge_ipv6
+          changed_when: false
+          no_log: true
+
+        - name: Verify no physical or other bridge ports are attached
+          ansible.builtin.command:
+            argv: [bridge, -j, link, show, master, vmbr90]
+          register: scoped_bridge_ports
+          changed_when: false
+          no_log: true
+
+        - name: Refuse any Proxmox-host IPv6 or foreign bridge port before guest connection
+          ansible.builtin.assert:
+            that:
+              - "scoped_bridge_ipv6.stdout | trim == '1'"
+              - "scoped_bridge_ports.stdout | from_json | length == 0"
           no_log: true
 
         - name: Connect CT110 private net1 without modifying production net0 or gateway
