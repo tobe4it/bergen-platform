@@ -150,8 +150,9 @@ class StageContract(TestCase):
         diagnostics = next(t for t in play["tasks"]
                            if t.get("name") == "Report non-secret prerequisites before protected gate")
         safe_debug = str(diagnostics["ansible.builtin.debug"])
-        self.assertIn("VAULT_ADMIN_TOKEN_DEFINED", safe_debug)
-        self.assertIn("VAULT_ADMIN_TOKEN_MIN_LENGTH_OK", safe_debug)
+        self.assertIn("ADMIN_BEARER_SOURCE", safe_debug)
+        self.assertIn("ADMIN_BEARER_PRESENT", safe_debug)
+        self.assertIn("GLOBAL_API_KEY_SWITCH_REQUIRED=NO", safe_debug)
         self.assertIn("THREE_GROUP_NAMES", safe_debug)
         self.assertNotIn("Bearer ", safe_debug)
         gates_task = next(t for t in play["tasks"]
@@ -161,7 +162,7 @@ class StageContract(TestCase):
                      "bergen_ai_family_model_backup_verified",
                      "bergen_ai_family_model_expected_sha256",
                      "bergen_ai_family_model_rollback_approved",
-                     "vault_open_webui_admin_token"):
+                     "bp_family_model_admin_bearer"):
             self.assertIn(name, gates)
         cmd = next(t for t in play["tasks"]
                    if "Run version-locked WebUI API audit" in t.get("name", ""))
