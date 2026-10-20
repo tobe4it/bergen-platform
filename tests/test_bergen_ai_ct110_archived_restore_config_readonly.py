@@ -97,6 +97,56 @@ class ArchivedRestoreConfigTests(TestCase):
         self.assertNotIn("password-do-not-display", str(out))
         self.assertNotIn("192.168.", str(out))
 
+    def test_sanitized_directive_breakdown_catches_deduplicated_keys(self):
+        # Prior "3" can represent only two keys because apparmor is in both
+        # the explicit high-risk set and the generic LXC catch-all.
+        raw = (
+            SAMPLE
+            + "lxc.apparmor.profile: generated-profile-with-private-value\\n"
+            + "lxc.cgroup2.devices.allow: c 10:229 rwm\\n"
+        )
+        values = a.parse_config(raw)
+        self.assertIsNotNone(values)
+        report = a.profile(values)
+        self.assertEqual(report["DANGEROUS_CONFIG_DIRECTIVES"], 3)
+        self.assertEqual(report["SENSITIVE_UNIQUE_COUNT"], 2)
+        self.assertEqual(report["SENSITIVE_DUPLICATE_OVERCOUNT"], 1)
+        self.assertEqual(report["SENSITIVE_APPARMOR_COUNT"], 1)
+        self.assertEqual(report["SENSITIVE_CGROUP_DEVICE_POLICY_COUNT"], 1)
+        self.assertEqual(report["SENSITIVE_HOOK_COUNT"], 0)
+        self.assertEqual(report["STATUS"], "REVIEW_REQUIRED")
+        self.assertNotIn("generated-profile", str(report))
+        self.assertNotIn("10:229", str(report))
+        for key in ("SENSITIVE_UNIQUE_COUNT", "SENSITIVE_DUPLICATE_OVERCOUNT",
+                    "SENSITIVE_APPARMOR_COUNT", "SENSITIVE_CGROUP_DEVICE_POLICY_COUNT"):
+            self.assertIn(key, PLAY.read_text())
+
+    def test_disjoint_sensitive_risk_categories_are_never_restore_clearance(self):
+        extra = (
+            "hookscript: local:snippets/unsafe.sh\\n"
+            "lxc.mount.auto: proc:rw\\n"
+            "lxc.cap.drop: sys_admin\\n"
+            "lxc.net.0.type: veth\\n"
+            "lxc.idmap: u 0 100000 65536\\n"
+            "lxc.seccomp.profile: /private/profile\\n"
+            "dev0: /dev/sda\\n"
+        )
+        report = a.profile(a.parse_config(SAMPLE + extra))
+        self.assertEqual(report["SENSITIVE_HOOK_COUNT"], 1)
+        self.assertEqual(report["SENSITIVE_LXC_MOUNT_POLICY_COUNT"], 1)
+        self.assertEqual(report["SENSITIVE_CAPABILITY_POLICY_COUNT"], 1)
+        self.assertEqual(report["SENSITIVE_LXC_NETWORK_COUNT"], 1)
+        self.assertEqual(report["SENSITIVE_ID_MAPPING_COUNT"], 1)
+        self.assertEqual(report["SENSITIVE_OTHER_LXC_COUNT"], 1)
+        self.assertEqual(report["SENSITIVE_PVE_DEVICE_COUNT"], 1)
+        self.assertEqual(report["SENSITIVE_UNIQUE_COUNT"], 7)
+        self.assertEqual(report["SENSITIVE_DUPLICATE_OVERCOUNT"], 2)
+        self.assertEqual(report["STATUS"], "REVIEW_REQUIRED")
+        self.assertNotIn("/dev/sda", str(report))
+        self.assertNotIn("unsafe.sh", str(report))
+        unknown = a.profile(None)
+        self.assertEqual(unknown["SENSITIVE_UNIQUE_COUNT"], "UNVERIFIED")
+
     def test_script_and_playbook_are_read_only_and_no_log(self):
         source = SCRIPT.read_text()
         ast.parse(source)
