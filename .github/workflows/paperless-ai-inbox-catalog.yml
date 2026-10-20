@@ -14,11 +14,15 @@ on:
       - 'ansible/files/paperless/audit_ai_catalog_review_state_readonly.py'
       - 'ansible/files/paperless/audit_ai_catalog_journal_inventory_readonly.py'
       - 'ansible/files/paperless/audit_ai_catalog_taxonomy_visibility_readonly.py'
+      - 'ansible/files/paperless/bergen_ai_catalog_note_permissions.py'
+      - 'ansible/files/paperless/bergen_ai_catalog_native_ui.py'
       - 'ansible/playbooks/manage-paperless-ai-inbox-catalog.yml'
       - 'ansible/playbooks/audit-paperless-ai-pilot-selection-readonly.yml'
       - 'ansible/playbooks/audit-paperless-ai-catalog-review-readonly.yml'
       - 'ansible/playbooks/audit-paperless-ai-catalog-journal-inventory-readonly.yml'
       - 'ansible/playbooks/audit-paperless-ai-taxonomy-visibility-readonly.yml'
+      - 'ansible/playbooks/manage-paperless-ai-native-notes.yml'
+      - 'ansible/playbooks/manage-paperless-native-ai-suggestions-ui.yml'
       - 'ansible/playbooks/manage-paperless-ai-local-ollama.yml'
       - 'ansible/playbooks/audit-paperless-ai-catalog-runtime-readonly.yml'
       - 'ansible/playbooks/audit-paperless-ai-ollama-private-path-readonly.yml'
@@ -34,6 +38,7 @@ on:
       - 'tests/test_paperless_ai_catalog_review_readonly.py'
       - 'tests/test_paperless_ai_catalog_journal_inventory_readonly.py'
       - 'tests/test_paperless_ai_catalog_taxonomy_visibility_readonly.py'
+      - 'tests/test_paperless_ai_failure_notes_and_native_ui.py'
       - 'docs/PAPERLESS-AI-INBOX-CATALOG.md'
       - 'docs/examples/paperless-ai-catalog.local.yml.example'
       - '.github/workflows/paperless-ai-inbox-catalog.yml'
@@ -51,11 +56,15 @@ on:
       - 'ansible/files/paperless/audit_ai_catalog_review_state_readonly.py'
       - 'ansible/files/paperless/audit_ai_catalog_journal_inventory_readonly.py'
       - 'ansible/files/paperless/audit_ai_catalog_taxonomy_visibility_readonly.py'
+      - 'ansible/files/paperless/bergen_ai_catalog_note_permissions.py'
+      - 'ansible/files/paperless/bergen_ai_catalog_native_ui.py'
       - 'ansible/playbooks/manage-paperless-ai-inbox-catalog.yml'
       - 'ansible/playbooks/audit-paperless-ai-pilot-selection-readonly.yml'
       - 'ansible/playbooks/audit-paperless-ai-catalog-review-readonly.yml'
       - 'ansible/playbooks/audit-paperless-ai-catalog-journal-inventory-readonly.yml'
       - 'ansible/playbooks/audit-paperless-ai-taxonomy-visibility-readonly.yml'
+      - 'ansible/playbooks/manage-paperless-ai-native-notes.yml'
+      - 'ansible/playbooks/manage-paperless-native-ai-suggestions-ui.yml'
       - 'ansible/playbooks/manage-paperless-ai-local-ollama.yml'
       - 'ansible/playbooks/audit-paperless-ai-catalog-runtime-readonly.yml'
       - 'ansible/playbooks/audit-paperless-ai-ollama-private-path-readonly.yml'
@@ -71,6 +80,7 @@ on:
       - 'tests/test_paperless_ai_catalog_review_readonly.py'
       - 'tests/test_paperless_ai_catalog_journal_inventory_readonly.py'
       - 'tests/test_paperless_ai_catalog_taxonomy_visibility_readonly.py'
+      - 'tests/test_paperless_ai_failure_notes_and_native_ui.py'
 
 jobs:
   policy-and-syntax:
@@ -94,6 +104,8 @@ jobs:
         run: python -m unittest discover -s tests -p 'test_paperless_ai_catalog_journal_inventory_readonly.py' -v
       - name: Test post-edit taxonomy ACL audit in read-only mode
         run: python -m unittest discover -s tests -p 'test_paperless_ai_catalog_taxonomy_visibility_readonly.py' -v
+      - name: Test 4-step ML -> BAI -> optional native UI gates
+        run: python -m unittest discover -s tests -p 'test_paperless_ai_failure_notes_and_native_ui.py' -v
       - name: Validate read-only/pilot and separately gated automatic timer syntax
         run: |
           ansible-playbook -i ansible/inventory.yml ansible/playbooks/manage-paperless-ai-inbox-catalog.yml --syntax-check
@@ -101,6 +113,8 @@ jobs:
           ansible-playbook -i ansible/inventory.yml ansible/playbooks/audit-paperless-ai-catalog-review-readonly.yml --syntax-check
           ansible-playbook -i ansible/inventory.yml ansible/playbooks/audit-paperless-ai-catalog-journal-inventory-readonly.yml --syntax-check
           ansible-playbook -i ansible/inventory.yml ansible/playbooks/audit-paperless-ai-taxonomy-visibility-readonly.yml --syntax-check
+          ansible-playbook -i ansible/inventory.yml ansible/playbooks/manage-paperless-ai-native-notes.yml --syntax-check
+          ansible-playbook -i ansible/inventory.yml ansible/playbooks/manage-paperless-native-ai-suggestions-ui.yml --syntax-check
           ansible-playbook -i ansible/inventory.yml ansible/playbooks/manage-paperless-ai-local-ollama.yml --syntax-check
           ansible-playbook -i ansible/inventory.yml ansible/playbooks/audit-paperless-ai-catalog-runtime-readonly.yml --syntax-check
           ansible-playbook -i ansible/inventory.yml ansible/playbooks/audit-paperless-ai-ollama-private-path-readonly.yml --syntax-check
