@@ -2115,3 +2115,56 @@ document 11. The routine cannot retrospectively
 recover the exception because the runner intentionally
 does not emit or retain it. Backup job rc 255 and
 Ollama port exposure remain independent open issues.
+
+## Controlled continuation stopped on existing journal record at document 16 (2026-10-20 15:44)
+
+After the approved 8-document run stopped at document 11,
+the read-only journal audit showed document 11
+`REQUIRES_REVIEW` with `SNAPSHOT_MATCH=MATCH`
+and `INBOX_TAG=PRESENT`. The operator then resumed the
+four remaining candidates (16, 21, 22, 29) with
+one-document-per-apply fail-stop logic. The **first** step,
+document 16, returned:
+
+```text
+AUDIT=CONTROLLED
+STATUS=COMPLETED
+PAPERLESS_VERSION=3.3.0
+ELIGIBLE_SAMPLE=N/A
+APPLIED=0
+REVIEW_REQUIRED=0
+ALREADY_RECORDED=1
+ROLLED_BACK=0
+CHANGED=False
+venombox ok=9 changed=0 failed=0
+STOP: DOC 16, Ergebnis nicht bestätigt
+```
+
+The loop intentionally stopped; documents 21, 22, 29
+were not processed **in this continuation**. The worker's
+`process_one` returns `ALREADY_RECORDED` if *any*
+persistent `catalogue` journal row exists for the ID,
+independently of its state. Therefore the status
+`COMPLETED` is only the outcome of this **no-op**
+command: it does **not** prove that document 16 was
+classified successfully in a previous run, and does not
+disclose whether its existing journal state is
+`APPLIED`, `REQUIRES_REVIEW`, `PROCESSING` or
+`ROLLED_BACK`. The earlier claim that document 16 was
+never previously attempted cannot be established by
+the observed partial shell output.
+
+**Next gate, no writes:** inspect document 16 with
+the already tested
+`audit-paperless-ai-catalog-review-readonly.yml`
+(`paperless_ai_catalog_review_document_id=16`),
+which compares the journal's preimage with live
+Django metadata, classifies its actual persistent
+state and verifies the inbox tag. Do not delete or
+edit the SQLite journal, rerun document 16 blindly,
+or continue the batch before reviewing that result.
+All documents with `APPLIED=1` remain unchanged by
+these audits.
+
+The unresolved scheduled CT126 backup rc 255 and
+Ollama wildcard-port exposure remain separate issues.
