@@ -1202,3 +1202,60 @@ The wildcard unauthenticated TCP/11434 exposure to
 bp-controller on both address families **remains unresolved**,
 and classification of real documents is still blocked
 until its separate, explicit approval and security review.
+
+## Live follow-up 2026-10-20 11:57 – parent-scope catalogue audit
+
+After populating the ignored `paperless-ai-catalog.local.yml` with
+the locally observed LXC110 private endpoint, reviewed model, parent group,
+and previous read-only configuration fingerprint, the operator validated
+the YAML and ran `manage-paperless-ai-inbox-catalog.yml` in
+default `audit` mode using the site variables file.
+
+```text
+AUDIT=READ_ONLY
+STATUS=AI_CONFIG_NOT_READY
+PAPERLESS_VERSION=3.3.0
+ELIGIBLE_SAMPLE=8
+APPLIED=0
+REVIEW_REQUIRED=0
+ALREADY_RECORDED=0
+ROLLED_BACK=0
+CHANGED=False
+venombox ok=9 changed=0 failed=0 skipped=1
+```
+
+**Meaning:** The explicitly supplied Paperless Django parent group
+resolved to exactly one group (otherwise the runner fails closed).
+Eight matching, OCR-eligible parent-owned inbox documents were
+counted in the bounded preview scope; **none was processed**.
+`AI_CONFIG_NOT_READY` is expected while the native
+`llm_backend`/`llm_model`/`llm_endpoint` have not been set
+in Paperless's singleton configuration.
+
+A separate existing-backend read-only audit passed
+(`PAPERLESS_ROOT_AND_DATA_MOUNT_BACKUP_INCLUDED=true`,
+three services active), but it only verifies that both
+filesystems participate in the backup configuration.
+Previously discovered recent CT126 `vzdump` metadata
+likewise does **not** verify archive integrity, database
+consistency, successful restoration, or data recovery.
+
+**Next operator evidence before native ORM connection apply:**
+identify an actual current complete CT126 `vzdump`
+archive in the expected mounted NFS backup repository,
+review its completed backup job and validate compressed
+archive integrity without extracting, restoring, or
+altering production. Assess database + media/data coverage
+and rollback plan. A successful `zstd -t` alone is
+not a full restore proof. Do not set
+`paperless_ai_catalog_verified_backup: true`
+based only on JSON/YAML validity, backup=1, or filenames.
+
+Native LLM client configuration (three ORM fields only)
+remains the next separately authorized mutation after
+that evidence, using a fresh optimistic
+`CURRENT_SHA256`. Document classification, timer,
+Paperless global AI UI, embeddings, Ollama listener and
+firewall remain unchanged and unapproved in this gate.
+The unauthenticated wildcard port exposure is a
+known, deferred security task.
