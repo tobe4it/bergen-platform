@@ -1,0 +1,103 @@
+---
+# An archive configuration read does not authorize a restore, even if expected.
+- import_playbook: audit-bergen-ai-ct110-isolated-restore-feasibility-readonly.yml
+
+- name: Audit CT110 archived restore configuration without extracting guest files
+  hosts: venombox
+  become: true
+  gather_facts: false
+  tasks:
+    - name: Require exact Proxmox host
+      ansible.builtin.assert:
+        that:
+          - "inventory_hostname == 'venombox'"
+
+    - name: Read only the archived LXC configuration and classify without exposing it
+      ansible.builtin.command:
+        argv:
+          - python3
+          - -c
+          - "{{ lookup('ansible.builtin.file', playbook_dir ~ '/../files/bergen_ai/audit_ct110_archived_restore_config_readonly.py', rstrip=False) }}"
+      register: archive_config_raw
+      changed_when: false
+      failed_when: false
+      check_mode: false
+      no_log: true
+
+    - name: Extract exactly one bounded sanitized archived config frame
+      ansible.builtin.set_fact:
+        archive_config_frames: >-
+          {{ archive_config_raw.stdout_lines | default([]) |
+             select('match', '^BERGEN_AI_CT110_RESTORE_CONFIG_AUDIT_V1:') | list }}
+      no_log: true
+
+    - name: Refuse missing repeated oversized or failed frames
+      ansible.builtin.assert:
+        that:
+          - "archive_config_raw.rc == 0"
+          - "archive_config_frames | length == 1"
+          - "archive_config_frames[0] | length < 2200"
+      no_log: true
+
+    - name: Parse only classified archived config results
+      ansible.builtin.set_fact:
+        archive_config: >-
+          {{ (archive_config_frames[0] |
+             regex_replace('^BERGEN_AI_CT110_RESTORE_CONFIG_AUDIT_V1:', '')) | from_json }}
+      no_log: true
+
+    - name: Refuse any archived-config read implying restore or network authorization
+      ansible.builtin.assert:
+        that:
+          - "archive_config.AUDIT == 'READ_ONLY'"
+          - "not archive_config.CHANGED"
+          - "not archive_config.RESTORE_EXECUTED"
+          - "not archive_config.RESTORE_AUTHORIZED"
+          - "not archive_config.RESTORE_CONFIG_OVERRIDE_PROVEN"
+          - "not archive_config.GUEST_CREATED"
+          - "not archive_config.GUEST_STARTED"
+          - "not archive_config.APPLY_AUTHORIZED"
+          - "archive_config.ORIGINAL_NETWORK_CONFIG_PRESERVED_IN_ARCHIVE == 'NOT_EXPORTED'"
+          - "archive_config.GUEST_START_POLICY == 'NOT_PROVEN'"
+          - "archive_config.NETWORK_ISOLATION == 'NOT_PROVEN'"
+          - "archive_config.RESTORE_TEST == 'NOT_ATTESTED'"
+          - "archive_config.ROLLBACK_CLEARANCE == 'NOT_PROVEN'"
+          - "archive_config.NETWORK_CHANGES == 'NONE'"
+          - "archive_config.STATUS in ['KNOWN_SOURCE_CONFIGURATION', 'REVIEW_REQUIRED', 'UNVERIFIED']"
+          - "archive_config.ARCHIVE_SELECTION in ['ONE_EXACT_BACKUP_CONFIG_SELECTED', 'UNVERIFIED']"
+          - "archive_config.CONFIG_READ in ['PARSED', 'UNVERIFIED']"
+          - "archive_config.ONBOOT in ['ENABLED', 'DISABLED', 'ABSENT', 'OTHER', 'UNVERIFIED']"
+          - "archive_config.DEVICE_MOUNT_PROFILE in ['EXACT_FUSE_DEVICE_ONLY', 'UNKNOWN_OR_EXTRA_DEVICE', 'UNVERIFIED']"
+          - "archive_config.SOURCE_HOSTNAME in ['EXPECTED_ORIGINAL', 'OTHER_OR_MISSING', 'UNVERIFIED']"
+          - "archive_config.SOURCE_ROOTFS in ['EXPECTED_LOCAL_ZFS', 'OTHER_OR_MISSING', 'UNVERIFIED']"
+          - "archive_config.SOURCE_UNPRIVILEGED in ['YES', 'NO_OR_UNVERIFIED', 'UNVERIFIED']"
+          - "archive_config.NETWORK_INTERFACE_COUNT == 'UNVERIFIED' or (archive_config.NETWORK_INTERFACE_COUNT | type_debug == 'int' and archive_config.NETWORK_INTERFACE_COUNT >= 0 and archive_config.NETWORK_INTERFACE_COUNT <= 10)"
+          - "archive_config.EXTERNAL_MP_COUNT == 'UNVERIFIED' or (archive_config.EXTERNAL_MP_COUNT | type_debug == 'int' and archive_config.EXTERNAL_MP_COUNT >= 0 and archive_config.EXTERNAL_MP_COUNT <= 100)"
+          - "archive_config.DANGEROUS_CONFIG_DIRECTIVES == 'UNVERIFIED' or (archive_config.DANGEROUS_CONFIG_DIRECTIVES | type_debug == 'int' and archive_config.DANGEROUS_CONFIG_DIRECTIVES >= 0 and archive_config.DANGEROUS_CONFIG_DIRECTIVES <= 100)"
+      no_log: true
+
+    - name: Report configuration shape without original network or private values
+      ansible.builtin.debug:
+        msg:
+          - AUDIT=READ_ONLY
+          - "STATUS={{ archive_config.STATUS }}"
+          - "ARCHIVE_SELECTION={{ archive_config.ARCHIVE_SELECTION }}"
+          - "CONFIG_READ={{ archive_config.CONFIG_READ }}"
+          - "SOURCE_HOSTNAME={{ archive_config.SOURCE_HOSTNAME }}"
+          - "SOURCE_ROOTFS={{ archive_config.SOURCE_ROOTFS }}"
+          - "SOURCE_UNPRIVILEGED={{ archive_config.SOURCE_UNPRIVILEGED }}"
+          - "NETWORK_INTERFACE_COUNT={{ archive_config.NETWORK_INTERFACE_COUNT }}"
+          - "ONBOOT={{ archive_config.ONBOOT }}"
+          - "EXTERNAL_MP_COUNT={{ archive_config.EXTERNAL_MP_COUNT }}"
+          - "DEVICE_MOUNT_PROFILE={{ archive_config.DEVICE_MOUNT_PROFILE }}"
+          - "DANGEROUS_CONFIG_DIRECTIVES={{ archive_config.DANGEROUS_CONFIG_DIRECTIVES }}"
+          - ARCHIVE_CONFIG_SANITIZATION=NOT_PROVEN
+          - NETWORK_ISOLATION=NOT_PROVEN
+          - GUEST_START_POLICY=NOT_PROVEN
+          - RESTORE_EXECUTED=False
+          - RESTORE_AUTHORIZED=False
+          - GUEST_CREATED=False
+          - GUEST_STARTED=False
+          - RESTORE_TEST=NOT_ATTESTED
+          - ROLLBACK_CLEARANCE=NOT_PROVEN
+          - APPLY_AUTHORIZED=False
