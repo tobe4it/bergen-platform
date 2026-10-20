@@ -1,0 +1,180 @@
+---
+# Before any CT creation, reuse the verified staged-template boundary.
+# No PVE configuration changes, extraction, guest start or network attach.
+- import_playbook: audit-rocky-9-8-staged-template-readonly.yml
+
+- name: Audit authenticated Rocky 9.8 archive numeric ownership compatibility
+  hosts: bp-controller
+  connection: local
+  become: false
+  gather_facts: false
+  any_errors_fatal: true
+  tasks:
+    - name: Read short hostname without changes
+      ansible.builtin.command:
+        argv: [hostname, -s]
+      changed_when: false
+      register: rocky_ct790_source_hostname
+
+    - name: Read current execution account without changes
+      ansible.builtin.command:
+        argv: [id, -un]
+      changed_when: false
+      register: rocky_ct790_source_user
+
+    - name: Require approved unprivileged controller execution identity
+      ansible.builtin.assert:
+        that:
+          - inventory_hostname == 'bp-controller'
+          - rocky_ct790_source_hostname.stdout == 'bp-controller'
+          - rocky_ct790_source_user.stdout == 'ansible'
+
+    - name: Inspect pinned tar owner IDs and extended metadata without extraction
+      ansible.builtin.command:
+        argv:
+          - python3
+          - "{{ playbook_dir }}/../files/nextcloud/audit_rocky_lxc_idmap_metadata.py"
+      changed_when: false
+      register: rocky_ct790_ownership
+
+    - name: Demand complete archived ownership range and structural recheck
+      ansible.builtin.assert:
+        that:
+          - (rocky_ct790_ownership.stdout | from_json).result == 'ROCKY_9_8_UID_GID_METADATA_REVIEW_COMPLETE'
+          - (rocky_ct790_ownership.stdout | from_json).sha256_verified
+          - (rocky_ct790_ownership.stdout | from_json).structural_audit_passed
+          - (rocky_ct790_ownership.stdout | from_json).default_idmap_compatibility
+          - (rocky_ct790_ownership.stdout | from_json).uid_outside_default_mapping_count == 0
+          - (rocky_ct790_ownership.stdout | from_json).gid_outside_default_mapping_count == 0
+          - not (rocky_ct790_ownership.stdout | from_json).archive_extracted
+          - not (rocky_ct790_ownership.stdout | from_json).pct_create_authorized
+        fail_msg: Rocky archive numeric owner IDs need additional mapping review.
+
+    - name: Report bounded source metadata without member paths
+      ansible.builtin.debug:
+        msg: "{{ rocky_ct790_ownership.stdout | from_json }}"
+
+- name: Audit venombox unprivileged creation prerequisites without allocating CT790
+  hosts: venombox
+  become: true
+  gather_facts: false
+  any_errors_fatal: true
+  tasks:
+    - name: Require same-run staged template and source ownership audit
+      ansible.builtin.assert:
+        that:
+          - rocky_after_file is defined
+          - rocky_after_file.stat.checksum == '1fd0ade221871319d5ae7bed9ece57c001d79ef950c1263814d5b8d48779b7e5'
+          - rocky_after_host.stdout == 'venombox'
+          - hostvars['bp-controller'].rocky_ct790_ownership is defined
+          - (hostvars['bp-controller'].rocky_ct790_ownership.stdout | from_json).default_idmap_compatibility
+        fail_msg: Separate staged-template and authenticated ownership proofs required.
+
+    - name: Inspect Proxmox pct create options without creating a container
+      ansible.builtin.command:
+        argv: [pct, help, create]
+      changed_when: false
+      register: rocky_ct790_pct_help
+
+    - name: Require unprivileged creation and offline containment options
+      ansible.builtin.assert:
+        that:
+          - "'--unprivileged' in rocky_ct790_pct_help.stdout"
+          - "'--rootfs' in rocky_ct790_pct_help.stdout"
+          - "'--ostype' in rocky_ct790_pct_help.stdout"
+          - "'--protection' in rocky_ct790_pct_help.stdout"
+          - "'--start' in rocky_ct790_pct_help.stdout"
+          - "'--onboot' in rocky_ct790_pct_help.stdout"
+        fail_msg: PVE command syntax differs from the reviewed creation design.
+
+    - name: Inspect default Proxmox unprivileged user namespace allocations
+      ansible.builtin.command:
+        argv:
+          - python3
+          - -c
+          - |
+            import json, os, socket, stat
+            if os.geteuid() != 0 or socket.gethostname().split('.')[0] != 'venombox':
+                raise SystemExit(71)
+            def check(path):
+                fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC)
+                try:
+                    s = os.fstat(fd)
+                    if not stat.S_ISREG(s.st_mode) or s.st_uid != 0 or s.st_mode & 0o022 or s.st_size > 65536:
+                        raise SystemExit(72)
+                    text = os.read(fd, 65537).decode('utf-8')
+                finally:
+                    os.close(fd)
+                valid = []
+                for entry in text.splitlines():
+                    p = entry.split(':')
+                    if len(p) == 3 and p[0] == 'root' and all(x.isdigit() for x in p[1:]):
+                        start, count = map(int, p[1:])
+                        if start >= 65536 and count >= 65536 and start + count <= 2**32:
+                            valid.append((start, count))
+                if len(valid) != 1:
+                    raise SystemExit(73)
+                return True
+            uid_ok = check('/etc/subuid')
+            gid_ok = check('/etc/subgid')
+            print(json.dumps({
+                'result': 'DEFAULT_UNPRIVILEGED_65536_IDMAP_POSSIBLE',
+                'subuid_verified': uid_ok,
+                'subgid_verified': gid_ok,
+                'config_changed': False
+            }))
+      changed_when: false
+      register: rocky_ct790_subid
+
+    - name: Require validated non-root UID and GID mapping resources
+      ansible.builtin.assert:
+        that:
+          - (rocky_ct790_subid.stdout | from_json).result == 'DEFAULT_UNPRIVILEGED_65536_IDMAP_POSSIBLE'
+          - (rocky_ct790_subid.stdout | from_json).subuid_verified
+          - (rocky_ct790_subid.stdout | from_json).subgid_verified
+          - not (rocky_ct790_subid.stdout | from_json).config_changed
+
+    - name: Read configured local-zfs pool content types
+      ansible.builtin.command:
+        argv: [pvesh, get, /storage, --output-format, json]
+      changed_when: false
+      register: rocky_ct790_storage_config
+
+    - name: Require one active local-zfs storage with rootdir content
+      ansible.builtin.assert:
+        that:
+          - >-
+            ((rocky_ct790_storage_config.stdout | from_json)
+             | selectattr('storage', 'equalto', 'local-zfs') | list | length) == 1
+          - rocky_zfs_storage.type == 'zfspool'
+          - "'rootdir' in rocky_zfs_storage.content.split(',')"
+          - not (rocky_zfs_storage.disable | default(false) | bool)
+          - >-
+            (rocky_zfs_storage.nodes is not defined)
+            or ('venombox' in rocky_zfs_storage.nodes.split(','))
+        fail_msg: local-zfs is not a valid active Proxmox LXC rootdir destination.
+      vars:
+        rocky_zfs_storage: >-
+          {{ ((rocky_ct790_storage_config.stdout | from_json)
+               | selectattr('storage', 'equalto', 'local-zfs') | list | first) }}
+
+    - name: Report review-ready design without any mutation authorization
+      ansible.builtin.debug:
+        msg:
+          result: ROCKY_9_8_CT790_CREATE_PREFLIGHT_READ_ONLY_READY
+          reviewed_vmid: 790
+          template: local:vztmpl/rockylinux-9.8-lxc_20261018_amd64.tar.xz
+          container_unprivileged_required: true
+          container_network_interfaces_planned: 0
+          container_start_planned: false
+          container_protection_required: true
+          container_rootfs_storage: local-zfs
+          source_owner_ids_within_default_mapping: true
+          host_subuid_subgid_default_mapping_available: true
+          pve_option_help_verified: true
+          pve_template_still_hash_verified: true
+          new_guest_created: false
+          ct701_changed: false
+          network_egress_authorized: false
+          pct_create_authorized: false
+          next_gate: Human review of PVE unprivileged extraction and explicit CT790-only creation approval.
