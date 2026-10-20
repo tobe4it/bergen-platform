@@ -93,8 +93,10 @@ class Vmbr90ScopedApplyTests(TestCase):
         rescue = block_task["rescue"]
         assert all(x.get("no_log", False) for x in block
                    if "ansible.builtin.command" in x and "pct, set" in str(x))
-        assert any("pct, set, '110', --delete, net1" in str(t) for t in rescue)
-        assert any("pct, set, '126', --delete, net1" in str(t) for t in rescue)
+        assert any(t.get("ansible.builtin.command", {}).get("argv") ==
+                   ["pct", "set", "110", "--delete", "net1"] for t in rescue)
+        assert any(t.get("ansible.builtin.command", {}).get("argv") ==
+                   ["pct", "set", "126", "--delete", "net1"] for t in rescue)
         assert any("bridge=vmbr90" in str(t) for t in rescue)
         self.assertTrue(any(t.get("ansible.builtin.file", {}).get("state") == "absent"
                             for t in rescue))
