@@ -1,0 +1,111 @@
+---
+# Exact-group Paperless Note model grants only; no document/note mutations.
+- name: Audit and optionally enable native Paperless notes for parents
+  hosts: venombox
+  become: true
+  gather_facts: false
+  vars:
+    bp_notes_mode: "{{ paperless_ai_notes_permission_mode | default('audit') }}"
+    bp_notes_payload:
+      protocol: notes-permissions-v1
+      mode: "{{ bp_notes_mode }}"
+      approved: "{{ paperless_ai_notes_permission_approved | default(false) | bool }}"
+      backup_verified: "{{ paperless_ai_catalog_verified_backup | default(false) | bool }}"
+      group: "{{ paperless_ai_catalog_allowed_group | default('') }}"
+  tasks:
+    - name: Enforce reviewed read-only default and separate note permission approval
+      ansible.builtin.assert:
+        that:
+          - inventory_hostname == 'venombox'
+          - bp_notes_mode in ['audit', 'apply']
+          - not ansible_check_mode or bp_notes_mode == 'audit'
+          - bp_notes_mode == 'audit' or (paperless_ai_notes_permission_approved | default(false) | bool)
+          - bp_notes_mode == 'audit' or (paperless_ai_catalog_verified_backup | default(false) | bool)
+        fail_msg: NOTES_PERMISSION_SCOPE_OR_APPROVAL_INVALID
+      no_log: true
+
+    - name: Verify exact unprivileged Paperless LXC
+      ansible.builtin.command:
+        argv: [pct, config, '126']
+      register: bp_notes_guest
+      changed_when: false
+      no_log: true
+
+    - name: Refuse unexpected or privileged LXC
+      ansible.builtin.assert:
+        that:
+          - bp_notes_guest.rc == 0
+          - "'hostname: bergen-paperless' in bp_notes_guest.stdout_lines"
+          - "'unprivileged: 1' in bp_notes_guest.stdout_lines"
+          - "'lxc.apparmor.profile: unconfined' not in bp_notes_guest.stdout"
+      no_log: true
+
+    - name: Inspect or grant only scoped native note rights
+      ansible.builtin.command:
+        argv:
+          - pct
+          - exec
+          - '126'
+          - --
+          - podman
+          - exec
+          - -i
+          - bergen-paperless
+          - python
+          - /usr/src/paperless/src/manage.py
+          - shell
+          - --verbosity=0
+          - -c
+          - "{{ lookup('ansible.builtin.file', playbook_dir ~ '/../files/paperless/bergen_ai_catalog_note_permissions.py', rstrip=False) }}"
+        stdin: "{{ bp_notes_payload | to_json }}"
+        stdin_add_newline: true
+      register: bp_notes_raw
+      changed_when: false
+      failed_when: false
+      no_log: true
+
+    - name: Extract a single approved bounded note status
+      ansible.builtin.set_fact:
+        bp_notes_frames: >-
+          {{ bp_notes_raw.stdout_lines | default([]) |
+             select('match', '^BERGEN_PAPERLESS_NOTE_RIGHTS_V1:') | list }}
+      no_log: true
+
+    - name: Refuse absent or conflicting note status frames
+      ansible.builtin.assert:
+        that:
+          - bp_notes_frames | length == 1
+          - bp_notes_frames[0] | length < 1000
+        fail_msg: NOTES_PERMISSION_FRAME_INVALID
+      no_log: true
+
+    - name: Parse only sanitized status
+      ansible.builtin.set_fact:
+        bp_notes_report: >-
+          {{ bp_notes_frames[0] |
+             regex_replace('^BERGEN_PAPERLESS_NOTE_RIGHTS_V1:', '') | from_json }}
+      no_log: true
+
+    - name: Enforce positive permission audit or controlled grant
+      ansible.builtin.assert:
+        that:
+          - bp_notes_raw.rc == 0
+          - bp_notes_report.AUDIT in ['READ_ONLY', 'CONTROLLED']
+          - bp_notes_report.STATUS == ('NOTE_RIGHTS_READY' if bp_notes_mode == 'apply' else 'INSPECTED')
+          - bp_notes_report.CHANGED is boolean
+          - bp_notes_mode == 'apply' or not bp_notes_report.CHANGED
+          - bp_notes_report.ADULT_ACCOUNTS | int >= 1
+          - bp_notes_report.ADULT_ACCOUNTS | int <= 6
+        fail_msg: NOTES_PERMISSION_NOT_VERIFIED
+      no_log: true
+
+    - name: Report only aggregate native note permission results
+      ansible.builtin.debug:
+        msg:
+          - "AUDIT={{ bp_notes_report.AUDIT }}"
+          - "STATUS={{ bp_notes_report.STATUS }}"
+          - "ADULT_ACCOUNTS={{ bp_notes_report.ADULT_ACCOUNTS }}"
+          - "MISSING_NOTE_RIGHTS={{ bp_notes_report.MISSING_NOTE_RIGHTS | default('N/A') }}"
+          - "MODEL_RIGHTS_ADDED={{ bp_notes_report.MODEL_RIGHTS_ADDED | default('N/A') }}"
+          - "CHANGED={{ bp_notes_report.CHANGED }}"
+      changed_when: bp_notes_mode == 'apply' and bp_notes_report.CHANGED | bool
