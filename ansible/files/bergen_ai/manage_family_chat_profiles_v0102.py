@@ -1,4 +1,4 @@
-"""Open WebUI v0.10.2: approved, private-only, four-profile staging.
+"""Open WebUI v0.10.2: OIDC-active private-only four-profile staging.
 
 API only (never SQL writes). Secrets, model prompts and raw API errors are
 never printed. Existing user/group membership and OIDC config are untouched.
@@ -79,7 +79,7 @@ def checked_version():
            "UNREVIEWED_OPEN_WEBUI_VERSION")
 
 
-def check_guest():
+def check_guest(names):
     inspect = json.loads(subprocess.check_output(
         ["podman", "inspect", "open-webui"],
         stderr=subprocess.DEVNULL, timeout=12, text=True))
@@ -94,17 +94,21 @@ def check_guest():
                   if isinstance(x, str) and "=" in x)
     demand(values.get("BYPASS_MODEL_ACCESS_CONTROL", "false").lower() != "true",
            "MODEL_ACL_BYPASSED")
-    demand(values.get("ENABLE_OAUTH_GROUP_MANAGEMENT", "false").lower() != "true",
-           "OIDC_GROUP_MANAGEMENT_UNREVIEWED")
+    demand(values.get("ENABLE_OAUTH_GROUP_MANAGEMENT", "false").lower() == "true",
+           "OIDC_GROUP_MANAGEMENT_NOT_ACTIVE")
+    demand(values.get("ENABLE_OAUTH_GROUP_CREATION", "false").lower() != "true"
+           and values.get("ENABLE_OAUTH_ROLE_MANAGEMENT", "false").lower() != "true"
+           and values.get("ENABLE_OAUTH_PERSISTENT_CONFIG", "false").lower() == "false",
+           "OIDC_PRIVILEGE_BASELINE_DRIFT")
     demand(not any(x in values for x in
                    ("DATABASE_URL", "DATABASE_TYPE", "DATABASE_USER")),
            "DATABASE_BACKEND_UNREVIEWED")
     db_file = Path(sources[0]) / "webui.db"
     demand(db_file.is_file() and not db_file.is_symlink(),
            "DATABASE_NOT_FOUND")
-    # First-stage release targets an EMPTY membership/ACL baseline. Even a
-    # single unexpected existing member can immediately see the new aliases;
-    # fail closed rather than accidentally enabling anyone at this stage.
+    # First-stage release now targets the VERIFIED OIDC-synchronized
+    # adult+family baseline. Members can see newly granted aliases immediately;
+    # fingerprint roster and fail if accounts/groups move between audit/apply.
     uri = db_file.resolve().as_uri() + "?mode=ro"
     with sqlite3.connect(uri, uri=True, timeout=4) as db:
         db.execute("PRAGMA query_only=ON")
@@ -114,10 +118,38 @@ def check_guest():
             "SELECT COUNT(*) FROM access_grant WHERE resource_type='model'"
         ).fetchone()[0]
         all_model_ids = {r[0] for r in db.execute('SELECT id FROM "model"')}
-    demand(member_count == 0, "GROUP_MEMBERSHIP_REVIEW_REQUIRED")
+        members = db.execute(
+            'SELECT gm.user_id, g.name FROM group_member gm '
+            'JOIN "group" g ON g.id=gm.group_id'
+        ).fetchall()
+        # Members are already present because OIDC sync is active. Only
+        # same-family user/group assignments are permitted. No account IDs or
+        # group names are ever printed; the roster is merely fingerprinted.
+        existing_names = {r[0] for r in db.execute('SELECT name FROM "group"')}
+        demand(existing_names == set(names.values()), "GROUP_SET_DRIFT")
+        demand(len(members) == member_count
+               and 0 < len(members) <= 12
+               and all(isinstance(uid, str) and uid and group in existing_names
+                       for uid, group in members),
+               "GROUP_MEMBERSHIP_REVIEW_REQUIRED")
+        adult = {uid for uid, group in members if group == names["adults"]}
+        child = {uid for uid, group in members if group == names["children"]}
+        family = {uid for uid, group in members if group == names["family"]}
+        demand(bool(adult) and not (adult & child)
+               and (adult | child).issubset(family),
+               "GROUP_MEMBERSHIP_REVIEW_REQUIRED")
+        roles = dict(db.execute('SELECT id, role FROM "user"').fetchall())
+        demand(all(roles.get(uid) in ("user", "pending", "admin")
+                   for uid, _ in members),
+               "GROUP_MEMBERSHIP_REVIEW_REQUIRED")
+        demand(all(roles.get(uid) == "user" for uid in adult),
+               "GROUP_MEMBERSHIP_REVIEW_REQUIRED")
     demand(existing_grants == 0 or existing_grants == 4,
            "MODEL_GRANT_BASELINE_DRIFT")
-    return all_model_ids
+    roster_hash = hashlib.sha256(json.dumps(
+        sorted(members), sort_keys=True, separators=(",", ":")
+    ).encode("utf-8")).hexdigest()
+    return all_model_ids, roster_hash
 
 
 def validate_names(names):
@@ -186,10 +218,10 @@ def matches_existing(record, plan, ids):
 
 def fetch_state(token, names, prompt):
     checked_version()
-    db_model_ids = check_guest()
+    db_model_ids, membership_hash = check_guest(names)
     oauth = get_json("/api/v1/auths/admin/config/oauth", token)
     demand(isinstance(oauth, dict)
-           and oauth.get("ENABLE_OAUTH_GROUP_MANAGEMENT") is False
+           and oauth.get("ENABLE_OAUTH_GROUP_MANAGEMENT") is True
            and oauth.get("ENABLE_OAUTH_GROUP_CREATION") is False
            and oauth.get("ENABLE_OAUTH_ROLE_MANAGEMENT") is False,
            "EFFECTIVE_OIDC_CONFIG_DRIFT")
@@ -242,6 +274,8 @@ def fetch_state(token, names, prompt):
     # Opaque snapshot, no user data or secret/identity fields in output.
     snap = {
         "group_id_map": ids,
+        "membership_fingerprint": membership_hash,
+        "oidc_group_management": "ACTIVE",
         "model_ids": sorted(current_ids),
         "profile_state": stage,
         "prompt_sha256": hashlib.sha256(prompt.encode()).hexdigest(),
