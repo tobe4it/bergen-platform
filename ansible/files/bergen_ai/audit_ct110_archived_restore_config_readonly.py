@@ -162,6 +162,83 @@ def sensitive_categories(values):
     return out
 
 
+def device_type(value):
+    """Categorize the host device name without exporting path or properties."""
+    if not isinstance(value, str) or len(value) > 2048:
+        return "UNVERIFIED"
+    path = value.split(",", 1)[0].strip()
+    if re.fullmatch(r"/dev/dri/renderD[0-9]+", path):
+        return "GPU_RENDER"
+    if re.fullmatch(r"/dev/dri/card[0-9]+", path):
+        return "GPU_CARD"
+    if path == "/dev/kfd":
+        return "GPU_KFD"
+    if re.fullmatch(r"/dev/video[0-9]+", path):
+        return "VIDEO"
+    if path.startswith("/dev/bus/usb/") or re.fullmatch(
+            r"/dev/(?:ttyUSB|ttyACM)[0-9]+", path):
+        return "USB"
+    if path == "/dev/net/tun":
+        return "TUN"
+    if path == "/dev/fuse":
+        return "FUSE"
+    if path.startswith("/dev/"):
+        return "OTHER_DEVICE"
+    return "UNRECOGNIZED_FORMAT"
+
+
+def cgroup_device_rule(value):
+    """Return only device *class* and scope, never major/minor/access tokens."""
+    if not isinstance(value, str):
+        return ("UNVERIFIED", "UNVERIFIED")
+    # LXC device policy follows a <type> <major>:<minor> <permissions> form.
+    match = re.fullmatch(r"([abc])\s+(\*|[0-9]+):(\*|[0-9]+)\s+([rwm]{1,3})", value.strip())
+    if match is None or len(set(match.group(4))) != len(match.group(4)):
+        return ("OTHER_RULE_FORMAT", "UNVERIFIED")
+    dev_type, major, minor, _ = match.groups()
+    if dev_type == "a" or major == "*":
+        return ("BROAD_ALL_DEVICES", "UNRESTRICTED_MAJOR")
+    if dev_type != "c":
+        return ("OTHER_BLOCK_OR_TYPE", "ALL_MINORS" if minor == "*" else "SINGLE_MINOR")
+    if major == "226":
+        kind = "DRM"
+    elif major == "10" and minor == "229":
+        kind = "FUSE"
+    elif major == "10" and minor == "200":
+        kind = "TUN"
+    elif major == "189":
+        kind = "USB"
+    elif major == "235":
+        kind = "ACCELERATOR_POSSIBLE"
+    else:
+        kind = "OTHER_CHAR_MAJOR"
+    return (kind, "ALL_MINORS" if minor == "*" else "SINGLE_MINOR")
+
+
+def device_details(values):
+    if values is None:
+        return dict(DEV0_CLASS="UNVERIFIED", DEV1_CLASS="UNVERIFIED",
+                    PVE_DEVICE_INDEX_PROFILE="UNVERIFIED",
+                    CGROUP_DEVICE_RULE_CLASS="UNVERIFIED",
+                    CGROUP_DEVICE_RULE_SCOPE="UNVERIFIED")
+    indices = sorted(k for k in values if re.fullmatch(r"dev[0-9]+", k))
+    index_class = "EXACT_DEV0_DEV1" if indices == ["dev0", "dev1"] else (
+        "NO_PVE_DEVICES" if not indices else "OTHER_DEVICE_INDICES")
+    rule_keys = [k for k in values if k in (
+        "lxc.cgroup.devices.allow", "lxc.cgroup2.devices.allow",
+        "lxc.cgroup.devices.deny", "lxc.cgroup2.devices.deny")]
+    if len(rule_keys) == 1 and len(values[rule_keys[0]]) == 1:
+        rule_class, rule_scope = cgroup_device_rule(values[rule_keys[0]][0])
+    else:
+        rule_class, rule_scope = ("NONE" if not rule_keys else "OTHER_OR_MULTIPLE", "UNVERIFIED")
+    return dict(
+        DEV0_CLASS=device_type(one(values, "dev0")) if "dev0" in values else "ABSENT",
+        DEV1_CLASS=device_type(one(values, "dev1")) if "dev1" in values else "ABSENT",
+        PVE_DEVICE_INDEX_PROFILE=index_class,
+        CGROUP_DEVICE_RULE_CLASS=rule_class,
+        CGROUP_DEVICE_RULE_SCOPE=rule_scope)
+
+
 def profile(values):
     if values is None:
         fields = {f"SENSITIVE_{kind}_COUNT": "UNVERIFIED"
@@ -178,7 +255,7 @@ def profile(values):
                     DANGEROUS_CONFIG_DIRECTIVES="UNVERIFIED",
                     SOURCE_HOSTNAME="UNVERIFIED",
                     SOURCE_ROOTFS="UNVERIFIED", SOURCE_UNPRIVILEGED="UNVERIFIED",
-                    STATUS="UNVERIFIED", **fields)
+                    STATUS="UNVERIFIED", **fields, **device_details(None))
     keys = list(values)
     networks = [k for k in keys if re.fullmatch(r"net[0-9]+", k)]
     mounts = [k for k in keys if re.fullmatch(r"mp[0-9]+", k)]
@@ -223,6 +300,7 @@ def profile(values):
                              else "UNKNOWN_OR_EXTRA_DEVICE",
         DANGEROUS_CONFIG_DIRECTIVES=len(sensitive),
         **sensitive_categories(values),
+        **device_details(values),
         SOURCE_HOSTNAME="EXPECTED_ORIGINAL" if hostname == "bergen-ai"
                         else "OTHER_OR_MISSING",
         SOURCE_ROOTFS="EXPECTED_LOCAL_ZFS" if root_expected
