@@ -2402,3 +2402,128 @@ cd "$WT"
   --vault-id ai@prompt
 )
 ```
+
+
+### Phase 0f.14 – Ursprüngliche GPU-/FUSE-Konfiguration nun vollständig kategorisiert (20.10.2026, 07:53)
+
+Der Operator führte den erweiterten Read-only-Konfigurationsaudit
+aus (`venombox ok=14 changed=0 failed=0`):
+
+```text
+STATUS=REVIEW_REQUIRED
+ARCHIVE_SELECTION=ONE_EXACT_BACKUP_CONFIG_SELECTED
+CONFIG_READ=PARSED
+SOURCE_HOSTNAME=EXPECTED_ORIGINAL
+SOURCE_ROOTFS=EXPECTED_LOCAL_ZFS
+SOURCE_UNPRIVILEGED=YES
+NETWORK_INTERFACE_COUNT=1
+ONBOOT=ENABLED
+EXTERNAL_MP_COUNT=0
+SENSITIVE_UNIQUE_COUNT=3
+SENSITIVE_DUPLICATE_OVERCOUNT=0
+DEV0_CLASS=GPU_RENDER
+DEV0_FORMAT=KEYED_PATH
+DEV1_CLASS=GPU_KFD
+DEV1_FORMAT=KEYED_PATH
+PVE_DEVICE_INDEX_PROFILE=EXACT_DEV0_DEV1
+CGROUP_DEVICE_RULE_CLASS=FUSE
+CGROUP_DEVICE_RULE_SCOPE=SINGLE_MINOR
+CGROUP_POLICY_ACTION=ALLOW
+ARCHIVE_CONFIG_SANITIZATION=NOT_PROVEN
+NETWORK_ISOLATION=NOT_PROVEN
+GUEST_START_POLICY=NOT_PROVEN
+RESTORE_EXECUTED=False
+RESTORE_AUTHORIZED=False
+GUEST_CREATED=False
+GUEST_STARTED=False
+RESTORE_TEST=NOT_ATTESTED
+ROLLBACK_CLEARANCE=NOT_PROVEN
+APPLY_AUTHORIZED=False
+```
+
+**Diagnose abgeschlossen:** Die drei separaten Geräte-Risikodirektiven
+sind `dev0` (GPU-Rendergerät), `dev1` (`/dev/kfd`-Klasse,
+GPU-Compute) und eine charakteristische FUSE-Cgroup-Allow-Regel.
+Der zuvor unerkannte Proxmox-Gerätewert wurde durch die Unterstützung
+von `path=` korrekt kategorisiert. Hostgerätedateien selbst sind
+**nicht** durch die CT110-`vzdump`-Sicherung repliziert.
+
+#### Wiederherstellungsdesign für CT910: Sicherheit vor Start
+
+**Ziel für den ersten Test:** Feststellen, ob das CT110-Archiv
+auf `local-zfs` als isolierter, ausgeschalteter LXC 910
+wiederhergestellt werden kann. **Keine** GPU-/FUSE-Gerätedurchreichung,
+kein produktives Netzwerk, kein Autostart. Ein späterer unabhängiger
+Funktionstest von Ollama/Open WebUI bedarf einer gesonderten
+Freigabe und kann zusätzliche Hardware-/FUSE-Bedingungen benötigen.
+
+Proxmox dokumentiert, dass `pct restore` standardmäßig möglichst
+viel der archivierten Konfiguration übernimmt, und dass bei Angabe
+von `rootfs` der Advanced-Modus **ausschließlich Rootfs-/mpN-
+Mountdefinitionen** durch explizite Optionen ersetzt. Daraus folgt
+**nicht**, dass `netN`, `devN`, `lxc.cgroup2.*` oder andere
+Hardware-Richtlinien automatisch entfernt würden.
+Dokumentation: https://github.com/proxmox/pve-docs/blob/master/pct.adoc
+und https://github.com/proxmox/pve-docs/blob/master/generated/pct.1-synopsis.adoc.
+
+Die später umsetzbare Abfolge müsste deshalb separat abgesichert werden:
+
+1. **Vorher:** Genau eine Archiv-ID mit nachgewiesenem
+   Zstd-/TAR-Stream-PASS; Proxmox-Host/Vmid-/Speicher-/Gast-
+   Istzustand nochmals unmittelbar vor jedem Eingriff prüfen.
+   VMID 910 ist bislang **nicht reserviert**. Keine Änderungen
+   an CT110 oder am Archiv; nie `--force`.
+2. **Restore-Erstellung:** Ein ausschließlich vom Betreiber
+   freizugebendes und mit exakten Parametern geprüftes
+   `pct restore 910` hätte `--start 0` und explizit
+   `--onboot 0`; Ziel-Rootfs auf `local-zfs`,
+   eigene Testidentität und niemals CT110. Vorab ist die
+   **lokale Proxmox-8.3-CLI-Semantik** dieser Optionen
+   lesend zu verifizieren.
+3. **Noch im ausgeschalteten Zustand:** Unmittelbar
+   nach einer erfolgreichen Archiv-Entpackung muss die
+   Testkonfiguration streng geprüft und gegebenenfalls
+   bereinigt werden, insbesondere **sämtliche** `netN`,
+   `devN`, `lxc.cgroup*.devices.*`, das bekannte
+   `lxc.mount.entry` für FUSE, `onboot`, `hostname`,
+   `rootfs`, Haken/Device-Mounts und alle übrigen
+   Netzwerk-/Hardware-Anbindungen. Keine Gastaktivierung
+   vor einem zweiten fail-closed Konfigurationsnachweis.
+4. **Isolations-Gate:** `pct status 910` muss
+   `stopped` bleiben; `onboot=0`, keinerlei `netN`
+   oder fremde Device-/Bind-Mounts, keine Backup-
+   oder Original-Rootfs-Verknüpfung, eindeutig isolierter
+   Storage-Bestand. Eine Host-Netzwerk- oder `vmbr90`-
+   Umstellung ist **nicht** Bestandteil dieses Tests.
+   Auch die Abwesenheit von Netzwerkschnittstellen in
+   der LXC-Konfiguration allein wäre noch **kein**
+   Nachweis, dass potenzielle App-Dienste nicht über
+   andere Ressourcen indirekt Zugriff erhalten.
+5. **Evidenz:** Bei keinem Testschritt Archivdaten,
+   Tokens, User-IDs oder Original-IP-Adressen in
+   öffentlichen Logs ausgeben. Erst nach erneuter
+   separater Entscheidung ist eine tatsächliche
+   Aktivierung zu prüfen; das Abbild selbst kann
+   vorerst **ausgeschaltet** archiviert oder manuell
+   unter bewusst gewählten Bedingungen entfernt werden.
+
+**Wichtig:** Es existiert weiterhin *kein* mutierendes
+Restore-Playbook. Die technische Möglichkeit, einen
+LXC auszupacken, ist keine Genehmigung zum Aufruf.
+Zusätzliche Schritte zum Absichern des Config-Übergangs
+und der hostseitigen Restore-Ausführung müssen vor
+einer späteren expliziten Einmalfreigabe getestet
+werden. Ein einfaches `pct restore` ohne vorherigen
+Plan bleibt verboten; es könnte Netzwerkschnittstellen,
+Autostart und Hostgerätedurchreichungen übernehmen.
+
+```text
+RESTORE_EXECUTED=False
+RESTORE_AUTHORIZED=False
+GUEST_CREATED=False
+GUEST_STARTED=False
+RESTORE_TEST=NOT_ATTESTED
+NETWORK_ISOLATION=NOT_PROVEN
+ROLLBACK_CLEARANCE=NOT_PROVEN
+APPLY_AUTHORIZED=False
+```
