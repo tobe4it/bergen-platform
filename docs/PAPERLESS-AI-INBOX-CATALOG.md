@@ -1478,3 +1478,103 @@ discovery level and is **not** the cause of the
 backup failure. All Paperless document metadata, AI
 UI, RAG/embeddings, scheduled AI and `vmbr90`
 remain unchanged by these audits.
+
+
+## Live native Ollama configuration apply SUCCEEDED – 2026-10-20 13:05
+
+The operator explicitly accepted the **2026-10-19 CT126 vzdump**
+as the rollback reference, confirming no relevant Paperless
+changes since then. The compressed archive passed
+`zstd -tq` and `tar --zstd -tf` integrity/structure checks;
+a full PostgreSQL/document recovery test was **not** performed.
+The 2026-10-20 03:00 scheduled backup **failed**
+(`Result=exit-code`, status 255); that independent incident
+remains open. The oneoff ORM configuration backup acceptance
+is not evidence that the failed scheduled backup was fixed.
+
+Operator applied the **separately approved** Paperless native
+Ollama settings change from `bp-controller` using:
+
+```text
+ansible/playbooks/manage-paperless-ai-local-ollama.yml
+paperless_ai_catalog_config_action=apply
+paperless_ai_catalog_config_approved=true
+paperless_ai_catalog_verified_backup=true (operator oneoff acceptance only)
+
+AUDIT=CONTROLLED
+STATUS=LOCAL_LLM_CONFIG_APPLIED
+AI_UI_ENABLED=NO
+EMBEDDINGS=OFF
+CHANGED=True
+
+venombox ok=9 changed=1 failed=0 skipped=1
+```
+
+The reviewed site-local configuration selected the
+existing private LXC110 Ollama endpoint
+(`192.168.20.225:11434`, DHCP at that time) and the
+installed `qwen2.5:14b-instruct-q4_K_M` model.
+The three intended Paperless ORM fields were
+`llm_backend`, `llm_model`, `llm_endpoint`.
+The runtime change reported success and no global AI
+UI or embedding activation. The guarded apply stores
+a private 0600 prechange snapshot for future rollback
+provided that its persistence was successful, but
+actual rollback has **not** been performed.
+
+**Important distinction:** a write-success status proves
+that the controlled Paperless config operation ran,
+but the *post-apply effective runtime state* and
+the document runner's `STATUS=READY` still require
+a **separate live read-only check**. The 13:05 apply
+response returns `CURRENT_SHA256=N/A` by design;
+refresh the hash before any future setting change.
+
+### Mandatory no-write postchecks
+
+On `bp-controller`, from the existing Paperless-AI
+worktree, run:
+
+```bash
+(
+set -euo pipefail
+BASE="$HOME/bergen-platform"
+WT="$HOME/bergen-platform-paperless-ai-catalog"
+cd "$WT"
+"$BASE/.venv/bin/ansible-playbook" \
+  -i ansible/inventory.yml \
+  -i "$BASE/ansible/inventory.local.yml" \
+  ansible/playbooks/manage-paperless-ai-local-ollama.yml \
+  --vault-id ai@prompt
+"$BASE/.venv/bin/ansible-playbook" \
+  -i ansible/inventory.yml \
+  -i "$BASE/ansible/inventory.local.yml" \
+  ansible/playbooks/manage-paperless-ai-inbox-catalog.yml \
+  --vault-id ai@prompt \
+  -e "@$BASE/ansible/vars/paperless-ai-catalog.local.yml"
+)
+```
+
+Expected first result: `AUDIT=READ_ONLY`,
+`STATUS=INSPECTED`, `AI_UI_ENABLED=NO`,
+`EMBEDDINGS=OFF`, `CHANGED=False`,
+a **new** `CURRENT_SHA256`.
+
+Expected second result if the endpoint/model and
+parent-owned inbox policies are still valid:
+`AUDIT=READ_ONLY`, `STATUS=READY`,
+`CHANGED=False`. No document is classified by
+either postcheck. If the second result is still
+`AI_CONFIG_NOT_READY`, investigate the effective
+database settings before any repeat `apply`:
+the guarded config snapshot explicitly prevents
+blind reapplication.
+
+**Still not authorized:** document-level
+`manage-paperless-ai-inbox-catalog.yml` apply,
+timer deployment, global Paperless AI UI,
+embeddings/RAG, the `vmbr90` network change,
+or Ollama listener/firewall modifications.
+The broader, unauthenticated TCP/11434 reachability
+from `bp-controller` on both address families
+remains an acknowledged, deferred security risk.
