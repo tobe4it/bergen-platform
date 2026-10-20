@@ -75,6 +75,9 @@ class Vmbr90ScopedApplyTests(TestCase):
                           "qm stop", "rm -rf", "curl", "wget", "OLLAMA_HOST="):
             self.assertNotIn(forbidden, source)
         self.assertIn("bridge-ports none", source)
+        self.assertIn("post-up echo 1 > /proc/sys/net/ipv6/conf/vmbr90/disable_ipv6", source)
+        self.assertIn("scoped_bridge_ipv6.stdout | trim == '1'", source)
+        self.assertIn("scoped_bridge_ports.stdout | from_json | length == 0", source)
         self.assertIn("iface vmbr90 inet manual", source)
         self.assertIn("argv: [ifup, vmbr90]", source)
         self.assertIn("argv: [ifdown, vmbr90]", source)
