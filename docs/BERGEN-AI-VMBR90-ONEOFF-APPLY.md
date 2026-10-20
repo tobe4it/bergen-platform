@@ -317,3 +317,61 @@ real geprüfter unabhängiger Konsole den Oneoff-Apply
 separat autorisieren. Die eigentliche Ollama-
 und Paperless-Endpunktumstellung ist anschließend
 weiterhin ein anderer Change.
+
+
+## Phase 1.3 – Vollständiger Live-Gateaudit (20.10.2026, 10:26)
+
+Der Betreiber hat das strikt schreibgeschützte Playbook
+`audit-bergen-ai-vmbr90-apply-gates-readonly.yml`
+nach Vervollständigung des ausschließlich lokal gespeicherten
+IPAM-Inventars ausgeführt:
+
+```text
+AUDIT=READ_ONLY
+CHANGED=False
+IPAM_DECLARED_RANGES=PASS
+IPAM_SCOPE_COMPLETE=PASS
+BRIDGE_UNUSED=PASS
+CT110_CT126_CT120_NIC_BASELINE=PASS
+LXC_PODMAN_NETWORK_RANGES=PASS
+LIVE_WIREGUARD_RANGES=PASS
+HOST_AND_CT_CONFIG_READABLE=PASS
+BACKUP_NFS=PASS
+CT110_RECENT_BACKUP_METADATA=PASS
+CT126_RECENT_BACKUP_METADATA=PASS
+HOST_IFUPDOWN2_DROPIN_PRECHECK=PASS
+CT110_CT126_RUNNING_NET0_ONLY=PASS
+HOST_SOURCE_DIAGNOSTIC=EXPLICIT_SOURCE_NO_PENDING_EDIT
+CT110_LAYOUT_DIAGNOSTIC=RUNNING_NET0_ONLY
+CT126_LAYOUT_DIAGNOSTIC=RUNNING_NET0_ONLY
+INDEPENDENT_CONSOLE_ACCESS=NOT_ATTESTED_BY_THIS_AUDIT
+FULL_NETWORK_CLEARANCE=NOT_PROVEN
+NETWORK_CHANGES=NONE
+OLLAMA_CHANGED=NO
+PAPERLESS_CHANGED=NO
+APPLY_AUTHORIZED=False
+```
+
+Ansible-Rekapitulation:
+`localhost ok=6 changed=0 failed=0`;
+`venombox ok=36 changed=0 failed=0`.
+Alle zwölf implementierten **technischen** Gates erfüllen
+den erforderlichen Vergleichswert. Die IPAM-Vollständigkeit
+ist eine Erklärung des Betreibers; keine unabhängige
+UniFi-/Offhost-Netzerhebung fand statt.
+
+**Noch erforderliche Freigabe vor dem ersten mutierenden
+Apply:** Unabhängigen Proxmox-Konsolenzugang und wirksame
+Rollback-Bedienbarkeit tatsächlich prüfen und attestieren.
+`INDEPENDENT_CONSOLE_ACCESS=NOT_ATTESTED_BY_THIS_AUDIT`
+ist ausdrücklich *kein* positiver Konsolennachweis.
+`ROLLBACK_CLEARANCE=NOT_PROVEN` aus dem gesonderten
+Baseline-Audit gilt weiterhin für den nicht ausgeführten
+Restore-Test. Auch erfolgreiche Metadatenchecks ersetzen
+keinen getesteten Container-Restore.
+
+Es wurden weder `vmbr90` noch `net1` erzeugt;
+CT110, CT126, Ollama und Paperless blieben unverändert.
+Die spätere Ollama-Endpunktbindung und native
+Paperless-LLM-Katalogisierung bleiben unabhängige
+Änderungen. PR bleibt Draft bis zur Produktionsverifikation.
