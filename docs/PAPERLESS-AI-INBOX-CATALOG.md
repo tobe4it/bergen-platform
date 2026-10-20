@@ -1578,3 +1578,65 @@ or Ollama listener/firewall modifications.
 The broader, unauthenticated TCP/11434 reachability
 from `bp-controller` on both address families
 remains an acknowledged, deferred security risk.
+
+## Live ORM post-apply audit 2026-10-20 13:08 – INSPECTED
+
+Operator reran `manage-paperless-ai-local-ollama.yml`
+with its default read-only `audit` action after the
+successful native-LLM configuration apply:
+
+```text
+AUDIT=READ_ONLY
+STATUS=INSPECTED
+CURRENT_SHA256=d1ec58b87da6163b99fca00e5aa144d9a421fbce129312fa84243afc5c2978ea
+AI_UI_ENABLED=NO
+EMBEDDINGS=OFF
+CHANGED=False
+venombox ok=9 changed=0 failed=0 skipped=1
+```
+
+This is the **post-change** configuration fingerprint,
+not a pre-change token; use a new live audit/fingerprint
+before any future mutually independent config change.
+The result confirms that the native configuration is
+readable, global AI UI remains disabled and the embeddings
+backend remains off. The `INSPECTED` status alone does
+**not** confirm the catalogue worker's effective endpoint
+and model, a live inference, or per-document permissions.
+No document metadata was changed during the postcheck.
+
+The excerpt preceding this run included an Ansible recap
+(`bp-controller ok=5`, `venombox ok=28`) without the
+corresponding task details; do not infer its function
+or effect from the recap alone.
+
+**Still required now:** run the independently existing
+`manage-paperless-ai-inbox-catalog.yml` using the
+ignored site-local variables file in unchanged
+`paperless_ai_catalog_mode: audit` and confirm
+`STATUS=READY` (not `AI_CONFIG_NOT_READY`).
+No `apply`, preview mutation, pilot or timer is approved.
+The originally observed `ELIGIBLE_SAMPLE=8`
+was **before** the native backend configuration,
+and must not be assumed to be the new count.
+
+```bash
+(
+set -euo pipefail
+BASE="$HOME/bergen-platform"
+WT="$HOME/bergen-platform-paperless-ai-catalog"
+cd "$WT"
+"$BASE/.venv/bin/ansible-playbook" \
+  -i ansible/inventory.yml \
+  -i "$BASE/ansible/inventory.local.yml" \
+  ansible/playbooks/manage-paperless-ai-inbox-catalog.yml \
+  --vault-id ai@prompt \
+  -e "@$BASE/ansible/vars/paperless-ai-catalog.local.yml"
+)
+```
+
+The scheduled CT126 backup failure on 20 Oct and wider
+Ollama TCP/11434 IPv4/IPv6 exposure remain separate
+open security/operational findings. The operator accepted
+the 19 Oct archive for the earlier **config-only** apply;
+that does not grant unattended document classification.
