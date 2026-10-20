@@ -82,7 +82,7 @@ class TestPilotReadonly(unittest.TestCase):
 
     def test_invalid_envelope_fails_without_django(self):
         x = subprocess.run(
-            [sys.executable, "-c", SCRIPT.read_text() + "\\nmain()"],
+            [sys.executable, "-c", SCRIPT.read_text() + "\nmain()"],
             input=json.dumps({"protocol": "unexpected", "pilot_ids": [42],
                               "show_candidate_ids": True}),
             text=True, capture_output=True, check=True, timeout=5,
