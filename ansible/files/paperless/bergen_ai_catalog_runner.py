@@ -242,7 +242,7 @@ def process_one(doc_id, group, minimum, pilot, db, *, notes_enabled=False):
     # All journal states (including review and no-change) are terminal from
     # the scheduler's perspective. Never replay an uncertain write.
     if db.execute("SELECT 1 FROM catalogue WHERE document_id=?", (doc_id,)).fetchone():
-        return "ALREADY_RECORDED", 0
+        return "ALREADY_RECORDED", 0, "NONE", "NONE"
     doc = guarded_document(doc_id, group, minimum, pilot)
     before = snapshot(doc)
     before_json = stable_snapshot(before)
@@ -329,7 +329,7 @@ def process_one(doc_id, group, minimum, pilot, db, *, notes_enabled=False):
             (state, after, json.dumps(changes, sort_keys=True), doc_id),
         )
         db.commit()
-        return state, notes_added
+        return state, notes_added, "NONE", "NONE"
     except Exception as exc:
         # Store only allowlisted failure *classifications*, never exception
         # strings, model output, title, OCR or identifiers. In particular,
@@ -353,7 +353,7 @@ def process_one(doc_id, group, minimum, pilot, db, *, notes_enabled=False):
                     json.dumps({"error_stage": stage, "error_code": code},
                                sort_keys=True), doc_id))
         db.commit()
-        return "REQUIRES_REVIEW", 0
+        return "REQUIRES_REVIEW", 0, stage, code
 
 
 def rollback_one(doc_id, group, db):
@@ -444,21 +444,26 @@ def run():
                     return
                 outcomes = []
                 notes_added = 0
+                failures = []
                 for doc_id in ids:
                     if mode == "rollback":
                         rollback_one(doc_id, group, db)
                         outcomes.append("ROLLED_BACK")
                     else:
-                        outcome, note_count = process_one(
+                        outcome, note_count, failure_stage, failure_code = process_one(
                             doc_id, group, min_id, bool(pilot), db,
                             notes_enabled=request.get("notes_enabled", False),
                         )
                         outcomes.append(outcome)
                         notes_added += note_count
+                        if outcome == "REQUIRES_REVIEW":
+                            failures.append((failure_stage, failure_code))
                 report(AUDIT="CONTROLLED", STATUS="COMPLETED",
                        APPLIED=outcomes.count("APPLIED"),
                        NO_CHANGE=outcomes.count("NO_CHANGE"),
                        NOTES_ADDED=notes_added,
+                       ERROR_STAGE=failures[0][0] if failures else "NONE",
+                       ERROR_CODE=failures[0][1] if failures else "NONE",
                        REVIEW_REQUIRED=outcomes.count("REQUIRES_REVIEW"),
                        ALREADY_RECORDED=outcomes.count("ALREADY_RECORDED"),
                        ROLLED_BACK=outcomes.count("ROLLED_BACK"),
