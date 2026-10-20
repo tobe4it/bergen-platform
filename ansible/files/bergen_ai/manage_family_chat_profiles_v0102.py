@@ -319,13 +319,20 @@ def run():
         demand(inp.get("approved") is True
                and inp.get("backup_verified") is True,
                "APPROVAL_OR_BACKUP_MISSING")
-        demand(inp.get("expected_sha256") == sha, "SNAPSHOT_CHANGED")
         demand(stage != "PROFILE_DRIFT", "PROFILE_DRIFT")
+        # Idempotence is a desired-state check, not a stale-preimage override:
+        # fetch_state has already verified all four IDs, base models, prompts,
+        # active flags and exactly one authorized group/read grant per profile.
+        # A second approved apply must therefore produce NO writes even when
+        # the pre-apply fingerprint is no longer current.
+        if mode == "apply" and stage == "ALREADY_STAGED":
+            response(AUDIT="CONTROLLED", STATUS="ALREADY_STAGED",
+                     CREATED=0, CHANGED=False)
+            return
+        # For every actual mutation (first apply or rollback), pin the exact
+        # pre-image. A partial or foreign inventory must always fail closed.
+        demand(inp.get("expected_sha256") == sha, "SNAPSHOT_CHANGED")
         if mode == "apply":
-            if stage == "ALREADY_STAGED":
-                response(AUDIT="CONTROLLED", STATUS="ALREADY_STAGED",
-                         CREATED=0, CHANGED=False)
-                return
             demand(stage == "EMPTY_READY", "UNEXPECTED_STATE")
             done = 0
             for plan_item in plan:
