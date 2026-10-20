@@ -23,6 +23,8 @@ on:
       - 'ansible/playbooks/stage-rocky-9-8-lxc-rootfs.yml'
       - 'ansible/playbooks/audit-rocky-9-8-staged-template-readonly.yml'
       - 'ansible/playbooks/audit-rocky-9-8-ct790-create-readonly.yml'
+      - 'ansible/playbooks/create-rocky-9-8-ct790-offline.yml'
+      - 'tests/test_rocky_lxc_ct790_create_plan.py'
       - 'ansible/files/nextcloud/audit_rocky_lxc_idmap_metadata.py'
       - 'tests/test_rocky_lxc_ct790_create_readonly.py'
       - 'tests/test_rocky_lxc_staged_template_readonly.py'
@@ -105,6 +107,10 @@ jobs:
           python3 -m unittest discover -s tests -p 'test_rocky_lxc_staged_template_readonly.py'
           python3 -m py_compile ansible/files/nextcloud/audit_rocky_lxc_idmap_metadata.py
           python3 -m unittest discover -s tests -p 'test_rocky_lxc_ct790_create_readonly.py'
+          python3 -m unittest discover -s tests -p 'test_rocky_lxc_ct790_create_plan.py'
+          ansible-playbook -i localhost, \
+            ansible/playbooks/create-rocky-9-8-ct790-offline.yml \
+            --syntax-check
           ansible-playbook -i localhost, \
             ansible/playbooks/audit-rocky-9-8-ct790-create-readonly.yml \
             --syntax-check
