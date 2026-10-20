@@ -10,6 +10,7 @@
     bp_ai_timer_model: "{{ paperless_ai_catalog_model | default('') }}"
     bp_ai_timer_endpoint: "{{ paperless_ai_catalog_endpoint | default('') }}"
     bp_ai_timer_watermark: "{{ paperless_ai_catalog_min_document_id | default(0) | int }}"
+    bp_ai_timer_auto_watermark: "{{ paperless_ai_catalog_initial_use_current_max_id | default(false) | bool }}"
   tasks:
     - name: Demand reviewed backups, local group, tested pilot and independent timer activation
       ansible.builtin.assert:
@@ -24,7 +25,7 @@
           - paperless_ai_catalog_notes_approved | default(false) | bool
           - paperless_native_ai_ui_approved | default(false) | bool
           - paperless_ai_catalog_approved | default(false) | bool
-          - bp_ai_timer_watermark > 0
+          - bp_ai_timer_watermark > 0 or bp_ai_timer_auto_watermark
           - bp_ai_timer_allowed_group is match('^[^\s@]+@[^\s@]+$')
           - bp_ai_timer_model is match('^[A-Za-z0-9_.:-]{1,96}$')
           - bp_ai_timer_endpoint is match('^http://[A-Za-z0-9.:-]+:11434/?$')
@@ -102,12 +103,20 @@
       changed_when: false
       no_log: true
 
+    - name: Pin a single live snapshot as first-activation watermark
+      ansible.builtin.set_fact:
+        bp_ai_timer_effective_watermark: >-
+          {{ (bp_ai_timer_max_lines[0] | regex_replace('^CATALOG_MAX_ID=', '') | int)
+             if bp_ai_timer_auto_watermark else (bp_ai_timer_watermark | int) }}
+      no_log: true
+
     - name: Reject historical-document reclassification with wrong watermark
       ansible.builtin.assert:
         that:
           - bp_ai_timer_max_doc.rc == 0
           - bp_ai_timer_max_lines | length == 1
-          - bp_ai_timer_watermark == (bp_ai_timer_max_lines[0] | regex_replace('^CATALOG_MAX_ID=', '') | int)
+          - bp_ai_timer_effective_watermark | int > 0
+          - bp_ai_timer_effective_watermark | int == (bp_ai_timer_max_lines[0] | regex_replace('^CATALOG_MAX_ID=', '') | int)
         fail_msg: WATERMARK_MUST_EQUAL_LIVE_MAX_DOCUMENT_ID
       no_log: true
 
@@ -172,6 +181,7 @@
     - name: Refuse unapproved changes to existing automatic jobs
       ansible.builtin.assert:
         that:
+          - not bp_ai_timer_auto_watermark or bp_ai_timer_previous.stdout | trim != 'enabled'
           - bp_ai_timer_previous.stdout | trim != 'enabled' or
             (paperless_ai_catalog_timer_upgrade_approved | default(false) | bool)
         fail_msg: EXISTING_AI_AUTOMATION_REQUIRES_SEPARATE_UPGRADE_APPROVAL
@@ -206,7 +216,7 @@
               'allowed_group': bp_ai_timer_allowed_group,
               'expected_model': bp_ai_timer_model,
               'expected_endpoint': bp_ai_timer_endpoint,
-              'min_document_id': bp_ai_timer_watermark,
+              'min_document_id': bp_ai_timer_effective_watermark | int,
               'pilot_ids': [],
               'batch_size': 1,
               'approved': true,
