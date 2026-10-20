@@ -24,7 +24,7 @@ from urllib.request import Request, ProxyHandler, HTTPRedirectHandler, build_ope
 
 from django.contrib.auth.models import Group
 from django.db import transaction
-from documents.models import Correspondent, Document, DocumentType, Tag
+from documents.models import Correspondent, Document, DocumentType, Note, Tag
 from documents.workflows.ai import resolve_object, resolve_tags
 from paperless.config import AIConfig
 from paperless.models import ApplicationConfiguration
@@ -122,6 +122,7 @@ def ensure_config(request, *, apply):
     demand(type(limit) is int and limit >= 0, "WATERMARK_INVALID")
     count = request.get("batch_size", 1)
     demand(type(count) is int and 1 <= count <= MAX_BATCH, "BATCH_INVALID")
+    demand(type(request.get("notes_enabled", False)) is bool, "NOTES_FLAG_INVALID")
     samples = request.get("pilot_ids", [])
     demand(isinstance(samples, list) and len(samples) <= MAX_BATCH
            and len(samples) == len(set(samples))
@@ -237,20 +238,33 @@ def resolve_choices(suggestions, owner):
     return tags, correspondent, kind
 
 
-def process_one(doc_id, group, minimum, pilot, db):
+def process_one(doc_id, group, minimum, pilot, db, *, notes_enabled=False):
+    # All journal states (including review and no-change) are terminal from
+    # the scheduler's perspective. Never replay an uncertain write.
     if db.execute("SELECT 1 FROM catalogue WHERE document_id=?", (doc_id,)).fetchone():
-        return "ALREADY_RECORDED"
+        return "ALREADY_RECORDED", 0
     doc = guarded_document(doc_id, group, minimum, pilot)
     before = snapshot(doc)
     before_json = stable_snapshot(before)
     db.execute("INSERT INTO catalogue(document_id,state,before_json) VALUES (?,?,?)",
                (doc_id, "PROCESSING", before_json))
     db.commit()
+    stage = "INFERENCE"
     try:
-        # Run upstream v3.3.0's native LLM classifier exactly once.
-        # Passing the real owner prevents cross-owner taxonomy lookup.
+        # The native classifier may be slow; output is treated as untrusted.
         suggestions = get_ai_document_classification(doc, doc.owner, None)
+        stage = "RESOLUTION"
         tags, correspondent, kind = resolve_choices(suggestions, doc.owner)
+        # This is only a suggestion rendered for the SAME document owner.
+        # Do not include OCR, filenames, prompts or other owners' metadata.
+        note_body = (review_note_text(
+            suggestions,
+            resolved_type_name=kind.name if kind else None,
+            resolved_tag_names=[t.name for t in tags],
+        ) if notes_enabled else None)
+
+        stage = "VALIDATION"
+        notes_added = 0
         with transaction.atomic():
             current_doc = Document.objects.select_for_update().get(pk=doc_id)
             demand(eligible(current_doc, group, minimum, pilot), "DOCUMENT_CHANGED")
@@ -261,44 +275,82 @@ def process_one(doc_id, group, minimum, pilot, db):
                 correspondent.pk if correspondent else None,
                 kind.pk if kind else None,
             )
-            if (changes["title"] is None
-                and changes["correspondent_id"] is None
-                and changes["document_type_id"] is None
-                and not changes["add_tag_ids"]):
-                raise PolicyError("NO_APPLICABLE_SUGGESTIONS")
-            if changes["title"] is not None:
-                current_doc.title = changes["title"]
-            if changes["correspondent_id"] is not None:
-                current_doc.correspondent_id = changes["correspondent_id"]
-            if changes["document_type_id"] is not None:
-                current_doc.document_type_id = changes["document_type_id"]
-            fields = [field for field in ("title", "correspondent", "document_type")
-                      if changes[field if field == "title" else field + "_id"] is not None]
-            if fields:
-                current_doc.save(update_fields=[*fields, "modified"])
-            add = [t for t in tags if t.pk in changes["add_tag_ids"]]
-            if add:
-                current_doc.add_nested_tags(add)
+            has_changes = has_metadata_changes(changes)
+            # Successful classification with an empty permissible diff is NOT
+            # an AI failure. Protect manual metadata and keep its inbox tag.
+            if notes_enabled:
+                demand(doc.owner.has_perm("documents.add_note"),
+                       "NOTE_PERMISSION_DENIED")
+            stage = "DB_WRITE"
+            if has_changes:
+                if changes["title"] is not None:
+                    current_doc.title = changes["title"]
+                if changes["correspondent_id"] is not None:
+                    current_doc.correspondent_id = changes["correspondent_id"]
+                if changes["document_type_id"] is not None:
+                    current_doc.document_type_id = changes["document_type_id"]
+                fields = [field for field in ("title", "correspondent", "document_type")
+                          if changes[field if field == "title" else field + "_id"] is not None]
+                if fields:
+                    current_doc.save(update_fields=[*fields, "modified"])
+                add = [t for t in tags if t.pk in changes["add_tag_ids"]]
+                if add:
+                    current_doc.add_nested_tags(add)
+            if notes_enabled:
+                # Native note model, no privileged API key or admin user.
+                # An atomic failure must roll back the metadata as well.
+                Note.objects.create(document=current_doc, user=doc.owner,
+                                    note=note_body)
+                notes_added = 1
             demand(current_doc.tags.filter(is_inbox_tag=True).exists(),
                    "INBOX_TAG_REMOVED")
             post = snapshot(current_doc)
-            # Nested tags may add parent tags; capture all additions precisely
-            # for rollback, never remove a previously existing (incl. inbox) tag.
+            # Do not permit note creation to rewrite unrelated document
+            # fields. At rest, keep the regular optimistic metadata snapshot.
+            demand(post["owner_id"] == before["owner_id"]
+                   and post["checksum"] == before["checksum"]
+                   and post["content_sha256"] == before["content_sha256"]
+                   and post["created"] == before["created"]
+                   and post["original_filename"] == before["original_filename"]
+                   and post["storage_path_id"] == before["storage_path_id"],
+                   "UNEXPECTED_DOCUMENT_CHANGE")
+            # Nested tags may add parents: record them for guarded rollback.
             changes["add_tag_ids"] = sorted(
                 set(post["tag_ids"]) - set(before["tag_ids"])
             )
             after = stable_snapshot(post)
-        db.execute("UPDATE catalogue SET state=?,after_json=?,applied_json=? WHERE document_id=?",
-                   ("APPLIED", after, json.dumps(changes, sort_keys=True), doc_id))
+            state = "APPLIED" if has_changes else "NO_CHANGE"
+        stage = "JOURNAL"
+        db.execute(
+            "UPDATE catalogue SET state=?,after_json=?,applied_json=? WHERE document_id=?",
+            (state, after, json.dumps(changes, sort_keys=True), doc_id),
+        )
         db.commit()
-        return "APPLIED"
-    except Exception:
-        # Never retry an indeterminate write without a human reviewing
-        # the document and the persistent journal. Retain the inbox tag.
-        db.execute("UPDATE catalogue SET state=? WHERE document_id=?",
-                   ("REQUIRES_REVIEW", doc_id))
+        return state, notes_added
+    except Exception as exc:
+        # Store only allowlisted failure *classifications*, never exception
+        # strings, model output, title, OCR or identifiers. In particular,
+        # write-indeterminate failures remain REQUIRES_REVIEW; no retry.
+        allowlisted = {
+            "DOCUMENT_CHANGED", "INBOX_TAG_REMOVED", "SNAPSHOT_INVALID",
+            "UNEXPECTED_DOCUMENT_CHANGE", "NOTE_PERMISSION_DENIED",
+            "NOTE_SUGGESTIONS_INVALID", "CHANGES_INVALID", "SUGGESTIONS_INVALID",
+            "TAGS_INVALID", "INBOX_REMOVED", "CORRESPONDENT_INVALID",
+            "DOCUMENT_TYPE_INVALID",
+        }
+        code = str(exc) if isinstance(exc, PolicyError) and str(exc) in allowlisted else {
+            "INFERENCE": "LLM_FAILURE",
+            "RESOLUTION": "MATCHING_FAILURE",
+            "VALIDATION": "VALIDATION_FAILURE",
+            "DB_WRITE": "PERSISTENCE_FAILURE",
+            "JOURNAL": "JOURNAL_COMMIT_FAILURE",
+        }.get(stage, "UNCLASSIFIED_FAILURE")
+        db.execute("UPDATE catalogue SET state=?,applied_json=? WHERE document_id=?",
+                   ("REQUIRES_REVIEW",
+                    json.dumps({"error_stage": stage, "error_code": code},
+                               sort_keys=True), doc_id))
         db.commit()
-        return "REQUIRES_REVIEW"
+        return "REQUIRES_REVIEW", 0
 
 
 def rollback_one(doc_id, group, db):
@@ -386,19 +438,26 @@ def run():
                            CHANGED=False)
                     return
                 outcomes = []
+                notes_added = 0
                 for doc_id in ids:
                     if mode == "rollback":
                         rollback_one(doc_id, group, db)
                         outcomes.append("ROLLED_BACK")
                     else:
-                        outcomes.append(process_one(doc_id, group, min_id,
-                                                    bool(pilot), db))
+                        outcome, note_count = process_one(
+                            doc_id, group, min_id, bool(pilot), db,
+                            notes_enabled=request.get("notes_enabled", False),
+                        )
+                        outcomes.append(outcome)
+                        notes_added += note_count
                 report(AUDIT="CONTROLLED", STATUS="COMPLETED",
                        APPLIED=outcomes.count("APPLIED"),
+                       NO_CHANGE=outcomes.count("NO_CHANGE"),
+                       NOTES_ADDED=notes_added,
                        REVIEW_REQUIRED=outcomes.count("REQUIRES_REVIEW"),
                        ALREADY_RECORDED=outcomes.count("ALREADY_RECORDED"),
                        ROLLED_BACK=outcomes.count("ROLLED_BACK"),
-                       CHANGED=any(x in ("APPLIED", "ROLLED_BACK") for x in outcomes),
+                       CHANGED=notes_added > 0 or any(x in ("APPLIED", "ROLLED_BACK") for x in outcomes),
                        INBOX_TAG_REMOVAL="NEVER",
                        DOCUMENT_ACL_CHANGES="NEVER")
     except PolicyError as exc:
