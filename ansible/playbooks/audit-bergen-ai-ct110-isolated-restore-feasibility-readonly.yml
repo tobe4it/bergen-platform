@@ -63,6 +63,7 @@
           - "restore_feasibility.CANDIDATE_VMID == 910"
           - "restore_feasibility.CANDIDATE_VMID_STATE in ['UNUSED_AT_CHECK_TIME', 'IN_USE', 'UNVERIFIED']"
           - "restore_feasibility.TARGET_STORAGE_CLASS in ['ACTIVE_ROOTDIR_ZFS_WITH_BUFFER', 'STORAGE_INACTIVE', 'NOT_ROOTDIR_ZFS_STORAGE', 'INSUFFICIENT_CAPACITY_WITH_BUFFER', 'UNVERIFIED']"
+          - "restore_feasibility.BACKUP_NFS_STATE in ['EXPECTED_ACTIVE_NFS', 'UNVERIFIED']"
           - "restore_feasibility.CT110_ARCHIVE_METADATA in ['ONE_NONEMPTY_CT110_ZSTD_ARCHIVE', 'NO_UNIQUE_CT110_ARCHIVE', 'ARCHIVE_METADATA_UNEXPECTED', 'UNVERIFIED']"
       no_log: true
 
@@ -75,6 +76,7 @@
           - "CANDIDATE_VMID={{ restore_feasibility.CANDIDATE_VMID }}"
           - "CANDIDATE_VMID_STATE={{ restore_feasibility.CANDIDATE_VMID_STATE }}"
           - "TARGET_STORAGE_CLASS={{ restore_feasibility.TARGET_STORAGE_CLASS }}"
+          - "BACKUP_NFS_STATE={{ restore_feasibility.BACKUP_NFS_STATE }}"
           - "CT110_ARCHIVE_METADATA={{ restore_feasibility.CT110_ARCHIVE_METADATA }}"
           - "ARCHIVE_STREAM_CHECK={{ restore_feasibility.ARCHIVE_STREAM_CHECK }}"
           - ARCHIVE_CONFIG_SANITIZATION=NOT_PROVEN
