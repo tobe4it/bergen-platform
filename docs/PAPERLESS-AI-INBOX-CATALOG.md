@@ -2059,3 +2059,59 @@ The accepted 19 October CT126 backup is unchanged;
 20 October daily backup rc 255 and wildcard Ollama
 TCP/11434 access remain open issues. All eight documents
 have not been classified successfully.
+
+
+## Live document 11 journal audit – baseline preserved (2026-10-20 15:38)
+
+Operator executed `audit-paperless-ai-catalog-review-readonly.yml`
+with exact `paperless_ai_catalog_review_document_id=11`.
+The existing Proxmox Paperless guest was verified, and all
+Ansible tasks passed without changes:
+
+```text
+AUDIT=READ_ONLY
+STATUS=INSPECTED
+JOURNAL_STATE=REQUIRES_REVIEW
+SNAPSHOT_MATCH=MATCH
+DIFFERENCE_CATEGORY=NONE
+INBOX_TAG=PRESENT
+JOURNAL_AFTER_SNAPSHOT=ABSENT
+MODEL_INFERENCE=NO
+DOCUMENTS_CHANGED=NO
+CHANGED=False
+venombox ok=9 changed=0 failed=0
+```
+
+**Conclusions:** The persistent journal has marked document
+11 for manual review and therefore prevents an unreviewed
+retry. At read time the document's protected owner/title,
+source fingerprint, OCR hash, type, correspondent, tag set,
+inbox state and timestamps matched the journal preimage.
+No completed after-snapshot exists. This does **not** reveal
+the original Python exception, establish whether the earlier
+attempt invoked inference, or prove no transient writes
+occurred; `MODEL_INFERENCE=NO` applies **only to this
+subsequent audit**. Do not remove, alter or purge its SQLite
+journal entry and do not run a second `apply` for document
+11. Its current user-facing metadata remains as before.
+
+The operator had already explicitly authorized the fixed
+eight eligible document candidates. The documented,
+one-document-per-invocation fail-stop processing can
+resume **only for the four not-yet-attempted candidate
+IDs**, never include previously recorded documents
+2, 5, 10 or blocked document 11 in the resumption.
+Pre-existing eligibility and configuration gates must
+run on each invocation; require `APPLIED=1`,
+`REVIEW_REQUIRED=0`, `ALREADY_RECORDED=0`,
+`CHANGED=True` after each, and stop on any anomaly.
+Do not equate the approval with automation, timer
+activation or future unbounded scans.
+
+After the four outstanding IDs have been attempted,
+inspect outcomes before any decision on a separate,
+version-pinned explanation and repair workflow for
+document 11. The routine cannot retrospectively
+recover the exception because the runner intentionally
+does not emit or retain it. Backup job rc 255 and
+Ollama port exposure remain independent open issues.
