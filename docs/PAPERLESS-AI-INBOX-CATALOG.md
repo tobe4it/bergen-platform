@@ -942,3 +942,93 @@ during classification halts that document for manual review.**
   for unsafe shared-field overwrites.
 - Documentation: https://docs.paperless-ngx.com/advanced_usage/ and
   https://docs.paperless-ngx.com/configuration/.
+
+
+## Paperless-first decision while vmbr90 is suspended (2026-10-20)
+
+The operator confirmed that `venombox` has **no independent, tested
+console outside SSH**. Consequently, the previously planned
+`vmbr90` bridge + secondary CT110/CT126 NIC apply is **suspended**
+(Draft PR #119). The 12/12 successful read-only bridge gates are
+not a substitute for a recovery path following SSH disconnection.
+Do not set a fictional `CONSOLE_VERIFIED_AND_ROLLBACK_AVAILABLE`
+attestation.
+
+**Preferred workstream now:** complete the native Paperless-ngx
+3.3.0 AI inbox catalogue in this PR using the *existing*
+LXC126 Paperless-Podman → LXC110 Ollama connection.
+
+Previously demonstrated, not to be confused with production
+authorization:
+
+- Real Paperless-Podman client successfully reached the existing
+  private IPv4 Ollama endpoint and saw the exact
+  `qwen2.5:14b-instruct-q4_K_M` model.
+- Paperless native model/backend/endpoint was
+  `NOT_CONFIGURED` at the initial audit.
+- The Ollama service listened on wildcard address(es).
+  An **unapproved** `bp-controller` source could make a
+  TCP/11434 connection over **both IPv4 and IPv6**.
+  This remains a demonstrable excessive-exposure condition.
+- `firewall=1` or running PVE firewall daemons alone do
+  not show enforcement for this route. Distinct bridges and
+  ambiguous VLAN tag evidence also prevent assumptions
+  about where packet filtering takes effect.
+- Existing Paperless OCR/inbox metadata and OIDC parent
+  groups were inventoried without changes; CI for this
+  Draft PR is green, but no document pilot has run.
+
+**Do not weaken the security gate to proceed faster.**
+While the unapproved TCP reachability remains, the native
+Paperless LLM endpoint/model `apply`, one-document
+catalogue `apply`, global AI UI, embeddings/RAG and the
+automatic timer all stay **NOT AUTHORIZED**.
+No Proxmox bridge/NIC, guest/host firewall, Ollama listener
+change, service restart, or public proxy should be made
+through this workstream without its own safety review.
+
+### Next safe operator action: inspect current effective filters, read-only
+
+Run the existing bounded `nft`/iptables/IPv6 inspection
+without emitting source addresses or firewall rules:
+
+```bash
+(
+set -euo pipefail
+BASE="$HOME/bergen-platform"
+WT="$HOME/bergen-platform-paperless-ai-catalog"
+git -C "$WT" fetch origin feat/paperless-native-ai-inbox-catalog-20261018
+git -C "$WT" switch --detach origin/feat/paperless-native-ai-inbox-catalog-20261018
+cd "$WT"
+"$BASE/.venv/bin/ansible-playbook" \
+  -i ansible/inventory.yml \
+  -i "$BASE/ansible/inventory.local.yml" \
+  ansible/playbooks/audit-paperless-ai-ollama-runtime-filter-readonly.yml \
+  --vault-id ai@prompt
+)
+```
+
+Inspect the **sanitized** runtime summary before selecting a policy
+enforcement point. The earlier negative-client TCP proof cannot be
+overridden by a rule-count-only audit; observed source identities
+and an actually effective IPv4/IPv6 allowlist require separate proof.
+Do not apply host/guest network changes without an operationally
+reliable rollback/recovery path.
+
+A separate previously authored, operator-approved TCP-only source
+observation (`audit-paperless-ai-ollama-observed-source.yml`)
+can later be used in a quiet window to identify the *actual*
+Paperless source seen by Ollama. That probe is **not**
+implicitly approved by the decision to prioritize Paperless.
+Do not invent an allowed source IP from a Podman local route.
+
+After an independently verified access-control design and actual
+positive-Paperless/negative-unapproved-client tests, refresh the
+read-only Paperless ORM fingerprint, verify Paperless DB+files
+backups, configure only the native local LLM setting with
+the separate explicit gate, then preview and run **one**
+parent-owned inbox document. Keep the inbox tag for human
+review; timer activation and any unattended processing
+remain later releases.
+
+No production changes performed by this documentation update.
