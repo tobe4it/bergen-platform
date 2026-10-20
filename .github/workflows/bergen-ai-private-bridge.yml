@@ -15,6 +15,7 @@ on:
       - 'ansible/files/bergen_ai/audit_ct110_runtime_mount_relationships_readonly.py'
       - 'ansible/files/bergen_ai/audit_ct110_postbackup_archive_readonly.py'
       - 'ansible/files/bergen_ai/verify_ct110_archive_stream_readonly.py'
+      - 'ansible/files/bergen_ai/audit_ct110_isolated_restore_feasibility_readonly.py'
       - 'ansible/playbooks/audit-bergen-ai-private-bridge-readonly.yml'
       - 'ansible/playbooks/audit-bergen-ai-private-bridge-extended-readonly.yml'
       - 'ansible/playbooks/audit-bergen-ai-private-bridge-external-gates-readonly.yml'
@@ -28,6 +29,7 @@ on:
       - 'ansible/playbooks/audit-bergen-ai-ct110-runtime-mount-relationships-readonly.yml'
       - 'ansible/playbooks/audit-bergen-ai-ct110-postbackup-archive-readonly.yml'
       - 'ansible/playbooks/verify-bergen-ai-ct110-archive-stream-readonly.yml'
+      - 'ansible/playbooks/audit-bergen-ai-ct110-isolated-restore-feasibility-readonly.yml'
       - 'docs/BERGEN-AI-PRIVATE-PROXMOX-BRIDGE.md'
       - 'tests/test_bergen_ai_private_bridge_preflight.py'
       - 'tests/test_bergen_ai_private_bridge_external_gates.py'
@@ -40,6 +42,7 @@ on:
       - 'tests/test_bergen_ai_ct110_runtime_mount_relationships_readonly.py'
       - 'tests/test_bergen_ai_ct110_postbackup_archive_readonly.py'
       - 'tests/test_bergen_ai_ct110_archive_stream_readonly.py'
+      - 'tests/test_bergen_ai_ct110_isolated_restore_feasibility_readonly.py'
       - 'docs/examples/bergen-ai-bridge-ipam.local.json.example'
       - '.github/workflows/bergen-ai-private-bridge.yml'
   push:
@@ -57,6 +60,7 @@ on:
       - 'ansible/files/bergen_ai/audit_ct110_runtime_mount_relationships_readonly.py'
       - 'ansible/files/bergen_ai/audit_ct110_postbackup_archive_readonly.py'
       - 'ansible/files/bergen_ai/verify_ct110_archive_stream_readonly.py'
+      - 'ansible/files/bergen_ai/audit_ct110_isolated_restore_feasibility_readonly.py'
       - 'ansible/playbooks/audit-bergen-ai-private-bridge-readonly.yml'
       - 'ansible/playbooks/audit-bergen-ai-private-bridge-extended-readonly.yml'
       - 'ansible/playbooks/audit-bergen-ai-private-bridge-external-gates-readonly.yml'
@@ -70,6 +74,7 @@ on:
       - 'ansible/playbooks/audit-bergen-ai-ct110-runtime-mount-relationships-readonly.yml'
       - 'ansible/playbooks/audit-bergen-ai-ct110-postbackup-archive-readonly.yml'
       - 'ansible/playbooks/verify-bergen-ai-ct110-archive-stream-readonly.yml'
+      - 'ansible/playbooks/audit-bergen-ai-ct110-isolated-restore-feasibility-readonly.yml'
       - 'tests/test_bergen_ai_private_bridge_preflight.py'
       - 'tests/test_bergen_ai_private_bridge_external_gates.py'
       - 'tests/test_bergen_ai_private_bridge_backup_inventory.py'
@@ -81,6 +86,7 @@ on:
       - 'tests/test_bergen_ai_ct110_runtime_mount_relationships_readonly.py'
       - 'tests/test_bergen_ai_ct110_postbackup_archive_readonly.py'
       - 'tests/test_bergen_ai_ct110_archive_stream_readonly.py'
+      - 'tests/test_bergen_ai_ct110_isolated_restore_feasibility_readonly.py'
       - 'docs/examples/bergen-ai-bridge-ipam.local.json.example'
 
 jobs:
@@ -108,6 +114,7 @@ jobs:
           python -m unittest discover -s tests -p 'test_bergen_ai_ct110_runtime_mount_relationships_readonly.py' -v
           python -m unittest discover -s tests -p 'test_bergen_ai_ct110_postbackup_archive_readonly.py' -v
           python -m unittest discover -s tests -p 'test_bergen_ai_ct110_archive_stream_readonly.py' -v
+          python -m unittest discover -s tests -p 'test_bergen_ai_ct110_isolated_restore_feasibility_readonly.py' -v
       - name: Validate read-only Proxmox inventory playbook syntax
         run: |
           ansible-playbook -i ansible/inventory.yml \
@@ -136,3 +143,5 @@ jobs:
             ansible/playbooks/audit-bergen-ai-ct110-postbackup-archive-readonly.yml --syntax-check
           ansible-playbook -i ansible/inventory.yml \
             ansible/playbooks/verify-bergen-ai-ct110-archive-stream-readonly.yml --syntax-check
+          ansible-playbook -i ansible/inventory.yml \
+            ansible/playbooks/audit-bergen-ai-ct110-isolated-restore-feasibility-readonly.yml --syntax-check
