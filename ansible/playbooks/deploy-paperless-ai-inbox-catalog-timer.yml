@@ -20,6 +20,9 @@
           - paperless_ai_catalog_timer_approved | default(false) | bool
           - paperless_ai_catalog_verified_backup | default(false) | bool
           - paperless_ai_catalog_pilot_passed | default(false) | bool
+          - paperless_ai_catalog_notes_enabled | default(false) | bool
+          - paperless_ai_catalog_notes_approved | default(false) | bool
+          - paperless_native_ai_ui_approved | default(false) | bool
           - paperless_ai_catalog_approved | default(false) | bool
           - bp_ai_timer_watermark > 0
           - bp_ai_timer_allowed_group is match('^[^\s@]+@[^\s@]+$')
@@ -156,7 +159,8 @@
               'min_document_id': bp_ai_timer_watermark,
               'pilot_ids': [],
               'batch_size': 1,
-              'approved': true
+              'approved': true,
+              'notes_enabled': true
              } | to_json }}
         dest: "{{ bp_ai_timer_conf_dir }}/catalog-policy.json"
         owner: root
@@ -208,6 +212,8 @@
           - TIMER=ENABLED
           - SCOPE=ONLY_NEW_POST_WATERMARK_ELTERN_INBOX_DOCUMENTS
           - METADATA=TITLE_CORRESPONDENT_TAGS_DOCUMENT_TYPE
+          - NOTES=ENABLED_FOR_VALIDATED_CLASSIFICATION_ONLY
+          - FAILURE=PRIVATE_JOURNAL_ONLY_NO_RETRY
           - INBOX_TAG_REMOVAL=NEVER
           - DOCUMENT_PERMISSIONS=UNCHANGED
           - AMBIGUOUS_DOCUMENT_RETRIES=MANUAL_REVIEW_ONLY
