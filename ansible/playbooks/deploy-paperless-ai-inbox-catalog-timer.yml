@@ -111,6 +111,56 @@
         fail_msg: WATERMARK_MUST_EQUAL_LIVE_MAX_DOCUMENT_ID
       no_log: true
 
+    - name: Read only production AI, parent Note permissions and embedding preconditions
+      ansible.builtin.command:
+        argv:
+          - pct
+          - exec
+          - '126'
+          - --
+          - podman
+          - exec
+          - -i
+          - bergen-paperless
+          - python
+          - /usr/src/paperless/src/manage.py
+          - shell
+          - --verbosity=0
+          - -c
+          - "{{ lookup('ansible.builtin.file', playbook_dir ~ '/../files/paperless/bergen_ai_catalog_timer_readiness.py', rstrip=False) }}"
+        stdin: >-
+          {{ {'protocol': 'catalog-timer-ready-v1',
+              'model': bp_ai_timer_model,
+              'endpoint': bp_ai_timer_endpoint,
+              'group': bp_ai_timer_allowed_group} | to_json }}
+        stdin_add_newline: true
+      register: bp_timer_ready_raw
+      changed_when: false
+      failed_when: false
+      no_log: true
+
+    - name: Extract exactly one non-identifying readiness frame
+      ansible.builtin.set_fact:
+        bp_timer_ready_frames: >-
+          {{ bp_timer_ready_raw.stdout_lines | default([]) |
+             select('match', '^BERGEN_PAPERLESS_AI_TIMER_READINESS_V1:') | list }}
+      no_log: true
+
+    - name: Fail closed if no verified AI UI or scoped native note rights
+      ansible.builtin.assert:
+        that:
+          - bp_timer_ready_raw.rc == 0
+          - bp_timer_ready_frames | length == 1
+          - bp_timer_ready_frames[0] | length < 900
+          - (bp_timer_ready_frames[0] |
+             regex_replace('^BERGEN_PAPERLESS_AI_TIMER_READINESS_V1:', '') |
+             from_json).STATUS == 'READY'
+          - (bp_timer_ready_frames[0] |
+             regex_replace('^BERGEN_PAPERLESS_AI_TIMER_READINESS_V1:', '') |
+             from_json).CHANGED == false
+        fail_msg: PAPERLESS_AI_TIMER_PARENT_NOTES_OR_UI_NOT_READY
+      no_log: true
+
     - name: Inspect whether a timer was already enabled
       ansible.builtin.command:
         argv: [systemctl, is-enabled, bergen-ai-catalog.timer]
