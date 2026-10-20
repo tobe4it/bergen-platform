@@ -1032,3 +1032,101 @@ review; timer activation and any unattended processing
 remain later releases.
 
 No production changes performed by this documentation update.
+
+## Operator decision 20.10.2026 – connect Paperless to existing Ollama first
+
+The operator explicitly selected **connecting the existing Paperless native
+LLM backend/model/endpoint first**, and restricting the already exposed
+Ollama API separately later. This changes the *order of work for the
+client configuration only*; it does **not** approve the `vmbr90` Proxmox
+network apply, a firewall or Ollama listener change, document classification,
+global AI UI, embeddings/RAG, or an automatic catalog timer.
+
+Technical boundary:
+- LXC126's real Paperless Podman container **already reached** the existing
+  LXC110 Ollama instance and the exact `qwen2.5:14b-instruct-q4_K_M` model.
+  The planned first change is **only** Paperless-ngx's existing
+  `ApplicationConfiguration` ORM fields `llm_backend`, `llm_model`,
+  `llm_endpoint`. It creates no new network interface or API exposure.
+- The latest live Ollama security audit (20.10.2026, 10:43) found
+  `OLLAMA_IPV6_BIND=WILDCARD`, `OLLAMA_IPV4_BIND=NONE` and
+  `EFFECTIVE_TCP_11434_DENY=NOT_VERIFIED`. The earlier explicitly
+  unauthorized bp-controller TCP client reached port 11434 over both IPv4
+  and IPv6. Deferring access restrictions leaves that known risk unresolved.
+- Paperless backend configuration should be restricted to the **exact
+  verified private endpoint** reached from Paperless Podman. Do not
+  invent a new IP, use localhost in Paperless or rely on documentation
+  example `192.168.0.100`.
+- An effective Paperless DB+document-file backup, exact optimistic
+  `CURRENT_SHA256`, current exact Qwen model reachability and the
+  protected preimage mechanism remain required. The earlier CT126
+  `RECENT_FILE_METADATA_ONLY` evidence is **not** restore verification.
+- Do **not** assert the verified-backup boolean or approval unless they are
+  actually true. Never overwrite an existing preimage. No automatic
+  writes of document title, correspondent, type or tags are authorized
+  by this client configuration decision.
+
+### Staged operator commands (bp-controller)
+
+**1. Reverify the existing Paperless→Ollama path without writes:**
+
+```bash
+(
+set -euo pipefail
+BASE="$HOME/bergen-platform"
+WT="$HOME/bergen-platform-paperless-ai-catalog"
+git -C "$WT" fetch origin feat/paperless-native-ai-inbox-catalog-20261018
+git -C "$WT" switch --detach origin/feat/paperless-native-ai-inbox-catalog-20261018
+cd "$WT"
+"$BASE/.venv/bin/ansible-playbook" \
+  -i ansible/inventory.yml \
+  -i "$BASE/ansible/inventory.local.yml" \
+  ansible/playbooks/audit-paperless-ai-ollama-private-path-readonly.yml \
+  --vault-id ai@prompt
+)
+```
+
+**2. Read the *current* native Paperless configuration fingerprint,
+still without writes:**
+
+```bash
+(
+set -euo pipefail
+BASE="$HOME/bergen-platform"
+WT="$HOME/bergen-platform-paperless-ai-catalog"
+cd "$WT"
+"$BASE/.venv/bin/ansible-playbook" \
+  -i ansible/inventory.yml \
+  -i "$BASE/ansible/inventory.local.yml" \
+  ansible/playbooks/manage-paperless-ai-local-ollama.yml \
+  --vault-id ai@prompt
+)
+```
+
+Expected audit fields: `AUDIT=READ_ONLY`, `STATUS=INSPECTED`,
+`AI_UI_ENABLED=NO`, `EMBEDDINGS=OFF`, a 64-character
+`CURRENT_SHA256`, `CHANGED=False`.
+
+**3. Only after independent backup confirmation and reviewed private
+endpoint/model:** Edit the ignored controller-local
+`$BASE/ansible/vars/paperless-ai-catalog.local.yml` with the actual
+private URI/selected model, `paperless_ai_catalog_config_action:
+apply`, `paperless_ai_catalog_config_approved: true`,
+`paperless_ai_catalog_verified_backup: true`, and the fingerprint
+just observed. Then run `manage-paperless-ai-local-ollama.yml`
+with the reviewed variables file, as described under '1a' above.
+That playbook changes only the three ORM fields. If a backup,
+fingerprint or endpoint is not confirmed, **stop before apply**.
+
+**4. Postcheck:** Rerun the ORM configuration audit (without local
+apply flags), confirm the existing private-path model and ensure
+Paperless global AI/UI and embeddings remain off.
+Do not run the document-level `manage-paperless-ai-inbox-catalog.yml`
+apply or `deploy-paperless-ai-inbox-catalog-timer.yml` yet.
+
+The security hard gate now explicitly applies to **document-level
+processing and unattended use**, while the one-time native connection
+configuration can be separately operator-approved with its own safe
+backup, model, endpoint and fingerprint prerequisites. The deferred
+access restriction remains an open finding and must not be called fixed
+or masked by a successful Paperless backend configuration.
