@@ -50,8 +50,11 @@ def verify_envelope(req):
     demand(req.get("mode") in ("audit", "apply", "rollback"), "MODE_INVALID")
     demand(ApplicationConfiguration.objects.count() == 1, "APP_CONFIG_UNREVIEWED")
     effective = AIConfig()
-    # The deployment must not make existing AI UI or embeddings available.
-    demand(not effective.ai_enabled and not effective.llm_embedding_backend,
+    # Local backend configuration may be audited even after a separately
+    # approved native AI UI enablement; embeddings must always stay OFF.
+    demand(not effective.llm_embedding_backend,
+           "GLOBAL_AI_OR_INDEX_ALREADY_ACTIVE")
+    demand(req.get("mode") == "audit" or not effective.ai_enabled,
            "GLOBAL_AI_OR_INDEX_ALREADY_ACTIVE")
     demand(not settings.AI_ENABLED and not settings.LLM_EMBEDDING_BACKEND,
            "GLOBAL_AI_OR_INDEX_ENV_CONFLICT")
@@ -71,7 +74,7 @@ def main():
         mode = req["mode"]
         if mode == "audit":
             status(AUDIT="READ_ONLY", STATUS="INSPECTED",
-                   AI_UI_ENABLED="NO", EMBEDDINGS="OFF",
+                   AI_UI_ENABLED="YES" if effective.ai_enabled else "NO", EMBEDDINGS="OFF",
                    CURRENT_SHA256=fingerprint, CHANGED=False)
             return
         demand(req.get("approved") is True, "APPROVAL_REQUIRED")
