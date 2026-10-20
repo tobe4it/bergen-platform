@@ -132,6 +132,26 @@ class ReadinessTest(unittest.TestCase):
         self.assertTrue(tasks[0]["no_log"])
         self.assertEqual(tasks[0]["changed_when"], False)
 
+    def test_model_api_accepts_existing_admin_session_bearer_without_key_switch(self):
+        source = (ROOT / "ansible/playbooks/manage-bergen-ai-family-chat-profiles.yml").read_text()
+        cfg = yaml.safe_load(source)[0]
+        self.assertIn("vault_open_webui_admin_session_jwt", source)
+        self.assertIn("vault_open_webui_admin_token | default('')", source)
+        self.assertIn("GLOBAL_API_KEY_SWITCH_REQUIRED=NO", source)
+        self.assertIn("bp_family_model_admin_bearer", source)
+        self.assertNotIn("ENABLE_API_KEYS=true", source)
+        self.assertNotIn("ansible.builtin.uri:", source)
+        assert_one = next(t for t in cfg["tasks"]
+                          if t["name"].startswith("Require approved target"))
+        self.assertIn("bp_family_model_admin_bearer | length >= 20",
+                      str(assert_one["ansible.builtin.assert"]))
+        runner = next(t for t in cfg["tasks"]
+                      if t["name"].startswith("Run version-locked"))
+        self.assertTrue(runner.get("no_log"))
+        self.assertIn("bp_family_model_admin_bearer",
+                      str(cfg["vars"]["bp_family_model_payload"]))
+        self.assertTrue(cfg["serial"] == 1)
+
     def test_oidc_active_legacy_stager_is_now_guarded(self):
         src = STAGER.read_text()
         self.assertIn("OIDC_GROUP_MANAGEMENT_NOT_ACTIVE", src)
