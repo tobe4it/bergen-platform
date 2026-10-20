@@ -118,6 +118,69 @@ class RockyLxcAuditTests(unittest.TestCase):
                 {"name": "file-link/child", "content": b"x"},
             ]))
 
+    def test_all_seven_exact_pinned_missing_links_accepted_after_hash_gate(self):
+        extras = [
+            {"name": name, "kind": tarfile.SYMTYPE, "link": target}
+            for name, (target, _resolved) in
+            audit.EXPECTED_PINNED_DANGLING_SYMLINKS.items()
+        ]
+        result = audit.inspect_archive(
+            make_archive(extras), allow_pinned_exceptions=True
+        )
+        self.assertEqual(result["pinned_missing_link_exception_count"], 7)
+        self.assertEqual(result["pinned_runtime_link_exception_count"], 3)
+        self.assertEqual(result["pinned_build_id_link_exception_count"], 4)
+        self.assertFalse(result["template_import_authorized"])
+        self.assertFalse(result["guest_restore_authorized"])
+
+    def test_known_missing_link_rejected_without_pinned_hash_gate(self):
+        with self.assertRaisesRegex(audit.AuditBlocked, "DANGLING_SYMLINK"):
+            audit.inspect_archive(make_archive([{
+                "name": "etc/mtab", "kind": tarfile.SYMTYPE,
+                "link": "../proc/self/mounts",
+            }]))
+
+    def test_known_name_with_different_link_target_refused(self):
+        with self.assertRaisesRegex(audit.AuditBlocked, "DANGLING_SYMLINK"):
+            audit.inspect_archive(
+                make_archive([{
+                    "name": "etc/mtab", "kind": tarfile.SYMTYPE,
+                    "link": "../proc/self/mountinfo",
+                }]),
+                allow_pinned_exceptions=True,
+            )
+
+    def test_unknown_runtime_missing_link_refused(self):
+        with self.assertRaisesRegex(audit.AuditBlocked, "DANGLING_SYMLINK"):
+            audit.inspect_archive(
+                make_archive([{
+                    "name": "etc/other-mtab", "kind": tarfile.SYMTYPE,
+                    "link": "../proc/self/mounts",
+                }]),
+                allow_pinned_exceptions=True,
+            )
+
+    def test_unknown_build_id_missing_link_refused(self):
+        with self.assertRaisesRegex(audit.AuditBlocked, "DANGLING_SYMLINK"):
+            audit.inspect_archive(
+                make_archive([{
+                    "name": "usr/lib/.build-id/28/other", "kind": tarfile.SYMTYPE,
+                    "link": "../../../../usr/sbin/tc",
+                }]),
+                allow_pinned_exceptions=True,
+            )
+
+    def test_build_id_known_name_mismatched_target_refused(self):
+        name = "usr/lib/.build-id/28/809fc5a9ce55a93beda8e8fbd646cb14322f72"
+        with self.assertRaisesRegex(audit.AuditBlocked, "DANGLING_SYMLINK"):
+            audit.inspect_archive(
+                make_archive([{
+                    "name": name, "kind": tarfile.SYMTYPE,
+                    "link": "../../../../usr/bin/other",
+                }]),
+                allow_pinned_exceptions=True,
+            )
+
     def test_duplicate_refused(self):
         with self.assertRaisesRegex(audit.AuditBlocked, "DUPLICATE_MEMBER"):
             audit.inspect_archive(make_archive([{"name": "dir000/file0000", "content": b"x"}]))
