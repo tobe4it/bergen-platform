@@ -1259,3 +1259,47 @@ Paperless global AI UI, embeddings, Ollama listener and
 firewall remain unchanged and unapproved in this gate.
 The unauthenticated wildcard port exposure is a
 known, deferred security task.
+
+
+## CT126 backup inventory 2026-10-20 11:00 – recent archives, missing same-day result
+
+Operator read actual NFS/Proxmox metadata on `venombox`
+without modifying files, stopping services, or altering
+the backup schedule. Mounted storage type: `nfs4`.
+The five most recent listed CT126 `vzdump` archives were:
+
+| Archive date | Recorded compressed bytes |
+| --- | ---: |
+| 2026-10-19 03:02 | 1,585,779,616 |
+| 2026-10-18 03:07 | 1,573,769,658 |
+| 2026-10-17 03:01 | 1,558,860,332 |
+| 2026-10-16 03:01 | 1,504,436,666 |
+| 2026-10-15 03:03 | 1,492,825,227 |
+
+**No 2026-10-20 archive appeared** in the operator's
+most-recent-five listing at approximately 11:00 local,
+despite the historically documented daily 03:00
+`bergen-paperless-vzdump.timer` schedule. Its cause
+is **unknown**: do not infer that systemd ran, that
+the backup failed, that the timer is enabled, or
+that the archive could not be in another storage.
+
+Archive names, sizes, NFS mount status and `backup=1`
+flags are *not* integrity, consistent PostgreSQL
+snapshot or full-restore proofs. A successful
+`zstd -t` plus a streamed GNU tar listing only
+verifies the encoded stream and TAR structure;
+it does not test Paperless boot, database recovery,
+media completeness or restore authorization.
+
+Operator next action: review the systemd timer and
+last job result read-only, then test the **pinned**
+19 Oct archive with `zstd -tq` and
+`tar --zstd -tf ... > /dev/null`. Avoid
+`vzdump`, retention/pruning, test restores in
+production or any CT126 stop/restart here.
+`paperless_ai_catalog_verified_backup` remains false
+until the usable DB/files backup and rollback
+plan are independently assessed. The standalone
+Paperless-native Ollama endpoint/model/backend apply
+and all document processing remain unexecuted.
