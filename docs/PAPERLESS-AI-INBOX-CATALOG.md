@@ -1303,3 +1303,104 @@ until the usable DB/files backup and rollback
 plan are independently assessed. The standalone
 Paperless-native Ollama endpoint/model/backend apply
 and all document processing remain unexecuted.
+
+## CT126 backup incident 2026-10-20 – 03:00 job failed with rc 255
+
+Read-only operator report on `venombox`:
+
+```text
+bergen-paperless-vzdump.timer:
+  LoadState=loaded
+  ActiveState=active
+  UnitFileState=enabled
+  LastTriggerUSec=Tue 2026-10-20 03:00:02 CEST
+  NextElapseUSecRealtime=Wed 2026-10-21 03:00:00 CEST
+bergen-paperless-vzdump.service:
+  Result=exit-code
+  ExecMainStartTimestamp=Tue 2026-10-20 03:00:02 CEST
+  ExecMainExitTimestamp=Tue 2026-10-20 06:00:02 CEST
+  ExecMainStatus=255
+19 Oct archive:
+  ZSTD_INTEGRITY=PASS
+  TAR_STRUCTURE=PASS
+BACKUP_CHECK=COMPLETED_READ_ONLY
+```
+
+**Incident:** The scheduled 20 Oct backup returned a failure
+after exactly three hours. The timer remained active and
+enabled for 21 Oct. An exact three-hour run is suspicious
+for a time limit, but `Result=exit-code` alone does
+**not** prove a systemd timeout. The IaC template specifies
+`TimeoutStartSec=infinity`; inspect the **live**
+`TimeoutStartUSec`/drop-ins and bounded job journal
+before attributing the cause. The 19 Oct stream and TAR
+are intact, but its actual PostgreSQL recovery, document
+mount completeness, and full restore are not proven.
+
+**Read-only, privacy-safe first diagnosis (on bp-controller):**
+
+```bash
+(
+set -euo pipefail
+BASE="$HOME/bergen-platform"
+WT="$HOME/bergen-platform-paperless-ai-catalog"
+cd "$WT"
+"$BASE/.venv/bin/ansible" venombox \
+  -i ansible/inventory.yml \
+  -i "$BASE/ansible/inventory.local.yml" \
+  -b -m ansible.builtin.shell \
+  -a '
+set -eu
+echo "=== SYSTEMD EFFECTIVE SERVICE ==="
+systemctl show bergen-paperless-vzdump.service \
+  -p Result -p ExecMainCode -p ExecMainStatus \
+  -p TimeoutStartUSec -p TimeoutStopUSec \
+  -p FragmentPath -p DropInPaths
+echo "=== BACKUP JOB JOURNAL CLASSIFICATIONS ==="
+journalctl -u bergen-paperless-vzdump.service \
+  --since "2026-10-20 02:55:00" \
+  --until "2026-10-20 06:10:00" \
+  --no-pager -o cat | awk '"'"'
+  {
+    s=tolower($0); n++;
+    if(s ~ /timed? out|timeout|time limit|deadline|watchdog/) timeouts++;
+    if(s ~ /nfs|stale file handle|server not responding|mount/) nfs++;
+    if(s ~ /no space left|enospc|disk full|quota/) space++;
+    if(s ~ /permission denied|operation not permitted/) permission++;
+    if(s ~ /i\/o error|input\/output error|broken pipe|read-only file system/) io++;
+    if(s ~ /zfs|snapshot/) zfs++;
+    if(s ~ /oom|out.of.memory|killed process/) oom++;
+    if(s ~ /error|failed|fatal|aborted/) errors++;
+  }
+  END {
+    print "JOURNAL_LINES=" n+0;
+    print "TIMEOUT_MARKERS=" timeouts+0;
+    print "NFS_MOUNT_MARKERS=" nfs+0;
+    print "STORAGE_CAPACITY_MARKERS=" space+0;
+    print "PERMISSION_MARKERS=" permission+0;
+    print "IO_MARKERS=" io+0;
+    print "ZFS_MARKERS=" zfs+0;
+    print "OOM_MARKERS=" oom+0;
+    print "ERROR_MARKERS=" errors+0;
+    print "JOURNAL_CLASSIFICATION_ONLY=YES";
+  }
+  '"'"'
+' \
+  --vault-id ai@prompt
+)
+```
+
+This diagnostic prints no raw journal lines, target IPs,
+document content or credentials. Marker counts are
+**hints**, not precise causes. If all error counts are zero,
+inspect exact host-local logs privately before classifying.
+Do not restart, reconfigure or manually launch `vzdump`,
+alter pruning, or set
+`paperless_ai_catalog_verified_backup: true`
+based on the latest failure or on archive-structure
+checks alone.
+
+The existing native Paperless Ollama route and parent
+group audit remain successful (`ELIGIBLE_SAMPLE=8`)
+but neither document classification nor the protected
+ORM connection apply has been executed.
