@@ -97,6 +97,24 @@ def storage_capacity(storage):
     return "ACTIVE_ROOTDIR_ZFS_WITH_BUFFER"
 
 
+def backup_nfs():
+    mount = json_cmd(["findmnt", "-J", "-M",
+                      "/mnt/pve/" + BACKUP_STORE])
+    fs = mount.get("filesystems") if isinstance(mount, dict) else None
+    if (not isinstance(fs, list) or len(fs) != 1 or
+            not isinstance(fs[0], dict) or
+            fs[0].get("target") != "/mnt/pve/" + BACKUP_STORE or
+            fs[0].get("fstype") not in ("nfs", "nfs4")):
+        return "UNVERIFIED"
+    status = json_cmd([
+        "pvesh", "get", f"/nodes/{HOST}/storage/{BACKUP_STORE}/status",
+        "--output-format", "json"])
+    if (not isinstance(status, dict) or status.get("active") not in (True, 1) or
+            "backup" not in str(status.get("content", "")).split(",")):
+        return "UNVERIFIED"
+    return "EXPECTED_ACTIVE_NFS"
+
+
 def archive_metadata():
     obj = json_cmd([
         "pvesh", "get", f"/nodes/{HOST}/storage/{BACKUP_STORE}/content",
@@ -124,8 +142,9 @@ def report():
     root = source_storage()
     vmid = candidate_unused()
     target = storage_capacity(root)
-    archive = archive_metadata()
-    ready = (source_state == "RUNNING" and vmid == "UNUSED_AT_CHECK_TIME"
+    backup_nfs_state = backup_nfs()
+    archive = archive_metadata() if backup_nfs_state == "EXPECTED_ACTIVE_NFS" else "UNVERIFIED"
+    ready = (backup_nfs_state == "EXPECTED_ACTIVE_NFS" and source_state == "RUNNING" and vmid == "UNUSED_AT_CHECK_TIME"
              and target == "ACTIVE_ROOTDIR_ZFS_WITH_BUFFER"
              and archive == "ONE_NONEMPTY_CT110_ZSTD_ARCHIVE")
     return dict(
@@ -135,6 +154,7 @@ def report():
         CANDIDATE_VMID=CANDIDATE_VMID,
         CANDIDATE_VMID_STATE=vmid,
         TARGET_STORAGE_CLASS=target,
+        BACKUP_NFS_STATE=backup_nfs_state,
         CT110_ARCHIVE_METADATA=archive,
         ARCHIVE_STREAM_CHECK="PREVIOUSLY_REPORTED_PASS_NOT_RECHECKED",
         ARCHIVE_CONFIG_SANITIZATION="NOT_PROVEN",
@@ -155,6 +175,7 @@ def main():
                      SOURCE_CT110_STATE="UNVERIFIED", CANDIDATE_VMID=CANDIDATE_VMID,
                      CANDIDATE_VMID_STATE="UNVERIFIED",
                      TARGET_STORAGE_CLASS="UNVERIFIED",
+                     BACKUP_NFS_STATE="UNVERIFIED",
                      CT110_ARCHIVE_METADATA="UNVERIFIED",
                      ARCHIVE_STREAM_CHECK="PREVIOUSLY_REPORTED_PASS_NOT_RECHECKED",
                      ARCHIVE_CONFIG_SANITIZATION="NOT_PROVEN",
