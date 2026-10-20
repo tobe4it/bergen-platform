@@ -37,6 +37,8 @@ jobs:
           python-version: '3.12'
       - name: Install Ansible
         run: python3 -m pip install 'ansible-core>=2.16,<2.21'
+      - name: Install controller bootstrap collection dependency
+        run: ansible-galaxy collection install ansible.posix
       - name: Syntax
         run: |
           ansible-playbook -i localhost, \
