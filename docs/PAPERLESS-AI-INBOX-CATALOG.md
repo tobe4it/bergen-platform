@@ -1964,3 +1964,98 @@ claim that production documents were updated until
 their actual `APPLIED` counts. The workflow must not
 silently process new inbox arrivals or all documents
 without the pinned candidate set.
+
+## One-document-per-run bulk trial STOP at document 11 – 2026-10-20 15:28
+
+The operator executed the eight-ID manually approved one-document-at-a-time
+classification loop and provided the following output excerpt:
+
+```text
+DOC 2:  previous per-ID step confirmed as successful by 3/8 counter
+DOC 5:  previous per-ID step confirmed as successful by 3/8 counter
+DOC 10: AUDIT=CONTROLLED STATUS=COMPLETED
+        APPLIED=1 REVIEW_REQUIRED=0 ALREADY_RECORDED=0 CHANGED=True
+        changed=1 failed=0
+CONFIRMED=3/8
+
+DOC 11: "Report only a reviewed, non-identifying error classification" SKIPPED
+        "Fail closed if runtime rejected a configuration or write attempt" FAILED
+        CATALOG_AUDIT_FAILED_OR_REQUIRES_REVIEW
+        changed=0 failed=1 (Ansible report)
+STOP: Ansible-Fehler bei DOC 11
+```
+
+**Operationally:** The shell loop stopped as designed; documents
+16, 21, 22, 29 have **not been attempted** in that execution.
+Ansible `changed=0` at the failure step does **not** prove
+the document metadata was unchanged: the worker catches the
+exception, persists `REQUIRES_REVIEW` in the private processing
+journal, then reports an outcome that the guarded Ansible assert
+rejects. The skipped error classification implies the underlying
+`pct exec` command exited with code zero, making an ordinary
+`REVIEW_REQUIRED=1` outcome a strong but not yet independently
+verified hypothesis. It is **not evidence** of a failed network
+connection or failed classification step in particular: the worker
+intentionally suppresses exception details and cannot reconstruct
+them after the fact.
+
+**No automatic retry and no rollback** of document 11, and no
+further batch processing pending a forensic read-only comparison
+between the persistent journal pre-image and current Django ORM
+snapshot. A diagnostic with bounded, non-identifying categories
+has been committed:
+
+- `ansible/files/paperless/audit_ai_catalog_review_state_readonly.py`
+- `ansible/playbooks/audit-paperless-ai-catalog-review-readonly.yml`
+
+This audit reads exactly the selected document ID and its
+`catalog.sqlite3` row using SQLite `mode=ro` and
+`PRAGMA query_only=ON`; it never performs OCR/LLM inference,
+reads/logs document text, changes the journal, or changes
+Paperless metadata. Its output reveals `JOURNAL_STATE`,
+`SNAPSHOT_MATCH` (`MATCH` or `DIFF`),
+`DIFFERENCE_CATEGORY`, the presence of the inbox tag
+and whether an after-snapshot was recorded. A matching
+snapshot means no **currently observable** changes to
+the guarded ORM fields compared to the pre-inference
+journal pre-image; it is not proof that no transient
+write ever happened or that nobody else changed the
+document meanwhile.
+
+Run from `bp-controller` after a GitHub branch fetch,
+with local private site var file and an explicit document
+selection:
+
+```bash
+(
+set -euo pipefail
+BASE="$HOME/bergen-platform"
+WT="$HOME/bergen-platform-paperless-ai-catalog"
+git -C "$WT" fetch origin feat/paperless-native-ai-inbox-catalog-20261018
+git -C "$WT" switch --detach origin/feat/paperless-native-ai-inbox-catalog-20261018
+cd "$WT"
+"$BASE/.venv/bin/ansible-playbook" \
+  -i ansible/inventory.yml \
+  -i "$BASE/ansible/inventory.local.yml" \
+  ansible/playbooks/audit-paperless-ai-catalog-review-readonly.yml \
+  --vault-id ai@prompt \
+  -e "@$BASE/ansible/vars/paperless-ai-catalog.local.yml" \
+  -e paperless_ai_catalog_review_document_id=11
+)
+```
+
+If `JOURNAL_STATE=REQUIRES_REVIEW` and
+`SNAPSHOT_MATCH=MATCH`, the document has not
+observably changed since the durable pre-image, but
+the journal blocks automatic retry. Any explicit
+one-record journal reset/retry requires a distinct
+policy and review authorization; **never remove
+the journal row or manipulate SQLite manually**.
+If `SNAPSHOT_MATCH=DIFF`, inspect the live Paperless
+document UI and reconcile the pre-image with any
+concurrent user work before authorizing any rollback.
+
+The accepted 19 October CT126 backup is unchanged;
+20 October daily backup rc 255 and wildcard Ollama
+TCP/11434 access remain open issues. All eight documents
+have not been classified successfully.
