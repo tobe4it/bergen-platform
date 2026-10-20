@@ -55,6 +55,13 @@ class EffectiveOidcRuntimeAudit(unittest.TestCase):
                           "ansible.builtin.systemd:"):
             self.assertNotIn(forbidden, source)
         self.assertIn("MEMBERSHIP_WRITE_OBSERVED=NOT_MEASURED", source)
+        self.assertIn("BERGEN_PYTHON_EXEC_V1:OK", source)
+        self.assertIn("BERGEN_PYTHON_APP_V1:PRESENT", source)
+        self.assertIn("CONTAINER_PYTHON_EXEC_OR_MODULE_UNAVAILABLE", source)
+        self.assertIn("CONTAINER_PYTHON_EXEC", source)
+        self.assertIn("OPEN_WEBUI_MODULE", source)
+        self.assertNotIn("bp_oidc_python_exec.stderr", source)
+        self.assertNotIn("bp_oidc_python_module.stderr", source)
         self.assertIn("DIAGNOSTIC=READ_ONLY_FAILURE", source)
         self.assertIn("STATUS_FRAME_COUNT", source)
         self.assertIn("RUNTIME_CONFIG_RESOLUTION_FAILED", source)
