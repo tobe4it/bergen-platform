@@ -695,3 +695,38 @@ verify its digest against the signed checksum manifest before
 inspecting tar member types and the embedded OS release marker.
 Do not extract an unverified tar as root or import it into PVE.
 Production mx1/mx2 and guest 701 remain unchanged.
+
+
+## Rocky 9.8 rootfs downloaded to bp-controller (2026-10-20)
+
+The operator downloaded the three files SHA256SUMS,
+SHA256SUMS.asc and rootfs.tar.xz from the exact pinned
+20261018_03:16 linuxcontainers.org image path into a
+mode-0700 staging directory on bp-controller:
+
+    /home/ansible/rocky9-lxc-20261018/
+
+The real local rootfs.tar.xz passed independent
+sha256sum -c against the previously recorded SHA-256:
+
+    1fd0ade221871319d5ae7bed9ece57c001d79ef950c1263814d5b8d48779b7e5
+
+Read-only tar inspection confirmed an embedded regular
+etc/rocky-release file, with contents
+"Rocky Linux release 9.8 (Blue Onyx)", and
+usr/lib/os-release with ID=rocky and VERSION_ID=9.8.
+etc/os-release is a symlink to ../usr/lib/os-release.
+
+The GPG packet inspection command returned **no matching lines**,
+which cannot be considered successful signature verification.
+Investigate signature encoding, local gpg availability and
+independently authenticated issuer key. Verify detached
+SHA256SUMS.asc over exact SHA256SUMS after approving the
+independent issuer fingerprint. Do not silently accept a key
+obtained from the same image server.
+
+No import to PVE, root filesystem extraction, guest creation or
+modification to protected CT701 is authorized yet. Before any
+rootfs consumption as root, audit all tar entry paths, symlink
+chains, hardlinks, special node types and ownership/permissions;
+use an approved, disposable networkless guest boot test.
