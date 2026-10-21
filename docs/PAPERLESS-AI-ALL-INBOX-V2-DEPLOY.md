@@ -1,99 +1,67 @@
-# Bergen-AI v2 rollout: all Inbox documents imported since 2026-10-01
+# Bergen-AI: regulärer Paperless-Posteingang ab 01.10.2026
 
-## Exact approved processing scope
+## Verbindlicher automatischer Ablauf
 
-- **Tag:** Native Paperless Inbox tag (`Tag.is_inbox_tag=True`).
-  Do not match a tag merely by its displayed name.
-- **Date:** `Document.added >= 2026-10-01 00:00:00 Europe/Berlin`
-  (timestamp timezone offset was UTC+02:00 on that date);
-  **not** `Document.created`, not document ID or the old timer watermark.
-- **Owners:** No owner/group/staff predicate. Includes personal, group-shared,
-  technical-account, administrator-owned and ownerless documents. There is no
-  implicit ACL grant to the original document owner.
-- **Existing protections:** at least 30 OCR characters; no linked document
-  revisions; document must still carry Inbox tag before commit; do not remove
-  Inbox tag, change ACL/owner or overwrite user-entered metadata; no new
-  type/tag objects; no reprocessing of **any** journaled ID (success,
-  `NO_CHANGE`, review, processing or rollback).
-- **Native classifier:** Paperless ML runs independently on import; Bergen-AI
-  uses local Ollama Qwen only afterward. For owned documents, suggestion
-  resolution uses their existing Paperless owner ACL. For ownerless documents,
-  the classifier's `user=None` path and native matching routines restrict
-  *taxonomy matches* to unowned/global objects. Ownerless documents do not
-  acquire an artificial owner.
-- **Notes:** In catalog v2 the note is recorded with native `Note.user=None`
-  (system-produced), not impersonating a human owner. Paperless 3.3
-  permits this nullable field. Notes do not change document permissions.
-- **Errors:** strict per-document status journal, no automatic retries,
-  human review for write-indeterminate conditions. PostgreSQL and SQLite
-  are separate transaction domains; status `REQUIRES_REVIEW` is
-  required for crash recovery.
+1. Paperless importiert Dokumente, erkennt Text (OCR) und führt sein
+   vorhandenes klassisches Metadaten-Matching aus.
+2. Der **bereits vorhandene** `bergen-ai-catalog.timer` verarbeitet im
+   5-Minuten-Takt maximal ein **noch nicht journalisiertes** Dokument.
+3. Die v2-Abfrage berücksichtigt `Document.added >= 2026-10-01 00:00
+   Europe/Berlin` und den nativen Paperless-Posteingangstag
+   (`Tag.is_inbox_tag=True`). Es gibt **keinen Filter nach owner, Gruppe,
+   Freigabe oder Dokument-ID-Watermark**.
+4. Für ein OCR-bereites, nicht versioniertes Dokument klassifiziert der
+   lokale Ollama-Client (Qwen) ausschließlich **den aktuellen Dokumenttext**
+   ohne Abruf benachbarter/fremder Dokumente. Bestehende Kategorien dürfen
+   nur aus global sichtbaren, dokumenteigenen und nachweislich für Gruppen
+   **dieses Dokuments** freigegebenen Objekten aufgelöst werden. Auch
+   Eltern-Tags eines verschachtelten Tags müssen im gleichen Bereich
+   sichtbar sein.
+5. Der Worker ergänzt nur erlaubte Metadaten und eine native
+   systemerzeugte Note (`Note.user=None`). Das Posteingangstag bleibt
+   bestehen, bis ein Mensch es entfernt. Die manuelle KI-Oberfläche von
+   Paperless bleibt unabhängig davon vorhanden.
+6. Sämtliche Journal-Einträge bleiben terminal (einschließlich
+   `NO_CHANGE`, `REQUIRES_REVIEW`, `PROCESSING` und `ROLLED_BACK`).
+   Kein automatisches Retry, kein Überschreiben von späteren Handkorrekturen,
+   keine neuen Taxonomieobjekte und keine Änderung von Eigentümern oder ACLs.
 
-**Important:** `start_added_date` is fixed to `2026-10-01` in v2. Older
-catalog v1 is retained for audit/compatibility, but the new scope cannot be
-enabled merely by changing variables in the old v1 timer deploy.
+Die OCR-/Versionsschutzprüfungen sind **keine** Eigentümer- oder
+Gruppenfilter: Dokumente ohne verwertbaren OCR-Text bleiben noch offen;
+versionierte Dokumente benötigen gesonderte Freigabe der Mutationslogik.
 
-## Deployment status
+## Stand
 
-The original v2 design was **blocked** because native Paperless 3.3.0
-interprets `user=None` as **unrestricted** when retrieving other
-documents as context. The reviewed v2 worker now uses the existing local
-Ollama client with `build_prompt_without_rag`: the prompt contains only
-the current document, never other documents' text. Taxonomy candidates
-and matching are restricted to global, this document owner's, and
-objects explicitly shared with groups that have permissions on **this
-document**. The ACL scope is revalidated before writes. Group-only
-ownerless documents retain their existing ownership and permissions;
-system-created Notes use nullable `Note.user=None`.
+Der Quellcode, CI-Tests, Read-only-Audit und ein **einziger,
+separat freizugebender Upgrade-Schritt für den bestehenden Timer** liegen
+im Feature-Branch `feat/paperless-native-ai-inbox-catalog-20261018`.
+Der produktive Timer auf venombox wird durch GitHub-Commits **nicht**
+automatisch verändert. Der frühere alternative Upgrade-Pfad
+`upgrade-paperless-ai-inbox-catalog-all-inbox-oct2026.yml` ist
+aus Sicherheitsgründen ausdrücklich gesperrt. Ein gesonderter Eltern-
+oder Ein-Dokument-Pilot ist kein Bestandteil der regulären Auswahl.
 
-**Operational gate:** this is not yet deployed. First select one
-ownerless document from the Eltern-shared Inbox, imported since
-2026-10-01, whose OCR is ready and which has not been journalized.
-Run the explicit one-document pilot and manually verify its Note and
-Inbox status. The timer-upgrade playbook independently requires
-proof of that same successful pilot in the SQLite journal and Paperless
-before changing the v1 job. A failed pilot must **never** be retried
-automatically; choose a separate unprocessed document if appropriate.
-
-The GitHub feature branch carries reviewed Python worker/policy v2,
-a separate **operator-approved** upgrade playbook, and offline regression
-tests. Nothing in this commit changes the live timer. Use the commands
-below from the existing `bp-controller` worktree. Do not paste
-Markdown headings or commentary into the shell.
-
-### 1. Sync and verify (no writes to production)
+### 1. Branch aktualisieren und ohne Produktivänderung prüfen
 
 ```bash
 (
 set -euo pipefail
 BASE="$HOME/bergen-platform"
 WT="$HOME/bergen-platform-paperless-ai-catalog"
-
 test -z "$(git -C "$WT" status --porcelain)" || {
-  echo "STOP: local uncommitted work"; exit 1;
+  echo "STOP: uncommitted local work"; exit 1;
 }
 git -C "$WT" fetch origin feat/paperless-native-ai-inbox-catalog-20261018
 git -C "$WT" switch --detach origin/feat/paperless-native-ai-inbox-catalog-20261018
 cd "$WT"
-read -r -p "Same successful ownerless pilot document ID: " DOC_ID
-[[ "$DOC_ID" =~ ^[1-9][0-9]{0,8}$ ]] || exit 1
-
-"$BASE/.venv/bin/ansible-playbook" \
-  -i ansible/inventory.yml \
-  -i "$BASE/ansible/inventory.local.yml" \
-  ansible/playbooks/upgrade-paperless-ai-all-inbox-since-20261001.yml \
-  --syntax-check
+"$BASE/.venv/bin/ansible-playbook" -i ansible/inventory.yml \
+ -i "$BASE/ansible/inventory.local.yml" \
+ ansible/playbooks/upgrade-paperless-ai-all-inbox-since-20261001.yml \
+ --syntax-check
 )
 ```
 
-### 2. Read-only scope inventory before any write
-
-This audit counts the complete intended `Posteingang` subset by
-`Document.added`, regardless of owner. It independently reports
-ownerless documents explicitly shared with `Eltern@bergen.intern`,
-OCR-ready candidates, existing SQLite journal states and whether one
-unprocessed shared-parent pilot remains. No identifiers, document text,
-metadata or credentials are printed; no model inference occurs.
+### 2. Die komplette tatsächliche Posteingangsmenge rein lesend auditieren
 
 ```bash
 (
@@ -101,7 +69,6 @@ set -euo pipefail
 BASE="$HOME/bergen-platform"
 WT="$HOME/bergen-platform-paperless-ai-catalog"
 cd "$WT"
-
 "$BASE/.venv/bin/ansible-playbook" \
   -i ansible/inventory.yml \
   -i "$BASE/ansible/inventory.local.yml" \
@@ -111,53 +78,21 @@ cd "$WT"
 )
 ```
 
-Look for `OWNERLESS_PARENT_UNJOURNALIZED_READY > 0` before choosing
-the exact parent-shared Inbox document ID in the Paperless UI.
-If there are none, do not run the ownerless pilot, and investigate the
-OCR/import/group-ACL filter instead. The audit is capped at 5,000
-Inbox documents to avoid unbounded retrieval.
+Relevante Nachweise sind `ALL_INBOX_ADDED_FROM_OCT1`,
+`OCR_READY_UNVERSIONED`, `WAITING_OCR_OR_VERSION_REVIEW`,
+`READY_UNJOURNALIZED`, `SCOPE_JOURNAL_TOTAL` und
+`SCOPE_JOURNAL_STATES`. Der Audit zeigt **keine Dokument-IDs,
+Eigentümer, Gruppennamen, Texte oder Notiztexte**.
 
-### 3. Run an explicitly selected one-document ownerless Eltern pilot
+### 3. Den bereits existierenden regulären Timer einmalig auf v2 umstellen
 
-Choose the **document ID** from the Paperless UI for one document
-matching this exact scope. This one-off execution can write metadata and
-a system-attributed Note to that one document; it does **not** update
-the timer. Check an accepted CT126 backup first. Replace `<DOC_ID>`
-with the actual integer (do not type angle brackets).
-
-```bash
-(
-set -euo pipefail
-BASE="$HOME/bergen-platform"
-WT="$HOME/bergen-platform-paperless-ai-catalog"
-cd "$WT"
-read -r -p "Exact ownerless Eltern pilot document ID: " DOC_ID
-[[ "$DOC_ID" =~ ^[1-9][0-9]{0,8}$ ]] || exit 1
-"$BASE/.venv/bin/ansible-playbook" \
-  -i ansible/inventory.yml \
-  -i "$BASE/ansible/inventory.local.yml" \
-  ansible/playbooks/pilot-paperless-ai-v2-ownerless-inbox.yml \
-  --vault-id ai@prompt \
-  -e "@$BASE/ansible/vars/paperless-ai-catalog.local.yml" \
-  -e "paperless_ai_catalog_v2_pilot_document_id=$DOC_ID" \
-  -e '{
-    "paperless_ai_catalog_v2_pilot_approved": true,
-    "paperless_ai_catalog_verified_backup": true
-  }'
-)
-```
-
-Require `STATUS=COMPLETED`, `NOTE=SYSTEM_ATTRIBUTED`,
-`INBOX_TAG=RETAINED` and visible Note content in Paperless. If an
-audit or pilot fails, do not rerun against the same ID without a
-journal inspection. Preserve any manual metadata correction.
-
-### 4. Explicit production upgrade (timer pauses during file installation)
-
-The operator's existing October 2026 CT126 NFS backup was accepted
-for this project. `verified_backup=true` must still mean an
-actual reviewed backup, not just a file exists. Check there is no
-active manual AI classification task or other deployment in flight.
+Nur ausführen, wenn die zuvor akzeptierte CT126-Sicherung verfügbar ist,
+der Audit die richtige Menge bestätigt und die produktive Erweiterung
+ausdrücklich freigegeben bleibt. Die folgenden Approval-Flags sind
+absichtlich notwendig. Der Übergang deaktiviert den Timer nur während
+des geprüften Worker-/Policy-Tauschs, verwendet weiter denselben
+`bergen-ai-catalog.timer` und behält das SQLite-Verarbeitungsjournal
+unverändert.
 
 ```bash
 (
@@ -165,39 +100,31 @@ set -euo pipefail
 BASE="$HOME/bergen-platform"
 WT="$HOME/bergen-platform-paperless-ai-catalog"
 cd "$WT"
-
 "$BASE/.venv/bin/ansible-playbook" \
   -i ansible/inventory.yml \
   -i "$BASE/ansible/inventory.local.yml" \
   ansible/playbooks/upgrade-paperless-ai-all-inbox-since-20261001.yml \
   --vault-id ai@prompt \
   -e "@$BASE/ansible/vars/paperless-ai-catalog.local.yml" \
-  -e "paperless_ai_catalog_v2_pilot_document_id=$DOC_ID" \
   -e '{
     "paperless_ai_catalog_v2_upgrade_approved": true,
     "paperless_ai_catalog_v2_all_owners_approved": true,
     "paperless_ai_catalog_v2_history_from_october_approved": true,
+    "paperless_ai_catalog_v2_regular_pipeline_approved": true,
     "paperless_ai_catalog_verified_backup": true
   }'
 )
 ```
 
-Enter the **same exact pilot ID** that passed the independent ownerless pilot. The deployment will refuse
-to run without that journal/Note proof.
+Der Upgrade-Lauf prüft das vorhandene v1-Policy-Format, den laufenden
+Timer, den LXC und den lokal konfigurierten Modellendpunkt; danach
+erfolgt eine v2-Read-only-Vorschau **vor** jedem Schreibzugriff.
+Falls der Cutover scheitert, bleibt der Timer **gestoppt**
+und verlangt manuelle Prüfung. Die ursprüngliche v1-Gruppenangabe
+wird nur zur Identifikation der **alten** Konfiguration geprüft;
+sie ist **keine** Einschränkung des v2-Dokumentbestands.
 
-The playbook checks the original v1 policy, live active timer,
-Paperless guest identity, current Qwen backend and model, and a
-read-only v2 scope preview **before any production file write**.
-It disables the existing timer, rejects active inference,
-backs up and installs only the worker/policy and root-owned JSON
-runtime settings, verifies the installed v2 policy, then
-reenables the original timer. It does not modify the native
-Paperless ML/UI, permissions, files or network. If anything
-fails during deployment, the timer stays **disabled** pending
-review; it does not automatically revert or replay document
-operations.
-
-Success summary:
+Erwartete Ergebniszeilen:
 
 ```text
 TIMER=ENABLED
@@ -211,23 +138,15 @@ DOCUMENT_INBOX_TAG=RETAINED
 BATCH_SIZE=1
 ```
 
-Verify subsequent status read-only with:
+### 4. Anschließender Nachweis
 
-```bash
-"$HOME/bergen-platform/.venv/bin/ansible" venombox \
-  -i "$HOME/bergen-platform-paperless-ai-catalog/ansible/inventory.yml" \
-  -i "$HOME/bergen-platform/ansible/inventory.local.yml" \
-  --vault-id ai@prompt -b -m ansible.builtin.command \
-  -a "systemctl show bergen-ai-catalog.timer -p ActiveState -p UnitFileState"
-```
+Den Status via `systemctl show bergen-ai-catalog.timer -p ActiveState
+-p UnitFileState` lesen; anschließend den v2-Scope-Audit erneut
+ausführen und `SCOPE_JOURNAL_STATES` sowie `SYSTEM_BAI_NOTES`
+beobachten. Das v1-Watermark-Audit eignet sich **nicht** für
+die v2-Importdatumauswahl.
 
-**Caution:** The existing `audit-paperless-ai-timer-journal-readonly.yml`
-is scoped to v1 parent/ID-watermark policy; it must not be used as
-a v2 scope audit. A separate v2 audit is needed for aggregate
-date-based processing verification.
-
-Workloads with an exceptionally large historic backlog may hit the
-current 2,000-document scan cap before the oldest 2,000 records have
-been journalized; do not interpret an empty run in that case as all
-eligible documents processed. Address scanning/pagination before
-scaling to large archives.
+**Noch offen:** Das systemd-Journal der alten v1-Läufe zeigte bisher
+keine strukturierten Worker-Frames. Ein erfolgreicher systemd-Exit
+allein belegt keine Klassifizierung; die PostgreSQL-/SQLite-
+Nachweise bleiben maßgeblich.
