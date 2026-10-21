@@ -1674,3 +1674,38 @@ Expected only if all checks complete:
 Existing CT701, mx1, mx2, production Nextcloud and network
 configuration remain out of scope. Starting or converting CT790
 will require its own explicit permission and separate checks.
+
+
+### CT790 post-create ZFS field-list CLI correction (2026-10-21)
+
+The first strictly read-only post-create audit reached
+`Read the specific existing CT790 ZFS dataset without mounting it`,
+then failed with `rc=1` while executing the malformed argument
+vector `zfs list -H -p -o name type mountpoint refquota rpool/data/subvol-790-disk-0`.
+ZFS printed the intended dataset name but treated the following
+field names `type`, `mountpoint`, `refquota` as extra dataset
+operands. It reported that those unintended datasets did not exist.
+The operator's recap was `venombox: ok=24 changed=0 failed=1`.
+
+The correct read-only command passes **one comma-separated field
+argument** to `-o`:
+`zfs list -H -p -o name,type,mountpoint,refquota rpool/data/subvol-790-disk-0`.
+This is encoded as one YAML `argv` list element and covered by a
+regression test that inspects the actual parsed command token
+sequence. OpenZFS specifies that `-o` accepts a comma-separated
+property list; `-H` produces TAB-delimited output.
+
+The failure is a playbook argument-assembly error, **not**
+evidence of a missing dataset: earlier same-run Proxmox storage
+checks resolved and listed the exact CT790 rootdir successfully.
+The ZFS dataset metadata validation has **not yet completed**.
+No host or guest state was changed (`changed=0`).
+
+Rerun **only** the updated
+`ansible/playbooks/audit-rocky-9-8-ct790-postcreate-readonly.yml`
+after refreshing the same clean worktree, with
+`--vault-id infra@prompt` and no apply flags. Do **not** rerun
+`create-rocky-9-8-ct790-offline.yml`: VMID790 already exists.
+A successful independent CT790 post-create audit must still show
+`ROCKY_9_8_CT790_POSTCREATE_READ_ONLY_VERIFIED`, changed=0,
+failed=0, no CT startup and no template conversion.
