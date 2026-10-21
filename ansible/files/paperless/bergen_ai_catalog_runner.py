@@ -36,7 +36,8 @@ from paperless.config import AIConfig
 from paperless.models import ApplicationConfiguration
 from paperless.version import __full_version_str__
 from paperless_ai.ai_classifier import get_ai_document_classification
-from paperless_ai.ai_classifier import build_prompt_without_rag, parse_ai_response
+from paperless_ai.ai_classifier import (build_prompt_without_rag,
+    build_localization_prompt, parse_ai_response)
 from paperless_ai.client import AIClient
 from paperless_ai.db import db_connection_released
 from paperless_ai.matching import _match_names_to_queryset
@@ -164,13 +165,18 @@ def ensure_config(request, *, apply):
     demand(isinstance(model, str) and 1 <= len(model) <= 96
            and all(c.isalnum() or c in "._:-" for c in model),
            "MODEL_UNREVIEWED")
-    # Native UI may be enabled independently. Both UI suggestions and Bergen's
-    # worker use the *same reviewed local-only Ollama backend and model*.
-    # Embeddings/RAG remain disabled; no public or hosted LLM fallbacks.
+    # The native chat may have its separate, strictly local bge-m3 index.
+    # This cataloguing worker ALWAYS uses build_prompt_without_rag and NEVER
+    # retrieves indexed neighbours. Do not reject its operation merely
+    # because Paperless chat has an approved local embedding backend.
+    local_index = (not config.llm_embedding_backend or
+                   (config.ai_enabled and
+                    config.llm_embedding_backend == "ollama" and
+                    config.llm_embedding_model == "bge-m3"))
     ai_ready = bool(config.llm_backend == "ollama"
                     and endpoint == expected and config.llm_model == model
                     and config.llm_allow_internal_endpoints
-                    and not config.llm_embedding_backend)
+                    and local_index)
     model_ready = bool(ai_ready and ollama_model_available(endpoint, model))
     if apply:
         demand(request.get("approved") is True, "APPROVAL_REQUIRED")
@@ -348,11 +354,29 @@ def classify_v2_no_rag(doc, group_ids):
         for key in ("tags", "correspondents", "document_types", "storage_paths")
     }
     prompt = build_prompt_without_rag(doc, AIConfig(), candidates=candidates)
+    # Keep Paperless's schema, current-document-only prompt, and existing ID
+    # matching. Localization is a SECOND isolated Paperless LLM call. IDs,
+    # correspondent names and dates always come from the original parse.
+    client = AIClient()
     with db_connection_released():
-        raw = AIClient().run_llm_query(
-            prompt, allowed_candidate_ids=allowed,
+        raw = client.run_llm_query(prompt, allowed_candidate_ids=allowed)
+        result = parse_ai_response(raw)
+        localized_raw = client.run_llm_query(
+            build_localization_prompt(result, "de")
         )
-    return parse_ai_response(raw)
+        localized = parse_ai_response(localized_raw)
+    output = dict(result)
+    output["title"] = localized["title"] or result["title"]
+    for field in ("tags", "document_types", "storage_paths"):
+        output[field] = {
+            "existing_ids": result[field]["existing_ids"],
+            "new_names": localized[field]["new_names"]
+            or result[field]["new_names"],
+        }
+    # Proper names and organizational/legal names remain unchanged.
+    output["correspondents"] = result["correspondents"]
+    output["dates"] = result["dates"]
+    return output
 
 
 def resolve_choices_v2(suggestions, doc, group_ids):
@@ -608,7 +632,7 @@ def run():
         if mode in ("audit", "preview"):
             report(AUDIT="READ_ONLY", STATUS="READY" if ai_ready else "AI_CONFIG_NOT_READY",
                    PAPERLESS_VERSION="3.3.0", PROVIDER="OLLAMA_LOCAL_ONLY",
-                   EMBEDDINGS="DISABLED" if not cfg.llm_embedding_backend else "CONFIG_UNACCEPTABLE",
+                   EMBEDDINGS="LOCAL_OLLAMA_BGE_M3" if cfg.llm_embedding_backend == "ollama" and cfg.llm_embedding_model == "bge-m3" else ("DISABLED" if not cfg.llm_embedding_backend else "CONFIG_UNACCEPTABLE"),
                    CANDIDATES_SCAN_BOUND=30, ELIGIBLE_SAMPLE=eligible_count,
                    POSTINGEST_WATERMARK="NOT_USED" if all_inbox else ("PRESENT" if min_id else "NOT_SET"),
                    SELECTION_SCOPE="ALL_INBOX_FROM_2026_10_01" if all_inbox else "PARENT_POST_WATERMARK",
