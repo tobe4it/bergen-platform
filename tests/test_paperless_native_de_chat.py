@@ -92,7 +92,6 @@ class TestNativeGermanChat(unittest.TestCase):
         yaml.safe_load(play)
         self.assertIn('ai.llm_output_language == "de"', index)
         self.assertIn("Document.objects.count()", index)
-        self.assertIn("INDEX_COVERAGE=\"NOT_PROVEN\"", index.replace("INDEX_COVERAGE=\"NOT_PROVEN\"", "INDEX_COVERAGE=\"NOT_PROVEN\"") if False else index) if False else None
         self.assertIn('INDEX_COVERAGE="NOT_PROVEN"', index)
         self.assertNotIn("get_vector_store(", index.split("def main():", 1)[1])
         self.assertIn("permitted_document_ids(user)", acl)
