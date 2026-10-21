@@ -25,13 +25,20 @@ from urllib.parse import urlsplit
 from urllib.request import Request, ProxyHandler, HTTPRedirectHandler, build_opener
 
 from django.contrib.auth.models import Group
+from django.contrib.contenttypes.models import ContentType
 from django.db import transaction
+from django.db.models import Q
+from guardian.models import GroupObjectPermission
 from documents.models import Correspondent, Document, DocumentType, Note, Tag
 from documents.workflows.ai import resolve_object, resolve_tags
 from paperless.config import AIConfig
 from paperless.models import ApplicationConfiguration
 from paperless.version import __full_version_str__
 from paperless_ai.ai_classifier import get_ai_document_classification
+from paperless_ai.ai_classifier import build_prompt_without_rag, parse_ai_response
+from paperless_ai.client import AIClient
+from paperless_ai.db import db_connection_released
+from paperless_ai.matching import _match_names_to_queryset
 from paperless_ai.matching import (
     match_correspondents_by_name, match_document_types_by_name,
     match_tags_by_name, resolve_correspondent_ids,
@@ -123,13 +130,9 @@ def ensure_config(request, *, apply):
                "CUTOFF_DATE_UNREVIEWED")
         demand(request.get("allowed_group") in (None, ""),
                "GROUP_SCOPE_MUST_BE_UNSET")
-        # v2 includes ownerless documents with group-only ACLs. In upstream
-        # Paperless 3.3.0, get_taxonomy_context(document, user=None) treats
-        # None as unrestricted when searching similar documents, and can
-        # expose unrelated personal/group OCR as LLM context. It is not safe
-        # to activate this branch until v2 uses a permission-scoped identity
-        # or a no-RAG classification path that also handles group taxonomy.
-        demand(False, "GROUP_ACL_CONTEXT_UNVERIFIED")
+        # v2 invokes only classify_v2_no_rag(), never the native similarity
+        # retrieval that interprets user=None as unrestricted. Taxonomy
+        # candidates and resolution use explicit document group permissions.
         group = None
     else:
         group_name = request.get("allowed_group")
@@ -266,6 +269,138 @@ def resolve_choices(suggestions, owner):
     return tags, correspondent, kind
 
 
+
+
+# v2 deliberately does NOT use upstream get_taxonomy_context / RAG, since
+# Paperless 3.3.0 treats user=None as unrestricted for similar-document
+# retrieval. Never include another document's OCR or title in an AI prompt.
+V2_TAXONOMY = (
+    ("tags", Tag, "view_tag", 10),
+    ("correspondents", Correspondent, "view_correspondent", 5),
+    ("document_types", DocumentType, "view_documenttype", 5),
+    ("storage_paths", None, None, 0),
+)
+
+
+def direct_document_group_ids(doc):
+    """Only groups explicitly assigned view/change on THIS document."""
+    ct = ContentType.objects.get_for_model(Document)
+    return frozenset(GroupObjectPermission.objects.filter(
+        content_type=ct, object_pk=str(doc.pk),
+        permission__codename__in=("view_document", "change_document"),
+        permission__content_type=ct,
+    ).values_list("group_id", flat=True))
+
+
+def scoped_taxonomy(model, perm, doc, group_ids, *, exclude_inbox=False):
+    """Global, this owner's, or explicitly shared with document's groups.
+
+    No membership-based implicit sharing of another owner's private metadata.
+    Group object permissions must be for this taxonomy model and view action.
+    This queryset cannot expose another group's private metadata via an
+    ownerless Paperless document.
+    """
+    cond = Q(owner__isnull=True)
+    if doc.owner_id:
+        cond |= Q(owner_id=doc.owner_id)
+    if group_ids:
+        ct = ContentType.objects.get_for_model(model)
+        group_shared = GroupObjectPermission.objects.filter(
+            content_type=ct, permission__content_type=ct,
+            permission__codename=perm,
+            group_id__in=group_ids,
+        ).values_list("object_pk", flat=True)
+        cond |= Q(pk__in=group_shared)
+    qs = model.objects.filter(cond).distinct()
+    if exclude_inbox:
+        qs = qs.filter(is_inbox_tag=False)
+    return qs
+
+
+def taxonomy_candidates_v2(doc, group_ids):
+    """One bounded taxonomy hint list; no neighbouring documents or RAG."""
+    choices = {}
+    for key, model, perm, cap in V2_TAXONOMY:
+        if model is None:
+            choices[key] = []
+            continue
+        qs = scoped_taxonomy(
+            model, perm, doc, group_ids, exclude_inbox=(model is Tag)
+        )
+        choices[key] = [
+            {"id": item.pk, "name": item.name, "weight": 1.0}
+            for item in qs.order_by("pk")[:cap]
+        ]
+    return choices
+
+
+def classify_v2_no_rag(doc, group_ids):
+    """Native Paperless LLM and prompt validation, without cross-doc lookup.
+
+    Do not invoke get_ai_document_classification(): its user=None path
+    searches unrestricted document OCR. This calls only the *no-RAG* prompt
+    builder for the current document and bounded, explicitly visible taxonomy.
+    """
+    candidates = taxonomy_candidates_v2(doc, group_ids)
+    allowed = {
+        key: {item["id"] for item in candidates[key]}
+        for key in ("tags", "correspondents", "document_types", "storage_paths")
+    }
+    prompt = build_prompt_without_rag(doc, AIConfig(), candidates=candidates)
+    with db_connection_released():
+        raw = AIClient().run_llm_query(
+            prompt, allowed_candidate_ids=allowed,
+        )
+    return parse_ai_response(raw)
+
+
+def resolve_choices_v2(suggestions, doc, group_ids):
+    """Resolve global/owner/group-visible metadata, never invent taxonomy."""
+    demand(isinstance(suggestions, dict), "SUGGESTIONS_INVALID")
+    selections = {}
+    for key, model, perm, _ in V2_TAXONOMY:
+        if model is None:
+            continue
+        block = suggestions.get(key)
+        demand(isinstance(block, dict), "SUGGESTIONS_INVALID")
+        provided_ids = block.get("existing_ids")
+        names = block.get("new_names")
+        demand(isinstance(provided_ids, list) and len(provided_ids) <= 20
+               and all(type(x) is int and x > 0 for x in provided_ids),
+               "SUGGESTIONS_INVALID")
+        bounded_ai_labels(names)
+        visible = scoped_taxonomy(
+            model, perm, doc, group_ids, exclude_inbox=(model is Tag)
+        )
+        # Even if an LLM returns an unexpected database ID, it cannot
+        # override the document's group/owner/global taxonomy scope.
+        found_ids = list(visible.filter(pk__in=provided_ids).order_by("pk"))
+        found_names = _match_names_to_queryset(names, visible)
+        selected = list(dict((obj.pk, obj) for obj in found_ids + found_names).values())
+        selections[key] = selected
+    return (
+        selections["tags"][:10],
+        selections["correspondents"][0] if selections["correspondents"] else None,
+        selections["document_types"][0] if selections["document_types"] else None,
+    )
+
+
+def verify_choices_v2(doc, group_ids, tags, correspondent, kind):
+    """Recheck ACL-backed taxonomy after inference and under document lock."""
+    if any(not scoped_taxonomy(Tag, "view_tag", doc, group_ids, exclude_inbox=True)
+           .filter(pk=tag.pk).exists() for tag in tags):
+        return False
+    if correspondent is not None and not scoped_taxonomy(
+        Correspondent, "view_correspondent", doc, group_ids
+    ).filter(pk=correspondent.pk).exists():
+        return False
+    if kind is not None and not scoped_taxonomy(
+        DocumentType, "view_documenttype", doc, group_ids
+    ).filter(pk=kind.pk).exists():
+        return False
+    return True
+
+
 def process_one(doc_id, group, minimum, pilot, db, *, notes_enabled=False,
                 all_inbox=False):
     # All journal states (including review and no-change) are terminal from
@@ -275,15 +410,23 @@ def process_one(doc_id, group, minimum, pilot, db, *, notes_enabled=False,
     doc = guarded_document(doc_id, group, minimum, pilot, all_inbox=all_inbox)
     before = snapshot(doc)
     before_json = stable_snapshot(before)
+    before_groups = direct_document_group_ids(doc) if all_inbox else frozenset()
     db.execute("INSERT INTO catalogue(document_id,state,before_json) VALUES (?,?,?)",
                (doc_id, "PROCESSING", before_json))
     db.commit()
     stage = "INFERENCE"
     try:
-        # The native classifier may be slow; output is treated as untrusted.
-        suggestions = get_ai_document_classification(doc, doc.owner, None)
+        # No RAG and no unbounded user=None in v2. The local model receives
+        # this document only plus its explicitly visible taxonomy candidates.
+        suggestions = (
+            classify_v2_no_rag(doc, before_groups) if all_inbox
+            else get_ai_document_classification(doc, doc.owner, None)
+        )
         stage = "RESOLUTION"
-        tags, correspondent, kind = resolve_choices(suggestions, doc.owner)
+        tags, correspondent, kind = (
+            resolve_choices_v2(suggestions, doc, before_groups) if all_inbox
+            else resolve_choices(suggestions, doc.owner)
+        )
         # This is only a suggestion rendered for the SAME document owner.
         # Do not include OCR, filenames, prompts or other owners' metadata.
         note_body = (review_note_text(
@@ -300,6 +443,12 @@ def process_one(doc_id, group, minimum, pilot, db, *, notes_enabled=False,
                             all_inbox=all_inbox), "DOCUMENT_CHANGED")
             demand(stable_snapshot(snapshot(current_doc)) == before_json,
                    "DOCUMENT_CHANGED")
+            if all_inbox:
+                current_groups = direct_document_group_ids(current_doc)
+                demand(current_groups == before_groups, "DOCUMENT_ACL_CHANGED")
+                demand(verify_choices_v2(current_doc, current_groups, tags,
+                                         correspondent, kind),
+                       "TAXONOMY_ACL_CHANGED")
             changes = plan_changes(
                 before, suggestions, [t.pk for t in tags],
                 correspondent.pk if correspondent else None,
@@ -370,7 +519,8 @@ def process_one(doc_id, group, minimum, pilot, db, *, notes_enabled=False,
             "UNEXPECTED_DOCUMENT_CHANGE", "NOTE_PERMISSION_DENIED",
             "NOTE_SUGGESTIONS_INVALID", "CHANGES_INVALID", "SUGGESTIONS_INVALID",
             "TAGS_INVALID", "INBOX_REMOVED", "CORRESPONDENT_INVALID",
-            "DOCUMENT_TYPE_INVALID",
+            "DOCUMENT_TYPE_INVALID", "DOCUMENT_ACL_CHANGED",
+            "TAXONOMY_ACL_CHANGED",
         }
         code = str(exc) if isinstance(exc, PolicyError) and str(exc) in allowlisted else {
             "INFERENCE": "LLM_FAILURE",
