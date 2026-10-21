@@ -32,6 +32,7 @@ Current capabilities include:
 - Provider-neutral daytrading market-data collection
 - Centralized configuration
 - Paperless-ngx Synology group scan transfer, verified import and protected original archival ([runbook](docs/PAPERLESS-GROUP-OPERATIONS.md))
+- Paperless-ngx native Bergen-AI automated Inbox classification and review notes since 2026-10-01 ([as-operated runbook](docs/PAPERLESS-AI-INBOX-CATALOG-AS-OPERATED.md))
 - Semantic Versioning
 - Documented headless Proxmox/Synology Wake-on-LAN recovery fallback (no G3 guarantee)
 - Complete project documentation
@@ -232,15 +233,27 @@ The Bergen Platform follows Semantic Versioning.
 
 Current release:
 
-v0.15.0 — Bergen-AI family OIDC and four private chat profiles (2026-10-20)
+v0.16.0 — Paperless-AI: regulärer Posteingang seit 01.10.2026 (2026-10-21)
 
-See **[docs/CHANGELOG.md](docs/CHANGELOG.md)** for release history and
-**[the Bergen-AI family chat operations runbook](docs/BERGEN-AI-CHAT-PROFILES-LIVE-OIDC.md)**
-for reproducible Ansible commands, exact model/group ACLs, idempotent second
-apply and outstanding child-access and revocation tests. The v0.15.0
-documentation records a live functional deployment; it does **not** claim
-complete child/login revocation E2E assurance or a verified backup restore.
-Source-merge and Git tag/release publishing are separate steps.
+Der vorhandene Bergen-AI-Timer klassifiziert nach normalem Paperless-Import
+und OCR **alle** Dokumente mit dem echten Posteingangs-Tag und Importzeitpunkt
+ab 01.10.2026, unabhängig von Eigentümer oder Gruppenfreigaben. Es werden
+nur zulässige Metadaten ergänzt, systemseitige Review-Notizen angelegt und
+bestehende Berechtigungen sowie das Posteingangs-Tag beibehalten.
+
+**Nachgewiesener Produktivstand:** 38 relevante Dokumente journalisiert,
+davon 33 `APPLIED`, 1 `NO_CHANGE`, 4 alte `REQUIRES_REVIEW`;
+32 systemseitige Bergen-AI-Notizen. Audit `ok=9 changed=0 failed=0`
+am 21.10.2026. Vier Altfehler und die fachliche Einzelprüfung der
+KI-Ergebnisse sind weiterhin offen. Quellen-Release ist **kein**
+neuer produktiver Timer-Apply.
+
+Siehe **[CHANGELOG](docs/CHANGELOG.md)**,
+**[v0.16.0 Release Notes](docs/releases/v0.16.0.md)** und das
+**[as-operated Paperless-AI-Runbook](docs/PAPERLESS-AI-INBOX-CATALOG-AS-OPERATED.md)**.
+Die vorherigen Bergen-AI-OIDC-Chat-Profile aus v0.15.0 sind weiter
+im [eigenen Runbook](docs/BERGEN-AI-CHAT-PROFILES-LIVE-OIDC.md)
+dokumentiert.
 
 ---
 

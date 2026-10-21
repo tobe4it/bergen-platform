@@ -18,6 +18,72 @@ The project follows **Semantic Versioning (SemVer)** and the changelog format is
 ---
 
 
+## [0.16.0] - 2026-10-21
+
+Paperless-ngx 3.3.0 native local-Ollama metadata catalogue for the
+**regular** Posteingang pipeline. This release records an **already
+completed production deployment**, not another apply.
+
+### Added
+- Local Qwen-backed classification after normal Paperless import and OCR,
+  with guarded title, existing correspondent/document type/tag assignments
+  and native system-attributed Paperless review Notes.
+- Existing five-minute `bergen-ai-catalog.timer` processing all documents
+  with `is_inbox_tag=True` and **`Document.added` from
+  2026-10-01 00:00 Europe/Berlin**. No owner, group, sharing or
+  document-ID watermark restriction in the *selection*.
+- No similarity retrieval of unrelated document OCR into v2 prompts.
+  Existing taxonomy may be reused only when globally, owner- or
+  document-group-visible; private nested tag ancestors are rejected.
+- Protected one-way v1→v2 timer cutover retaining the existing private SQLite
+  processing journal, no automatic replay and an independent
+  exact-scope read-only audit.
+- [As-operated Paperless-AI runbook](PAPERLESS-AI-INBOX-CATALOG-AS-OPERATED.md)
+  and [v0.16.0 release notes](releases/v0.16.0.md).
+
+### Changed
+- Replaced the previous parent-owned new-document scope above a
+  watermark with full Posteingang **import-date** selection.
+  Ownership/ACL are only considered in **metadata visibility**, not
+  in selecting documents.
+- Reused the existing timer, root-owned launcher, persistent journal and
+  manual Inbox review. Disabled the older alternative v2 cutover, which
+  could include unrelated OCR in a `user=None`-based native RAG prompt.
+
+### Verified in the existing deployment (2026-10-21)
+- 04:02: read-only audit: 38 Posteingang documents since 01.10,
+  all OCR-ready; 32 pending, 6 journalized
+  (2 `APPLIED`, 4 `REQUIRES_REVIEW`).
+- 04:04: approved timer upgrade:
+  `ok=23 changed=4 failed=0`;
+  `TIMER=ENABLED`, `OWNER_FILTER=NONE`, `ID_WATERMARK=NOT_USED`.
+- 08:04: independent read-only audit:
+  `ok=9 changed=0 failed=0`, all **38** journalized,
+  `APPLIED=33`, `NO_CHANGE=1`, `REQUIRES_REVIEW=4`,
+  `PROCESSING=0`, `ROLLED_BACK=0`,
+  `READY_UNJOURNALIZED=0`, `SYSTEM_BAI_NOTES=32`.
+  All 32 previously pending documents reached a technical success state:
+  31 newly `APPLIED`, 1 `NO_CHANGE`, **no new** review cases.
+- Source PR #114 passed its related CI. Integrating source and publishing
+  this version are **not** further production deployments.
+
+### Not yet proven / release boundaries
+- Four old `REQUIRES_REVIEW` documents remain blocked from
+  automatic replay and need separate manual reconciliation.
+- Journal success is not manual proof of correctness for every
+  title, correspondent, type, tag or the Notes UI display.
+- Previous v1 service journal lacked expected structured status frames;
+  post-v2 journald outcome transport has not been positively verified.
+- The operator confirmed the backup gate; a restore test is
+  **not attested**.
+- The one-way upgrade is **not** a tested idempotent v2→v2 reapply.
+  No automatic Inbox-tag removal, source-file deletion, LLM retraining,
+  or new external model/provider was introduced.
+
+Related PR: #114, issue #113.
+
+---
+
 ## [0.15.0] - 2026-10-20
 
 Bergen-AI family OIDC group synchronization and four scoped private chat

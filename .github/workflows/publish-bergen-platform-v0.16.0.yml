@@ -1,0 +1,127 @@
+name: Publish Bergen Platform v0.16.0
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/publish-bergen-platform-v0.16.0.yml'
+      - 'docs/releases/v0.16.0.md'
+      - 'docs/PAPERLESS-AI-INBOX-CATALOG-AS-OPERATED.md'
+      - 'docs/CHANGELOG.md'
+      - 'README.md'
+  push:
+    branches:
+      - main
+    paths:
+      - '.github/workflows/publish-bergen-platform-v0.16.0.yml'
+      - 'docs/releases/v0.16.0.md'
+      - 'docs/PAPERLESS-AI-INBOX-CATALOG-AS-OPERATED.md'
+      - 'docs/CHANGELOG.md'
+      - 'README.md'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: publish-bergen-platform-v0.16.0
+  cancel-in-progress: false
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate exact production evidence and release boundaries
+        shell: bash
+        run: |
+          set -euo pipefail
+          grep -Fq '## [0.16.0] - 2026-10-21' docs/CHANGELOG.md
+          grep -Fq '## [0.15.0] - 2026-10-20' docs/CHANGELOG.md
+          grep -Fq 'v0.16.0 — Paperless-AI' README.md
+          grep -Fq '2026-10-01T00:00:00+02:00' docs/PAPERLESS-AI-INBOX-CATALOG-AS-OPERATED.md
+          grep -Fq 'READY_UNJOURNALIZED=0' docs/PAPERLESS-AI-INBOX-CATALOG-AS-OPERATED.md
+          grep -Fq 'SCOPE_JOURNAL_TOTAL=38' docs/PAPERLESS-AI-INBOX-CATALOG-AS-OPERATED.md
+          grep -Fq 'SYSTEM_BAI_NOTES=32' docs/PAPERLESS-AI-INBOX-CATALOG-AS-OPERATED.md
+          grep -Fq 'REQUIRES_REVIEW=4' docs/PAPERLESS-AI-INBOX-CATALOG-AS-OPERATED.md
+          grep -Fq 'not attested' docs/releases/v0.16.0.md
+          grep -Fq 'v0.16.0' docs/releases/v0.16.0.md
+          grep -Fq 'get_ancestors_pks()' ansible/files/paperless/bergen_ai_catalog_runner.py
+          grep -Fq 'build_prompt_without_rag' ansible/files/paperless/bergen_ai_catalog_runner.py
+          grep -Fq 'added__gte=IMPORT_CUTOFF' ansible/files/paperless/bergen_ai_catalog_runner.py
+          grep -Fq 'DEPRECATED_ALL_INBOX_V2_UPGRADE_USE_GUARDED_REGULAR_PIPELINE' ansible/playbooks/upgrade-paperless-ai-inbox-catalog-all-inbox-oct2026.yml
+          test -s docs/PAPERLESS-AI-INBOX-CATALOG-AS-OPERATED.md
+          test -s docs/releases/v0.16.0.md
+      - name: Validate the v2 selection, safety invariants and upgrade syntax
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from pathlib import Path
+          import ast
+          p = Path('ansible/files/paperless/bergen_ai_catalog_runner.py')
+          ast.parse(p.read_text())
+          assert 'classify_v2_no_rag(doc, before_groups)' in p.read_text()
+          assert 'No RAG' in p.read_text()
+          PY
+
+  publish:
+    needs: validate
+    # Explicit and immutable release marker: a merge without this exact
+    # prefix never creates a tag or release; even if the workflow is merged.
+    if: >-
+      github.event_name == 'push' &&
+      github.ref == 'refs/heads/main' &&
+      startsWith(github.event.head_commit.message, 'chore(release): publish Bergen Platform v0.16.0')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Publish exactly the reviewed main SHA as v0.16.0
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          TAG='v0.16.0'
+          REPO="$GITHUB_REPOSITORY"
+          COMMIT="$GITHUB_SHA"
+          tag_http_code="$(curl -sS \
+            --header "Authorization: Bearer $GH_TOKEN" \
+            --header 'Accept: application/vnd.github+json' \
+            --output "$RUNNER_TEMP/bergen-v0.16.0-tag-ref.json" \
+            --write-out '%{http_code}' \
+            "https://api.github.com/repos/$REPO/git/ref/tags/$TAG")"
+          case "$tag_http_code" in
+            200)
+              existing_tag_sha="$(jq -er '.object.sha' "$RUNNER_TEMP/bergen-v0.16.0-tag-ref.json")"
+              ;;
+            404)
+              existing_tag_sha=''
+              ;;
+            *)
+              echo "Refusing: release tag check returned HTTP $tag_http_code" >&2
+              exit 1
+              ;;
+          esac
+          if [[ -n "$existing_tag_sha" && "$existing_tag_sha" != "$COMMIT" ]]; then
+            echo "Refusing: v0.16.0 tag points to another Git object" >&2
+            exit 1
+          fi
+          if gh release view "$TAG" --repo "$REPO" >/dev/null 2>&1; then
+            echo 'Release already exists; not changed.'
+            exit 0
+          fi
+          if [[ -n "$existing_tag_sha" ]]; then
+            echo 'Refusing: orphan release tag without release; manual review'
+            exit 1
+          fi
+          gh release create "$TAG" \
+            --repo "$REPO" \
+            --target "$COMMIT" \
+            --title 'Bergen Platform v0.16.0 — Paperless-AI regular Inbox' \
+            --notes-file docs/releases/v0.16.0.md
+          echo "Published v0.16.0 at $COMMIT" >> "$GITHUB_STEP_SUMMARY"
