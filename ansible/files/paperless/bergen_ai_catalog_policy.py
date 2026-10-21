@@ -59,7 +59,8 @@ def stable_snapshot(data):
                 "inbox"}
     demand(isinstance(data, dict) and set(data) == required, "SNAPSHOT_INVALID")
     demand(type(data["id"]) is int and data["id"] > 0, "SNAPSHOT_INVALID")
-    demand(type(data["owner_id"]) is int and data["owner_id"] > 0, "SNAPSHOT_INVALID")
+    demand(data["owner_id"] is None or (type(data["owner_id"]) is int and data["owner_id"] > 0),
+           "SNAPSHOT_INVALID")
     demand(type(data["inbox"]) is bool, "SNAPSHOT_INVALID")
     demand(isinstance(data["tag_ids"], list)
            and all(type(i) is int and i > 0 for i in data["tag_ids"]),
