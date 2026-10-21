@@ -2179,3 +2179,67 @@ write to its own rootfs during graceful shutdown; any later
 shutdown timeout must never trigger a forced stop, retry,
 unconditional restart, rollback, VMID removal or template
 conversion. CT701 and all production systems remain untouched.
+
+
+## CT790 separately gated graceful shutdown: default no-write proposal
+
+The **running** CT790 has passed the independent, healthy
+systemd read-only audit. A separate, non-mutating-by-default
+shutdown runbook now exists:
+`ansible/playbooks/shutdown-rocky-9-8-ct790-offline.yml`.
+
+This imports the *running-container* audit in the **same** Ansible
+invocation; it will fail closed if CT790 has already stopped,
+if Proxmox configuration drifted, the guest is no longer Rocky
+9.8/systemd PID 1, the user namespace changed, a network interface
+appeared, CT701 is no longer protected, systemd isn't `running`,
+or failed systemd units appear.
+
+The runbook checks the live `pct help shutdown` output and
+requires support for `--timeout` and `--forceStop`, but **does
+not call shutdown by default**. The default bounded receipt is
+`ROCKY_9_8_CT790_SHUTDOWN_PLAN_READ_ONLY_READY`.
+
+The ONLY permitted mutation **after a new explicit CT790-only
+operator approval** is exactly
+`pct shutdown 790 --timeout 90 --forceStop 0`. The explicit
+`--forceStop 0` prevents timeout escalation to a forced stop;
+a timeout is handled as failure with an unchanged follow-up
+policy, never a reason to call `pct stop`, retry automatically,
+restart or destroy. Successful shutdown may write guest
+systemd/journal/machine-id state to CT790's disposable rootfs.
+The runbook rechecks `pct status 790`, identical PVE CT790 config,
+and identical protected CT701 config after shutdown. Even success
+does **not** authorize converting CT790 to a Proxmox template.
+
+Without an explicit second-stage operator approval, **NEVER**
+pass `rocky_ct790_shutdown_apply=true` and the separately
+required `rocky_ct790_shutdown_confirm` value.
+
+For default no-write review from `bp-controller`:
+
+    BASE="$HOME/bergen-platform"
+    WT="$HOME/bergen-platform-nextcloud-restore"
+    BRANCH="feat/nextcloud-isolated-restore-701-20261019"
+    SSH_ARGS="-C -o ControlMaster=no -o ControlPath=none -o ConnectTimeout=10 -o ServerAliveInterval=10 -o ServerAliveCountMax=2"
+    if [ -n "$(git -C "$WT" status --porcelain)" ]; then
+      echo "STOP: dirty worktree"
+    else
+      git -C "$WT" fetch origin "$BRANCH" &&
+      git -C "$WT" switch --detach "origin/$BRANCH" &&
+      ANSIBLE_SSH_ARGS="$SSH_ARGS" "$BASE/.venv/bin/ansible-playbook" \
+        -i "$BASE/ansible/inventory.yml" \
+        -i "$BASE/ansible/inventory.local.yml" \
+        "$WT/ansible/playbooks/shutdown-rocky-9-8-ct790-offline.yml" \
+        --limit venombox --vault-id infra@prompt
+    fi
+
+Expected: `ROCKY_9_8_CT790_SHUTDOWN_PLAN_READ_ONLY_READY`,
+`changed=0`, `failed=0`,
+`pct_stop_authorized=false`, `pct_template_authorized=false`.
+The actual live graceful shutdown, post-shutdown rootfs audit,
+and any image sanitization and conversion are **separate** future
+approvals.
+
+Official Proxmox `pct shutdown` flags:
+https://github.com/proxmox/pve-docs/blob/master/generated/pct.1-synopsis.adoc
