@@ -152,7 +152,7 @@
           - "'NON_LOOPBACK_DEVICES=0' in rocky_start_runtime.stdout_lines"
           - "'GUEST_IDMAP_NONIDENTITY=YES' in rocky_start_runtime.stdout_lines"
           - "'RUNTIME_GUEST_WRITE_OPERATIONS=NONE_BY_PROBE' in rocky_start_runtime.stdout_lines"
-        fail_msg: Guest identity/network/userns evidence absent. CT790 may still be running: do not retry, stop or destroy automatically.
+        fail_msg: "Guest identity/network/userns evidence absent. CT790 may still be running: do not retry, stop or destroy automatically."
       when: rocky_start_apply | bool
 
     - name: Review CT701 still-isolated PVE config after CT790 first boot
