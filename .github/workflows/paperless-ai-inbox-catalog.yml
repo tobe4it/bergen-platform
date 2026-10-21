@@ -15,6 +15,7 @@ on:
       - 'ansible/files/paperless/audit_ai_catalog_journal_inventory_readonly.py'
       - 'ansible/files/paperless/audit_ai_catalog_taxonomy_visibility_readonly.py'
       - 'ansible/files/paperless/audit_ai_catalog_timer_journal_readonly.py'
+      - 'ansible/files/paperless/audit_ai_catalog_all_inbox_oct2026_readonly.py'
       - 'ansible/files/paperless/bergen_ai_catalog_note_permissions.py'
       - 'ansible/files/paperless/bergen_ai_catalog_native_ui.py'
       - 'ansible/files/paperless/bergen_ai_catalog_timer_readiness.py'
@@ -24,6 +25,8 @@ on:
       - 'ansible/playbooks/audit-paperless-ai-catalog-journal-inventory-readonly.yml'
       - 'ansible/playbooks/audit-paperless-ai-taxonomy-visibility-readonly.yml'
       - 'ansible/playbooks/audit-paperless-ai-timer-journal-readonly.yml'
+      - 'ansible/playbooks/audit-paperless-ai-all-inbox-oct2026-readonly.yml'
+      - 'ansible/playbooks/upgrade-paperless-ai-inbox-catalog-all-inbox-oct2026.yml'
       - 'ansible/playbooks/manage-paperless-ai-native-notes.yml'
       - 'ansible/playbooks/manage-paperless-native-ai-suggestions-ui.yml'
       - 'ansible/playbooks/manage-paperless-ai-local-ollama.yml'
@@ -42,6 +45,7 @@ on:
       - 'tests/test_paperless_ai_catalog_journal_inventory_readonly.py'
       - 'tests/test_paperless_ai_catalog_taxonomy_visibility_readonly.py'
       - 'tests/test_paperless_ai_timer_journal_readonly.py'
+      - 'tests/test_paperless_ai_all_inbox_oct2026_v2.py'
       - 'tests/test_paperless_ai_failure_notes_and_native_ui.py'
       - 'docs/PAPERLESS-AI-INBOX-CATALOG.md'
       - 'docs/examples/paperless-ai-catalog.local.yml.example'
@@ -61,6 +65,7 @@ on:
       - 'ansible/files/paperless/audit_ai_catalog_journal_inventory_readonly.py'
       - 'ansible/files/paperless/audit_ai_catalog_taxonomy_visibility_readonly.py'
       - 'ansible/files/paperless/audit_ai_catalog_timer_journal_readonly.py'
+      - 'ansible/files/paperless/audit_ai_catalog_all_inbox_oct2026_readonly.py'
       - 'ansible/files/paperless/bergen_ai_catalog_note_permissions.py'
       - 'ansible/files/paperless/bergen_ai_catalog_native_ui.py'
       - 'ansible/files/paperless/bergen_ai_catalog_timer_readiness.py'
@@ -70,6 +75,8 @@ on:
       - 'ansible/playbooks/audit-paperless-ai-catalog-journal-inventory-readonly.yml'
       - 'ansible/playbooks/audit-paperless-ai-taxonomy-visibility-readonly.yml'
       - 'ansible/playbooks/audit-paperless-ai-timer-journal-readonly.yml'
+      - 'ansible/playbooks/audit-paperless-ai-all-inbox-oct2026-readonly.yml'
+      - 'ansible/playbooks/upgrade-paperless-ai-inbox-catalog-all-inbox-oct2026.yml'
       - 'ansible/playbooks/manage-paperless-ai-native-notes.yml'
       - 'ansible/playbooks/manage-paperless-native-ai-suggestions-ui.yml'
       - 'ansible/playbooks/manage-paperless-ai-local-ollama.yml'
@@ -88,6 +95,7 @@ on:
       - 'tests/test_paperless_ai_catalog_journal_inventory_readonly.py'
       - 'tests/test_paperless_ai_catalog_taxonomy_visibility_readonly.py'
       - 'tests/test_paperless_ai_timer_journal_readonly.py'
+      - 'tests/test_paperless_ai_all_inbox_oct2026_v2.py'
       - 'tests/test_paperless_ai_failure_notes_and_native_ui.py'
 
 jobs:
@@ -116,6 +124,8 @@ jobs:
         run: python -m unittest discover -s tests -p 'test_paperless_ai_failure_notes_and_native_ui.py' -v
       - name: Test immutable post-watermark timer journal audit
         run: python -m unittest discover -s tests -p 'test_paperless_ai_timer_journal_readonly.py' -v
+      - name: Test all-owner October Inbox cutover and immutable journal constraints
+        run: python -m unittest discover -s tests -p 'test_paperless_ai_all_inbox_oct2026_v2.py' -v
       - name: Validate read-only/pilot and separately gated automatic timer syntax
         run: |
           ansible-playbook -i ansible/inventory.yml ansible/playbooks/manage-paperless-ai-inbox-catalog.yml --syntax-check
@@ -124,6 +134,8 @@ jobs:
           ansible-playbook -i ansible/inventory.yml ansible/playbooks/audit-paperless-ai-catalog-journal-inventory-readonly.yml --syntax-check
           ansible-playbook -i ansible/inventory.yml ansible/playbooks/audit-paperless-ai-taxonomy-visibility-readonly.yml --syntax-check
           ansible-playbook -i ansible/inventory.yml ansible/playbooks/audit-paperless-ai-timer-journal-readonly.yml --syntax-check
+          ansible-playbook -i ansible/inventory.yml ansible/playbooks/audit-paperless-ai-all-inbox-oct2026-readonly.yml --syntax-check
+          ansible-playbook -i ansible/inventory.yml ansible/playbooks/upgrade-paperless-ai-inbox-catalog-all-inbox-oct2026.yml --syntax-check
           ansible-playbook -i ansible/inventory.yml ansible/playbooks/manage-paperless-ai-native-notes.yml --syntax-check
           ansible-playbook -i ansible/inventory.yml ansible/playbooks/manage-paperless-native-ai-suggestions-ui.yml --syntax-check
           ansible-playbook -i ansible/inventory.yml ansible/playbooks/manage-paperless-ai-local-ollama.yml --syntax-check
