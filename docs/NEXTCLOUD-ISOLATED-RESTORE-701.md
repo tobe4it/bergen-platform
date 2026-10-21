@@ -2150,3 +2150,32 @@ This still does not authorize CT790 shutdown,
 network attachment, restart or template conversion. A later
 controlled shutdown and image lifecycle change will each
 require explicit separate operator approval.
+
+
+## Rocky CT790 running service-health audit PASS (2026-10-21)
+
+After the explicitly authorized first boot, the operator executed
+`ansible/playbooks/audit-rocky-9-8-ct790-running-readonly.yml`
+with the following independent results:
+
+- `ROCKY_9_8_CT790_RUNNING_READ_ONLY_INVENTORY_RECORDED`
+- `venombox: ok=17 changed=0 unreachable=0 failed=0 skipped=0`
+- `container_status=RUNNING`, `systemd_pid1_verified=true`
+- `systemd_state=running`, `failed_unit_output_lines=0`,
+  `systemd_health=RUNNING_WITH_ZERO_FAILED_UNIT_LINES`
+- `actual_nonloopback_network_interfaces=0`,
+  `user_namespace_nonidentity=true`
+- `ct701_offline_protection_verified=true`; no guest or
+  host configuration changes by the audit.
+- `pct_stop_authorized=false`, `pct_template_authorized=false`.
+
+Thus the live Rocky 9.8 CT790 has passed both its initial
+first-boot checks and an independent service-health observation
+while remaining **isolated, protected and RUNNING**.
+
+**Important: this is not shutdown authorization.** CT790 may
+write to its own rootfs during graceful shutdown; any later
+`pct shutdown 790` is a separately approved mutation. A
+shutdown timeout must never trigger a forced stop, retry,
+unconditional restart, rollback, VMID removal or template
+conversion. CT701 and all production systems remain untouched.
