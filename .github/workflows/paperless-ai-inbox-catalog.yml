@@ -17,6 +17,7 @@ on:
       - 'ansible/files/paperless/audit_ai_catalog_timer_journal_readonly.py'
       - 'ansible/files/paperless/audit_ai_catalog_v2_pilot_eligibility.py'
       - 'ansible/files/paperless/audit_ai_catalog_v2_pilot_success.py'
+      - 'ansible/files/paperless/audit_ai_catalog_v2_scope_readonly.py'
       - 'ansible/files/paperless/audit_ai_catalog_all_inbox_oct2026_readonly.py'
       - 'ansible/files/paperless/bergen_ai_catalog_note_permissions.py'
       - 'ansible/files/paperless/bergen_ai_catalog_native_ui.py'
@@ -29,6 +30,7 @@ on:
       - 'ansible/playbooks/audit-paperless-ai-timer-journal-readonly.yml'
       - 'ansible/playbooks/upgrade-paperless-ai-all-inbox-since-20261001.yml'
       - 'ansible/playbooks/pilot-paperless-ai-v2-ownerless-inbox.yml'
+      - 'ansible/playbooks/audit-paperless-ai-v2-scope-readonly.yml'
       - 'ansible/playbooks/audit-paperless-ai-all-inbox-oct2026-readonly.yml'
       - 'ansible/playbooks/upgrade-paperless-ai-inbox-catalog-all-inbox-oct2026.yml'
       - 'ansible/playbooks/manage-paperless-ai-native-notes.yml'
@@ -72,6 +74,7 @@ on:
       - 'ansible/files/paperless/audit_ai_catalog_timer_journal_readonly.py'
       - 'ansible/files/paperless/audit_ai_catalog_v2_pilot_eligibility.py'
       - 'ansible/files/paperless/audit_ai_catalog_v2_pilot_success.py'
+      - 'ansible/files/paperless/audit_ai_catalog_v2_scope_readonly.py'
       - 'ansible/files/paperless/audit_ai_catalog_all_inbox_oct2026_readonly.py'
       - 'ansible/files/paperless/bergen_ai_catalog_note_permissions.py'
       - 'ansible/files/paperless/bergen_ai_catalog_native_ui.py'
@@ -84,6 +87,7 @@ on:
       - 'ansible/playbooks/audit-paperless-ai-timer-journal-readonly.yml'
       - 'ansible/playbooks/upgrade-paperless-ai-all-inbox-since-20261001.yml'
       - 'ansible/playbooks/pilot-paperless-ai-v2-ownerless-inbox.yml'
+      - 'ansible/playbooks/audit-paperless-ai-v2-scope-readonly.yml'
       - 'ansible/playbooks/audit-paperless-ai-all-inbox-oct2026-readonly.yml'
       - 'ansible/playbooks/upgrade-paperless-ai-inbox-catalog-all-inbox-oct2026.yml'
       - 'ansible/playbooks/manage-paperless-ai-native-notes.yml'
@@ -148,6 +152,7 @@ jobs:
           ansible-playbook -i ansible/inventory.yml ansible/playbooks/audit-paperless-ai-timer-journal-readonly.yml --syntax-check
           ansible-playbook -i ansible/inventory.yml ansible/playbooks/upgrade-paperless-ai-all-inbox-since-20261001.yml --syntax-check
           ansible-playbook -i ansible/inventory.yml ansible/playbooks/pilot-paperless-ai-v2-ownerless-inbox.yml --syntax-check
+          ansible-playbook -i ansible/inventory.yml ansible/playbooks/audit-paperless-ai-v2-scope-readonly.yml --syntax-check
           ansible-playbook -i ansible/inventory.yml ansible/playbooks/audit-paperless-ai-all-inbox-oct2026-readonly.yml --syntax-check
           ansible-playbook -i ansible/inventory.yml ansible/playbooks/upgrade-paperless-ai-inbox-catalog-all-inbox-oct2026.yml --syntax-check
           ansible-playbook -i ansible/inventory.yml ansible/playbooks/manage-paperless-ai-native-notes.yml --syntax-check
