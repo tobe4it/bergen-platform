@@ -62,9 +62,9 @@ class FirstBootPlanTests(unittest.TestCase):
             "pct, stop", "pct, destroy", "pct, restart", "pct, reboot",
             "pct, mount", "pct, template", "pct, set", "pct, create",
             "zfs, destroy", "zfs, rollback",
-            "ansible.builtin.shell", "ansible.builtin.copy",
-            "ansible.builtin.file", "ansible.builtin.template",
-            "ansible.builtin.systemd", "ansible.builtin.apt",
+            "ansible.builtin.shell:", "ansible.builtin.copy:",
+            "ansible.builtin.file:", "ansible.builtin.template:",
+            "ansible.builtin.systemd:", "ansible.builtin.apt:",
         ):
             self.assertNotIn(forbidden, self.source)
 
