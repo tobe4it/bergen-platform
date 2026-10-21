@@ -1,0 +1,87 @@
+---
+# Explicitly approved single TCP-only Paperless -> Ollama peer observation.
+# No HTTP/model inference, no config/service changes, no IP output. The
+# source classification is only trustworthy when there is exactly ONE socket
+# and zero pre-existing Ollama ESTABLISHED connections.
+- name: Observe actual peer address at LXC110 for one Paperless TCP-only connection
+  hosts: venombox
+  become: true
+  gather_facts: false
+  tasks:
+    - name: Require explicit narrow live TCP observation approval
+      ansible.builtin.assert:
+        that:
+          - inventory_hostname == 'venombox'
+          - not ansible_check_mode
+          - bergen_ai_paperless_source_observation_approved | default(false) | bool
+        fail_msg: BERGEN_AI_PAPERLESS_SOURCE_OBSERVATION_APPROVAL_REQUIRED
+      no_log: true
+
+    - name: Establish exactly one short no-HTTP Paperless TCP connection and observe LXC110 peer
+      ansible.builtin.command:
+        argv:
+          - python3
+          - -c
+          - "{{ lookup('ansible.builtin.file', playbook_dir ~ '/../files/paperless/audit_ai_catalog_observed_tcp_source.py', rstrip=False) }}"
+      async: 90
+      poll: 5
+      register: bp_ai_observed_source_raw
+      changed_when: false
+      failed_when: false
+      no_log: true
+
+    - name: Extract a single sealed non-identifying observation
+      ansible.builtin.set_fact:
+        bp_ai_observed_source_frames: >-
+          {{ bp_ai_observed_source_raw.stdout_lines | default([]) |
+             select('match','^BERGEN_AI_PAPERLESS_SOURCE_OBSERVATION_V1:') | list }}
+      no_log: true
+
+    - name: Refuse missing multiple or oversized frames
+      ansible.builtin.assert:
+        that:
+          - bp_ai_observed_source_raw.rc == 0
+          - bp_ai_observed_source_frames | length == 1
+          - bp_ai_observed_source_frames[0] | length < 1300
+        fail_msg: BERGEN_AI_PAPERLESS_SOURCE_OBSERVATION_UNVERIFIED
+      no_log: true
+
+    - name: Decode sanitized TCP-only source classification
+      ansible.builtin.set_fact:
+        bp_ai_observed_source: >-
+          {{ (bp_ai_observed_source_frames[0] |
+             regex_replace('^BERGEN_AI_PAPERLESS_SOURCE_OBSERVATION_V1:','')) | from_json }}
+      no_log: true
+
+    - name: Require explicit unchanged systems and no premature exposure clearance
+      ansible.builtin.assert:
+        that:
+          - bp_ai_observed_source.AUDIT == 'BOUNDED_TCP_ONLY'
+          - not bp_ai_observed_source.CHANGED
+          - bp_ai_observed_source.STATUS in ['SOURCE_OBSERVED','GUEST_IDENTITY_UNVERIFIED','TARGET_OR_SOURCE_UNVERIFIED','ROUTE_SOURCE_UNVERIFIED','OLLAMA_SOCKET_INSPECTION_UNVERIFIED','OLLAMA_HAS_OTHER_TCP_CLIENTS','TCP_CLIENT_START_FAILED','TCP_CLIENT_UNVERIFIED','TCP_OBSERVATION_UNVERIFIED','TCP_OBSERVATION_AMBIGUOUS','TCP_PEER_UNEXPECTED','UNVERIFIED']
+          - bp_ai_observed_source.HTTP_REQUESTS == 0
+          - bp_ai_observed_source.MODEL_INFERENCE == 'NO'
+          - bp_ai_observed_source.PAPERLESS_CHANGED == 'NO'
+          - bp_ai_observed_source.OLLAMA_CONFIG_CHANGED == 'NO'
+          - bp_ai_observed_source.FIREWALL_CHANGED == 'NO'
+          - bp_ai_observed_source.NETWORK_EXPOSURE_GATE == 'REVIEW_REQUIRED'
+          - bp_ai_observed_source.CONNECTION_CLASS | default('UNVERIFIED') in ['MATCHES_LXC126_ROUTE_SOURCE','MATCHES_PODMAN_LOCAL_ROUTE','DIFFERENT_PRIVATE_PEER','UNVERIFIED']
+        fail_msg: BERGEN_AI_PAPERLESS_SOURCE_RESULT_INVALID
+      no_log: true
+
+    - name: Print only verified source category and preserve all rollout gates
+      ansible.builtin.debug:
+        msg:
+          - AUDIT=BOUNDED_TCP_ONLY
+          - CHANGED=False
+          - "STATUS={{ bp_ai_observed_source.STATUS }}"
+          - "TCP_PEER_SOURCE_CLASS={{ bp_ai_observed_source.CONNECTION_CLASS | default('UNVERIFIED') }}"
+          - "PODMAN_ROUTE_DIFFERS_FROM_LXC={{ bp_ai_observed_source.PODMAN_ROUTE_DIFFERS_FROM_LXC | default('UNVERIFIED') }}"
+          - "NAT_MECHANISM={{ bp_ai_observed_source.NAT_MECHANISM | default('NOT_DETERMINED') }}"
+          - HTTP_REQUESTS=ZERO
+          - MODEL_INFERENCE=NO
+          - PAPERLESS_CHANGED=NO
+          - OLLAMA_CONFIG_CHANGED=NO
+          - FIREWALL_CHANGED=NO
+          - EXPOSURE_GATE=REVIEW_REQUIRED
+          - NEXT_ACTION=REVIEW_PRECISE_PVE_FIREWALL_POLICY_WITHOUT_APPLY

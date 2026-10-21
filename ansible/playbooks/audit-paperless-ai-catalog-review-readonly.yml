@@ -1,0 +1,119 @@
+---
+# Non-writing, single-document status audit after guarded Paperless AI failure.
+# Safe even if upstream classifier mutated the document before journal finalization:
+# compares live Django metadata to its persisted journal pre-image without writing.
+- name: Read-only review of a failed Paperless native AI classification
+  hosts: venombox
+  become: true
+  gather_facts: false
+  vars:
+    bp_review_payload:
+      protocol: catalog-review-v1
+      document_id: "{{ paperless_ai_catalog_review_document_id | default(0) | int }}"
+  tasks:
+    - name: Require exact documented guest and positive reviewed ID, no apply
+      ansible.builtin.assert:
+        that:
+          - inventory_hostname == 'venombox'
+          - paperless_ai_catalog_review_document_id is defined
+          - (paperless_ai_catalog_review_document_id | int) > 0
+          - not (paperless_ai_catalog_approved | default(false) | bool)
+          - not (paperless_ai_catalog_timer_activate | default(false) | bool)
+          - paperless_ai_catalog_mode | default('audit') in ['audit', 'preview']
+        fail_msg: REVIEW_READONLY_SCOPE_REQUIRED
+      no_log: true
+
+    - name: Confirm guest is the known unprivileged Paperless CT
+      ansible.builtin.command:
+        argv: [pct, config, '126']
+      register: bp_review_guest
+      changed_when: false
+      no_log: true
+
+    - name: Refuse unexpected or privileged container
+      ansible.builtin.assert:
+        that:
+          - bp_review_guest.rc == 0
+          - "'hostname: bergen-paperless' in bp_review_guest.stdout_lines"
+          - "'unprivileged: 1' in bp_review_guest.stdout_lines"
+          - "'lxc.apparmor.profile: unconfined' not in bp_review_guest.stdout"
+        fail_msg: PAPERLESS_REVIEW_GUEST_UNVERIFIED
+      no_log: true
+
+    - name: Audit exactly one journal record and live document snapshot without writes
+      ansible.builtin.command:
+        argv:
+          - pct
+          - exec
+          - '126'
+          - --
+          - podman
+          - exec
+          - -i
+          - bergen-paperless
+          - python
+          - /usr/src/paperless/src/manage.py
+          - shell
+          - --verbosity=0
+          - -c
+          - "{{ lookup('ansible.builtin.file', playbook_dir ~ '/../files/paperless/audit_ai_catalog_review_state_readonly.py', rstrip=False) ~ '\nmain()' }}"
+        stdin: "{{ bp_review_payload | to_json }}"
+        stdin_add_newline: true
+      register: bp_review_raw
+      changed_when: false
+      failed_when: false
+      no_log: true
+
+    - name: Isolate exactly one sanitized audit frame
+      ansible.builtin.set_fact:
+        bp_review_frames: >-
+          {{ bp_review_raw.stdout_lines | default([]) |
+             select('match', '^BERGEN_PAPERLESS_CATALOG_REVIEW_V1:') | list }}
+      no_log: true
+
+    - name: Refuse unsuccessful or ambiguous audit
+      ansible.builtin.assert:
+        that:
+          - bp_review_raw.rc == 0
+          - bp_review_frames | length == 1
+          - bp_review_frames[0] | length < 1200
+        fail_msg: PAPERLESS_REVIEW_FRAME_UNVERIFIED
+      no_log: true
+
+    - name: Decode only allowlisted aggregate audit evidence
+      ansible.builtin.set_fact:
+        bp_review_record: >-
+          {{ bp_review_frames[0] |
+             regex_replace('^BERGEN_PAPERLESS_CATALOG_REVIEW_V1:', '') |
+             from_json }}
+      no_log: true
+
+    - name: Accept only one read-only reviewed record without secrets
+      ansible.builtin.assert:
+        that:
+          - bp_review_record.AUDIT == 'READ_ONLY'
+          - bp_review_record.CHANGED == false
+          - bp_review_record.DOCUMENTS_CHANGED == 'NO'
+          - bp_review_record.MODEL_INFERENCE == 'NO'
+          - bp_review_record.STATUS == 'INSPECTED'
+          - bp_review_record.JOURNAL_STATE in ['PROCESSING', 'REQUIRES_REVIEW', 'APPLIED', 'ROLLED_BACK']
+          - bp_review_record.SNAPSHOT_MATCH in ['MATCH', 'DIFF', 'UNVERIFIED']
+          - bp_review_record.DIFFERENCE_CATEGORY in ['NONE', 'MODIFIED_ONLY', 'OTHER_FIELDS', 'UNVERIFIED']
+          - bp_review_record.INBOX_TAG in ['PRESENT', 'ABSENT', 'UNVERIFIED']
+          - bp_review_record.JOURNAL_AFTER_SNAPSHOT in ['PRESENT', 'ABSENT']
+        fail_msg: PAPERLESS_REVIEW_EVIDENCE_UNVERIFIED
+      no_log: true
+
+    - name: Report only document's journal state and preimage comparison classes
+      ansible.builtin.debug:
+        msg:
+          - AUDIT=READ_ONLY
+          - STATUS=INSPECTED
+          - "JOURNAL_STATE={{ bp_review_record.JOURNAL_STATE }}"
+          - "SNAPSHOT_MATCH={{ bp_review_record.SNAPSHOT_MATCH }}"
+          - "DIFFERENCE_CATEGORY={{ bp_review_record.DIFFERENCE_CATEGORY }}"
+          - "INBOX_TAG={{ bp_review_record.INBOX_TAG }}"
+          - "JOURNAL_AFTER_SNAPSHOT={{ bp_review_record.JOURNAL_AFTER_SNAPSHOT }}"
+          - MODEL_INFERENCE=NO
+          - DOCUMENTS_CHANGED=NO
+          - CHANGED=False

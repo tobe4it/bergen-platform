@@ -1,0 +1,15 @@
+[Unit]
+Description=Bergen Paperless private Ollama inbox metadata catalogue
+After=network-online.target
+Wants=network-online.target
+ConditionPathExists=/etc/bergen-platform/paperless-ai/catalog-policy.json
+
+[Service]
+Type=oneshot
+User=root
+Group=root
+UMask=0077
+ExecStart=/usr/local/libexec/bergen-ai-catalog-run
+TimeoutStartSec=900
+StandardOutput=journal
+StandardError=null

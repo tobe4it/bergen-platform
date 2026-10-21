@@ -1,0 +1,76 @@
+---
+# Read-only cross-guest network diagnosis:
+# actual Paperless Podman container -> Ollama discovered in existing LXC 110.
+# No address, OCR content, documents, usernames or secrets in output.
+# No network, AI settings, Podman/LXC changes or Ollama inference.
+- name: Verify private Paperless Podman to Ollama model path
+  hosts: venombox
+  become: true
+  gather_facts: false
+  tasks:
+    - name: Confine read-only network discovery to expected Proxmox host
+      ansible.builtin.assert:
+        that:
+          - inventory_hostname == 'venombox'
+        fail_msg: WRONG_PROXMOX_HOST
+
+    - name: Discover LXC110 address and test exact Qwen model from Paperless Podman
+      ansible.builtin.command:
+        argv:
+          - python3
+          - -c
+          - "{{ lookup('ansible.builtin.file', playbook_dir ~ '/../files/paperless/audit_ai_catalog_private_ollama_path_readonly.py', rstrip=False) }}"
+      register: paperless_ai_private_path_raw
+      changed_when: false
+      failed_when: false
+      check_mode: false
+      no_log: true
+
+    - name: Extract only a bounded sanitized readiness frame
+      ansible.builtin.set_fact:
+        paperless_ai_private_path_frames: >-
+          {{ paperless_ai_private_path_raw.stdout_lines | default([]) |
+             select('match', '^BERGEN_PAPERLESS_OLLAMA_PATH_V1:') | list }}
+      no_log: true
+
+    - name: Refuse failed or duplicate private endpoint inspection
+      ansible.builtin.assert:
+        that:
+          - paperless_ai_private_path_raw.rc == 0
+          - paperless_ai_private_path_frames | length == 1
+          - paperless_ai_private_path_frames[0] | length < 1300
+        fail_msg: PRIVATE_OLLAMA_PATH_RESULT_UNVERIFIED
+      no_log: true
+
+    - name: Decode privacy-preserving network result
+      ansible.builtin.set_fact:
+        paperless_ai_private_path: >-
+          {{ (paperless_ai_private_path_frames[0] |
+              regex_replace('^BERGEN_PAPERLESS_OLLAMA_PATH_V1:','')) | from_json }}
+      no_log: true
+
+    - name: Require read-only classification without assuming connectivity
+      ansible.builtin.assert:
+        that:
+          - paperless_ai_private_path.AUDIT == 'READ_ONLY'
+          - not paperless_ai_private_path.CHANGED
+          - paperless_ai_private_path.STATUS in ['UNVERIFIED_GUEST_IDENTITY', 'GUEST_NOT_RUNNING', 'GUEST_NETWORK_INSPECTION_FAILED', 'REVIEW_PRIVATE_IPV4_SELECTION', 'OLLAMA_NOT_BOUND_TO_PRIVATE_INTERFACE', 'PAPERLESS_PRIVATE_PATH_READY', 'PAPERLESS_PRIVATE_PATH_NOT_READY', 'UNVERIFIED']
+          - paperless_ai_private_path.OLLAMA_LISTENER in ['NONE','WILDCARD','LOOPBACK_ONLY','INTERFACE_OR_MIXED','UNVERIFIED']
+          - paperless_ai_private_path.MODEL_FROM_PAPERLESS in ['UNVERIFIED','MODEL_PRESENT','MODEL_ABSENT','UNREACHABLE','PROBE_UNVERIFIED']
+        fail_msg: PRIVATE_OLLAMA_PATH_FRAME_INVALID
+      no_log: true
+
+    - name: Print scoped Paperless connectivity status without network addresses
+      ansible.builtin.debug:
+        msg:
+          - AUDIT=READ_ONLY
+          - CHANGED=False
+          - "STATUS={{ paperless_ai_private_path.STATUS }}"
+          - "OLLAMA_LISTENER={{ paperless_ai_private_path.OLLAMA_LISTENER }}"
+          - "PRIVATE_IPV4_CANDIDATES={{ paperless_ai_private_path.CANDIDATE_PRIVATE_IPV4 }}"
+          - "QWEN14_FROM_PAPERLESS_PODMAN={{ paperless_ai_private_path.MODEL_FROM_PAPERLESS }}"
+          - "NETWORK_EXPOSURE_REVIEW={{ paperless_ai_private_path.NETWORK_EXPOSURE_REVIEW | default('NOT_EVALUATED') }}"
+          - PAPERLESS_CONFIG_CHANGED=NO
+          - PAPERLESS_DOCUMENTS_CHANGED=NO
+          - RAG_AND_EMBEDDINGS_ACTIVATED=NO
+          - NEXT_ACTION=CONFIGURE_ONLY_AFTER_REVIEWED_PRIVATE_ENDPOINT_AND_BACKUP

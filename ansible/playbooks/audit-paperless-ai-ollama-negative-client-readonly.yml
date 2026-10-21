@@ -1,0 +1,137 @@
+---
+# One bounded TCP-connect-only negative exposure test from bp-controller
+# to the *verified* existing Bergen-AI LXC110 port 11434, IPv4 and IPv6.
+# No Ollama HTTP request, no generated tokens, no changes or port scan.
+# Source and target identities must match existing inventory and guest NIC.
+- name: Test unapproved bp-controller direct TCP access to Bergen-AI Ollama
+  hosts: venombox
+  become: true
+  gather_facts: false
+  tasks:
+    - name: Confine probe to expected host and named inventory endpoints
+      ansible.builtin.assert:
+        that:
+          - inventory_hostname == 'venombox'
+          - "'bergen-ai' in hostvars"
+          - "'bp-controller' in hostvars"
+          - hostvars['bergen-ai'].ansible_host is defined
+          - hostvars['bp-controller'].ansible_host is defined
+          - bergen_ai_negative_probe_approved | default(false) | bool
+        fail_msg: BERGEN_AI_NEGATIVE_PROBE_APPROVAL_OR_INVENTORY_MISSING
+      no_log: true
+
+    - name: Discover private LXC110 targets without exposing IPs
+      ansible.builtin.command:
+        argv:
+          - python3
+          - -c
+          - "{{ lookup('ansible.builtin.file', playbook_dir ~ '/../files/paperless/audit_ai_ollama_bp_controller_negative_readonly.py', rstrip=False) }}"
+          - discover
+      register: bp_ai_negative_discovery_raw
+      changed_when: false
+      failed_when: false
+      check_mode: false
+      no_log: true
+
+    - name: Extract one sealed target frame
+      ansible.builtin.set_fact:
+        bp_ai_negative_discovery_frames: >-
+          {{ bp_ai_negative_discovery_raw.stdout_lines | default([]) |
+             select('match','^BERGEN_AI_OLLAMA_NEGATIVE_PROBE_V1:') | list }}
+      no_log: true
+
+    - name: Require bounded successful target discovery
+      ansible.builtin.assert:
+        that:
+          - bp_ai_negative_discovery_raw.rc == 0
+          - bp_ai_negative_discovery_frames | length == 1
+          - bp_ai_negative_discovery_frames[0] | length < 1400
+        fail_msg: BERGEN_AI_NEGATIVE_TARGET_UNVERIFIED
+      no_log: true
+
+    - name: Parse only the sealed address frame for transport
+      ansible.builtin.set_fact:
+        bp_ai_negative_discovery: >-
+          {{ (bp_ai_negative_discovery_frames[0] |
+             regex_replace('^BERGEN_AI_OLLAMA_NEGATIVE_PROBE_V1:','')) | from_json }}
+      no_log: true
+
+    - name: Require exact inventory address before remote probe
+      ansible.builtin.assert:
+        that:
+          - bp_ai_negative_discovery.AUDIT == 'READ_ONLY'
+          - bp_ai_negative_discovery.STATUS == 'TARGET_DISCOVERED'
+          - not bp_ai_negative_discovery.CHANGED
+          - bp_ai_negative_discovery.IPV4 == hostvars['bergen-ai'].ansible_host
+          - bp_ai_negative_discovery.IPV6 is string
+        fail_msg: BERGEN_AI_NEGATIVE_TARGET_DRIFT_OR_AMBIGUOUS
+      no_log: true
+
+    - name: Connect once from verified bp-controller to both permitted IP families
+      ansible.builtin.command:
+        argv:
+          - python3
+          - -c
+          - "{{ lookup('ansible.builtin.file', playbook_dir ~ '/../files/paperless/audit_ai_ollama_bp_controller_negative_readonly.py', rstrip=False) }}"
+          - probe
+          - "{{ hostvars['bp-controller'].ansible_host }}"
+          - "{{ bp_ai_negative_discovery.IPV4 }}"
+          - "{{ bp_ai_negative_discovery.IPV6 }}"
+      delegate_to: bp-controller
+      become: true
+      register: bp_ai_negative_probe_raw
+      changed_when: false
+      failed_when: false
+      check_mode: false
+      no_log: true
+
+    - name: Extract one sealed probe result
+      ansible.builtin.set_fact:
+        bp_ai_negative_probe_frames: >-
+          {{ bp_ai_negative_probe_raw.stdout_lines | default([]) |
+             select('match','^BERGEN_AI_OLLAMA_NEGATIVE_PROBE_V1:') | list }}
+      no_log: true
+
+    - name: Require one bounded sanitized result
+      ansible.builtin.assert:
+        that:
+          - bp_ai_negative_probe_raw.rc == 0
+          - bp_ai_negative_probe_frames | length == 1
+          - bp_ai_negative_probe_frames[0] | length < 1300
+        fail_msg: BERGEN_AI_NEGATIVE_PROBE_RESULT_UNVERIFIED
+      no_log: true
+
+    - name: Decode non-identifying connectivity classification
+      ansible.builtin.set_fact:
+        bp_ai_negative_probe: >-
+          {{ (bp_ai_negative_probe_frames[0] |
+             regex_replace('^BERGEN_AI_OLLAMA_NEGATIVE_PROBE_V1:','')) | from_json }}
+      no_log: true
+
+    - name: Reject any unexpected source or target status
+      ansible.builtin.assert:
+        that:
+          - bp_ai_negative_probe.AUDIT == 'READ_ONLY'
+          - not bp_ai_negative_probe.CHANGED
+          - bp_ai_negative_probe.STATUS == 'PROBE_COMPLETED'
+          - bp_ai_negative_probe.SOURCE == 'BP_CONTROLLER_ONLY'
+          - bp_ai_negative_probe.IPV4_TCP_11434 in ['REACHABLE','REFUSED','NO_ROUTE','TIMEOUT','UNVERIFIED_NETWORK_ERROR']
+          - bp_ai_negative_probe.IPV6_TCP_11434 in ['REACHABLE','REFUSED','NO_ROUTE','TIMEOUT','NO_TARGET_ADDRESS','UNVERIFIED_NETWORK_ERROR']
+          - bp_ai_negative_probe.SECURITY_GATE == 'REVIEW_REQUIRED'
+        fail_msg: BERGEN_AI_NEGATIVE_PROBE_UNVERIFIED_NO_AUTO_RETRY
+      no_log: true
+
+    - name: Show only connection classifications with security gate still pending
+      ansible.builtin.debug:
+        msg:
+          - AUDIT=READ_ONLY
+          - CHANGED=False
+          - PROBE_SOURCE=BP_CONTROLLER
+          - "IPV4_TCP_11434={{ bp_ai_negative_probe.IPV4_TCP_11434 }}"
+          - "IPV6_TCP_11434={{ bp_ai_negative_probe.IPV6_TCP_11434 }}"
+          - "UNAPPROVED_SOURCE_ACCESS={{ bp_ai_negative_probe.EXTERNAL_CLIENT_ACCESS }}"
+          - OLLAMA_HTTP_REQUESTS=ZERO
+          - PAPERLESS_CHANGED=NO
+          - OLLAMA_CHANGED=NO
+          - EXPOSURE_GATE=REVIEW_REQUIRED
+          - NEXT_ACTION=REVIEW_FIREWALL_POLICY_BEFORE_PAPERLESS_APPLY

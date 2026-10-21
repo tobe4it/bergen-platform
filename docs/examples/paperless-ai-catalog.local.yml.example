@@ -1,0 +1,36 @@
+---
+# Example ONLY. Store reviewed values in the git-ignored path:
+# $HOME/bergen-platform/ansible/vars/paperless-ai-catalog.local.yml
+# No secrets, real user identities, document IDs or internal addresses in Git.
+
+# Exact real Paperless Django group, not a universal domain name.
+paperless_ai_catalog_allowed_group: "Eltern@YOUR-DIRECTORY-DOMAIN"
+paperless_ai_catalog_model: "qwen2.5:14b-instruct-q4_K_M"
+paperless_ai_catalog_endpoint: "http://192.168.0.100:11434"
+
+# Model routing (decision 2026-10-19):\n# - Paperless classification = qwen2.5:14b-instruct-q4_K_M\n# - multilingual evaluation = mistral-nemo:12b (NOT a production fallback)\n# - embeddings / future ACL-safe RAG = bge-m3:latest (NOT enabled)\n# Runtime /api/tags must confirm the exact catalog model on the Ollama\n# endpoint reachable by the Paperless container before any apply.\n\n# Trial: select one or two independently reviewed *existing inbox* IDs.
+# Never select already-reviewed documents. The operator supplies real IDs locally.
+paperless_ai_catalog_pilot_ids: []
+paperless_ai_catalog_batch_size: 1
+
+# Set a positive watermark at AUTOMATION activation for NEW documents only.
+# Existing documents are NOT retroactively classified.
+paperless_ai_catalog_min_document_id: 0
+
+# First configure the *native LLM client only* via its guarded ORM playbook.
+# Global Paperless AI UI and embedding features stay DISABLED.
+paperless_ai_catalog_config_action: audit
+paperless_ai_catalog_config_approved: false
+paperless_ai_catalog_config_expected_sha256: ""
+paperless_ai_catalog_config_rollback_approved: false
+
+# The default Ansible run is read-only.
+paperless_ai_catalog_mode: audit
+paperless_ai_catalog_approved: false
+paperless_ai_catalog_verified_backup: false
+paperless_ai_catalog_rollback_approved: false
+
+# Separate automatic timer deployment – disabled until E2E pilot is accepted.
+paperless_ai_catalog_timer_activate: false
+paperless_ai_catalog_timer_approved: false
+paperless_ai_catalog_pilot_passed: false

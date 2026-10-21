@@ -1,0 +1,170 @@
+---
+# Zero-write discovery of Paperless v3.3 AI settings, group counts and Ollama
+# models in two existing LXCs on venombox. Outputs no group or user names,
+# OCR content, document identifiers, network addresses or API credentials.
+- name: Preflight native Paperless AI inbox metadata catalogue without writes
+  hosts: venombox
+  become: true
+  gather_facts: false
+  tasks:
+    - name: Require known single Proxmox inventory host and no Ansible mutations
+      ansible.builtin.assert:
+        that:
+          - inventory_hostname == 'venombox'
+
+    - name: Inspect target LXC 126 identity
+      ansible.builtin.command:
+        argv: [pct, config, '126']
+      register: bp_ai_preflight_paperless_lxc
+      changed_when: false
+      no_log: true
+
+    - name: Confirm only the existing confined Paperless guest
+      ansible.builtin.assert:
+        that:
+          - bp_ai_preflight_paperless_lxc.rc == 0
+          - "'hostname: bergen-paperless' in bp_ai_preflight_paperless_lxc.stdout_lines"
+          - "'unprivileged: 1' in bp_ai_preflight_paperless_lxc.stdout_lines"
+          - "'lxc.apparmor.profile: unconfined' not in bp_ai_preflight_paperless_lxc.stdout"
+        fail_msg: PAPERLESS_GUEST_IDENTITY_NOT_VERIFIED
+      no_log: true
+
+    - name: Read sealed Paperless runtime status via installed Django shell
+      ansible.builtin.command:
+        argv:
+          - pct
+          - exec
+          - '126'
+          - --
+          - podman
+          - exec
+          - bergen-paperless
+          - python
+          - /usr/src/paperless/src/manage.py
+          - shell
+          - --verbosity=0
+          - -c
+          - "{{ lookup('ansible.builtin.file', playbook_dir ~ '/../files/paperless/audit_ai_catalog_paperless_readonly.py', rstrip=False) }}"
+      register: bp_ai_preflight_paperless_raw
+      changed_when: false
+      failed_when: false
+      no_log: true
+
+    - name: Extract only expected Paperless inventory JSON frame
+      ansible.builtin.set_fact:
+        bp_ai_preflight_paperless_frames: >-
+          {{ bp_ai_preflight_paperless_raw.stdout_lines |
+             select('match', '^BERGEN_AI_CATALOG_PREFLIGHT_PAPERLESS_V1:') | list }}
+      no_log: true
+
+    - name: Refuse failed or duplicate Paperless inventory
+      ansible.builtin.assert:
+        that:
+          - bp_ai_preflight_paperless_raw.rc == 0
+          - bp_ai_preflight_paperless_frames | length == 1
+          - bp_ai_preflight_paperless_frames[0] | length < 1500
+        fail_msg: PAPERLESS_READONLY_INVENTORY_UNAVAILABLE
+      no_log: true
+
+    - name: Decode only the bounded Paperless inventory categories
+      ansible.builtin.set_fact:
+        bp_ai_preflight_paperless: >-
+          {{ bp_ai_preflight_paperless_frames[0] |
+             regex_replace('^BERGEN_AI_CATALOG_PREFLIGHT_PAPERLESS_V1:', '') |
+             from_json }}
+      no_log: true
+
+    - name: Assert valid non-mutating Paperless result
+      ansible.builtin.assert:
+        that:
+          - bp_ai_preflight_paperless.AUDIT == 'READ_ONLY'
+          - bp_ai_preflight_paperless.CHANGED == false
+          - bp_ai_preflight_paperless.VERSION is string
+          - bp_ai_preflight_paperless.MODEL is string
+          - bp_ai_preflight_paperless.GLOBAL_AI in ['ON', 'OFF', 'NOT_INSPECTED']
+          - bp_ai_preflight_paperless.EMBEDDINGS in ['ON', 'OFF', 'NOT_INSPECTED']
+          - bp_ai_preflight_paperless.LLM_BACKEND in ['OLLAMA', 'OTHER', 'NOT_CONFIGURED', 'NOT_INSPECTED']
+        fail_msg: PAPERLESS_INVENTORY_INVALID
+      no_log: true
+
+    - name: Inspect expected Bergen-AI guest identity
+      ansible.builtin.command:
+        argv: [pct, config, '110']
+      register: bp_ai_preflight_llm_lxc
+      changed_when: false
+      failed_when: false
+      no_log: true
+
+    - name: Confirm existing Bergen-AI container before model inventory
+      ansible.builtin.set_fact:
+        bp_ai_preflight_llm_target_ok: >-
+          {{ bp_ai_preflight_llm_lxc.rc == 0 and
+             'hostname: bergen-ai' in bp_ai_preflight_llm_lxc.stdout_lines and
+             'unprivileged: 1' in bp_ai_preflight_llm_lxc.stdout_lines and
+             'lxc.apparmor.profile: unconfined' not in bp_ai_preflight_llm_lxc.stdout }}
+      no_log: true
+
+    - name: Read local Ollama models in verified Bergen-AI guest
+      ansible.builtin.command:
+        argv:
+          - pct
+          - exec
+          - '110'
+          - --
+          - python3
+          - -c
+          - "{{ lookup('ansible.builtin.file', playbook_dir ~ '/../files/paperless/audit_ai_catalog_ollama_readonly.py', rstrip=False) }}"
+      register: bp_ai_preflight_ollama_raw
+      changed_when: false
+      failed_when: false
+      no_log: true
+      when: bp_ai_preflight_llm_target_ok | bool
+
+    - name: Extract only bounded Ollama inventory JSON frame
+      ansible.builtin.set_fact:
+        bp_ai_preflight_ollama_frames: >-
+          {{ bp_ai_preflight_ollama_raw.stdout_lines |
+             default([]) |
+             select('match', '^BERGEN_AI_CATALOG_PREFLIGHT_OLLAMA_V1:') | list }}
+      no_log: true
+
+    - name: Validate optional loopback Ollama inventory
+      ansible.builtin.assert:
+        that:
+          - bp_ai_preflight_ollama_frames | length <= 1
+          - bp_ai_preflight_ollama_frames | length == 0 or bp_ai_preflight_ollama_frames[0] | length < 3300
+        fail_msg: OLLAMA_INVENTORY_INVALID
+      no_log: true
+
+    - name: Decode valid Ollama classification only
+      ansible.builtin.set_fact:
+        bp_ai_preflight_ollama: >-
+          {{ (bp_ai_preflight_ollama_frames[0] |
+              regex_replace('^BERGEN_AI_CATALOG_PREFLIGHT_OLLAMA_V1:', '') |
+              from_json) if bp_ai_preflight_ollama_frames | length == 1
+              else {'AUDIT':'READ_ONLY', 'API':'UNAVAILABLE', 'MODELS':[], 'MODEL_COUNT':0} }}
+      no_log: true
+
+    - name: Print sanitized readiness summary for next setup step
+      ansible.builtin.debug:
+        msg:
+          - "AUDIT=READ_ONLY"
+          - "CHANGED=False"
+          - "PAPERLESS_VERSION={{ bp_ai_preflight_paperless.VERSION }}"
+          - "PAPERLESS_CONFIG_ROWS={{ bp_ai_preflight_paperless.CONFIG_ROWS }}"
+          - "GLOBAL_AI={{ bp_ai_preflight_paperless.GLOBAL_AI }}"
+          - "EMBEDDINGS={{ bp_ai_preflight_paperless.EMBEDDINGS }}"
+          - "LLM_BACKEND={{ bp_ai_preflight_paperless.LLM_BACKEND }}"
+          - "LLM_MODEL={{ bp_ai_preflight_paperless.MODEL }}"
+          - "LLM_ENDPOINT={{ bp_ai_preflight_paperless.ENDPOINT }}"
+          - "PRIVATE_LLM_ALLOWED={{ bp_ai_preflight_paperless.PRIVATE_LLM_ALLOWED }}"
+          - "INBOX_TAGS={{ bp_ai_preflight_paperless.TOTAL_INBOX_TAGS }}"
+          - "INBOX_DOCUMENTS={{ bp_ai_preflight_paperless.INBOX_DOCUMENTS }}"
+          - "PARENT_GROUPS={{ bp_ai_preflight_paperless.PARENT_GROUPS }}"
+          - "FAMILY_GROUPS={{ bp_ai_preflight_paperless.FAMILY_GROUPS }}"
+          - "CHILD_GROUPS={{ bp_ai_preflight_paperless.CHILD_GROUPS }}"
+          - "ACTIVE_PARENT_ACCOUNTS={{ bp_ai_preflight_paperless.PARENT_ACTIVE_NONSTAFF_ACCOUNTS }}"
+          - "PARENT_INBOX_OCR_DOCUMENTS={{ bp_ai_preflight_paperless.PARENT_OWNED_INBOX_WITH_OCR }}"
+          - "OLLAMA_LXC110_IDENTITY={{ 'VERIFIED' if bp_ai_preflight_llm_target_ok | bool else 'NOT_VERIFIED' }}"
+          - "OLLAMA_LOOPBACK_API={{ bp_ai_preflight_ollama.API }}"
+          - "OLLAMA_MODELS={{ bp_ai_preflight_ollama.MODELS | join(',') }}"

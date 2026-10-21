@@ -1,0 +1,143 @@
+---
+# Classify newly ingested documents against the installed timer watermark.
+# Read-only. No worker execution, model inference or notes/metadata writes.
+- name: Audit installed Paperless Bergen-AI timer journal without writes
+  hosts: venombox
+  become: true
+  gather_facts: false
+  tasks:
+    - name: Require exact Proxmox target and no write approvals
+      ansible.builtin.assert:
+        that:
+          - inventory_hostname == 'venombox'
+          - paperless_ai_catalog_mode | default('audit') in ['audit', 'preview']
+          - not (paperless_ai_catalog_approved | default(false) | bool)
+          - not (paperless_ai_catalog_timer_activate | default(false) | bool)
+        fail_msg: TIMER_JOURNAL_READONLY_ONLY
+      no_log: true
+
+    - name: Require correct confined Paperless LXC
+      ansible.builtin.command:
+        argv: [pct, config, '126']
+      register: bp_timer_audit_lxc
+      changed_when: false
+      no_log: true
+
+    - name: Reject unexpected or privileged Paperless guest
+      ansible.builtin.assert:
+        that:
+          - bp_timer_audit_lxc.rc == 0
+          - "'hostname: bergen-paperless' in bp_timer_audit_lxc.stdout_lines"
+          - "'unprivileged: 1' in bp_timer_audit_lxc.stdout_lines"
+          - "'lxc.apparmor.profile: unconfined' not in bp_timer_audit_lxc.stdout"
+      no_log: true
+
+    - name: Read root-only installed timer settings without exposing values
+      ansible.builtin.slurp:
+        src: /etc/bergen-platform/paperless-ai/catalog-policy.json
+      register: bp_timer_audit_policy_blob
+      no_log: true
+
+    - name: Decode installed policy only in memory
+      ansible.builtin.set_fact:
+        bp_timer_audit_policy: "{{ bp_timer_audit_policy_blob.content | b64decode | from_json }}"
+      no_log: true
+
+    - name: Prove exact scheduled parent-only local metadata policy
+      ansible.builtin.assert:
+        that:
+          - bp_timer_audit_policy.protocol == 'catalog-v1'
+          - bp_timer_audit_policy.mode == 'apply'
+          - bp_timer_audit_policy.allowed_group == 'Eltern@bergen.intern'
+          - bp_timer_audit_policy.pilot_ids == []
+          - bp_timer_audit_policy.notes_enabled == true
+          - bp_timer_audit_policy.approved == true
+          - bp_timer_audit_policy.batch_size == 1
+          - bp_timer_audit_policy.min_document_id is number
+          - bp_timer_audit_policy.min_document_id | int > 0
+        fail_msg: TIMER_JOURNAL_INSTALLED_POLICY_UNVERIFIED
+      no_log: true
+
+    - name: Read only new document counts and protected post-watermark journal states
+      ansible.builtin.command:
+        argv:
+          - pct
+          - exec
+          - '126'
+          - --
+          - podman
+          - exec
+          - -i
+          - bergen-paperless
+          - python
+          - /usr/src/paperless/src/manage.py
+          - shell
+          - --verbosity=0
+          - -c
+          - "{{ lookup('ansible.builtin.file', playbook_dir ~ '/../files/paperless/audit_ai_catalog_timer_journal_readonly.py', rstrip=False) ~ '\nmain()' }}"
+        stdin: >-
+          {{ {'protocol': 'timer-journal-readonly-v1',
+              'watermark': bp_timer_audit_policy.min_document_id | int} | to_json }}
+        stdin_add_newline: true
+      register: bp_timer_audit_raw
+      changed_when: false
+      failed_when: false
+      no_log: true
+
+    - name: Isolate one bounded non-identifying evidence record
+      ansible.builtin.set_fact:
+        bp_timer_audit_frames: >-
+          {{ bp_timer_audit_raw.stdout_lines | default([]) |
+             select('match', '^BERGEN_PAPERLESS_TIMER_JOURNAL_AUDIT_V1:') | list }}
+      no_log: true
+
+    - name: Reject missing or ambiguous journal evidence
+      ansible.builtin.assert:
+        that:
+          - bp_timer_audit_raw.rc == 0
+          - bp_timer_audit_frames | length == 1
+          - bp_timer_audit_frames[0] | length < 1800
+        fail_msg: TIMER_JOURNAL_AUDIT_FRAME_UNVERIFIED
+      no_log: true
+
+    - name: Decode only sanitized counters
+      ansible.builtin.set_fact:
+        bp_timer_audit_result: >-
+          {{ bp_timer_audit_frames[0] |
+             regex_replace('^BERGEN_PAPERLESS_TIMER_JOURNAL_AUDIT_V1:', '') | from_json }}
+      no_log: true
+
+    - name: Require strict read-only status, bounded state set and consistent counts
+      ansible.builtin.assert:
+        that:
+          - bp_timer_audit_result.AUDIT == 'READ_ONLY'
+          - bp_timer_audit_result.STATUS == 'INSPECTED'
+          - bp_timer_audit_result.CHANGED == false
+          - bp_timer_audit_result.MODEL_INFERENCE == 'NO'
+          - bp_timer_audit_result.DOCUMENTS_CHANGED == 'NO'
+          - bp_timer_audit_result.NEW_DOCUMENTS | int >= 0
+          - bp_timer_audit_result.NEW_PARENT_INBOX_DOCUMENTS | int >= 0
+          - bp_timer_audit_result.NEW_PARENT_INBOX_WITH_OCR | int >= 0
+          - bp_timer_audit_result.NEW_PARENT_INBOX_DOCUMENTS | int <= bp_timer_audit_result.NEW_DOCUMENTS | int
+          - bp_timer_audit_result.NEW_PARENT_INBOX_WITH_OCR | int <= bp_timer_audit_result.NEW_PARENT_INBOX_DOCUMENTS | int
+          - bp_timer_audit_result.NEW_PARENT_AI_NOTES | int >= 0
+          - bp_timer_audit_result.POST_WATERMARK_JOURNAL_TOTAL | int >= 0
+          - (bp_timer_audit_result.POST_WATERMARK_STATES.keys() | list | sort) == ['APPLIED', 'NO_CHANGE', 'PROCESSING', 'REQUIRES_REVIEW', 'ROLLED_BACK']
+          - bp_timer_audit_result.POST_WATERMARK_JOURNAL_TOTAL | int == (bp_timer_audit_result.POST_WATERMARK_STATES.values() | map('int') | sum)
+        fail_msg: TIMER_JOURNAL_AUDIT_CONTENT_INVALID
+      no_log: true
+
+    - name: Report only aggregate new-document and journal status
+      ansible.builtin.debug:
+        msg:
+          - AUDIT=READ_ONLY
+          - STATUS=INSPECTED
+          - "NEW_DOCUMENTS={{ bp_timer_audit_result.NEW_DOCUMENTS }}"
+          - "NEW_PARENT_INBOX_DOCUMENTS={{ bp_timer_audit_result.NEW_PARENT_INBOX_DOCUMENTS }}"
+          - "NEW_PARENT_INBOX_WITH_OCR={{ bp_timer_audit_result.NEW_PARENT_INBOX_WITH_OCR }}"
+          - "NEW_PARENT_AI_NOTES={{ bp_timer_audit_result.NEW_PARENT_AI_NOTES }}"
+          - "POST_WATERMARK_JOURNAL_TOTAL={{ bp_timer_audit_result.POST_WATERMARK_JOURNAL_TOTAL }}"
+          - "POST_WATERMARK_STATES={{ bp_timer_audit_result.POST_WATERMARK_STATES | to_json }}"
+          - MODEL_INFERENCE=NO
+          - DOCUMENTS_CHANGED=NO
+          - CHANGED=False

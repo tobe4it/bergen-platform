@@ -1,0 +1,161 @@
+name: Paperless native AI inbox catalog policy
+
+on:
+  pull_request:
+    paths:
+      - 'ansible/files/paperless/bergen_ai_catalog_*.py'
+      - 'ansible/files/paperless/audit_ai_catalog_private_ollama_path_readonly.py'
+      - 'ansible/files/paperless/audit_ai_catalog_ollama_firewall_readonly.py'
+      - 'ansible/files/paperless/audit_ai_catalog_ollama_runtime_filter_readonly.py'
+      - 'ansible/files/paperless/audit_ai_ollama_bp_controller_negative_readonly.py'
+      - 'ansible/files/paperless/audit_ai_ollama_ct_topology_readonly.py'
+      - 'ansible/files/paperless/audit_ai_catalog_observed_tcp_source.py'
+      - 'ansible/files/paperless/audit_ai_catalog_pilot_candidates_readonly.py'
+      - 'ansible/files/paperless/audit_ai_catalog_review_state_readonly.py'
+      - 'ansible/files/paperless/audit_ai_catalog_journal_inventory_readonly.py'
+      - 'ansible/files/paperless/audit_ai_catalog_taxonomy_visibility_readonly.py'
+      - 'ansible/files/paperless/audit_ai_catalog_timer_journal_readonly.py'
+      - 'ansible/files/paperless/audit_ai_catalog_v2_scope_readonly.py'
+      - 'ansible/files/paperless/audit_ai_catalog_all_inbox_oct2026_readonly.py'
+      - 'ansible/files/paperless/bergen_ai_catalog_note_permissions.py'
+      - 'ansible/files/paperless/bergen_ai_catalog_native_ui.py'
+      - 'ansible/files/paperless/bergen_ai_catalog_timer_readiness.py'
+      - 'ansible/playbooks/manage-paperless-ai-inbox-catalog.yml'
+      - 'ansible/playbooks/audit-paperless-ai-pilot-selection-readonly.yml'
+      - 'ansible/playbooks/audit-paperless-ai-catalog-review-readonly.yml'
+      - 'ansible/playbooks/audit-paperless-ai-catalog-journal-inventory-readonly.yml'
+      - 'ansible/playbooks/audit-paperless-ai-taxonomy-visibility-readonly.yml'
+      - 'ansible/playbooks/audit-paperless-ai-timer-journal-readonly.yml'
+      - 'ansible/playbooks/upgrade-paperless-ai-all-inbox-since-20261001.yml'
+      - 'ansible/playbooks/audit-paperless-ai-v2-scope-readonly.yml'
+      - 'ansible/playbooks/audit-paperless-ai-all-inbox-oct2026-readonly.yml'
+      - 'ansible/playbooks/upgrade-paperless-ai-inbox-catalog-all-inbox-oct2026.yml'
+      - 'ansible/playbooks/manage-paperless-ai-native-notes.yml'
+      - 'ansible/playbooks/manage-paperless-native-ai-suggestions-ui.yml'
+      - 'ansible/playbooks/manage-paperless-ai-local-ollama.yml'
+      - 'ansible/playbooks/audit-paperless-ai-catalog-runtime-readonly.yml'
+      - 'ansible/playbooks/audit-paperless-ai-ollama-private-path-readonly.yml'
+      - 'ansible/playbooks/audit-paperless-ai-ollama-firewall-readonly.yml'
+      - 'ansible/playbooks/audit-paperless-ai-ollama-runtime-filter-readonly.yml'
+      - 'ansible/playbooks/audit-paperless-ai-ollama-negative-client-readonly.yml'
+      - 'ansible/playbooks/audit-paperless-ai-ollama-topology-readonly.yml'
+      - 'ansible/playbooks/audit-paperless-ai-ollama-observed-source.yml'
+      - 'ansible/playbooks/deploy-paperless-ai-inbox-catalog-timer.yml'
+      - 'ansible/files/paperless/bergen-ai-catalog-*'
+      - 'tests/test_paperless_ai_catalog_policy.py'
+      - 'tests/test_paperless_ai_pilot_candidates_readonly.py'
+      - 'tests/test_paperless_ai_catalog_review_readonly.py'
+      - 'tests/test_paperless_ai_catalog_journal_inventory_readonly.py'
+      - 'tests/test_paperless_ai_catalog_taxonomy_visibility_readonly.py'
+      - 'tests/test_paperless_ai_timer_journal_readonly.py'
+      - 'tests/test_paperless_ai_v2_all_inbox_since_october.py'
+      - 'tests/test_paperless_ai_all_inbox_oct2026_v2.py'
+      - 'tests/test_paperless_ai_failure_notes_and_native_ui.py'
+      - 'docs/PAPERLESS-AI-INBOX-CATALOG.md'
+      - 'docs/examples/paperless-ai-catalog.local.yml.example'
+      - '.github/workflows/paperless-ai-inbox-catalog.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'ansible/files/paperless/bergen_ai_catalog_*.py'
+      - 'ansible/files/paperless/audit_ai_catalog_private_ollama_path_readonly.py'
+      - 'ansible/files/paperless/audit_ai_catalog_ollama_firewall_readonly.py'
+      - 'ansible/files/paperless/audit_ai_catalog_ollama_runtime_filter_readonly.py'
+      - 'ansible/files/paperless/audit_ai_ollama_bp_controller_negative_readonly.py'
+      - 'ansible/files/paperless/audit_ai_ollama_ct_topology_readonly.py'
+      - 'ansible/files/paperless/audit_ai_catalog_observed_tcp_source.py'
+      - 'ansible/files/paperless/audit_ai_catalog_pilot_candidates_readonly.py'
+      - 'ansible/files/paperless/audit_ai_catalog_review_state_readonly.py'
+      - 'ansible/files/paperless/audit_ai_catalog_journal_inventory_readonly.py'
+      - 'ansible/files/paperless/audit_ai_catalog_taxonomy_visibility_readonly.py'
+      - 'ansible/files/paperless/audit_ai_catalog_timer_journal_readonly.py'
+      - 'ansible/files/paperless/audit_ai_catalog_v2_scope_readonly.py'
+      - 'ansible/files/paperless/audit_ai_catalog_all_inbox_oct2026_readonly.py'
+      - 'ansible/files/paperless/bergen_ai_catalog_note_permissions.py'
+      - 'ansible/files/paperless/bergen_ai_catalog_native_ui.py'
+      - 'ansible/files/paperless/bergen_ai_catalog_timer_readiness.py'
+      - 'ansible/playbooks/manage-paperless-ai-inbox-catalog.yml'
+      - 'ansible/playbooks/audit-paperless-ai-pilot-selection-readonly.yml'
+      - 'ansible/playbooks/audit-paperless-ai-catalog-review-readonly.yml'
+      - 'ansible/playbooks/audit-paperless-ai-catalog-journal-inventory-readonly.yml'
+      - 'ansible/playbooks/audit-paperless-ai-taxonomy-visibility-readonly.yml'
+      - 'ansible/playbooks/audit-paperless-ai-timer-journal-readonly.yml'
+      - 'ansible/playbooks/upgrade-paperless-ai-all-inbox-since-20261001.yml'
+      - 'ansible/playbooks/audit-paperless-ai-v2-scope-readonly.yml'
+      - 'ansible/playbooks/audit-paperless-ai-all-inbox-oct2026-readonly.yml'
+      - 'ansible/playbooks/upgrade-paperless-ai-inbox-catalog-all-inbox-oct2026.yml'
+      - 'ansible/playbooks/manage-paperless-ai-native-notes.yml'
+      - 'ansible/playbooks/manage-paperless-native-ai-suggestions-ui.yml'
+      - 'ansible/playbooks/manage-paperless-ai-local-ollama.yml'
+      - 'ansible/playbooks/audit-paperless-ai-catalog-runtime-readonly.yml'
+      - 'ansible/playbooks/audit-paperless-ai-ollama-private-path-readonly.yml'
+      - 'ansible/playbooks/audit-paperless-ai-ollama-firewall-readonly.yml'
+      - 'ansible/playbooks/audit-paperless-ai-ollama-runtime-filter-readonly.yml'
+      - 'ansible/playbooks/audit-paperless-ai-ollama-negative-client-readonly.yml'
+      - 'ansible/playbooks/audit-paperless-ai-ollama-topology-readonly.yml'
+      - 'ansible/playbooks/audit-paperless-ai-ollama-observed-source.yml'
+      - 'ansible/playbooks/deploy-paperless-ai-inbox-catalog-timer.yml'
+      - 'ansible/files/paperless/bergen-ai-catalog-*'
+      - 'tests/test_paperless_ai_catalog_policy.py'
+      - 'tests/test_paperless_ai_pilot_candidates_readonly.py'
+      - 'tests/test_paperless_ai_catalog_review_readonly.py'
+      - 'tests/test_paperless_ai_catalog_journal_inventory_readonly.py'
+      - 'tests/test_paperless_ai_catalog_taxonomy_visibility_readonly.py'
+      - 'tests/test_paperless_ai_timer_journal_readonly.py'
+      - 'tests/test_paperless_ai_v2_all_inbox_since_october.py'
+      - 'tests/test_paperless_ai_all_inbox_oct2026_v2.py'
+      - 'tests/test_paperless_ai_failure_notes_and_native_ui.py'
+
+jobs:
+  policy-and-syntax:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install offline dependencies
+        run: python -m pip install 'ansible-core>=2.16,<2.18' 'PyYAML>=6,<7'
+      - name: Run explicit fail-closed policy tests
+        run: python -m unittest discover -s tests -p 'test_paperless_ai_catalog_policy.py' -v
+      - name: Test bounded read-only pilot diagnosis and opt-in ID listing
+        run: python -m unittest discover -s tests -p 'test_paperless_ai_pilot_candidates_readonly.py' -v
+      - name: Test no-write journal diagnostic and snapshot comparison
+        run: python -m unittest discover -s tests -p 'test_paperless_ai_catalog_review_readonly.py' -v
+      - name: Test bounded read-only journal inventory and exact ID scope
+        run: python -m unittest discover -s tests -p 'test_paperless_ai_catalog_journal_inventory_readonly.py' -v
+      - name: Test post-edit taxonomy ACL audit in read-only mode
+        run: python -m unittest discover -s tests -p 'test_paperless_ai_catalog_taxonomy_visibility_readonly.py' -v
+      - name: Test 4-step ML -> BAI -> optional native UI gates
+        run: python -m unittest discover -s tests -p 'test_paperless_ai_failure_notes_and_native_ui.py' -v
+      - name: Test immutable post-watermark timer journal audit
+        run: python -m unittest discover -s tests -p 'test_paperless_ai_timer_journal_readonly.py' -v
+      - name: Test all-owner October Inbox cutover and immutable journal constraints
+        run: python -m unittest discover -s tests -p 'test_paperless_ai_all_inbox_oct2026_v2.py' -v
+      - name: Test all-owner October cutoff and safe timer upgrade
+        run: python -m unittest discover -s tests -p 'test_paperless_ai_v2_all_inbox_since_october.py' -v
+      - name: Validate read-only/pilot and separately gated automatic timer syntax
+        run: |
+          ansible-playbook -i ansible/inventory.yml ansible/playbooks/manage-paperless-ai-inbox-catalog.yml --syntax-check
+          ansible-playbook -i ansible/inventory.yml ansible/playbooks/audit-paperless-ai-pilot-selection-readonly.yml --syntax-check
+          ansible-playbook -i ansible/inventory.yml ansible/playbooks/audit-paperless-ai-catalog-review-readonly.yml --syntax-check
+          ansible-playbook -i ansible/inventory.yml ansible/playbooks/audit-paperless-ai-catalog-journal-inventory-readonly.yml --syntax-check
+          ansible-playbook -i ansible/inventory.yml ansible/playbooks/audit-paperless-ai-taxonomy-visibility-readonly.yml --syntax-check
+          ansible-playbook -i ansible/inventory.yml ansible/playbooks/audit-paperless-ai-timer-journal-readonly.yml --syntax-check
+          ansible-playbook -i ansible/inventory.yml ansible/playbooks/upgrade-paperless-ai-all-inbox-since-20261001.yml --syntax-check
+          ansible-playbook -i ansible/inventory.yml ansible/playbooks/audit-paperless-ai-v2-scope-readonly.yml --syntax-check
+          ansible-playbook -i ansible/inventory.yml ansible/playbooks/audit-paperless-ai-all-inbox-oct2026-readonly.yml --syntax-check
+          ansible-playbook -i ansible/inventory.yml ansible/playbooks/upgrade-paperless-ai-inbox-catalog-all-inbox-oct2026.yml --syntax-check
+          ansible-playbook -i ansible/inventory.yml ansible/playbooks/manage-paperless-ai-native-notes.yml --syntax-check
+          ansible-playbook -i ansible/inventory.yml ansible/playbooks/manage-paperless-native-ai-suggestions-ui.yml --syntax-check
+          ansible-playbook -i ansible/inventory.yml ansible/playbooks/manage-paperless-ai-local-ollama.yml --syntax-check
+          ansible-playbook -i ansible/inventory.yml ansible/playbooks/audit-paperless-ai-catalog-runtime-readonly.yml --syntax-check
+          ansible-playbook -i ansible/inventory.yml ansible/playbooks/audit-paperless-ai-ollama-private-path-readonly.yml --syntax-check
+          ansible-playbook -i ansible/inventory.yml ansible/playbooks/audit-paperless-ai-ollama-firewall-readonly.yml --syntax-check
+          ansible-playbook -i ansible/inventory.yml ansible/playbooks/audit-paperless-ai-ollama-runtime-filter-readonly.yml --syntax-check
+          ansible-playbook -i ansible/inventory.yml ansible/playbooks/audit-paperless-ai-ollama-negative-client-readonly.yml --syntax-check
+          ansible-playbook -i ansible/inventory.yml ansible/playbooks/audit-paperless-ai-ollama-topology-readonly.yml --syntax-check
+          ansible-playbook -i ansible/inventory.yml ansible/playbooks/audit-paperless-ai-ollama-observed-source.yml --syntax-check
+          ansible-playbook -i ansible/inventory.yml ansible/playbooks/deploy-paperless-ai-inbox-catalog-timer.yml --syntax-check

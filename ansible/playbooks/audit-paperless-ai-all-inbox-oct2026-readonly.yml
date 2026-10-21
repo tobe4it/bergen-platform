@@ -1,0 +1,117 @@
+---
+# Read only: all dated Inbox documents and existing private journal overlap.
+# This does not deploy the v2 worker or alter any timer/service.
+- name: Audit all Paperless Inbox documents imported since October 1
+  hosts: venombox
+  become: true
+  gather_facts: false
+  tasks:
+    - name: Require read-only operator mode without legacy or v2 apply approval
+      ansible.builtin.assert:
+        that:
+          - inventory_hostname == 'venombox'
+          - paperless_ai_catalog_mode | default('audit') in ['audit', 'preview']
+          - not (paperless_ai_catalog_approved | default(false) | bool)
+          - not (paperless_ai_catalog_all_inbox_upgrade_approved | default(false) | bool)
+        fail_msg: ALL_INBOX_READ_ONLY_REQUIRED
+      no_log: true
+
+    - name: Identify exact Paperless guest and sandbox
+      ansible.builtin.command:
+        argv: [pct, config, '126']
+      register: bp_all_inbox_guest
+      changed_when: false
+      no_log: true
+
+    - name: Reject privileged or unexpected guest
+      ansible.builtin.assert:
+        that:
+          - bp_all_inbox_guest.rc == 0
+          - "'hostname: bergen-paperless' in bp_all_inbox_guest.stdout_lines"
+          - "'unprivileged: 1' in bp_all_inbox_guest.stdout_lines"
+          - "'lxc.apparmor.profile: unconfined' not in bp_all_inbox_guest.stdout"
+      no_log: true
+
+    - name: Read exact dated Inbox inventory and private historical journal
+      ansible.builtin.command:
+        argv:
+          - pct
+          - exec
+          - '126'
+          - --
+          - podman
+          - exec
+          - -i
+          - bergen-paperless
+          - python
+          - /usr/src/paperless/src/manage.py
+          - shell
+          - --verbosity=0
+          - -c
+          - "{{ lookup('ansible.builtin.file', playbook_dir ~ '/../files/paperless/audit_ai_catalog_all_inbox_oct2026_readonly.py', rstrip=False) }}"
+      register: bp_all_inbox_raw
+      changed_when: false
+      failed_when: false
+      no_log: true
+
+    - name: Isolate exactly one bounded sanitized inventory record
+      ansible.builtin.set_fact:
+        bp_all_inbox_frames: >-
+          {{ bp_all_inbox_raw.stdout_lines | default([]) |
+             select('match', '^BERGEN_PAPERLESS_ALL_INBOX_OCT_AUDIT_V1:') | list }}
+      no_log: true
+
+    - name: Reject unframed output and runtime failures
+      ansible.builtin.assert:
+        that:
+          - bp_all_inbox_raw.rc == 0
+          - bp_all_inbox_frames | length == 1
+          - bp_all_inbox_frames[0] | length < 1800
+        fail_msg: ALL_INBOX_AUDIT_MISSING
+      no_log: true
+
+    - name: Parse non-identifying audit result
+      ansible.builtin.set_fact:
+        bp_all_inbox_result: >-
+          {{ bp_all_inbox_frames[0] |
+             regex_replace('^BERGEN_PAPERLESS_ALL_INBOX_OCT_AUDIT_V1:', '') | from_json }}
+      no_log: true
+
+    - name: Verify scope, no writes and partition consistency
+      ansible.builtin.assert:
+        that:
+          - bp_all_inbox_result.AUDIT == 'READ_ONLY'
+          - bp_all_inbox_result.STATUS == 'INSPECTED'
+          - bp_all_inbox_result.CHANGED == false
+          - bp_all_inbox_result.MODEL_INFERENCE == 'NO'
+          - bp_all_inbox_result.DOCUMENTS_CHANGED == 'NO'
+          - bp_all_inbox_result.IMPORT_CUTOFF == '2026-10-01'
+          - bp_all_inbox_result.ALL_INBOX_IMPORTED_FROM_CUTOFF | int >= 0
+          - bp_all_inbox_result.OWNERLESS_INBOX | int >= 0
+          - bp_all_inbox_result.OWNERLESS_INBOX | int <= bp_all_inbox_result.ALL_INBOX_IMPORTED_FROM_CUTOFF | int
+          - bp_all_inbox_result.READY_FOR_CLASSIFICATION | int >= 0
+          - bp_all_inbox_result.PENDING_NOT_JOURNALED | int >= 0
+          - bp_all_inbox_result.WAITING_FOR_OCR_OR_UNSUPPORTED_VERSION | int >= 0
+          - bp_all_inbox_result.ALREADY_JOURNALED | int >= 0
+          - bp_all_inbox_result.READY_FOR_CLASSIFICATION | int == bp_all_inbox_result.PENDING_NOT_JOURNALED | int + bp_all_inbox_result.ALREADY_JOURNALED | int
+          - bp_all_inbox_result.ALL_INBOX_IMPORTED_FROM_CUTOFF | int == bp_all_inbox_result.READY_FOR_CLASSIFICATION | int + bp_all_inbox_result.WAITING_FOR_OCR_OR_UNSUPPORTED_VERSION | int
+          - (bp_all_inbox_result.EXISTING_JOURNAL_STATES.keys() | list | sort) == ['APPLIED', 'NO_CHANGE', 'PROCESSING', 'REQUIRES_REVIEW', 'ROLLED_BACK']
+          - bp_all_inbox_result.ALREADY_JOURNALED | int == (bp_all_inbox_result.EXISTING_JOURNAL_STATES.values() | map('int') | sum)
+        fail_msg: ALL_INBOX_AUDIT_UNVERIFIED
+      no_log: true
+
+    - name: Print only reviewed aggregate inventory evidence
+      ansible.builtin.debug:
+        msg:
+          - AUDIT=READ_ONLY
+          - IMPORT_CUTOFF=2026-10-01_EUROPE_BERLIN
+          - "ALL_INBOX_IMPORTED_FROM_CUTOFF={{ bp_all_inbox_result.ALL_INBOX_IMPORTED_FROM_CUTOFF }}"
+          - "OWNERLESS_INBOX={{ bp_all_inbox_result.OWNERLESS_INBOX }}"
+          - "READY_FOR_CLASSIFICATION={{ bp_all_inbox_result.READY_FOR_CLASSIFICATION }}"
+          - "WAITING_FOR_OCR_OR_UNSUPPORTED_VERSION={{ bp_all_inbox_result.WAITING_FOR_OCR_OR_UNSUPPORTED_VERSION }}"
+          - "ALREADY_JOURNALED={{ bp_all_inbox_result.ALREADY_JOURNALED }}"
+          - "PENDING_NOT_JOURNALED={{ bp_all_inbox_result.PENDING_NOT_JOURNALED }}"
+          - "EXISTING_JOURNAL_STATES={{ bp_all_inbox_result.EXISTING_JOURNAL_STATES | to_json }}"
+          - MODEL_INFERENCE=NO
+          - DOCUMENTS_CHANGED=NO
+          - CHANGED=False

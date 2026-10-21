@@ -1,0 +1,93 @@
+---
+# Read-only runtime host packet-filter *inventory* and LXC110 IPv4/IPv6 bind.
+# Non-sensitive categories only; not proof of security without effective path
+# tracing and negative tests from a designated unauthorized client.
+- name: Inspect live Ollama 11434 firewall runtime and IPv6 without mutations
+  hosts: venombox
+  become: true
+  gather_facts: false
+  tasks:
+    - name: Assert only the expected Proxmox inventory host
+      ansible.builtin.assert:
+        that:
+          - inventory_hostname == 'venombox'
+        fail_msg: WRONG_PROXMOX_HOST
+
+    - name: Inventory nftables iptables and Bergen-AI listeners read-only
+      ansible.builtin.command:
+        argv:
+          - python3
+          - -c
+          - "{{ lookup('ansible.builtin.file', playbook_dir ~ '/../files/paperless/audit_ai_catalog_ollama_runtime_filter_readonly.py', rstrip=False) }}"
+      register: bergen_ai_filter_runtime_raw
+      changed_when: false
+      failed_when: false
+      check_mode: false
+      no_log: true
+
+    - name: Select only one sanitized bounded runtime report
+      ansible.builtin.set_fact:
+        bergen_ai_filter_runtime_frames: >-
+          {{ bergen_ai_filter_runtime_raw.stdout_lines | default([]) |
+             select('match','^BERGEN_PAPERLESS_OLLAMA_RUNTIME_FILTER_V1:') | list }}
+      no_log: true
+
+    - name: Reject missing duplicate or oversized runtime report
+      ansible.builtin.assert:
+        that:
+          - bergen_ai_filter_runtime_raw.rc == 0
+          - bergen_ai_filter_runtime_frames | length == 1
+          - bergen_ai_filter_runtime_frames[0] | length < 1900
+        fail_msg: OLLAMA_RUNTIME_FILTER_AUDIT_UNVERIFIED
+      no_log: true
+
+    - name: Parse sanitized LXC110 runtime firewall evidence
+      ansible.builtin.set_fact:
+        bergen_ai_filter_runtime: >-
+          {{ (bergen_ai_filter_runtime_frames[0] |
+             regex_replace('^BERGEN_PAPERLESS_OLLAMA_RUNTIME_FILTER_V1:','')) | from_json }}
+      no_log: true
+
+    - name: Validate no-change and reject any premature security clearance
+      ansible.builtin.assert:
+        that:
+          - bergen_ai_filter_runtime.AUDIT == 'READ_ONLY'
+          - not bergen_ai_filter_runtime.CHANGED
+          - bergen_ai_filter_runtime.STATUS in ['RUNTIME_RULE_INVENTORY','CT110_UNVERIFIED','UNVERIFIED']
+          - bergen_ai_filter_runtime.NFT_STATUS in ['LOADED','UNAVAILABLE','UNVERIFIED']
+          - bergen_ai_filter_runtime.IPT4_STATUS in ['AVAILABLE','UNAVAILABLE','UNVERIFIED']
+          - bergen_ai_filter_runtime.IPT6_STATUS in ['AVAILABLE','UNAVAILABLE','UNVERIFIED']
+          - bergen_ai_filter_runtime.IPV4_LISTENER in ['WILDCARD','BOUND_SPECIFIC','NONE','UNVERIFIED']
+          - bergen_ai_filter_runtime.IPV6_LISTENER in ['WILDCARD','BOUND_SPECIFIC','NONE','UNVERIFIED']
+          - bergen_ai_filter_runtime.IPV6_NON_LINK_LOCAL in ['PRESENT','ABSENT','UNVERIFIED']
+          - bergen_ai_filter_runtime.EXPOSURE_GATE == 'REVIEW_REQUIRED'
+          - bergen_ai_filter_runtime.UNIFI_POLICY == 'NOT_INSPECTED'
+        fail_msg: OLLAMA_RUNTIME_FILTER_RESULT_INVALID
+      no_log: true
+
+    - name: Report privacy-safe runtime facts and preserve review gate
+      ansible.builtin.debug:
+        msg:
+          - AUDIT=READ_ONLY
+          - CHANGED=False
+          - "STATUS={{ bergen_ai_filter_runtime.STATUS }}"
+          - "NFT_RUNTIME={{ bergen_ai_filter_runtime.NFT_STATUS }}"
+          - "NFT_BASE_INPUT_OR_FORWARD_CHAINS={{ bergen_ai_filter_runtime.NFT_BASE_CHAINS }}"
+          - "NFT_11434_RULE_REFERENCES={{ bergen_ai_filter_runtime.NFT_PORT_11434_RULE_HINTS }}"
+          - "NFT_CT110_INTERFACE_MENTION={{ bergen_ai_filter_runtime.NFT_CT110_INTERFACE_MENTION }}"
+          - "IPTABLES_IPV4={{ bergen_ai_filter_runtime.IPT4_STATUS }}"
+          - "IPTABLES_IPV4_RULE_COUNT={{ bergen_ai_filter_runtime.IPT4_RULE_COUNT | default('UNVERIFIED') }}"
+          - "IPTABLES_IPV4_CT110_INTERFACE_MENTION={{ bergen_ai_filter_runtime.IPT4_CT110_INTERFACE_MENTION }}"
+          - "IPTABLES_IPV6={{ bergen_ai_filter_runtime.IPT6_STATUS }}"
+          - "IPTABLES_IPV6_RULE_COUNT={{ bergen_ai_filter_runtime.IPT6_RULE_COUNT | default('UNVERIFIED') }}"
+          - "IPTABLES_IPV6_CT110_INTERFACE_MENTION={{ bergen_ai_filter_runtime.IPT6_CT110_INTERFACE_MENTION }}"
+          - "OLLAMA_IPV4_BIND={{ bergen_ai_filter_runtime.IPV4_LISTENER }}"
+          - "OLLAMA_IPV6_BIND={{ bergen_ai_filter_runtime.IPV6_LISTENER }}"
+          - "LXC110_IPV6_NON_LINK_LOCAL={{ bergen_ai_filter_runtime.IPV6_NON_LINK_LOCAL }}"
+          - "EFFECTIVE_TCP_11434_DENY={{ bergen_ai_filter_runtime.EFFECTIVE_TCP_11434_DENY | default('NOT_VERIFIED') }}"
+          - "INTRA_VLAN_ISOLATION={{ bergen_ai_filter_runtime.INTRA_VLAN_ISOLATION | default('NOT_VERIFIED') }}"
+          - UNIFI_POLICY=NOT_INSPECTED
+          - EXPOSURE_GATE=REVIEW_REQUIRED
+          - PAPERLESS_CONFIG_CHANGED=NO
+          - OLLAMA_CONFIG_CHANGED=NO
+          - NEXT_ACTION=INDEPENDENTLY_REVIEW_EFFECTIVE_POLICY_AND_NEGATIVE_CLIENT_TEST

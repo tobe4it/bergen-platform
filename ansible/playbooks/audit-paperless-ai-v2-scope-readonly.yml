@@ -1,0 +1,112 @@
+---
+# Read-only regular v2 Posteingang cutoff summary; never filter owner or group.
+- name: Audit all imported Posteingang documents since October 1
+  hosts: venombox
+  become: true
+  gather_facts: false
+  tasks:
+    - name: Require exact host and no live write approval
+      ansible.builtin.assert:
+        that:
+          - inventory_hostname == 'venombox'
+          - not (paperless_ai_catalog_approved | default(false) | bool)
+          - not (paperless_ai_catalog_v2_upgrade_approved | default(false) | bool)
+          - not (paperless_ai_catalog_v2_pilot_approved | default(false) | bool)
+        fail_msg: V2_SCOPE_AUDIT_READ_ONLY_ONLY
+      no_log: true
+
+    - name: Check exact confined Paperless LXC
+      ansible.builtin.command:
+        argv: [pct, config, '126']
+      register: bp_v2_scope_lxc
+      changed_when: false
+      no_log: true
+
+    - name: Refuse unexpected or insecure Paperless guest
+      ansible.builtin.assert:
+        that:
+          - bp_v2_scope_lxc.rc == 0
+          - "'hostname: bergen-paperless' in bp_v2_scope_lxc.stdout_lines"
+          - "'unprivileged: 1' in bp_v2_scope_lxc.stdout_lines"
+          - "'lxc.apparmor.profile: unconfined' not in bp_v2_scope_lxc.stdout"
+      no_log: true
+
+    - name: Inspect October Posteingang scope and protected journal irrespective of owner or group
+      ansible.builtin.command:
+        argv:
+          - pct
+          - exec
+          - '126'
+          - --
+          - podman
+          - exec
+          - -i
+          - bergen-paperless
+          - python
+          - /usr/src/paperless/src/manage.py
+          - shell
+          - --verbosity=0
+          - -c
+          - "{{ lookup('ansible.builtin.file', playbook_dir ~ '/../files/paperless/audit_ai_catalog_v2_scope_readonly.py', rstrip=False) ~ '\nmain()' }}"
+        stdin: '{"protocol":"catalog-v2-scope-audit-v1"}'
+        stdin_add_newline: true
+      register: bp_v2_scope_raw
+      changed_when: false
+      failed_when: false
+      no_log: true
+
+    - name: Require exactly one bounded sanitized output
+      ansible.builtin.set_fact:
+        bp_v2_scope_frames: >-
+          {{ bp_v2_scope_raw.stdout_lines | default([]) |
+             select('match', '^BERGEN_PAPERLESS_V2_SCOPE_AUDIT_V1:') | list }}
+      no_log: true
+
+    - name: Validate one read-only summary
+      ansible.builtin.assert:
+        that:
+          - bp_v2_scope_raw.rc == 0
+          - bp_v2_scope_frames | length == 1
+          - bp_v2_scope_frames[0] | length < 1800
+        fail_msg: V2_SCOPE_AUDIT_FRAME_MISSING
+      no_log: true
+
+    - name: Decode only aggregate status categories
+      ansible.builtin.set_fact:
+        bp_v2_scope_result: >-
+          {{ bp_v2_scope_frames[0] |
+             regex_replace('^BERGEN_PAPERLESS_V2_SCOPE_AUDIT_V1:', '') | from_json }}
+      no_log: true
+
+    - name: Require bounded consistent counts and no inference or document writes
+      ansible.builtin.assert:
+        that:
+          - bp_v2_scope_result.STATUS == 'INSPECTED'
+          - bp_v2_scope_result.AUDIT == 'READ_ONLY'
+          - bp_v2_scope_result.CHANGED == false
+          - bp_v2_scope_result.MODEL_INFERENCE == 'NO'
+          - bp_v2_scope_result.DOCUMENTS_CHANGED == 'NO'
+          - bp_v2_scope_result.ALL_INBOX_ADDED_FROM_OCT1 | int >= 0
+          - bp_v2_scope_result.OCR_READY_UNVERSIONED | int <= bp_v2_scope_result.ALL_INBOX_ADDED_FROM_OCT1 | int
+          - bp_v2_scope_result.READY_UNJOURNALIZED | int <= bp_v2_scope_result.OCR_READY_UNVERSIONED | int
+          - bp_v2_scope_result.ALL_INBOX_ADDED_FROM_OCT1 | int == bp_v2_scope_result.OCR_READY_UNVERSIONED | int + bp_v2_scope_result.WAITING_OCR_OR_VERSION_REVIEW | int
+          - (bp_v2_scope_result.SCOPE_JOURNAL_STATES.keys() | list | sort) == ['APPLIED', 'NO_CHANGE', 'PROCESSING', 'REQUIRES_REVIEW', 'ROLLED_BACK']
+          - bp_v2_scope_result.SCOPE_JOURNAL_TOTAL | int == (bp_v2_scope_result.SCOPE_JOURNAL_STATES.values() | map('int') | sum)
+        fail_msg: V2_SCOPE_AUDIT_COUNTERS_INVALID
+      no_log: true
+
+    - name: Display aggregate v2 scope evidence without sensitive fields
+      ansible.builtin.debug:
+        msg:
+          - AUDIT=READ_ONLY
+          - STATUS=INSPECTED
+          - "ALL_INBOX_ADDED_FROM_OCT1={{ bp_v2_scope_result.ALL_INBOX_ADDED_FROM_OCT1 }}"
+          - "OCR_READY_UNVERSIONED={{ bp_v2_scope_result.OCR_READY_UNVERSIONED }}"
+          - "WAITING_OCR_OR_VERSION_REVIEW={{ bp_v2_scope_result.WAITING_OCR_OR_VERSION_REVIEW }}"
+          - "READY_UNJOURNALIZED={{ bp_v2_scope_result.READY_UNJOURNALIZED }}"
+          - "SCOPE_JOURNAL_TOTAL={{ bp_v2_scope_result.SCOPE_JOURNAL_TOTAL }}"
+          - "SCOPE_JOURNAL_STATES={{ bp_v2_scope_result.SCOPE_JOURNAL_STATES | to_json }}"
+          - "SYSTEM_BAI_NOTES={{ bp_v2_scope_result.SYSTEM_BAI_NOTES }}"
+          - MODEL_INFERENCE=NO
+          - DOCUMENTS_CHANGED=NO
+          - CHANGED=False

@@ -1,0 +1,129 @@
+---
+# Read-only exact eligibility diagnosis for the operator-selected pilot ID(s).
+# Optional numeric eligible IDs are shown ONLY when explicitly requested.
+# No OCR, names, titles, document content, AI requests or writes.
+- name: Diagnose candidate eligibility for a Paperless inbox AI pilot without writes
+  hosts: venombox
+  become: true
+  gather_facts: false
+  vars:
+    bp_pilot_inspection_payload:
+      protocol: pilot-selection-v1
+      allowed_group: "{{ paperless_ai_catalog_allowed_group | default('') }}"
+      pilot_ids: "{{ paperless_ai_catalog_pilot_ids | default([]) }}"
+      show_candidate_ids: "{{ paperless_ai_catalog_show_candidate_ids | default(false) | bool }}"
+  tasks:
+    - name: Restrict to known target and nonmutating catalogue modes
+      ansible.builtin.assert:
+        that:
+          - inventory_hostname == 'venombox'
+          - paperless_ai_catalog_mode | default('audit') in ['audit', 'preview']
+          - not (paperless_ai_catalog_approved | default(false) | bool)
+          - not (paperless_ai_catalog_timer_activate | default(false) | bool)
+          - paperless_ai_catalog_allowed_group is defined
+          - paperless_ai_catalog_pilot_ids is defined
+          - (paperless_ai_catalog_pilot_ids | length) <= 2
+        fail_msg: PILOT_READONLY_SCOPE_REQUIRED
+      no_log: true
+
+    - name: Inspect expected Paperless guest before accessing catalogue metadata
+      ansible.builtin.command:
+        argv: [pct, config, '126']
+      register: bp_pilot_guest_raw
+      changed_when: false
+      no_log: true
+
+    - name: Refuse unexpected or privileged guest
+      ansible.builtin.assert:
+        that:
+          - bp_pilot_guest_raw.rc == 0
+          - "'hostname: bergen-paperless' in bp_pilot_guest_raw.stdout_lines"
+          - "'unprivileged: 1' in bp_pilot_guest_raw.stdout_lines"
+          - "'lxc.apparmor.profile: unconfined' not in bp_pilot_guest_raw.stdout"
+        fail_msg: PILOT_GUEST_UNVERIFIED
+      no_log: true
+
+    - name: Run bounded Django ORM read-only pilot eligibility audit
+      ansible.builtin.command:
+        argv:
+          - pct
+          - exec
+          - '126'
+          - --
+          - podman
+          - exec
+          - -i
+          - bergen-paperless
+          - python
+          - /usr/src/paperless/src/manage.py
+          - shell
+          - --verbosity=0
+          - -c
+          - "{{ lookup('ansible.builtin.file', playbook_dir ~ '/../files/paperless/audit_ai_catalog_pilot_candidates_readonly.py', rstrip=False) ~ '\nmain()' }}"
+        stdin: "{{ bp_pilot_inspection_payload | to_json }}"
+        stdin_add_newline: true
+      register: bp_pilot_result_raw
+      changed_when: false
+      failed_when: false
+      no_log: true
+
+    - name: Extract exactly one privacy-bounded diagnostic frame
+      ansible.builtin.set_fact:
+        bp_pilot_frames: >-
+          {{ bp_pilot_result_raw.stdout_lines | default([]) |
+             select('match', '^BERGEN_PAPERLESS_PILOT_SELECTION_V1:') | list }}
+      no_log: true
+
+    - name: Refuse ambiguous or missing reports
+      ansible.builtin.assert:
+        that:
+          - bp_pilot_result_raw.rc == 0
+          - bp_pilot_frames | length == 1
+          - bp_pilot_frames[0] | length < 1600
+        fail_msg: PILOT_DIAGNOSIS_UNVERIFIED
+      no_log: true
+
+    - name: Decode only the sanitized eligibility record
+      ansible.builtin.set_fact:
+        bp_pilot_result: >-
+          {{ bp_pilot_frames[0] |
+             regex_replace('^BERGEN_PAPERLESS_PILOT_SELECTION_V1:', '') |
+             from_json }}
+      no_log: true
+
+    - name: Require known reasons, correct scope and no mutations
+      ansible.builtin.assert:
+        that:
+          - bp_pilot_result.AUDIT == 'READ_ONLY'
+          - bp_pilot_result.CHANGED == false
+          - bp_pilot_result.DOCUMENTS_CHANGED == 'NO'
+          - bp_pilot_result.MODEL_INFERENCE == 'NO'
+          - bp_pilot_result.STATUS == 'INSPECTED'
+          - bp_pilot_result.PILOT_SELECTION_COUNT | int == (paperless_ai_catalog_pilot_ids | length)
+          - bp_pilot_result.PILOT_ELIGIBILITY | length == (paperless_ai_catalog_pilot_ids | length)
+          - bp_pilot_result.PILOT_ELIGIBILITY | difference(['ELIGIBLE', 'DOCUMENT_ABSENT', 'OWNER_MISSING', 'OWNER_INACTIVE', 'OWNER_PRIVILEGED', 'OWNER_OUTSIDE_PARENT_GROUP', 'INBOX_TAG_MISSING', 'OCR_INSUFFICIENT', 'VERSIONED_DOCUMENT']) | length == 0
+          - bp_pilot_result.ELIGIBLE_CANDIDATE_COUNT_SHOWN | int >= 0
+          - bp_pilot_result.ELIGIBLE_CANDIDATE_COUNT_SHOWN | int <= 8
+          - bp_pilot_result.CANDIDATE_SCAN_BOUND == 30
+          - bp_pilot_result.IDS_INCLUDED == (paperless_ai_catalog_show_candidate_ids | default(false) | bool)
+          - (bp_pilot_result.ELIGIBLE_CANDIDATE_IDS is not defined) or (paperless_ai_catalog_show_candidate_ids | default(false) | bool)
+          - (bp_pilot_result.ELIGIBLE_CANDIDATE_IDS is not defined) or (bp_pilot_result.ELIGIBLE_CANDIDATE_IDS | length == bp_pilot_result.ELIGIBLE_CANDIDATE_COUNT_SHOWN | int)
+        fail_msg: PILOT_DIAGNOSIS_RESULT_INVALID
+      no_log: true
+
+    - name: Report selected eligibility and bounded candidate count
+      ansible.builtin.debug:
+        msg:
+          - AUDIT=READ_ONLY
+          - CHANGED=False
+          - "STATUS={{ bp_pilot_result.STATUS }}"
+          - "PILOT_SELECTION_COUNT={{ bp_pilot_result.PILOT_SELECTION_COUNT }}"
+          - "PILOT_ELIGIBILITY={{ bp_pilot_result.PILOT_ELIGIBILITY | join(',') if bp_pilot_result.PILOT_ELIGIBILITY else 'NOT_SELECTED' }}"
+          - "ELIGIBLE_CANDIDATE_COUNT_SHOWN={{ bp_pilot_result.ELIGIBLE_CANDIDATE_COUNT_SHOWN }}"
+          - MODEL_INFERENCE=NO
+          - DOCUMENTS_CHANGED=NO
+
+    - name: Display only explicitly requested candidate numeric IDs on operator console
+      ansible.builtin.debug:
+        msg: "ELIGIBLE_CANDIDATE_IDS={{ bp_pilot_result.ELIGIBLE_CANDIDATE_IDS | join(',') }}"
+      when: paperless_ai_catalog_show_candidate_ids | default(false) | bool

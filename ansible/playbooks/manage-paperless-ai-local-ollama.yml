@@ -1,0 +1,137 @@
+---
+# Issue #113: configure only effective Paperless native LLM backend/model/endpoint.
+# Paperless AI/UI master switch must REMAIN DISABLED; embeddings must remain OFF.
+# Reads/writes the existing v3.3 singleton through Django ORM, never env secrets.
+- name: Review and optionally configure protected local Paperless Ollama backend
+  hosts: venombox
+  become: true
+  gather_facts: false
+  vars:
+    bp_ai_config_action: "{{ paperless_ai_catalog_config_action | default('audit') }}"
+    bp_ai_config_mutating: "{{ bp_ai_config_action in ['apply', 'rollback'] }}"
+    bp_ai_config_payload:
+      protocol: catalog-config-v1
+      mode: "{{ bp_ai_config_action }}"
+      endpoint: "{{ paperless_ai_catalog_endpoint | default('') }}"
+      model: "{{ paperless_ai_catalog_model | default('') }}"
+      approved: "{{ paperless_ai_catalog_config_approved | default(false) | bool }}"
+      backup_verified: "{{ paperless_ai_catalog_verified_backup | default(false) | bool }}"
+      expected_sha256: "{{ paperless_ai_catalog_config_expected_sha256 | default('') }}"
+  tasks:
+    - name: Require only the approved Proxmox and mutating action gates
+      ansible.builtin.assert:
+        that:
+          - inventory_hostname == 'venombox'
+          - bp_ai_config_action in ['audit', 'apply', 'rollback']
+          - not ansible_check_mode or not bp_ai_config_mutating
+          - not bp_ai_config_mutating or (paperless_ai_catalog_config_approved | default(false) | bool)
+          - not bp_ai_config_mutating or (paperless_ai_catalog_verified_backup | default(false) | bool)
+          - not bp_ai_config_mutating or (paperless_ai_catalog_config_expected_sha256 | default('') | length == 64)
+          - not bp_ai_config_mutating or (bp_ai_config_action != 'rollback' or paperless_ai_catalog_config_rollback_approved | default(false) | bool)
+        fail_msg: PAPERLESS_AI_CONFIG_APPROVAL_MISSING
+      no_log: true
+
+    - name: Verify exact unprivileged Paperless LXC identity
+      ansible.builtin.command:
+        argv: [pct, config, '126']
+      register: bp_ai_config_guest
+      changed_when: false
+      no_log: true
+
+    - name: Refuse wrong or privileged guest
+      ansible.builtin.assert:
+        that:
+          - bp_ai_config_guest.rc == 0
+          - "'hostname: bergen-paperless' in bp_ai_config_guest.stdout_lines"
+          - "'unprivileged: 1' in bp_ai_config_guest.stdout_lines"
+          - "'lxc.apparmor.profile: unconfined' not in bp_ai_config_guest.stdout"
+      no_log: true
+
+    - name: Audit or deliberately update only three local-LLM config fields
+      ansible.builtin.command:
+        argv:
+          - pct
+          - exec
+          - '126'
+          - --
+          - podman
+          - exec
+          - -i
+          - bergen-paperless
+          - python
+          - /usr/src/paperless/src/manage.py
+          - shell
+          - --verbosity=0
+          - -c
+          - "{{ lookup('ansible.builtin.file', playbook_dir ~ '/../files/paperless/bergen_ai_catalog_policy.py') ~ '\n' ~ lookup('ansible.builtin.file', playbook_dir ~ '/../files/paperless/bergen_ai_catalog_config.py') }}"
+        stdin: "{{ bp_ai_config_payload | to_json }}"
+        stdin_add_newline: true
+      register: bp_ai_config_raw
+      changed_when: false
+      failed_when: false
+      no_log: true
+
+    - name: Extract a single bounded non-identifying JSON status
+      ansible.builtin.set_fact:
+        bp_ai_config_frames: >-
+          {{ bp_ai_config_raw.stdout_lines |
+             select('match', '^BERGEN_PAPERLESS_AI_LOCAL_CONFIG_V1:') | list }}
+      changed_when: false
+      no_log: true
+
+    - name: Refuse absent, duplicate or unbounded report
+      ansible.builtin.assert:
+        that:
+          - bp_ai_config_frames | length == 1
+          - bp_ai_config_frames[0] | length < 1400
+      no_log: true
+
+    - name: Decode sealed config classification
+      ansible.builtin.set_fact:
+        bp_ai_config_result: >-
+          {{ (bp_ai_config_frames[0] |
+              regex_replace('^BERGEN_PAPERLESS_AI_LOCAL_CONFIG_V1:', '')) | from_json }}
+      changed_when: false
+      no_log: true
+
+    - name: Print only allowlisted error category on failure
+      ansible.builtin.debug:
+        msg: >-
+          PAPERLESS_AI_LOCAL_CONFIG_ERROR={{
+            bp_ai_config_result.CODE if bp_ai_config_result.CODE | default('') in [
+              'VERSION_UNREVIEWED', 'INPUT_INVALID', 'MODE_INVALID',
+              'APP_CONFIG_UNREVIEWED', 'GLOBAL_AI_OR_INDEX_ALREADY_ACTIVE',
+              'GLOBAL_AI_OR_INDEX_ENV_CONFLICT', 'LOCAL_OLLAMA_NOT_PERMITTED',
+              'EXTERNAL_PROVIDER_REVIEW_REQUIRED', 'APPROVAL_REQUIRED',
+              'BACKUP_NOT_VERIFIED', 'FINGERPRINT_CHANGED',
+              'ROLLBACK_BACKUP_MISSING', 'ROLLBACK_UNREVIEWED',
+              'ENDPOINT_INVALID', 'MODEL_INVALID',
+              'PRIOR_BACKUP_REQUIRES_REVIEW', 'DATA_MOUNT_INVALID'
+            ] else 'UNCLASSIFIED_FAILURE'
+          }}
+      when: bp_ai_config_raw.rc != 0
+
+    - name: Verify approved local-only configuration and no global AI/embedding
+      ansible.builtin.assert:
+        that:
+          - bp_ai_config_raw.rc == 0
+          - bp_ai_config_result.AUDIT in ['READ_ONLY', 'CONTROLLED']
+          - bp_ai_config_result.STATUS in ['INSPECTED', 'LOCAL_LLM_CONFIG_APPLIED', 'CONFIG_ROLLED_BACK']
+          - bp_ai_config_result.AI_UI_ENABLED == 'NO'
+          - bp_ai_config_result.EMBEDDINGS == 'OFF'
+          - bp_ai_config_result.CHANGED is boolean
+          - bp_ai_config_mutating or not bp_ai_config_result.CHANGED
+          - not bp_ai_config_mutating or bp_ai_config_result.CHANGED
+        fail_msg: PAPERLESS_AI_CONFIG_NOT_VERIFIED
+      no_log: true
+
+    - name: Report approved public config status and opaque optimistic fingerprint
+      ansible.builtin.debug:
+        msg:
+          - "AUDIT={{ bp_ai_config_result.AUDIT }}"
+          - "STATUS={{ bp_ai_config_result.STATUS }}"
+          - "CURRENT_SHA256={{ bp_ai_config_result.CURRENT_SHA256 | default('N/A') }}"
+          - "AI_UI_ENABLED={{ bp_ai_config_result.AI_UI_ENABLED }}"
+          - "EMBEDDINGS={{ bp_ai_config_result.EMBEDDINGS }}"
+          - "CHANGED={{ bp_ai_config_result.CHANGED }}"
+      changed_when: bp_ai_config_mutating and bp_ai_config_result.CHANGED | bool
