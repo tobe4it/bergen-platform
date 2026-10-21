@@ -86,7 +86,38 @@ read -r -p "Same successful ownerless pilot document ID: " DOC_ID
 )
 ```
 
-### 2. Run an explicitly selected one-document ownerless Eltern pilot
+### 2. Read-only scope inventory before any write
+
+This audit counts the complete intended `Posteingang` subset by
+`Document.added`, regardless of owner. It independently reports
+ownerless documents explicitly shared with `Eltern@bergen.intern`,
+OCR-ready candidates, existing SQLite journal states and whether one
+unprocessed shared-parent pilot remains. No identifiers, document text,
+metadata or credentials are printed; no model inference occurs.
+
+```bash
+(
+set -euo pipefail
+BASE="$HOME/bergen-platform"
+WT="$HOME/bergen-platform-paperless-ai-catalog"
+cd "$WT"
+
+"$BASE/.venv/bin/ansible-playbook" \
+  -i ansible/inventory.yml \
+  -i "$BASE/ansible/inventory.local.yml" \
+  ansible/playbooks/audit-paperless-ai-v2-scope-readonly.yml \
+  --vault-id ai@prompt \
+  -e "@$BASE/ansible/vars/paperless-ai-catalog.local.yml"
+)
+```
+
+Look for `OWNERLESS_PARENT_UNJOURNALIZED_READY > 0` before choosing
+the exact parent-shared Inbox document ID in the Paperless UI.
+If there are none, do not run the ownerless pilot, and investigate the
+OCR/import/group-ACL filter instead. The audit is capped at 5,000
+Inbox documents to avoid unbounded retrieval.
+
+### 3. Run an explicitly selected one-document ownerless Eltern pilot
 
 Choose the **document ID** from the Paperless UI for one document
 matching this exact scope. This one-off execution can write metadata and
@@ -121,7 +152,7 @@ Require `STATUS=COMPLETED`, `NOTE=SYSTEM_ATTRIBUTED`,
 audit or pilot fails, do not rerun against the same ID without a
 journal inspection. Preserve any manual metadata correction.
 
-### 3. Explicit production upgrade (timer pauses during file installation)
+### 4. Explicit production upgrade (timer pauses during file installation)
 
 The operator's existing October 2026 CT126 NFS backup was accepted
 for this project. `verified_backup=true` must still mean an
