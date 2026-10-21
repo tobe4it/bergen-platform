@@ -1785,3 +1785,78 @@ Success only if all checks pass:
 `changed=0`, `failed=0`, no guest started, no new mount,
 no template conversion. A future offline-first-boot trial
 remains a separately approved gate.
+
+
+## Rocky 9.8 CT790 release-in-rootfs confirmed; first-boot no-write preflight
+
+On 2026-10-21, the operator executed the
+`audit-rocky-9-8-ct790-rootfs-release-readonly.yml` against
+the previously created, still-stopped CT790 on venombox.
+
+**Verified result:**
+
+- `ROCKY_9_8_CT790_ROOTFS_RELEASE_READ_ONLY_VERIFIED`
+- `venombox ok=41 changed=0 unreachable=0 failed=0 skipped=0`
+- The installed ZFS dataset was **already mounted** and the
+  kernel mount table identified exactly the reviewed CT790 dataset;
+  no new mount was created.
+- `etc/rocky-release` is exactly
+  `Rocky Linux release 9.8 (Blue Onyx)`.
+- `usr/lib/os-release` has `ID="rocky"`,
+  `VERSION_ID="9.8"`; `etc/os-release` has the expected
+  relative symlink `../usr/lib/os-release`.
+- Two files were read without following release-file symlinks or
+  updating atime; zero files written.
+- CT790 remained `STOPPED`. CT701 was unchanged.
+  No startup or Proxmox template conversion occurred.
+
+This proves **the actual newly allocated rootfs contains the pinned
+Rocky Linux 9.8 OS-release metadata**. It is not yet a successful
+start, Linux namespace, systemd initialization, runtime network-device,
+RPM consistency, or application suitability test.
+
+A new pre-start-only read-only audit lives at
+`ansible/playbooks/audit-rocky-9-8-ct790-firstboot-readonly.yml`.
+It imports the complete post-create and release verification in the
+same run, then checks the current CT790 configuration against an
+allowlist of exact Proxmox config keys and exact approved resource
+settings. Any unreviewed `net*`, `mp*`, `dev*`, host mount,
+hookscript, raw LXC override, surprise feature flag, autostart,
+changed privilege, or template flag causes a fail-closed refusal.
+It verifies `pct help start` is supported on the actual
+Proxmox host and re-reads `pct status 790` to establish
+the container remains stopped. It does not allocate or
+modify anything.
+
+On bp-controller with a clean detached worktree (NO apply variables):
+
+    BASE="$HOME/bergen-platform"
+    WT="$HOME/bergen-platform-nextcloud-restore"
+    BRANCH="feat/nextcloud-isolated-restore-701-20261019"
+    SSH_ARGS="-C -o ControlMaster=no -o ControlPath=none -o ConnectTimeout=10 -o ServerAliveInterval=10 -o ServerAliveCountMax=2"
+    if [ -n "$(git -C "$WT" status --porcelain)" ]; then
+      echo "STOP: dirty worktree"
+    else
+      git -C "$WT" fetch origin "$BRANCH" &&
+      git -C "$WT" switch --detach "origin/$BRANCH" &&
+      ANSIBLE_SSH_ARGS="$SSH_ARGS" "$BASE/.venv/bin/ansible-playbook" \
+        -i "$BASE/ansible/inventory.yml" \
+        -i "$BASE/ansible/inventory.local.yml" \
+        "$WT/ansible/playbooks/audit-rocky-9-8-ct790-firstboot-readonly.yml" \
+        --limit venombox --vault-id infra@prompt
+    fi
+
+Only if the entire audit passes:
+`ROCKY_9_8_CT790_FIRSTBOOT_PREFLIGHT_READ_ONLY_READY`;
+`changed=0`; `failed=0`; still
+`pct_start_authorized=false`, `pct_template_authorized=false`.
+
+**Operational change and risk before any first boot:** Starting
+a container is a mutating operation: initialization may write a
+machine ID, journal, systemd state and other files in the new
+disposable rootfs, even if it is completely networkless. A future
+one-time `pct start 790` thus needs its own explicit approval,
+with a separate agreed post-start network-interface inspection,
+logging, rollback/recovery controls, and a requirement not to
+start CT701 or alter mx1/mx2/production services. No start or
+template conversion is authorized by this documentation or CI.
