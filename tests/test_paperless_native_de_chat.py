@@ -106,6 +106,34 @@ class TestNativeGermanChat(unittest.TestCase):
         self.assertNotIn("Note.objects.create", acl)
         self.assertNotIn("User.objects.create", acl)
 
+    def test_child_chat_parent_boundary_uses_actual_import_provenance(self):
+        """A missing global model grant is NOT evidence of future safety."""
+        files = ROOT / "ansible/files/paperless"
+        receipt = (files / "audit_native_chat_verified_group_imports.py").read_text()
+        boundary = (files / "audit_native_chat_child_boundary.py").read_text()
+        play = (ROOT / "ansible/playbooks/audit-paperless-native-chat-child-boundary-readonly.yml").read_text()
+        ast.parse(receipt)
+        ast.parse(boundary)
+        parsed = yaml.safe_load(play)
+        self.assertEqual(parsed[0]["hosts"], "venombox")
+        self.assertIn('mod.verify(filename, receipt["sha256"], owner, grant)', receipt)
+        self.assertIn('"SUBMITTED", "IMPORTED"', receipt)
+        self.assertIn('owner != "admin"', receipt)
+        self.assertIn('permitted_document_ids(', boundary)
+        self.assertIn('child.has_perm("documents.view_document")', boundary)
+        self.assertIn('has_perms_owner_aware(child, "view_document", docs[document_id])', boundary)
+        self.assertIn('"CHILD_PARENT_VISIBLE_IF_MODEL_VIEW_GRANTED"', boundary)
+        self.assertIn('"CHILD_PARENT_SINGLE_DOCUMENT_ALLOW"', boundary)
+        self.assertIn('"CHILD_FAMILY_VISIBLE_IF_MODEL_VIEW_GRANTED"', boundary)
+        self.assertIn("if imported[\"Eltern\"] - parent_grants", boundary)
+        self.assertIn('"USER_SESSION_AND_INDEX_TEST_STILL_REQUIRED"', boundary)
+        self.assertIn('no_log: true', play)
+        self.assertIn('CHILD_PARENT_VISIBLE_IF_MODEL_VIEW_GRANTED=', play)
+        self.assertNotIn("document_llmindex rebuild", play)
+        self.assertNotIn("user_permissions.add(", boundary)
+        self.assertNotIn("owner =", boundary)
+        self.assertNotIn("Document.objects.update(", boundary)
+
     def test_playbook_audit_is_default_and_explicit_gate_for_mutations(self):
         p = yaml.safe_load(PLAY.read_text())[0]
         self.assertEqual(p["hosts"], "venombox")
