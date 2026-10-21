@@ -367,6 +367,13 @@ def classify_v2_no_rag(doc, group_ids):
         localized = parse_ai_response(localized_raw)
     output = dict(result)
     output["title"] = localized["title"] or result["title"]
+    # Keep the original v0.16.0 matching inputs unchanged; localize the
+    # free-form suggestions ONLY for the German review note. An unmatched
+    # new German tag is a proposal, never permission to create a Tag.
+    output["_bergen_original_match_names"] = {
+        field: list(result[field]["new_names"])
+        for field in ("tags", "document_types", "storage_paths")
+    }
     for field in ("tags", "document_types", "storage_paths"):
         output[field] = {
             "existing_ids": result[field]["existing_ids"],
@@ -389,7 +396,13 @@ def resolve_choices_v2(suggestions, doc, group_ids):
         block = suggestions.get(key)
         demand(isinstance(block, dict), "SUGGESTIONS_INVALID")
         provided_ids = block.get("existing_ids")
-        names = block.get("new_names")
+        # Resolve taxonomy against the exact original AI suggestions, as in
+        # v0.16.0. German localized suggestions are still retained for the
+        # Note and may include NEW tag proposals outside the current list.
+        name_source = suggestions.get("_bergen_original_match_names", {})
+        demand(isinstance(name_source, dict), "SUGGESTIONS_INVALID")
+        names = name_source.get(key, block.get("new_names"))
+        bounded_ai_labels(block.get("new_names"))
         demand(isinstance(provided_ids, list) and len(provided_ids) <= 20
                and all(type(x) is int and x > 0 for x in provided_ids),
                "SUGGESTIONS_INVALID")
