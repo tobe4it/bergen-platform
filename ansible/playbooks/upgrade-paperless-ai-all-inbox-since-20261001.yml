@@ -1,6 +1,6 @@
 ---
-# Explicit scoped v2 upgrade of an ALREADY running Bergen Paperless AI timer.
-# NEVER invoked by generic deploy or pilot. Leaves timer disabled on failure.
+# Explicitly authorized regular timer upgrade; no special owner/group pilot.
+# Existing journaling and all-inbox import cutoff remain unchanged. Leaves timer disabled on failure.
 - name: Review exact all-owner inbox cutoff and controlled timer upgrade
   hosts: venombox
   become: true
@@ -10,7 +10,7 @@
     bp_upgrade_dir: /etc/bergen-platform/paperless-ai
     bp_upgrade_cutoff: '2026-10-01'
   tasks:
-    - name: Demand operator-approved v2 upgrade, accepted backup and exact target
+    - name: Demand reviewed backup and exact full-posteingang regular timer upgrade approval
       ansible.builtin.assert:
         that:
           - inventory_hostname == 'venombox'
@@ -19,8 +19,7 @@
           - paperless_ai_catalog_verified_backup | default(false) | bool
           - paperless_ai_catalog_v2_all_owners_approved | default(false) | bool
           - paperless_ai_catalog_v2_history_from_october_approved | default(false) | bool
-          - paperless_ai_catalog_v2_pilot_document_id is defined
-          - paperless_ai_catalog_v2_pilot_document_id | string is match('^[1-9][0-9]{0,8}$')
+          - paperless_ai_catalog_v2_regular_pipeline_approved | default(false) | bool
         fail_msg: ALL_INBOX_CUTOFF_V2_EXPLICIT_APPROVAL_REQUIRED
       no_log: true
 
@@ -87,54 +86,6 @@
           - bp_upgrade_enabled.stdout | trim == 'enabled'
           - bp_upgrade_active.stdout | trim == 'active'
         fail_msg: ALL_INBOX_V2_ORIGINAL_TIMER_NOT_ACTIVE
-      no_log: true
-
-    - name: Independently inspect one ownerless Eltern-group pilot success
-      ansible.builtin.command:
-        argv:
-          - pct
-          - exec
-          - '126'
-          - --
-          - podman
-          - exec
-          - -i
-          - bergen-paperless
-          - python
-          - /usr/src/paperless/src/manage.py
-          - shell
-          - --verbosity=0
-          - -c
-          - "{{ lookup('ansible.builtin.file', playbook_dir ~ '/../files/paperless/audit_ai_catalog_v2_pilot_success.py', rstrip=False) ~ '\nmain()' }}"
-        stdin: >-
-          {{ {'protocol':'catalog-v2-pilot-proof-v1',
-              'document_id':paperless_ai_catalog_v2_pilot_document_id | int} | to_json }}
-        stdin_add_newline: true
-      register: bp_upgrade_proof_raw
-      changed_when: false
-      failed_when: false
-      no_log: true
-
-    - name: Extract one bounded signed-by-state v2 pilot evidence frame
-      ansible.builtin.set_fact:
-        bp_upgrade_proof_frames: >-
-          {{ bp_upgrade_proof_raw.stdout_lines | default([]) |
-             select('match', '^BERGEN_PAPERLESS_V2_PILOT_PROOF_V1:') | list }}
-      no_log: true
-
-    - name: Refuse timer upgrade without journal-backed real ownerless pilot and system Note
-      ansible.builtin.assert:
-        that:
-          - bp_upgrade_proof_raw.rc == 0
-          - bp_upgrade_proof_frames | length == 1
-          - bp_upgrade_proof_frames[0] | length < 400
-          - (bp_upgrade_proof_frames[0] |
-             regex_replace('^BERGEN_PAPERLESS_V2_PILOT_PROOF_V1:', '') |
-             from_json).STATUS == 'PASSED'
-          - (bp_upgrade_proof_frames[0] |
-             regex_replace('^BERGEN_PAPERLESS_V2_PILOT_PROOF_V1:', '') |
-             from_json).CHANGED == false
-        fail_msg: ALL_INBOX_V2_REQUIRES_ONE_VERIFIED_OWNERLESS_GROUP_PILOT
       no_log: true
 
     - name: Preview v2 selection with exact local model and no writes
