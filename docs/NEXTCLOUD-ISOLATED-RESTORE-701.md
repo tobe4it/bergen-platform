@@ -1897,3 +1897,80 @@ human approval, and if startup or subsequent diagnostics fail,
 stop automation without automatic restart, stop, rollback, or
 destructive cleanup. A separate read-only post-start audit can
 establish the actual runtime network-device count.
+
+
+## CT790 gated offline first boot: proposal only, not yet authorized
+
+A separate *reviewable but not authorized* startup proposal is
+now committed at
+`ansible/playbooks/start-rocky-9-8-ct790-offline.yml`.
+This is deliberately distinct from the previously successful
+CT790 creation playbook and from the no-write first-boot preflight.
+
+With no apply variables, it imports the complete first-boot
+read-only preflight (including image SHA256, CT790/ZFS ownership,
+actual Rocky 9.8 release files, networkless CT configuration and
+still-stopped status), and then returns
+`ROCKY_9_8_CT790_FIRSTBOOT_PLAN_READ_ONLY_READY`.
+No guest start or other write is performed.
+
+A future human-approved startup requires **two separate exact
+operator inputs**, `rocky_ct790_first_start_apply=true` and
+the reviewed `rocky_ct790_first_start_confirm` token, in
+addition to a fresh successful same-run preflight. Do **not**
+pass either variable before receiving the operator's
+new explicit authorization.
+
+If approved, the playbook re-reads CT790's config and status
+immediately before the one allowed mutation, refusing any
+differences from the reviewed state. It runs exactly one
+`pct start 790` and then uses read-only PVE commands to
+establish that it is running with **unchanged** configuration.
+
+The subsequent tightly scoped `pct exec 790 -- /bin/sh -ec …`
+probe executes only inside CT790. It checks `ID="rocky"`
+and `VERSION_ID="9.8"`, PID1 process name `systemd`,
+hostname `rocky9-base-790`, zero non-loopback interfaces
+from `/sys/class/net`, and an effective nonidentity user
+namespace map. It does not intentionally write files,
+install packages, attach networks or contact services. The
+first systemd boot **can nevertheless write into the
+disposable rootfs**; this is the explicit approval risk.
+
+**Critical partial-failure behavior:** If `pct start` itself
+or any of the post-start identity/network assertions fails,
+the playbook halts. CT790 may **still be running**. There is
+no automatic stop, restart, retry, rollback, cleanup,
+network reconfiguration or conversion to a template.
+Do not rerun the pre-start/import playbook against an
+already-running CT790; instead perform a separate
+post-start/incident read-only inventory and request a
+new, specifically scoped shutdown approval if necessary.
+
+On bp-controller, for the proposal-only run (**NO apply args**):
+
+    BASE="$HOME/bergen-platform"
+    WT="$HOME/bergen-platform-nextcloud-restore"
+    BRANCH="feat/nextcloud-isolated-restore-701-20261019"
+    SSH_ARGS="-C -o ControlMaster=no -o ControlPath=none -o ConnectTimeout=10 -o ServerAliveInterval=10 -o ServerAliveCountMax=2"
+    if [ -n "$(git -C "$WT" status --porcelain)" ]; then
+      echo "STOP: dirty worktree"
+    else
+      git -C "$WT" fetch origin "$BRANCH" &&
+      git -C "$WT" switch --detach "origin/$BRANCH" &&
+      ANSIBLE_SSH_ARGS="$SSH_ARGS" "$BASE/.venv/bin/ansible-playbook" \
+        -i "$BASE/ansible/inventory.yml" \
+        -i "$BASE/ansible/inventory.local.yml" \
+        "$WT/ansible/playbooks/start-rocky-9-8-ct790-offline.yml" \
+        --limit venombox --vault-id infra@prompt
+    fi
+
+Expected until separately approved:
+`ROCKY_9_8_CT790_FIRSTBOOT_PLAN_READ_ONLY_READY`,
+`changed=0`, `failed=0`,
+`pct_start_authorized=false`.
+
+Creating or modifying VMIDs 701, 702, 790 or 791 beyond
+the explicitly authorized CT790 first boot, attaching a
+NIC, invoking `pct template`, modifying mx1/mx2 or
+restoring the production Nextcloud data remain out of scope.
