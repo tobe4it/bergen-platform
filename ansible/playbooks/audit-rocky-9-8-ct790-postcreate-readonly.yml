@@ -226,7 +226,7 @@
 
     - name: Read the specific existing CT790 ZFS dataset without mounting it
       ansible.builtin.command:
-        argv: [zfs, list, -H, -p, -o, name,type,mountpoint,refquota, "{{ rocky_post_dataset }}"]
+        argv: [zfs, list, -H, -p, -o, "name,type,mountpoint,refquota", "{{ rocky_post_dataset }}"]
       changed_when: false
       register: rocky_post_zfs_dataset
 
