@@ -1,0 +1,286 @@
+---
+# Default: read-only. Explicit approved mode=live creates temporary app sessions,
+# exercises native Paperless ChatStreamingView with real local inference, then
+# logs out. Neither path edits Documents, document ACLs, or the LLM index.
+# External OIDC / reverse-proxy authentication is NOT tested by force_login.
+- name: Accept native Paperless child chat after indexed ACL audit
+  hosts: venombox
+  become: true
+  gather_facts: false
+  vars:
+    bp_child_e2e_mode: "{{ paperless_native_chat_e2e_mode | default('audit') }}"
+    bp_child_e2e_live: "{{ bp_child_e2e_mode == 'live' }}"
+    bp_child_e2e_code: "{{ lookup('ansible.builtin.file', playbook_dir ~ '/../files/paperless/verify_native_chat_child_e2e.py', rstrip=False) }}"
+  tasks:
+    - name: Require exact target and refuse unrelated production approvals
+      ansible.builtin.assert:
+        that:
+          - inventory_hostname == 'venombox'
+          - bp_child_e2e_mode in ['audit', 'live']
+          - not (paperless_native_chat_acl_modify_approved | default(false) | bool)
+          - not (paperless_native_chat_index_build_approved | default(false) | bool)
+          - not (paperless_native_de_chat_approved | default(false) | bool)
+          - not bp_child_e2e_live or (
+              (paperless_native_chat_e2e_approved | default(false) | bool)
+              and (paperless_native_chat_model_inference_approved | default(false) | bool)
+              and (paperless_ai_catalog_verified_backup | default(false) | bool)
+            )
+        fail_msg: NATIVE_CHAT_E2E_REQUIRES_SEPARATE_SESSION_AND_INFERENCE_APPROVAL
+      no_log: true
+
+    - name: Read exact existing Paperless CT126 configuration
+      ansible.builtin.command:
+        argv: [pct, config, '126']
+      changed_when: false
+      register: bp_chat_e2e_guest
+      no_log: true
+
+    - name: Enforce protected guest identity and backup-included data mount
+      ansible.builtin.assert:
+        that:
+          - bp_chat_e2e_guest.rc == 0
+          - "'hostname: bergen-paperless' in bp_chat_e2e_guest.stdout_lines"
+          - "'unprivileged: 1' in bp_chat_e2e_guest.stdout_lines"
+          - "'lxc.apparmor.profile: unconfined' not in bp_chat_e2e_guest.stdout"
+          - "bp_chat_e2e_guest.stdout_lines | select('match', '^rootfs: local-zfs:') | list | length == 1"
+          - "bp_chat_e2e_guest.stdout_lines | select('match', '^mp0: local-zfs:.*mp=/srv/bergen-paperless,backup=1(,|$)') | list | length == 1"
+        fail_msg: NATIVE_CHAT_E2E_UNREVIEWED_GUEST_OR_BACKUP_SCOPE
+      no_log: true
+
+    - name: Verify recent existing CT126 NFS backup before live session writes
+      ansible.builtin.command:
+        argv:
+          - bash
+          - -euo
+          - pipefail
+          - -c
+          - |
+            target=/mnt/pve/bergen-synology-backup
+            fs="$(findmnt --mountpoint "$target" -n -o FSTYPE)"
+            [[ "$fs" = nfs || "$fs" = nfs4 ]]
+            find "$target/dump" -maxdepth 1 -type f \
+              -name 'vzdump-lxc-126-*.tar.zst' \
+              -mmin -2880 -size +1M -print -quit | grep -q .
+      changed_when: false
+      register: bp_chat_e2e_backup
+      no_log: true
+      when: bp_child_e2e_live
+
+    - name: Refuse live requests without independent backup presence check
+      ansible.builtin.assert:
+        that:
+          - bp_chat_e2e_backup.rc == 0
+        fail_msg: NATIVE_CHAT_E2E_NO_RECENT_BACKUP
+      no_log: true
+      when: bp_child_e2e_live
+
+    - name: Reverify protected actual group-import receipts and document ACLs
+      ansible.builtin.command:
+        argv:
+          - pct
+          - exec
+          - '126'
+          - --
+          - python3
+          - -c
+          - "{{ lookup('ansible.builtin.file', playbook_dir ~ '/../files/paperless/audit_native_chat_verified_group_imports.py', rstrip=False) }}"
+      changed_when: false
+      failed_when: false
+      register: bp_e2e_receipts_raw
+      no_log: true
+
+    - name: Extract exactly one private verified provenance frame
+      ansible.builtin.set_fact:
+        bp_e2e_receipt_frames: >-
+          {{ bp_e2e_receipts_raw.stdout_lines | default([]) |
+             select('match', '^BERGEN_CHAT_GROUP_IMPORT_PROOF_V1:') | list }}
+      no_log: true
+
+    - name: Refuse ambiguous group scope or failed provenance
+      ansible.builtin.assert:
+        that:
+          - bp_e2e_receipts_raw.rc == 0
+          - bp_e2e_receipt_frames | length == 1
+          - bp_e2e_receipt_frames[0] | length < 120000
+        fail_msg: NATIVE_CHAT_E2E_PROVENANCE_MISSING
+      no_log: true
+
+    - name: Keep real source document IDs only in protected Ansible memory
+      ansible.builtin.set_fact:
+        bp_e2e_proof: >-
+          {{ bp_e2e_receipt_frames[0] |
+             regex_replace('^BERGEN_CHAT_GROUP_IMPORT_PROOF_V1:', '') | from_json }}
+      no_log: true
+
+    - name: Require unmodified and independently verified Eltern Familie scope
+      ansible.builtin.assert:
+        that:
+          - bp_e2e_proof.STATUS == 'VERIFIED'
+          - bp_e2e_proof.CHANGED == false
+          - bp_e2e_proof.DOCUMENTS_CHANGED == false
+          - bp_e2e_proof.protocol == 'native-chat-import-proof-v1'
+          - bp_e2e_proof.document_ids.keys() | list | sort == ['Eltern', 'Familie']
+        fail_msg: NATIVE_CHAT_E2E_PROVENANCE_UNREVIEWED
+      no_log: true
+
+    - name: Run default no-session no-inference child chat readiness check
+      ansible.builtin.command:
+        argv:
+          - pct
+          - exec
+          - '126'
+          - --
+          - podman
+          - exec
+          - -i
+          - bergen-paperless
+          - python
+          - /usr/src/paperless/src/manage.py
+          - shell
+          - --verbosity=0
+          - -c
+          - "{{ bp_child_e2e_code }}"
+        stdin: "{{ {'protocol':'native-child-chat-e2e-v1','mode':'audit','approved':false,'proof':bp_e2e_proof} | to_json }}"
+        stdin_add_newline: true
+      changed_when: false
+      failed_when: false
+      register: bp_e2e_audit_raw
+      no_log: true
+
+    - name: Extract one sanitized audit frame only
+      ansible.builtin.set_fact:
+        bp_e2e_audit_frames: >-
+          {{ bp_e2e_audit_raw.stdout_lines | default([]) |
+             select('match', '^BERGEN_PAPERLESS_CHILD_CHAT_E2E_V1:') | list }}
+      no_log: true
+
+    - name: Refuse missing duplicate or unbounded audit results
+      ansible.builtin.assert:
+        that:
+          - bp_e2e_audit_raw.rc == 0
+          - bp_e2e_audit_frames | length == 1
+          - bp_e2e_audit_frames[0] | length < 1400
+        fail_msg: NATIVE_CHAT_E2E_AUDIT_MISSING
+      no_log: true
+
+    - name: Parse only enumerated readiness and aggregate counters
+      ansible.builtin.set_fact:
+        bp_e2e_audit: >-
+          {{ bp_e2e_audit_frames[0] |
+             regex_replace('^BERGEN_PAPERLESS_CHILD_CHAT_E2E_V1:', '') | from_json }}
+      no_log: true
+
+    - name: Require complete no-write preflight before any session or model call
+      ansible.builtin.assert:
+        that:
+          - bp_e2e_audit.STATUS == 'READY'
+          - bp_e2e_audit.AUDIT == 'READ_ONLY'
+          - bp_e2e_audit.REASON == 'NONE'
+          - bp_e2e_audit.MODE == 'AUDIT'
+          - bp_e2e_audit.SESSION_CREATED == 'NO'
+          - bp_e2e_audit.MODEL_INFERENCE == 'NO'
+          - bp_e2e_audit.PARENT_DOCUMENTS | int > 0
+          - bp_e2e_audit.FAMILY_DOCUMENTS | int > 0
+          - bp_e2e_audit.CHILD_IDENTITIES | int > 0
+          - bp_e2e_audit.INDEXED_DOCUMENTS | int > 0
+          - bp_e2e_audit.CHAT_RELEASE_GATE == 'BLOCKED'
+        fail_msg: NATIVE_CHAT_E2E_PREFLIGHT_BLOCKED
+      no_log: true
+
+    - name: Report aggregate read-only readiness without performing chat
+      ansible.builtin.debug:
+        msg:
+          - AUDIT=READ_ONLY
+          - "PARENT_DOCUMENTS={{ bp_e2e_audit.PARENT_DOCUMENTS }}"
+          - "FAMILY_DOCUMENTS={{ bp_e2e_audit.FAMILY_DOCUMENTS }}"
+          - "CHILD_IDENTITIES={{ bp_e2e_audit.CHILD_IDENTITIES }}"
+          - "INDEXED_DOCUMENTS={{ bp_e2e_audit.INDEXED_DOCUMENTS }}"
+          - LIVE_CHAT=NOT_STARTED
+          - CHAT_RELEASE_GATE=BLOCKED
+          - CHANGED=False
+      when: not bp_child_e2e_live
+
+    - name: Perform separately approved temporary child sessions and live local LLM chat
+      ansible.builtin.command:
+        argv:
+          - pct
+          - exec
+          - '126'
+          - --
+          - podman
+          - exec
+          - -i
+          - bergen-paperless
+          - python
+          - /usr/src/paperless/src/manage.py
+          - shell
+          - --verbosity=0
+          - -c
+          - "{{ bp_child_e2e_code }}"
+        stdin: "{{ {'protocol':'native-child-chat-e2e-v1','mode':'live','approved':true,'proof':bp_e2e_proof} | to_json }}"
+        stdin_add_newline: true
+      changed_when: false
+      failed_when: false
+      register: bp_e2e_live_raw
+      no_log: true
+      when: bp_child_e2e_live
+
+    - name: Parse one bounded sanitized live status without response bodies
+      ansible.builtin.set_fact:
+        bp_e2e_live_frames: >-
+          {{ bp_e2e_live_raw.stdout_lines | default([]) |
+             select('match', '^BERGEN_PAPERLESS_CHILD_CHAT_E2E_V1:') | list }}
+      no_log: true
+      when: bp_child_e2e_live
+
+    - name: Refuse failed or ambiguous live chat test output
+      ansible.builtin.assert:
+        that:
+          - bp_e2e_live_raw.rc == 0
+          - bp_e2e_live_frames | length == 1
+          - bp_e2e_live_frames[0] | length < 1400
+        fail_msg: NATIVE_CHAT_E2E_LIVE_RESULT_MISSING
+      no_log: true
+      when: bp_child_e2e_live
+
+    - name: Decode only live acceptance counters
+      ansible.builtin.set_fact:
+        bp_e2e_live: >-
+          {{ bp_e2e_live_frames[0] |
+             regex_replace('^BERGEN_PAPERLESS_CHILD_CHAT_E2E_V1:', '') | from_json }}
+      no_log: true
+      when: bp_child_e2e_live
+
+    - name: Require live parent denial and both child-positive chat paths
+      ansible.builtin.assert:
+        that:
+          - bp_e2e_live.STATUS == 'PASSED_LIVE'
+          - bp_e2e_live.MODE == 'LIVE'
+          - bp_e2e_live.REASON == 'NONE'
+          - bp_e2e_live.MODEL_INFERENCE == 'YES'
+          - bp_e2e_live.SESSION_CREATED == 'EPHEMERAL_CLEANED'
+          - bp_e2e_live.CHILD_IDENTITIES | int == bp_e2e_audit.CHILD_IDENTITIES | int
+          - bp_e2e_live.PARENT_DIRECT_DENIED | int == bp_e2e_live.CHILD_IDENTITIES | int
+          - bp_e2e_live.FAMILY_DIRECT_WITH_REFERENCE | int == bp_e2e_live.CHILD_IDENTITIES | int
+          - bp_e2e_live.ARCHIVE_FILTER_WITH_REFERENCE | int == bp_e2e_live.CHILD_IDENTITIES | int
+          - bp_e2e_live.INDEXED_DOCUMENTS | int == bp_e2e_audit.INDEXED_DOCUMENTS | int
+          - bp_e2e_live.EXTERNAL_OIDC_AUTHENTICATION == 'NOT_TESTED'
+          - bp_e2e_live.GERMAN_ANSWER_LANGUAGE == 'MANUAL_REVIEW_REQUIRED'
+          - bp_e2e_live.CHAT_RELEASE_GATE == 'EXTERNAL_OIDC_SMOKE_TEST_REQUIRED'
+        fail_msg: NATIVE_CHAT_E2E_LIVE_GATE_FAILED
+      no_log: true
+      when: bp_child_e2e_live
+
+    - name: Report only aggregate live result and still-closed production gate
+      ansible.builtin.debug:
+        msg:
+          - LIVE_CHAT=PASSED_INTERNAL_DJANGO_SESSION
+          - "CHILD_IDENTITIES={{ bp_e2e_live.CHILD_IDENTITIES }}"
+          - "PARENT_DIRECT_DENIED={{ bp_e2e_live.PARENT_DIRECT_DENIED }}"
+          - "FAMILY_DIRECT_WITH_REFERENCE={{ bp_e2e_live.FAMILY_DIRECT_WITH_REFERENCE }}"
+          - "ARCHIVE_FILTER_WITH_REFERENCE={{ bp_e2e_live.ARCHIVE_FILTER_WITH_REFERENCE }}"
+          - OIDC_END_TO_END=NOT_TESTED
+          - GERMAN_ANSWER_REVIEW=REQUIRED
+          - CHAT_RELEASE_GATE=EXTERNAL_OIDC_SMOKE_TEST_REQUIRED
+          - DOCUMENTS_CHANGED=NO
+      when: bp_child_e2e_live
