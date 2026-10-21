@@ -1,8 +1,15 @@
 # Issue #113 — Bergen Paperless-ngx v3.3.0: native AI inbox catalogue
 
-**State:** versioned implementation in a Draft PR. No production AI config, timer,
-document metadata, permissions or archives were changed by the PR. Code review,
-live preflight and a one-document trial are mandatory before automatic apply.
+**STATUS / Hinweis (21.10.2026):** Dieses Dokument ist das **historische
+Entwicklungs- und Vorbereitungsprotokoll**. Der produktive v1→v2-Cutover
+wurde am 21.10.2026 bereits ausgeführt; der 08:04-Uhr-Audit bestätigte
+38 journalisierte Posteingangsdokumente, 32 neu gespeicherte BAI-Notizen
+und 4 ältere `REQUIRES_REVIEW`-Fälle. Die folgenden früheren
+"noch nicht freigegeben"-Hinweise gelten nur für die jeweils damaligen
+Gates. **Verbindlich** sind
+[As-operated v2](PAPERLESS-AI-INBOX-CATALOG-AS-OPERATED.md) und
+[Release v0.16.0](releases/v0.16.0.md).
+**Keine historischen Freigabe-Kommandos erneut ausführen.**
 
 ## Live initial audit — 2026-10-19 (read-only, PASSED)
 
