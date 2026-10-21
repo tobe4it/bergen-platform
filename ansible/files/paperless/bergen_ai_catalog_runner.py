@@ -27,7 +27,8 @@ from urllib.request import Request, ProxyHandler, HTTPRedirectHandler, build_ope
 from django.contrib.auth.models import Group
 from django.contrib.contenttypes.models import ContentType
 from django.db import transaction
-from django.db.models import Q
+from django.db.models import Q, IntegerField
+from django.db.models.functions import Cast
 from guardian.models import GroupObjectPermission
 from documents.models import Correspondent, Document, DocumentType, Note, Tag
 from documents.workflows.ai import resolve_object, resolve_tags
@@ -309,7 +310,7 @@ def scoped_taxonomy(model, perm, doc, group_ids, *, exclude_inbox=False):
             content_type=ct, permission__content_type=ct,
             permission__codename=perm,
             group_id__in=group_ids,
-        ).values_list("object_pk", flat=True)
+        ).annotate(object_pk_int=Cast("object_pk", IntegerField()))          .values_list("object_pk_int", flat=True)
         cond |= Q(pk__in=group_shared)
     qs = model.objects.filter(cond).distinct()
     if exclude_inbox:
