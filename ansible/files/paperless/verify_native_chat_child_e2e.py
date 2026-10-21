@@ -52,8 +52,8 @@ def emit(status, reason="NONE", **fields):
     print(FRAME + json.dumps({
         "AUDIT": "CONTROLLED" if fields.get("MODE") == "LIVE" else "READ_ONLY",
         "STATUS": status, "REASON": reason,
-        "DOCUMENTS_CHANGED": False,
-        "USER_PERMISSIONS_CHANGED": False,
+        "DOCUMENTS_CHANGED": False if status in ("READY", "PASSED_LIVE") else "NOT_VERIFIED",
+        "USER_PERMISSIONS_CHANGED": False if status in ("READY", "PASSED_LIVE") else "NOT_VERIFIED",
         "CHAT_RELEASE_GATE": "EXTERNAL_OIDC_SMOKE_TEST_REQUIRED"
             if status == "PASSED_LIVE" else "BLOCKED",
         **fields,
@@ -196,10 +196,32 @@ def consume_response(response, allowed, parents, require_reference):
         response.close()
 
 
+def permission_snapshot(children):
+    # Compare before/after effective grant inputs without printing any IDs.
+    from guardian.models import UserObjectPermission
+    users = []
+    for user in children:
+        user.refresh_from_db()
+        users.append((
+            user.pk, user.is_active, user.is_staff, user.is_superuser,
+            tuple(sorted(user.groups.values_list("pk", flat=True))),
+            tuple(sorted(user.user_permissions.values_list("pk", flat=True))),
+        ))
+    groups = tuple(sorted(GroupObjectPermission.objects.values_list(
+        "group_id", "permission_id", "object_pk",
+    )))
+    direct = tuple(sorted(UserObjectPermission.objects.values_list(
+        "user_id", "permission_id", "object_pk",
+    )))
+    owners = tuple(sorted(Document.objects.values_list("pk", "owner_id")))
+    return (tuple(users), groups, direct, owners)
+
+
 def live_checks(parents, family, children, before_docs):
     from documents import views as views_module
 
     original = views_module.stream_chat_with_documents
+    baseline_permissions = permission_snapshot(children)
     verified = 0
     host = next((
         name for name in settings.ALLOWED_HOSTS
@@ -283,6 +305,8 @@ def live_checks(parents, family, children, before_docs):
              for pk, modified in Document.objects.values_list(
                  "pk", "modified",
              )} == before_docs, "DOCUMENTS_CHANGED_DURING_TEST")
+    require(permission_snapshot(children) == baseline_permissions,
+            "USER_OR_DOCUMENT_PERMISSIONS_CHANGED")
     return verified
 
 
