@@ -1860,3 +1860,40 @@ with a separate agreed post-start network-interface inspection,
 logging, rollback/recovery controls, and a requirement not to
 start CT701 or alter mx1/mx2/production services. No start or
 template conversion is authorized by this documentation or CI.
+
+
+## CT790 no-write first-boot preflight PASS (2026-10-21)
+
+The operator completed
+`ansible/playbooks/audit-rocky-9-8-ct790-firstboot-readonly.yml`
+on the actual `venombox` node:
+
+- `ROCKY_9_8_CT790_FIRSTBOOT_PREFLIGHT_READ_ONLY_READY`
+- `venombox: ok=50 changed=0 unreachable=0 failed=0 skipped=0`
+- VMID 790, existing `local-zfs:subvol-790-disk-0` and the
+  Rocky Linux 9.8 identity from the actual mounted rootfs were
+  independently rechecked without writes.
+- Current CT790 configuration passed the allowlist of reviewed
+  Proxmox keys, including no configured network interfaces,
+  no additional mounts, no hooks, no surprises in LXC overrides,
+  protection enabled, unprivileged, onboot disabled.
+- CT790 remained stopped. CT701 remained unchanged.
+- `pct help start` on the live PVE host was accepted.
+- The return expressly retained `pct_start_authorized=false`,
+  `pct_template_authorized=false`, and no runtime proof.
+
+**The first boot remains a separate approval step.**
+Starting CT790 may alter its disposable rootfs (systemd state,
+machine-id and journal) even with no configured NIC. The first
+boot must never be used as implied permission to start CT701,
+attach a network, change production services, destroy volumes,
+convert CT790 to a template, or retry a partially failed start.
+
+An approved next-stage runbook, if prepared later, must verify
+the stopped state, exact source rootfs identity, config allowlist
+and PVE userns isolation again in the same invocation. It must
+gate a **single** `pct start 790` with its own exact one-time
+human approval, and if startup or subsequent diagnostics fail,
+stop automation without automatic restart, stop, rollback, or
+destructive cleanup. A separate read-only post-start audit can
+establish the actual runtime network-device count.
