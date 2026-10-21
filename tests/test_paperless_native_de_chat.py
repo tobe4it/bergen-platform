@@ -134,6 +134,40 @@ class TestNativeGermanChat(unittest.TestCase):
         self.assertNotIn("owner =", boundary)
         self.assertNotIn("Document.objects.update(", boundary)
 
+    def test_child_chat_failure_reports_only_allowlisted_status_and_blocks_access(self):
+        """No ACL weakening: emit an aggregate cause before failing closed."""
+        p = ROOT / "ansible/playbooks/audit-paperless-native-chat-child-boundary-readonly.yml"
+        src = p.read_text()
+        loaded = yaml.safe_load(src)
+        tasks = loaded[0]["tasks"]
+        diagnostic = next(
+            step for step in tasks
+            if step["name"] == "Report sanitized child-chat gate diagnosis before fail-closed decision"
+        )
+        assertion = next(
+            step for step in tasks
+            if step["name"] == "Require proof of both chat access paths and unchanged permissions"
+        )
+        report = "\\n".join(diagnostic["ansible.builtin.debug"]["msg"])
+        self.assertIn("CHILD_AUDIT_STATUS=", report)
+        self.assertIn("NO_ACTIVE_CHILD_ACCOUNTS", report)
+        self.assertIn("NO_PARENT_SCOPE_PROVEN", report)
+        self.assertIn("IMPORT_GROUP_ACL_DRIFT", report)
+        self.assertIn("CHILD_PARENT_VISIBLE_IF_MODEL_VIEW_GRANTED=", report)
+        self.assertIn("CHILD_PARENT_SINGLE_DOCUMENT_ALLOW=", report)
+        self.assertNotIn("document_ids", report)
+        self.assertNotIn("username", report)
+        self.assertNotIn("raw.", report)
+        self.assertNotIn("stdout", report)
+        checks = assertion["ansible.builtin.assert"]["that"]
+        self.assertIn("bp_child_boundary.CHAT_CHILD_PARENT_BOUNDARY == 'NEGATIVE_ACL_CHECK_PASSED'", checks)
+        self.assertIn("bp_child_boundary.CHILD_PARENT_VISIBLE_IF_MODEL_VIEW_GRANTED | int == 0", checks)
+        self.assertIn("bp_child_boundary.CHILD_PARENT_SINGLE_DOCUMENT_ALLOW | int == 0", checks)
+        self.assertIn("bp_child_boundary.ACTIVE_CHILD_IDENTITIES | int > 0", checks)
+        self.assertEqual(assertion["ansible.builtin.assert"]["fail_msg"],
+                         "CHILD_CHAT_ACCESS_NOT_PROVEN_OR_SCOPE_EMPTY")
+        self.assertTrue(assertion["no_log"])
+
     def test_playbook_audit_is_default_and_explicit_gate_for_mutations(self):
         p = yaml.safe_load(PLAY.read_text())[0]
         self.assertEqual(p["hosts"], "venombox")
