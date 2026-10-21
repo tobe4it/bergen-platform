@@ -164,7 +164,9 @@ class CatalogPolicyTest(unittest.TestCase):
         self.assertIn('"/api/tags"', runner)
         self.assertIn("ProxyHandler({})", runner)
         self.assertIn("NoRedirect()", runner)
-        self.assertIn('model_ready, groups.first()', runner)
+        self.assertIn("return model_ready, group, count, samples, config", runner)
+        self.assertIn('request["protocol"] == "catalog-v2"', runner)
+        self.assertIn("group = groups.first()", runner)
         self.assertIn('"OLLAMA_MODEL_UNAVAILABLE"', runner)
         timer = ROOT / "ansible/playbooks/deploy-paperless-ai-inbox-catalog-timer.yml"
         tasks = yaml.safe_load(timer.read_text())[0]["tasks"]
