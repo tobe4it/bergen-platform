@@ -1,0 +1,285 @@
+---
+# One-way, separately approved v1 -> v2 production scope migration.
+# All import-dated Inbox documents from 2026-10-01 Europe/Berlin; every owner.
+# Only the worker and protected scheduler settings change; no document writes
+# in this playbook. Existing private journal is retained, never reset.
+- name: Upgrade existing Bergen-AI timer to all-owner October Inbox scope
+  hosts: venombox
+  become: true
+  gather_facts: false
+  vars:
+    bp_v2_root: /etc/bergen-platform/paperless-ai
+    bp_v2_date: '2026-10-01T00:00:00+02:00'
+    bp_v2_policy:
+      protocol: catalog-v2
+      mode: apply
+      added_since: "{{ bp_v2_date }}"
+      expected_model: "{{ paperless_ai_catalog_model }}"
+      expected_endpoint: "{{ paperless_ai_catalog_endpoint }}"
+      pilot_ids: []
+      batch_size: 1
+      approved: true
+      notes_enabled: true
+  tasks:
+    - name: Require separate reviewed, explicit October backfill approval
+      ansible.builtin.assert:
+        that:
+          - inventory_hostname == 'venombox'
+          - not ansible_check_mode
+          - paperless_ai_catalog_all_inbox_upgrade_approved | default(false) | bool
+          - paperless_ai_catalog_all_inbox_date_scope_approved | default(false) | bool
+          - paperless_ai_catalog_timer_upgrade_approved | default(false) | bool
+          - paperless_ai_catalog_verified_backup | default(false) | bool
+          - paperless_ai_catalog_notes_approved | default(false) | bool
+          - paperless_native_ai_ui_approved | default(false) | bool
+          - paperless_ai_catalog_model is defined
+          - paperless_ai_catalog_endpoint is defined
+          - paperless_ai_catalog_model is match('^[A-Za-z0-9_.:-]{1,96}$')
+          - paperless_ai_catalog_endpoint is match('^http://[A-Za-z0-9.:-]+:11434/?$')
+          - paperless_ai_catalog_pilot_ids | default([]) | length == 0
+        fail_msg: ALL_INBOX_V2_REQUIRES_SEPARATE_APPROVAL_AND_BACKUP
+      no_log: true
+
+    - name: Require known unprivileged Paperless guest
+      ansible.builtin.command:
+        argv: [pct, config, '126']
+      register: bp_v2_guest
+      changed_when: false
+      no_log: true
+
+    - name: Reject unexpected guest or privileged execution
+      ansible.builtin.assert:
+        that:
+          - bp_v2_guest.rc == 0
+          - "'hostname: bergen-paperless' in bp_v2_guest.stdout_lines"
+          - "'unprivileged: 1' in bp_v2_guest.stdout_lines"
+          - "'lxc.apparmor.profile: unconfined' not in bp_v2_guest.stdout"
+      no_log: true
+
+    - name: Check exact running Paperless version
+      ansible.builtin.command:
+        argv:
+          - pct
+          - exec
+          - '126'
+          - --
+          - podman
+          - exec
+          - bergen-paperless
+          - python
+          - -c
+          - "from paperless.version import __full_version_str__; print(__full_version_str__)"
+      register: bp_v2_version
+      changed_when: false
+      no_log: true
+
+    - name: Require reviewed production version 3.3.0
+      ansible.builtin.assert:
+        that:
+          - bp_v2_version.rc == 0
+          - bp_v2_version.stdout | trim == '3.3.0'
+      no_log: true
+
+    - name: Read installed legacy timer policy without disclosing it
+      ansible.builtin.slurp:
+        src: "{{ bp_v2_root }}/catalog-policy.json"
+      register: bp_v2_old_blob
+      no_log: true
+
+    - name: Decode expected v1 policy inside Ansible
+      ansible.builtin.set_fact:
+        bp_v2_old: "{{ bp_v2_old_blob.content | b64decode | from_json }}"
+      no_log: true
+
+    - name: Refuse drifted or unexpectedly broad legacy worker scope
+      ansible.builtin.assert:
+        that:
+          - bp_v2_old.protocol == 'catalog-v1'
+          - bp_v2_old.mode == 'apply'
+          - bp_v2_old.allowed_group == 'Eltern@bergen.intern'
+          - bp_v2_old.min_document_id is number
+          - bp_v2_old.min_document_id | int > 0
+          - bp_v2_old.pilot_ids == []
+          - bp_v2_old.batch_size == 1
+          - bp_v2_old.notes_enabled == true
+          - bp_v2_old.approved == true
+          - bp_v2_old.expected_model == paperless_ai_catalog_model
+          - bp_v2_old.expected_endpoint == paperless_ai_catalog_endpoint
+        fail_msg: UNEXPECTED_EXISTING_WORKER_POLICY
+      no_log: true
+
+    - name: Read installed service unit
+      ansible.builtin.slurp:
+        src: /etc/systemd/system/bergen-ai-catalog.service
+      register: bp_v2_service_blob
+      no_log: true
+
+    - name: Recognize only existing legacy or previously upgraded service
+      ansible.builtin.set_fact:
+        bp_v2_unit_text: "{{ bp_v2_service_blob.content | b64decode }}"
+      no_log: true
+
+    - name: Reject unexpected independent service unit
+      ansible.builtin.assert:
+        that:
+          - "'ExecStart=/usr/local/libexec/bergen-ai-catalog-run\n' in bp_v2_unit_text or 'ExecStart=/usr/local/libexec/bergen-ai-catalog-run-v2\n' in bp_v2_unit_text"
+        fail_msg: UNREVIEWED_EXISTING_TIMER_UNIT
+      no_log: true
+
+    - name: Read enabled timer state without changes
+      ansible.builtin.command:
+        argv: [systemctl, is-enabled, bergen-ai-catalog.timer]
+      register: bp_v2_timer_before
+      changed_when: false
+      failed_when: false
+      no_log: true
+
+    - name: Require previously enabled timer
+      ansible.builtin.assert:
+        that:
+          - bp_v2_timer_before.stdout | trim == 'enabled'
+      no_log: true
+
+    - name: Prove existing local Ollama, disabled embeddings and native AI UI
+      ansible.builtin.command:
+        argv:
+          - pct
+          - exec
+          - '126'
+          - --
+          - podman
+          - exec
+          - -i
+          - bergen-paperless
+          - python
+          - /usr/src/paperless/src/manage.py
+          - shell
+          - --verbosity=0
+          - -c
+          - "{{ lookup('ansible.builtin.file', playbook_dir ~ '/../files/paperless/bergen_ai_catalog_timer_readiness.py', rstrip=False) }}"
+        stdin: >-
+          {{ {'protocol': 'catalog-timer-ready-v1',
+              'model': paperless_ai_catalog_model,
+              'endpoint': paperless_ai_catalog_endpoint,
+              'group': 'Eltern@bergen.intern'} | to_json }}
+        stdin_add_newline: true
+      register: bp_v2_readiness_raw
+      changed_when: false
+      failed_when: false
+      no_log: true
+
+    - name: Require independently verified live AI backend
+      ansible.builtin.assert:
+        that:
+          - bp_v2_readiness_raw.rc == 0
+          - (bp_v2_readiness_raw.stdout_lines |
+             select('match', '^BERGEN_PAPERLESS_AI_TIMER_READINESS_V1:') |
+             list | length) == 1
+          - (bp_v2_readiness_raw.stdout_lines |
+             select('match', '^BERGEN_PAPERLESS_AI_TIMER_READINESS_V1:') |
+             list | first |
+             regex_replace('^BERGEN_PAPERLESS_AI_TIMER_READINESS_V1:', '') |
+             from_json).STATUS == 'READY'
+        fail_msg: BAI_V2_AI_BACKEND_NOT_READY
+      no_log: true
+
+    - name: Create isolated root-only v2 policy and source files
+      ansible.builtin.copy:
+        src: "{{ playbook_dir }}/../files/paperless/{{ item }}"
+        dest: "{{ bp_v2_root }}/{{ item }}"
+        owner: root
+        group: root
+        mode: '0600'
+      loop:
+        - bergen_ai_catalog_policy_v2.py
+        - bergen_ai_catalog_runner_v2.py
+      no_log: true
+
+    - name: Stage exact October all-owner timer settings
+      ansible.builtin.copy:
+        content: "{{ bp_v2_policy | to_nice_json }}\n"
+        dest: "{{ bp_v2_root }}/catalog-policy-v2.json"
+        owner: root
+        group: root
+        mode: '0600'
+      no_log: true
+
+    - name: Stage separately named v2 launcher
+      ansible.builtin.copy:
+        src: "{{ playbook_dir }}/../files/paperless/bergen-ai-catalog-run-v2.sh"
+        dest: /usr/local/libexec/bergen-ai-catalog-run-v2
+        owner: root
+        group: root
+        mode: '0750'
+      no_log: true
+
+    - name: Stop the existing timer only for separately authorized unit cutover
+      ansible.builtin.systemd:
+        name: bergen-ai-catalog.timer
+        state: stopped
+      when: "'ExecStart=/usr/local/libexec/bergen-ai-catalog-run-v2\n' not in bp_v2_unit_text"
+
+    - name: Check no previously started catalogue service is still executing
+      ansible.builtin.command:
+        argv: [systemctl, is-active, bergen-ai-catalog.service]
+      register: bp_v2_service_active
+      changed_when: false
+      failed_when: false
+      no_log: true
+
+    - name: Refuse a cutover while the old service is still running
+      ansible.builtin.assert:
+        that:
+          - bp_v2_service_active.stdout | trim in ['inactive', 'failed']
+        fail_msg: STOP_TIMER_AND_REVIEW_IN_FLIGHT_SERVICE
+      no_log: true
+
+    - name: Switch only the Bergen-AI one-shot unit, retaining old configs
+      ansible.builtin.copy:
+        src: "{{ playbook_dir }}/../files/paperless/bergen-ai-catalog-v2.service"
+        dest: /etc/systemd/system/bergen-ai-catalog.service
+        owner: root
+        group: root
+        mode: '0644'
+        backup: true
+
+    - name: Start the same five-minute timer with versioned v2 launcher
+      ansible.builtin.systemd:
+        name: bergen-ai-catalog.timer
+        daemon_reload: true
+        enabled: true
+        state: started
+
+    - name: Verify enabled timer after cutover
+      ansible.builtin.command:
+        argv: [systemctl, is-enabled, bergen-ai-catalog.timer]
+      register: bp_v2_timer_after
+      changed_when: false
+
+    - name: Verify installed all-owner service unit after cutover
+      ansible.builtin.command:
+        argv: [systemctl, show, bergen-ai-catalog.service, -p, ExecStart]
+      register: bp_v2_service_after
+      changed_when: false
+      no_log: true
+
+    - name: Require exact service and enabled timer
+      ansible.builtin.assert:
+        that:
+          - bp_v2_timer_after.stdout | trim == 'enabled'
+          - "'/usr/local/libexec/bergen-ai-catalog-run-v2' in bp_v2_service_after.stdout"
+        fail_msg: BAI_V2_TIMER_CUTOVER_NOT_VERIFIED
+      no_log: true
+
+    - name: Report bounded successful upgrade without exposing private settings
+      ansible.builtin.debug:
+        msg:
+          - TIMER=ENABLED
+          - PROTOCOL=CATALOG_V2
+          - SCOPE=ALL_INBOX_IMPORTS_FROM_2026_10_01_EUROPE_BERLIN
+          - OWNER_OR_GROUP_FILTER=NONE
+          - NOTE_AUTHOR=SYSTEM_GENERATED_NULL
+          - MODEL_PROVIDER=EXISTING_LOCAL_OLLAMA
+          - JOURNAL=RETAINED_EXISTING_NO_AUTOMATIC_RETRY
+          - METADATA=GUARDED_TITLE_CORRESPONDENT_TAGS_DOCUMENT_TYPE
+          - INBOX_TAG_REMOVAL=NEVER
