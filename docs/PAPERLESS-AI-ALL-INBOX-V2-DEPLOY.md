@@ -75,6 +75,8 @@ test -z "$(git -C "$WT" status --porcelain)" || {
 git -C "$WT" fetch origin feat/paperless-native-ai-inbox-catalog-20261018
 git -C "$WT" switch --detach origin/feat/paperless-native-ai-inbox-catalog-20261018
 cd "$WT"
+read -r -p "Same successful ownerless pilot document ID: " DOC_ID
+[[ "$DOC_ID" =~ ^[1-9][0-9]{0,8}$ ]] || exit 1
 
 "$BASE/.venv/bin/ansible-playbook" \
   -i ansible/inventory.yml \
@@ -98,7 +100,8 @@ set -euo pipefail
 BASE="$HOME/bergen-platform"
 WT="$HOME/bergen-platform-paperless-ai-catalog"
 cd "$WT"
-DOC_ID=123   # replace with exact unjournalized ownerless Eltern document ID
+read -r -p "Exact ownerless Eltern pilot document ID: " DOC_ID
+[[ "$DOC_ID" =~ ^[1-9][0-9]{0,8}$ ]] || exit 1
 "$BASE/.venv/bin/ansible-playbook" \
   -i ansible/inventory.yml \
   -i "$BASE/ansible/inventory.local.yml" \
@@ -138,18 +141,17 @@ cd "$WT"
   ansible/playbooks/upgrade-paperless-ai-all-inbox-since-20261001.yml \
   --vault-id ai@prompt \
   -e "@$BASE/ansible/vars/paperless-ai-catalog.local.yml" \
+  -e "paperless_ai_catalog_v2_pilot_document_id=$DOC_ID" \
   -e '{
     "paperless_ai_catalog_v2_upgrade_approved": true,
     "paperless_ai_catalog_v2_all_owners_approved": true,
     "paperless_ai_catalog_v2_history_from_october_approved": true,
-    "paperless_ai_catalog_v2_pilot_document_id": 123,
     "paperless_ai_catalog_verified_backup": true
   }'
 )
 ```
 
-Replace the example pilot ID `123` with the **same exact ID**
-that passed the independent ownerless pilot. The deployment will refuse
+Enter the **same exact pilot ID** that passed the independent ownerless pilot. The deployment will refuse
 to run without that journal/Note proof.
 
 The playbook checks the original v1 policy, live active timer,
