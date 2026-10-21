@@ -96,6 +96,7 @@ class AllInboxTests(unittest.TestCase):
         self.assertIn('user=None if all_inbox else doc.owner',src)
         self.assertIn('doc.added < IMPORT_CUTOFF',src)
         self.assertIn('REQUIRES_REVIEW',src)
+        self.assertIn('demand(False, "GROUP_ACL_CONTEXT_UNVERIFIED")',src)
         self.assertIn('INBOX_TAG_REMOVAL="NEVER"',src)
         self.assertIn('count = request.get("batch_size", 1)',src)
 
