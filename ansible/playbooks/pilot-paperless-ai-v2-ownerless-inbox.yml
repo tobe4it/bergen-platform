@@ -1,0 +1,216 @@
+---
+# Explicit 1-document pilot of v2, on an ownerless document shared with
+# Eltern, with exact operator-selected ID and reviewed backup. No timer edits.
+- name: Validate and process one ownerless group-shared Paperless Inbox document
+  hosts: venombox
+  gather_facts: false
+  become: true
+  tasks:
+    - name: Demand one exact approved document, verified backup, and live pilot approval
+      ansible.builtin.assert:
+        that:
+          - inventory_hostname == 'venombox'
+          - not ansible_check_mode
+          - paperless_ai_catalog_v2_pilot_approved | default(false) | bool
+          - paperless_ai_catalog_verified_backup | default(false) | bool
+          - paperless_ai_catalog_v2_pilot_document_id is defined
+          - paperless_ai_catalog_v2_pilot_document_id | string is match('^[1-9][0-9]{0,8}$')
+        fail_msg: V2_OWNERLESS_PILOT_REQUIRES_EXACT_DOCUMENT_APPROVAL
+      no_log: true
+
+    - name: Read root-protected existing v1 live policy
+      ansible.builtin.slurp:
+        src: /etc/bergen-platform/paperless-ai/catalog-policy.json
+      register: bp_v2_pilot_original_blob
+      no_log: true
+
+    - name: Decode original configuration only within Ansible memory
+      ansible.builtin.set_fact:
+        bp_v2_pilot_original: "{{ bp_v2_pilot_original_blob.content | b64decode | from_json }}"
+      no_log: true
+
+    - name: Require expected active historical parent v1 job
+      ansible.builtin.assert:
+        that:
+          - bp_v2_pilot_original.protocol == 'catalog-v1'
+          - bp_v2_pilot_original.allowed_group == 'Eltern@bergen.intern'
+          - bp_v2_pilot_original.mode == 'apply'
+          - bp_v2_pilot_original.batch_size == 1
+          - bp_v2_pilot_original.pilot_ids == []
+          - bp_v2_pilot_original.min_document_id | int > 0
+          - bp_v2_pilot_original.notes_enabled == true
+          - bp_v2_pilot_original.approved == true
+        fail_msg: V2_PILOT_ORIGINAL_CONFIGURATION_MISMATCH
+      no_log: true
+
+    - name: Read only current group-shared pilot eligibility and existing journal state
+      ansible.builtin.command:
+        argv:
+          - pct
+          - exec
+          - '126'
+          - --
+          - podman
+          - exec
+          - -i
+          - bergen-paperless
+          - python
+          - /usr/src/paperless/src/manage.py
+          - shell
+          - --verbosity=0
+          - -c
+          - "{{ lookup('ansible.builtin.file', playbook_dir ~ '/../files/paperless/audit_ai_catalog_v2_pilot_eligibility.py', rstrip=False) ~ '\nmain()' }}"
+        stdin: >-
+          {{ {'protocol':'catalog-v2-ownerless-pilot-check-v1',
+              'document_id':paperless_ai_catalog_v2_pilot_document_id | int} | to_json }}
+        stdin_add_newline: true
+      register: bp_v2_pilot_eligibility_raw
+      changed_when: false
+      failed_when: false
+      no_log: true
+
+    - name: Extract exactly one ownerless group ACL eligibility attestation
+      ansible.builtin.set_fact:
+        bp_v2_pilot_eligibility_frames: >-
+          {{ bp_v2_pilot_eligibility_raw.stdout_lines | default([]) |
+             select('match', '^BERGEN_PAPERLESS_V2_OWNERLESS_PILOT_V1:') | list }}
+      no_log: true
+
+    - name: Refuse non-ownerless, non-parent-group, old, unready, or recorded pilot
+      ansible.builtin.assert:
+        that:
+          - bp_v2_pilot_eligibility_raw.rc == 0
+          - bp_v2_pilot_eligibility_frames | length == 1
+          - (bp_v2_pilot_eligibility_frames[0] |
+             regex_replace('^BERGEN_PAPERLESS_V2_OWNERLESS_PILOT_V1:', '') |
+             from_json).STATUS == 'READY'
+        fail_msg: V2_OWNERLESS_PILOT_DOCUMENT_SCOPE_OR_JOURNAL_BLOCKED
+      no_log: true
+
+    - name: Preview exact v2 isolated classifier without any writes
+      ansible.builtin.command:
+        argv:
+          - pct
+          - exec
+          - '126'
+          - --
+          - podman
+          - exec
+          - -i
+          - bergen-paperless
+          - python
+          - /usr/src/paperless/src/manage.py
+          - shell
+          - --verbosity=0
+          - -c
+          - "{{ lookup('ansible.builtin.file', playbook_dir ~ '/../files/paperless/bergen_ai_catalog_policy.py', rstrip=False) ~ '\n' ~ lookup('ansible.builtin.file', playbook_dir ~ '/../files/paperless/bergen_ai_catalog_runner.py', rstrip=False) }}"
+        stdin: >-
+          {{ {'protocol':'catalog-v2','mode':'preview',
+              'start_added_date':'2026-10-01','allowed_group':none,
+              'min_document_id':0,
+              'expected_model':bp_v2_pilot_original.expected_model,
+              'expected_endpoint':bp_v2_pilot_original.expected_endpoint,
+              'pilot_ids':[paperless_ai_catalog_v2_pilot_document_id | int],
+              'batch_size':1, 'approved':false, 'notes_enabled':true} | to_json }}
+        stdin_add_newline: true
+      register: bp_v2_pilot_preview_raw
+      changed_when: false
+      failed_when: false
+      no_log: true
+
+    - name: Extract one sanitized v2 ready frame
+      ansible.builtin.set_fact:
+        bp_v2_pilot_preview_frames: >-
+          {{ bp_v2_pilot_preview_raw.stdout_lines | default([]) |
+             select('match', '^BERGEN_PAPERLESS_AI_CATALOG_V1:') | list }}
+      no_log: true
+
+    - name: Fail closed unless exact one-document v2 preview passes
+      ansible.builtin.assert:
+        that:
+          - bp_v2_pilot_preview_raw.rc == 0
+          - bp_v2_pilot_preview_frames | length == 1
+          - (bp_v2_pilot_preview_frames[0] |
+             regex_replace('^BERGEN_PAPERLESS_AI_CATALOG_V1:', '') |
+             from_json).STATUS == 'READY'
+          - (bp_v2_pilot_preview_frames[0] |
+             regex_replace('^BERGEN_PAPERLESS_AI_CATALOG_V1:', '') |
+             from_json).ELIGIBLE_SAMPLE == 1
+          - (bp_v2_pilot_preview_frames[0] |
+             regex_replace('^BERGEN_PAPERLESS_AI_CATALOG_V1:', '') |
+             from_json).SELECTION_SCOPE == 'ALL_INBOX_FROM_2026_10_01'
+        fail_msg: V2_OWNERLESS_PILOT_PREVIEW_FAILED
+      no_log: true
+
+    - name: Apply only the separately approved single shared-parent document
+      ansible.builtin.command:
+        argv:
+          - pct
+          - exec
+          - '126'
+          - --
+          - podman
+          - exec
+          - -i
+          - bergen-paperless
+          - python
+          - /usr/src/paperless/src/manage.py
+          - shell
+          - --verbosity=0
+          - -c
+          - "{{ lookup('ansible.builtin.file', playbook_dir ~ '/../files/paperless/bergen_ai_catalog_policy.py', rstrip=False) ~ '\n' ~ lookup('ansible.builtin.file', playbook_dir ~ '/../files/paperless/bergen_ai_catalog_runner.py', rstrip=False) }}"
+        stdin: >-
+          {{ {'protocol':'catalog-v2','mode':'apply',
+              'start_added_date':'2026-10-01','allowed_group':none,
+              'min_document_id':0,
+              'expected_model':bp_v2_pilot_original.expected_model,
+              'expected_endpoint':bp_v2_pilot_original.expected_endpoint,
+              'pilot_ids':[paperless_ai_catalog_v2_pilot_document_id | int],
+              'batch_size':1, 'approved':true, 'notes_enabled':true} | to_json }}
+        stdin_add_newline: true
+      register: bp_v2_pilot_apply_raw
+      changed_when: false
+      failed_when: false
+      no_log: true
+
+    - name: Extract precisely one bounded pilot outcome
+      ansible.builtin.set_fact:
+        bp_v2_pilot_apply_frames: >-
+          {{ bp_v2_pilot_apply_raw.stdout_lines | default([]) |
+             select('match', '^BERGEN_PAPERLESS_AI_CATALOG_V1:') | list }}
+      no_log: true
+
+    - name: Refuse absent or ambiguous write outcome without retry
+      ansible.builtin.assert:
+        that:
+          - bp_v2_pilot_apply_raw.rc == 0
+          - bp_v2_pilot_apply_frames | length == 1
+          - bp_v2_pilot_apply_frames[0] | length < 1800
+          - (bp_v2_pilot_apply_frames[0] |
+             regex_replace('^BERGEN_PAPERLESS_AI_CATALOG_V1:', '') |
+             from_json).STATUS == 'COMPLETED'
+          - (bp_v2_pilot_apply_frames[0] |
+             regex_replace('^BERGEN_PAPERLESS_AI_CATALOG_V1:', '') |
+             from_json).NOTES_ADDED == 1
+          - (bp_v2_pilot_apply_frames[0] |
+             regex_replace('^BERGEN_PAPERLESS_AI_CATALOG_V1:', '') |
+             from_json).REVIEW_REQUIRED == 0
+          - (bp_v2_pilot_apply_frames[0] |
+             regex_replace('^BERGEN_PAPERLESS_AI_CATALOG_V1:', '') |
+             from_json).APPLIED +
+            (bp_v2_pilot_apply_frames[0] |
+             regex_replace('^BERGEN_PAPERLESS_AI_CATALOG_V1:', '') |
+             from_json).NO_CHANGE == 1
+        fail_msg: V2_OWNERLESS_PILOT_INDETERMINATE_DO_NOT_RETRY
+      no_log: true
+
+    - name: Report single approved shared-parent pilot only
+      ansible.builtin.debug:
+        msg:
+          - PILOT=ONE_OWNERLESS_PARENT_SHARED_INBOX
+          - STATUS=COMPLETED
+          - AI_CONTEXT=NO_OTHER_DOCUMENT_TEXT
+          - NOTE=SYSTEM_ATTRIBUTED
+          - INBOX_TAG=RETAINED
+          - EXISTING_JOURNAL_ENTRIES=NO_RETRY
+          - TIMER=UNCHANGED_V1_STILL_ACTIVE
