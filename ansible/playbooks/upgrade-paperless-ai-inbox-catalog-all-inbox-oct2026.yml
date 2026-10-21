@@ -1,3 +1,5 @@
+# DEPRECATED: DO NOT APPLY; old ownerless path calls unrestricted native RAG.
+# Use upgrade-paperless-ai-all-inbox-since-20261001.yml instead.
 ---
 # One-way, separately approved v1 -> v2 production scope migration.
 # All import-dated Inbox documents from 2026-10-01 Europe/Berlin; every owner.
@@ -24,6 +26,7 @@
     - name: Require separate reviewed, explicit October backfill approval
       ansible.builtin.assert:
         that:
+          - false  # DEPRECATED: unsafe ownerless user=None unrestricted Paperless RAG
           - inventory_hostname == 'venombox'
           - not ansible_check_mode
           - paperless_ai_catalog_all_inbox_upgrade_approved | default(false) | bool
@@ -37,7 +40,7 @@
           - paperless_ai_catalog_model is match('^[A-Za-z0-9_.:-]{1,96}$')
           - paperless_ai_catalog_endpoint is match('^http://[A-Za-z0-9.:-]+:11434/?$')
           - paperless_ai_catalog_pilot_ids | default([]) | length == 0
-        fail_msg: ALL_INBOX_V2_REQUIRES_SEPARATE_APPROVAL_AND_BACKUP
+        fail_msg: DEPRECATED_ALL_INBOX_V2_UPGRADE_USE_GUARDED_REGULAR_PIPELINE
       no_log: true
 
     - name: Require known unprivileged Paperless guest
