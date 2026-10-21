@@ -388,9 +388,19 @@ def resolve_choices_v2(suggestions, doc, group_ids):
 
 def verify_choices_v2(doc, group_ids, tags, correspondent, kind):
     """Recheck ACL-backed taxonomy after inference and under document lock."""
-    if any(not scoped_taxonomy(Tag, "view_tag", doc, group_ids, exclude_inbox=True)
-           .filter(pk=tag.pk).exists() for tag in tags):
-        return False
+    # add_nested_tags() implicitly adds each chosen Tag's parents.
+    # Require the parent chain to be equally visible: a visible leaf must
+    # not cause a private ancestor Tag to appear on a shared document.
+    all_tag_ids = set()
+    for tag in tags:
+        all_tag_ids.add(tag.pk)
+        all_tag_ids.update(tag.get_ancestors_pks())
+    if all_tag_ids:
+        visible_ids = set(scoped_taxonomy(
+            Tag, "view_tag", doc, group_ids, exclude_inbox=True
+        ).filter(pk__in=all_tag_ids).values_list("pk", flat=True))
+        if visible_ids != all_tag_ids:
+            return False
     if correspondent is not None and not scoped_taxonomy(
         Correspondent, "view_correspondent", doc, group_ids
     ).filter(pk=correspondent.pk).exists():
