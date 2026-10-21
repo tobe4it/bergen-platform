@@ -99,7 +99,67 @@ Ohne explizite `paperless_native_de_chat_mode=apply` ist dies
 Betrieb fehlen derzeit noch gesonderte Abnahme der
 Embedding-Indexierung und geprüfte Zugriffstests.
 
-## 5. Referenz zur Tag-Regel
+## 5. Aktuelle Sicherheitsprüfung vor Freischaltung des Chats
+
+**Konfigurations-Apply vom 21.10.2026 17:38 auf venombox:** `ok=25`,
+`changed=3`, `failed=0`. Der produktive Worker wurde deutsch
+lokalisiert, die native Output-Language auf `de` und das
+`bge-m3`-Embedding-Backend auf Ollama gesetzt, der bestehende
+Fünf-Minuten-Timer wieder aktiviert. `INDEX_REBUILD=SEPARATE_APPROVAL_REQUIRED`
+und `BACKFILL_OR_RECLASSIFICATION=NONE`. Der Dokumentenindex wurde mit
+diesem Lauf **nicht** nachgewiesen.
+
+**Kritischer Berechtigungsbefund aus Paperless-ngx 3.3.0:**
+`has_perms_owner_aware()` gibt für `Document.owner=None`
+ohne weitere Objekt-ACL-Prüfung `True` zurück.
+`permitted_object_ids()` zählt die **eigentümerlosen** Dokumente
+grundsätzlich zu den für einen aktiven Benutzer sichtbaren Dokumenten.
+Der native Chat prüft zunächst die globale Model-Berechtigung
+`documents.view_document`, anschließend greift die
+Dokument-ID-Filterung auf diese Paperless-Funktionen zurück.
+**Eine Gruppenfreigabe an Eltern allein ist daher bei ownerlosen
+Dokumenten keine Abschottung gegenüber anderen Benutzern mit globaler
+Dokumenten-Leseberechtigung.** Der tatsächliche Effekt auf bestehende
+Nicht-Eltern- und Kinderkonten muss vor einem produktiven Chat geprüft
+werden. Es wird keine aktuelle Datenweitergabe unterstellt.
+
+Der genaue Test ist im neuen Read-only-Playbook enthalten:
+`ansible/playbooks/audit-paperless-native-chat-access-and-index-readonly.yml`.
+Das Playbook verändert weder Nutzerrechte noch den Index, erzeugt keine
+Embeddings und liest weder OCR-Inhalt noch Note-Texte aus. Es gibt nur
+summierte tatsächliche Zugriffszahlen und Indexstatus aus.
+
+```bash
+(
+set -euo pipefail
+BASE="$HOME/bergen-platform"
+WT="$HOME/bergen-platform-paperless-ai-catalog"
+
+test -z "$(git -C "$WT" status --porcelain)" || exit 1
+git -C "$WT" fetch origin feat/paperless-native-german-ai-chat-20261021
+git -C "$WT" switch --detach origin/feat/paperless-native-german-ai-chat-20261021
+cd "$WT"
+
+"$BASE/.venv/bin/ansible-playbook" \
+  -i ansible/inventory.yml \
+  -i "$BASE/ansible/inventory.local.yml" \
+  ansible/playbooks/audit-paperless-native-chat-access-and-index-readonly.yml \
+  --vault-id ai@prompt \
+  -e "@$BASE/ansible/vars/paperless-ai-catalog.local.yml"
+)
+```
+
+Entscheidend ist
+`NONPARENT_VISIBLE_DOCUMENT_PAIRS` und
+`CHILD_GROUP_VISIBLE_DOCUMENT_PAIRS`. Bei einem Wert über null wird
+die Freischaltung des Chats gesperrt, bis ein kontrollierter
+Berechtigungsentwurf und ein Negativtest vorliegen. Bei Null fehlt
+immer noch der echte Session-/RAG-Berechtigungstest; die
+Indexierung bleibt ein **separat freizugebender Vorgang**.
+Ein vorhandenes `llmindex.db` ohne Abdeckungsnachweis bedeutet nicht,
+dass alle berechtigten Dokumente bereits indiziert sind.
+
+## 6. Referenz zur Tag-Regel
 
 **Unverändert:** Vorhandene berechtigte Tags dürfen automatisch
 ergänzt werden. Neue deutsche Tag-Vorschläge werden **ausschließlich**
