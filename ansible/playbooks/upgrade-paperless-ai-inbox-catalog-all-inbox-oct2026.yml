@@ -122,7 +122,7 @@
     - name: Reject unexpected independent service unit
       ansible.builtin.assert:
         that:
-          - "'ExecStart=/usr/local/libexec/bergen-ai-catalog-run\n' in bp_v2_unit_text or 'ExecStart=/usr/local/libexec/bergen-ai-catalog-run-v2\n' in bp_v2_unit_text"
+          - "'ExecStart=/usr/local/libexec/bergen-ai-catalog-run' in bp_v2_unit_text.splitlines() or 'ExecStart=/usr/local/libexec/bergen-ai-catalog-run-v2' in bp_v2_unit_text.splitlines()"
         fail_msg: UNREVIEWED_EXISTING_TIMER_UNIT
       no_log: true
 
@@ -217,7 +217,7 @@
       ansible.builtin.systemd:
         name: bergen-ai-catalog.timer
         state: stopped
-      when: "'ExecStart=/usr/local/libexec/bergen-ai-catalog-run-v2\n' not in bp_v2_unit_text"
+      when: "'ExecStart=/usr/local/libexec/bergen-ai-catalog-run-v2' not in bp_v2_unit_text.splitlines()"
 
     - name: Check no previously started catalogue service is still executing
       ansible.builtin.command:
