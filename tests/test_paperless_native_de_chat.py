@@ -93,7 +93,10 @@ class TestNativeGermanChat(unittest.TestCase):
         self.assertIn('ai.llm_output_language == "de"', index)
         self.assertIn("Document.objects.count()", index)
         self.assertIn('INDEX_COVERAGE="NOT_PROVEN"', index)
-        self.assertNotIn("get_vector_store(", index.split("def main():", 1)[1])
+        executable = "
+".join(line for line in index.splitlines()
+                               if not line.lstrip().startswith("#"))
+        self.assertNotIn("get_vector_store(", executable)
         self.assertIn("permitted_document_ids(user)", acl)
         self.assertIn("owner__isnull=True", acl)
         self.assertIn("user.has_perm(\"documents.view_document\")", acl)
