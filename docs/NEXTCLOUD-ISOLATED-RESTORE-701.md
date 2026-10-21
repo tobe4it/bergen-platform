@@ -2009,3 +2009,39 @@ for exactly one `pct start 790` followed by bounded read-only
 guest identity, UID namespace and zero-nonloopback-NIC checks.
 No CT701 start, NIC attachment, Proxmox template conversion,
 Nextcloud restore, or production changes are implied.
+
+
+## CT790 gated firstboot proposal no-write PASS (2026-10-21)
+
+The operator executed the default/no-apply form of
+`ansible/playbooks/start-rocky-9-8-ct790-offline.yml` against
+`venombox`. This executed the complete, same-run independent
+CT790/ZFS/rootfs-release/first-boot audit and then reviewed,
+**but did not apply**, the single-guest start proposal.
+
+- Result: `ROCKY_9_8_CT790_FIRSTBOOT_PLAN_READ_ONLY_READY`.
+- `venombox: ok=52 changed=0 unreachable=0 failed=0 skipped=15`.
+- Expected start candidate: `pct start 790`; reviewed rootfs
+  `local-zfs:subvol-790-disk-0`; no configured NICs, no
+  additional mounts or hooks; unprivileged, protected,
+  autostart disabled; guest remains stopped.
+- All fifteen mutating and post-start runtime tasks were
+  correctly skipped because neither explicit first-start approval
+  variable was supplied. The operator output states
+  `pct_start_authorized=false` and
+  `pct_template_authorized=false`.
+- No automatic stop, restart or rollback is configured; if the
+  future start or checks fail, the state must be inspected without
+  repeating the start or making any corrective changes without
+  separate approval.
+
+**Authorization remains closed.** Neither CI nor this successful
+proposal authorizes a `pct start` operation. The exact intended
+next permission, if the operator separately grants it, is one
+offline/no-NIC first boot of existing CT790 only, followed by
+read-only guest identity, systemd PID 1, non-loopback-interface
+count and namespace-ID checks. A first boot may cause stateful
+systemd writes to the new disposable CT790 rootfs. Creation,
+guest restart/stop, template conversion, CT701 changes, host
+network changes and any production-system modifications are
+not included.
