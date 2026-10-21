@@ -219,7 +219,7 @@
           - "{{ bp_child_e2e_code }}"
         stdin: "{{ {'protocol':'native-child-chat-e2e-v1','mode':'live','approved':true,'proof':bp_e2e_proof} | to_json }}"
         stdin_add_newline: true
-      changed_when: false
+      changed_when: true  # temporary Django session DB rows are created/deleted
       failed_when: false
       register: bp_e2e_live_raw
       no_log: true
@@ -249,6 +249,34 @@
           {{ bp_e2e_live_frames[0] |
              regex_replace('^BERGEN_PAPERLESS_CHILD_CHAT_E2E_V1:', '') | from_json }}
       no_log: true
+      when: bp_child_e2e_live
+
+    - name: Diagnose failed live check with only enumerated reason codes
+      ansible.builtin.debug:
+        msg:
+          - "LIVE_STATUS={{ bp_e2e_live.STATUS if bp_e2e_live.STATUS in ['BLOCKED','PASSED_LIVE'] else 'UNCLASSIFIED' }}"
+          - "LIVE_REASON={{ bp_e2e_live.REASON if bp_e2e_live.REASON in [
+                'NONE', 'VERSION_UNREVIEWED', 'AI_CONFIG_UNREVIEWED',
+                'INDEX_TASK_IN_PROGRESS', 'APPROVAL_UNREVIEWED',
+                'PROVENANCE_UNREVIEWED', 'GROUP_SCOPE_MISSING',
+                'ACL_REFERENCE_INVALID', 'ACL_SCOPE_UNBOUNDED',
+                'IMPORT_GRANT_DRIFT', 'SCOPE_INCOMPLETE',
+                'CHILD_GROUP_MISSING', 'CHILD_ACCOUNTS_UNREVIEWED',
+                'CHILD_ROLE_UNSAFE', 'CHILD_SCOPE_UNSAFE',
+                'PARENT_SINGLE_ROUTE_UNSAFE', 'DOCUMENT_COUNT_UNREVIEWED',
+                'INDEX_PATH_UNREVIEWED', 'INDEX_MODEL_MISMATCH',
+                'INDEX_COVERAGE_DRIFT', 'OUTPUT_LANGUAGE_NOT_GERMAN',
+                'CHAT_ROUTE_UNREVIEWED', 'CHAT_ROUTE_UNSAFE',
+                'PARENT_DIRECT_NOT_DENIED', 'CHAT_HTTP_UNEXPECTED',
+                'CHAT_STREAM_UNBOUNDED', 'CHAT_REFERENCES_MISSING',
+                'CHAT_ANSWER_UNAVAILABLE', 'CHAT_REFERENCES_INVALID',
+                'CHAT_PARENT_REFERENCE_LEAK', 'FAMILY_REFERENCE_MISSING',
+                'FAMILY_DIRECT_FAILED', 'FAMILY_ROUTE_INCORRECT',
+                'ARCHIVE_ROUTE_INCORRECT', 'DOCUMENTS_CHANGED_DURING_TEST',
+                'USER_OR_DOCUMENT_PERMISSIONS_CHANGED',
+                'CHILD_TEST_INCOMPLETE', 'UNCLASSIFIED'
+              ] else 'UNCLASSIFIED' }}"
+          - CHAT_RELEASE_GATE=BLOCKED_UNTIL_ASSERTIONS_AND_OIDC_PASS
       when: bp_child_e2e_live
 
     - name: Require live parent denial and both child-positive chat paths
