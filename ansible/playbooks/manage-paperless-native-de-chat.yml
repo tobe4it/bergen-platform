@@ -1,0 +1,307 @@
+---
+# Native Paperless-ngx 3.3.0 German UI/LLM and Ollama bge-m3 chat config.
+# AUDIT is no-write. APPLY is separate operator-approved with fingerprint.
+# Rebuild of the document index is intentionally NOT included.
+- name: Audit and optionally enable German native Paperless AI document chat
+  hosts: venombox
+  become: true
+  gather_facts: false
+  vars:
+    bp_native_mode: "{{ paperless_native_de_chat_mode | default('audit') }}"
+    bp_native_apply: "{{ bp_native_mode == 'apply' }}"
+    bp_native_file: /etc/bergen-platform/paperless-ai/bergen_ai_catalog_runner.py
+    bp_native_code: "{{ lookup('ansible.builtin.file', playbook_dir ~ '/../files/paperless/bergen_ai_native_de_chat_config.py', rstrip=False) }}"
+    bp_native_request:
+      protocol: native-de-chat-v1
+      mode: "{{ bp_native_mode }}"
+      expected_model: "{{ paperless_ai_catalog_model | default('') }}"
+      expected_endpoint: "{{ paperless_ai_catalog_endpoint | default('') }}"
+      expected_sha256: "{{ paperless_native_de_chat_expected_sha256 | default('') }}"
+      approved: "{{ paperless_native_de_chat_approved | default(false) | bool }}"
+      backup_verified: "{{ paperless_ai_catalog_verified_backup | default(false) | bool }}"
+      chat_index_permission_reviewed: "{{ paperless_native_chat_acl_reviewed | default(false) | bool }}"
+  tasks:
+    - name: Enforce exact confined target and separate application approval
+      ansible.builtin.assert:
+        that:
+          - inventory_hostname == 'venombox'
+          - bp_native_mode in ['audit', 'apply']
+          - not ansible_check_mode or not bp_native_apply
+          - not bp_native_apply or (paperless_native_de_chat_approved | default(false) | bool)
+          - not bp_native_apply or (paperless_ai_catalog_verified_backup | default(false) | bool)
+          - not bp_native_apply or (paperless_native_chat_acl_reviewed | default(false) | bool)
+          - not bp_native_apply or ((paperless_native_de_chat_expected_sha256 | default('')) is match('^[a-f0-9]{64}$'))
+        fail_msg: NATIVE_GERMAN_CHAT_REQUIRES_INDEPENDENT_BACKUP_AND_ACL_APPROVAL
+      no_log: true
+
+    - name: Read expected unprivileged Paperless CT configuration
+      ansible.builtin.command:
+        argv: [pct, config, '126']
+      changed_when: false
+      register: bp_native_guest
+      no_log: true
+
+    - name: Refuse unreviewed or privileged Paperless guest
+      ansible.builtin.assert:
+        that:
+          - bp_native_guest.rc == 0
+          - "'hostname: bergen-paperless' in bp_native_guest.stdout_lines"
+          - "'unprivileged: 1' in bp_native_guest.stdout_lines"
+          - "'lxc.apparmor.profile: unconfined' not in bp_native_guest.stdout"
+      no_log: true
+
+    - name: Read installed v2 timer policy without disclosing model details
+      ansible.builtin.slurp:
+        src: /etc/bergen-platform/paperless-ai/catalog-policy.json
+      register: bp_native_live_policy_blob
+      no_log: true
+
+    - name: Check exact live v2 all-Posteingang baseline
+      ansible.builtin.set_fact:
+        bp_native_live_policy: "{{ bp_native_live_policy_blob.content | b64decode | from_json }}"
+      no_log: true
+
+    - name: Require unchanged v2 selection and approved endpoint
+      ansible.builtin.assert:
+        that:
+          - bp_native_live_policy.protocol == 'catalog-v2'
+          - bp_native_live_policy.mode == 'apply'
+          - bp_native_live_policy.start_added_date == '2026-10-01'
+          - bp_native_live_policy.allowed_group == none
+          - bp_native_live_policy.min_document_id == 0
+          - bp_native_live_policy.notes_enabled == true
+          - bp_native_live_policy.approved == true
+          - bp_native_live_policy.expected_endpoint == paperless_ai_catalog_endpoint
+          - bp_native_live_policy.expected_model == paperless_ai_catalog_model
+        fail_msg: NATIVE_CHAT_MUST_NOT_CHANGE_EXISTING_INBOX_SCOPE
+      no_log: true
+
+    - name: Audit live Paperless singleton native AI settings and local models
+      ansible.builtin.command:
+        argv:
+          - pct
+          - exec
+          - '126'
+          - --
+          - podman
+          - exec
+          - -i
+          - bergen-paperless
+          - python
+          - /usr/src/paperless/src/manage.py
+          - shell
+          - --verbosity=0
+          - -c
+          - "{{ bp_native_code }}"
+        stdin: >-
+          {{ bp_native_request | combine({'mode':'audit'}) | to_json }}
+        stdin_add_newline: true
+      changed_when: false
+      failed_when: false
+      register: bp_native_audit_raw
+      no_log: true
+
+    - name: Parse one sanitized native AI audit frame
+      ansible.builtin.set_fact:
+        bp_native_audit_frames: >-
+          {{ bp_native_audit_raw.stdout_lines | default([]) |
+             select('match', '^BERGEN_PAPERLESS_NATIVE_DE_CHAT_V1:') | list }}
+      no_log: true
+
+    - name: Require reviewed single native AI observation
+      ansible.builtin.assert:
+        that:
+          - bp_native_audit_raw.rc == 0
+          - bp_native_audit_frames | length == 1
+          - bp_native_audit_frames[0] | length < 1200
+        fail_msg: NATIVE_DE_CHAT_AUDIT_RECORD_MISSING
+      no_log: true
+
+    - name: Decode only allowlisted summary fields
+      ansible.builtin.set_fact:
+        bp_native_audit: >-
+          {{ bp_native_audit_frames[0] |
+             regex_replace('^BERGEN_PAPERLESS_NATIVE_DE_CHAT_V1:', '') | from_json }}
+      no_log: true
+
+    - name: Refuse ambiguous or unbounded native configuration
+      ansible.builtin.assert:
+        that:
+          - bp_native_audit.STATUS == 'INSPECTED'
+          - bp_native_audit.AUDIT == 'READ_ONLY'
+          - bp_native_audit.CHANGED == false
+          - bp_native_audit.DOCUMENTS_CHANGED == false
+          - bp_native_audit.INDEX_CHANGED == false
+          - bp_native_audit.CURRENT_SHA256 is match('^[a-f0-9]{64}$')
+          - bp_native_audit.AI_UI in ['YES', 'NO']
+          - bp_native_audit.OUTPUT_LANGUAGE in ['DE', 'UNSET', 'OTHER']
+          - bp_native_audit.INDEX in ['OFF', 'LOCAL_OLLAMA', 'OTHER']
+          - bp_native_audit.GENERATION_MODEL in ['REVIEWED', 'NOT_REVIEWED']
+          - bp_native_audit.EMBEDDING_MODEL in ['BGE_M3_LOCAL', 'NOT_READY']
+          - bp_native_audit.NEW_INDEX_COMPATIBLE in ['YES', 'NO']
+        fail_msg: NATIVE_DE_CHAT_CONFIG_AUDIT_UNVERIFIED
+      no_log: true
+
+    - name: Report non-identifying native German AI and chat readiness
+      ansible.builtin.debug:
+        msg:
+          - "AI_UI={{ bp_native_audit.AI_UI }}"
+          - "OUTPUT_LANGUAGE={{ bp_native_audit.OUTPUT_LANGUAGE }}"
+          - "INDEX={{ bp_native_audit.INDEX }}"
+          - "GENERATION_MODEL={{ bp_native_audit.GENERATION_MODEL }}"
+          - "EMBEDDING_MODEL={{ bp_native_audit.EMBEDDING_MODEL }}"
+          - "NEW_INDEX_COMPATIBLE={{ bp_native_audit.NEW_INDEX_COMPATIBLE }}"
+          - "CURRENT_SHA256={{ bp_native_audit.CURRENT_SHA256 }}"
+          - AUDIT=READ_ONLY
+          - CHANGED=False
+      when: not bp_native_apply
+
+    - name: Refuse apply if expected config or actual bge-m3 readiness changed
+      ansible.builtin.assert:
+        that:
+          - bp_native_audit.CURRENT_SHA256 == paperless_native_de_chat_expected_sha256
+          - bp_native_audit.GENERATION_MODEL == 'REVIEWED'
+          - bp_native_audit.EMBEDDING_MODEL == 'BGE_M3_LOCAL'
+          - bp_native_audit.NEW_INDEX_COMPATIBLE == 'YES'
+        fail_msg: NATIVE_CHAT_LOCAL_ONLY_OR_FINGERPRINT_NOT_READY
+      when: bp_native_apply
+      no_log: true
+
+    - name: Check managed current Bergen-AI worker checksum
+      ansible.builtin.stat:
+        path: "{{ bp_native_file }}"
+        checksum_algorithm: sha256
+      register: bp_native_worker_stat
+      no_log: true
+      when: bp_native_apply
+
+    - name: Decide if native German/chat configuration needs a controlled update
+      ansible.builtin.set_fact:
+        bp_native_new_sha: "{{ lookup('ansible.builtin.file', playbook_dir ~ '/../files/paperless/bergen_ai_catalog_runner.py', rstrip=False) | hash('sha256') }}"
+        bp_native_worker_update_required: >-
+          {{ (not bp_native_worker_stat.stat.exists) or
+             (bp_native_worker_stat.stat.checksum !=
+              (lookup('ansible.builtin.file', playbook_dir ~ '/../files/paperless/bergen_ai_catalog_runner.py', rstrip=False) | hash('sha256'))) }}
+        bp_native_ui_update_required: >-
+          {{ bp_native_audit.AI_UI != 'YES' or bp_native_audit.OUTPUT_LANGUAGE != 'DE'
+             or bp_native_audit.INDEX != 'LOCAL_OLLAMA' }}
+      when: bp_native_apply
+      no_log: true
+
+    - name: Update only existing worker and native app settings after approval
+      when: bp_native_apply and
+            (bp_native_worker_update_required | bool or bp_native_ui_update_required | bool)
+      block:
+        - name: Disable existing timer before changing the installed worker
+          ansible.builtin.systemd:
+            name: bergen-ai-catalog.timer
+            state: stopped
+            enabled: false
+
+        - name: Verify one-shot service is not actively processing a document
+          ansible.builtin.command:
+            argv: [systemctl, is-active, bergen-ai-catalog.service]
+          changed_when: false
+          failed_when: false
+          register: bp_native_service_current
+          no_log: true
+
+        - name: Refuse modifying native config during existing classification
+          ansible.builtin.assert:
+            that:
+              - bp_native_service_current.stdout | trim in ['inactive', 'failed']
+            fail_msg: NATIVE_CHAT_OLD_CLASSIFIER_STILL_RUNNING
+          no_log: true
+
+        - name: Install German-localized no-RAG Bergen-AI worker
+          ansible.builtin.copy:
+            src: "{{ playbook_dir }}/../files/paperless/bergen_ai_catalog_runner.py"
+            dest: "{{ bp_native_file }}"
+            owner: root
+            group: root
+            mode: '0600'
+            backup: true
+
+        - name: Apply only German output, master AI and local bge-m3 embedding config
+          ansible.builtin.command:
+            argv:
+              - pct
+              - exec
+              - '126'
+              - --
+              - podman
+              - exec
+              - -i
+              - bergen-paperless
+              - python
+              - /usr/src/paperless/src/manage.py
+              - shell
+              - --verbosity=0
+              - -c
+              - "{{ bp_native_code }}"
+            stdin: "{{ bp_native_request | to_json }}"
+            stdin_add_newline: true
+          register: bp_native_apply_raw
+          failed_when: false
+          changed_when: false
+          no_log: true
+
+        - name: Extract exactly one protected apply result
+          ansible.builtin.set_fact:
+            bp_native_apply_frames: >-
+              {{ bp_native_apply_raw.stdout_lines | default([]) |
+                 select('match', '^BERGEN_PAPERLESS_NATIVE_DE_CHAT_V1:') | list }}
+          no_log: true
+
+        - name: Require one reviewed German configuration apply result
+          ansible.builtin.assert:
+            that:
+              - bp_native_apply_raw.rc == 0
+              - bp_native_apply_frames | length == 1
+              - (bp_native_apply_frames[0] |
+                 regex_replace('^BERGEN_PAPERLESS_NATIVE_DE_CHAT_V1:', '') |
+                 from_json).STATUS in ['ALREADY_CONFIGURED', 'GERMAN_NATIVE_AI_CHAT_CONFIGURED']
+            fail_msg: NATIVE_DE_CHAT_CONFIG_APPLY_FAILED
+          no_log: true
+
+        - name: Re-enable unchanged original periodic catalogue timer
+          ansible.builtin.systemd:
+            name: bergen-ai-catalog.timer
+            state: started
+            enabled: true
+
+        - name: Require timer running again without manual service invocation
+          ansible.builtin.command:
+            argv: [systemctl, show, bergen-ai-catalog.timer, -p, ActiveState, -p, UnitFileState]
+          register: bp_native_end_state
+          changed_when: false
+          no_log: true
+
+        - name: Refuse incomplete original timer restoration
+          ansible.builtin.assert:
+            that:
+              - "'ActiveState=active' in bp_native_end_state.stdout_lines"
+              - "'UnitFileState=enabled' in bp_native_end_state.stdout_lines"
+          no_log: true
+      rescue:
+        - name: Leave timer disabled if new worker or AI config is indeterminate
+          ansible.builtin.systemd:
+            name: bergen-ai-catalog.timer
+            state: stopped
+            enabled: false
+
+        - name: Fail closed and require manual worker or config reconciliation
+          ansible.builtin.fail:
+            msg: NATIVE_DE_CHAT_APPLY_FAILED_TIMER_STOPPED_MANUAL_REVIEW_REQUIRED
+
+    - name: Report bounded approved change and separate index build requirement
+      ansible.builtin.debug:
+        msg:
+          - GERMAN_NATIVE_AI=CONFIGURED_OR_ALREADY_PRESENT
+          - LOCAL_OLLAMA_EMBEDDINGS=BGE_M3
+          - WORKER=GERMAN_NO_RAG
+          - INBOX_SELECTION=UNCHANGED
+          - JOURNAL=UNCHANGED
+          - INDEX_REBUILD=SEPARATE_APPROVAL_REQUIRED
+          - BACKFILL_OR_RECLASSIFICATION=NONE
+      when: bp_native_apply
