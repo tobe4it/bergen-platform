@@ -172,7 +172,7 @@ def ensure_config(request, *, apply):
     local_index = (not config.llm_embedding_backend or
                    (config.ai_enabled and
                     config.llm_embedding_backend == "ollama" and
-                    config.llm_embedding_model == "bge-m3"))
+                    config.llm_embedding_model in ("bge-m3", "bge-m3:latest")))
     ai_ready = bool(config.llm_backend == "ollama"
                     and endpoint == expected and config.llm_model == model
                     and config.llm_allow_internal_endpoints
@@ -632,7 +632,7 @@ def run():
         if mode in ("audit", "preview"):
             report(AUDIT="READ_ONLY", STATUS="READY" if ai_ready else "AI_CONFIG_NOT_READY",
                    PAPERLESS_VERSION="3.3.0", PROVIDER="OLLAMA_LOCAL_ONLY",
-                   EMBEDDINGS="LOCAL_OLLAMA_BGE_M3" if cfg.llm_embedding_backend == "ollama" and cfg.llm_embedding_model == "bge-m3" else ("DISABLED" if not cfg.llm_embedding_backend else "CONFIG_UNACCEPTABLE"),
+                   EMBEDDINGS="LOCAL_OLLAMA_BGE_M3" if cfg.llm_embedding_backend == "ollama" and cfg.llm_embedding_model in ("bge-m3", "bge-m3:latest") else ("DISABLED" if not cfg.llm_embedding_backend else "CONFIG_UNACCEPTABLE"),
                    CANDIDATES_SCAN_BOUND=30, ELIGIBLE_SAMPLE=eligible_count,
                    POSTINGEST_WATERMARK="NOT_USED" if all_inbox else ("PRESENT" if min_id else "NOT_SET"),
                    SELECTION_SCOPE="ALL_INBOX_FROM_2026_10_01" if all_inbox else "PARENT_POST_WATERMARK",
