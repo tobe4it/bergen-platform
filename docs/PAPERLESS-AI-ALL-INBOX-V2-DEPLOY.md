@@ -35,6 +35,27 @@ enabled merely by changing variables in the old v1 timer deploy.
 
 ## Deployment status
 
+**BLOCKED, DO NOT EXECUTE PRODUCTION UPGRADE YET.** An operator has
+clarified that imports from the shared Eltern folder have no document
+owner; they rely entirely on guardian group permissions. The preliminary
+v2 worker was found to pass `user=None` into native Paperless 3.3.0
+`get_ai_document_classification`, whose taxonomy-context retrieval
+interprets this as **unrestricted** access to similar documents. This
+could mix unrelated personal/group OCR into the local model prompt.
+The v2 runner now deliberately fails closed with
+`GROUP_ACL_CONTEXT_UNVERIFIED` *before* any inference or persistence,
+including in the read-only preview. The v1 production timer remains
+unchanged. The commands below are a reference for the eventual
+approved upgrade, **not operational instructions to execute now**.
+
+Future remediation requires a reviewed group ACL mapping to an
+appropriately restricted model context; native Note attribution must
+remain system/anonymous, original owner/group document permissions
+must not change, and document/taxonomy visibility must be verified
+separately. Run offline tests and a live read-only preview, then a
+one-document pilot *before* enabling v2 automation.
+
+
 The GitHub feature branch carries reviewed Python worker/policy v2,
 a separate **operator-approved** upgrade playbook, and offline regression
 tests. Nothing in this commit changes the live timer. Use the commands
