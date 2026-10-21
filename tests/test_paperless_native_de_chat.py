@@ -36,6 +36,26 @@ class TestNativeGermanChat(unittest.TestCase):
         self.assertIn("bge-m3:latest", s)
         self.assertIn('config.llm_embedding_backend == "ollama"', s)
 
+    def test_new_german_tags_are_note_proposals_not_auto_creation(self):
+        """v0.16 existing-tag resolution is unchanged, even after translation."""
+        source = WORKER.read_text()
+        self.assertIn('output["_bergen_original_match_names"]', source)
+        self.assertIn('field: list(result[field]["new_names"])', source)
+        self.assertIn('names = name_source.get(key, block.get("new_names"))', source)
+        self.assertIn('bounded_ai_labels(block.get("new_names"))', source)
+        # No free-form tag object creation in the worker.
+        self.assertNotIn("Tag.objects.create(", source)
+        self.assertNotIn("Tag.objects.get_or_create(", source)
+        self.assertIn('resolved_tag_names=[t.name for t in tags]', source)
+        self.assertIn("review_note_text(", source)
+        self.assertIn('Note.objects.create(document=current_doc,', source)
+        policy_source = (
+            ROOT / "ansible/files/paperless/bergen_ai_catalog_policy.py"
+        ).read_text()
+        self.assertIn('tag_names = bounded_ai_labels(tags.get("new_names"))',
+                      policy_source)
+        self.assertIn('"LLM-Tags: " +', policy_source)
+
     def test_config_apply_is_version_pinned_and_fingerprinted(self):
         s = CONFIG.read_text()
         ast.parse(s)
