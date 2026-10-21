@@ -1,0 +1,158 @@
+---
+# No-write index and real effective ownerless group ACL audit before RAG.
+- name: Audit Paperless native German chat index and ownerless ACL visibility
+  hosts: venombox
+  gather_facts: false
+  become: true
+  tasks:
+    - name: Require exact host and no approvals for production changes
+      ansible.builtin.assert:
+        that:
+          - inventory_hostname == 'venombox'
+          - not (paperless_native_de_chat_approved | default(false) | bool)
+          - not (paperless_native_chat_index_build_approved | default(false) | bool)
+          - not (paperless_native_chat_acl_modify_approved | default(false) | bool)
+        fail_msg: NATIVE_CHAT_AUDIT_IS_READ_ONLY
+      no_log: true
+
+    - name: Read reviewed CT126 container identity
+      ansible.builtin.command:
+        argv: [pct, config, '126']
+      register: bp_chat_guest
+      changed_when: false
+      no_log: true
+
+    - name: Refuse wrong or privileged container
+      ansible.builtin.assert:
+        that:
+          - bp_chat_guest.rc == 0
+          - "'hostname: bergen-paperless' in bp_chat_guest.stdout_lines"
+          - "'unprivileged: 1' in bp_chat_guest.stdout_lines"
+          - "'lxc.apparmor.profile: unconfined' not in bp_chat_guest.stdout"
+      no_log: true
+
+    - name: Obtain only sanitized model index state and task counts
+      ansible.builtin.command:
+        argv:
+          - pct
+          - exec
+          - '126'
+          - --
+          - podman
+          - exec
+          - -i
+          - bergen-paperless
+          - python
+          - /usr/src/paperless/src/manage.py
+          - shell
+          - --verbosity=0
+          - -c
+          - "{{ lookup('ansible.builtin.file', playbook_dir ~ '/../files/paperless/audit_native_de_chat_index.py', rstrip=False) ~ '\nmain()' }}"
+        stdin: '{"protocol":"native-de-chat-index-audit-v1"}'
+        stdin_add_newline: true
+      changed_when: false
+      failed_when: false
+      register: bp_chat_index_raw
+      no_log: true
+
+    - name: Obtain only aggregate effective permissions of group-owned documents
+      ansible.builtin.command:
+        argv:
+          - pct
+          - exec
+          - '126'
+          - --
+          - podman
+          - exec
+          - -i
+          - bergen-paperless
+          - python
+          - /usr/src/paperless/src/manage.py
+          - shell
+          - --verbosity=0
+          - -c
+          - "{{ lookup('ansible.builtin.file', playbook_dir ~ '/../files/paperless/audit_native_chat_ownerless_acl.py', rstrip=False) ~ '\nmain()' }}"
+        stdin: '{"protocol":"native-chat-ownerless-acl-audit-v1"}'
+        stdin_add_newline: true
+      changed_when: false
+      failed_when: false
+      register: bp_chat_acl_raw
+      no_log: true
+
+    - name: Isolate exactly one bounded index and ACL audit frame each
+      ansible.builtin.set_fact:
+        bp_chat_index_frames: >-
+          {{ bp_chat_index_raw.stdout_lines | default([]) |
+             select('match', '^BERGEN_PAPERLESS_NATIVE_CHAT_INDEX_AUDIT_V1:') | list }}
+        bp_chat_acl_frames: >-
+          {{ bp_chat_acl_raw.stdout_lines | default([]) |
+             select('match', '^BERGEN_PAPERLESS_CHAT_OWNERLESS_ACL_AUDIT_V1:') | list }}
+      no_log: true
+
+    - name: Reject missing, multiple or unbounded evidence
+      ansible.builtin.assert:
+        that:
+          - bp_chat_index_raw.rc == 0
+          - bp_chat_acl_raw.rc == 0
+          - bp_chat_index_frames | length == 1
+          - bp_chat_acl_frames | length == 1
+          - bp_chat_index_frames[0] | length < 1800
+          - bp_chat_acl_frames[0] | length < 1800
+        fail_msg: NATIVE_CHAT_AUDIT_MISSING_OR_AMBIGUOUS
+      no_log: true
+
+    - name: Decode sanitized index and actual permission aggregates
+      ansible.builtin.set_fact:
+        bp_chat_index_summary: >-
+          {{ bp_chat_index_frames[0] |
+             regex_replace('^BERGEN_PAPERLESS_NATIVE_CHAT_INDEX_AUDIT_V1:', '') | from_json }}
+        bp_chat_acl_summary: >-
+          {{ bp_chat_acl_frames[0] |
+             regex_replace('^BERGEN_PAPERLESS_CHAT_OWNERLESS_ACL_AUDIT_V1:', '') | from_json }}
+      no_log: true
+
+    - name: Demand read-only valid status for index and access
+      ansible.builtin.assert:
+        that:
+          - bp_chat_index_summary.STATUS == 'INSPECTED'
+          - bp_chat_acl_summary.STATUS == 'INSPECTED'
+          - bp_chat_index_summary.AUDIT == 'READ_ONLY'
+          - bp_chat_acl_summary.AUDIT == 'READ_ONLY'
+          - bp_chat_index_summary.CHANGED == false
+          - bp_chat_acl_summary.CHANGED == false
+          - bp_chat_index_summary.INDEX_CHANGED == false
+          - bp_chat_index_summary.DOCUMENTS_CHANGED == false
+          - bp_chat_acl_summary.DOCUMENTS_CHANGED == false
+          - bp_chat_acl_summary.USER_PERMISSIONS_CHANGED == false
+          - bp_chat_index_summary.OUTPUT_LANGUAGE == 'DE'
+          - bp_chat_index_summary.GENERATION_BACKEND == 'OLLAMA'
+          - bp_chat_index_summary.EMBEDDINGS == 'LOCAL_BGE_M3'
+          - bp_chat_index_summary.INDEX_FILE in ['ABSENT', 'PRESENT_NOT_COVERAGE_VERIFIED']
+          - bp_chat_index_summary.INDEX_TASKS_ACTIVE | int >= 0
+          - bp_chat_acl_summary.FINDING in ['CROSS_GROUP_VISIBILITY', 'NO_NONPARENT_CROSS_VISIBILITY_OBSERVED']
+          - bp_chat_acl_summary.OWNERLESS_PARENT_SHARED | int >= 0
+          - bp_chat_acl_summary.NONPARENT_VISIBLE_DOCUMENT_PAIRS | int >= 0
+          - bp_chat_acl_summary.CHAT_RELEASE_GATE in ['BLOCKED', 'FURTHER_PER_USER_NEGATIVE_TEST_REQUIRED']
+        fail_msg: NATIVE_CHAT_AUDIT_INVALID_OR_UNREVIEWED
+      no_log: true
+
+    - name: Show only sanitized index and effective-ACL evidence
+      ansible.builtin.debug:
+        msg:
+          - AUDIT=READ_ONLY
+          - "OUTPUT_LANGUAGE={{ bp_chat_index_summary.OUTPUT_LANGUAGE }}"
+          - "EMBEDDINGS={{ bp_chat_index_summary.EMBEDDINGS }}"
+          - "INDEX_FILE={{ bp_chat_index_summary.INDEX_FILE }}"
+          - "INDEX_BYTES={{ bp_chat_index_summary.INDEX_BYTES }}"
+          - "TOTAL_DOCUMENTS={{ bp_chat_index_summary.TOTAL_DOCUMENTS }}"
+          - "INDEX_TASKS_ACTIVE={{ bp_chat_index_summary.INDEX_TASKS_ACTIVE }}"
+          - "INDEX_TASKS_FAILED={{ bp_chat_index_summary.INDEX_TASKS_FAILED }}"
+          - "INDEX_COVERAGE={{ bp_chat_index_summary.INDEX_COVERAGE }}"
+          - "OWNERLESS_PARENT_SHARED={{ bp_chat_acl_summary.OWNERLESS_PARENT_SHARED }}"
+          - "ACTIVE_NONPARENT_MODEL_VIEWERS={{ bp_chat_acl_summary.ACTIVE_NONPARENT_MODEL_VIEWERS }}"
+          - "NONPARENT_VISIBLE_DOCUMENT_PAIRS={{ bp_chat_acl_summary.NONPARENT_VISIBLE_DOCUMENT_PAIRS }}"
+          - "CHILD_GROUP_MODEL_VIEWERS={{ bp_chat_acl_summary.CHILD_GROUP_MODEL_VIEWERS }}"
+          - "CHILD_GROUP_VISIBLE_DOCUMENT_PAIRS={{ bp_chat_acl_summary.CHILD_GROUP_VISIBLE_DOCUMENT_PAIRS }}"
+          - "CHAT_RELEASE_GATE={{ bp_chat_acl_summary.CHAT_RELEASE_GATE }}"
+          - DOCUMENTS_CHANGED=NO
+          - CHANGED=False
