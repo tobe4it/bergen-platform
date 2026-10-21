@@ -16,6 +16,8 @@ import ipaddress
 import json
 import os
 from pathlib import Path
+from datetime import datetime
+from zoneinfo import ZoneInfo
 import socket
 import sqlite3
 import sys
@@ -40,6 +42,8 @@ FRAME = "BERGEN_PAPERLESS_AI_CATALOG_V1:"
 JOURNAL_BASE = Path("/usr/src/paperless/data/.bergen-ai-catalog-v1")
 JOURNAL_DB = JOURNAL_BASE / "catalog.sqlite3"
 MAX_BATCH = 2
+IMPORT_CUTOFF = datetime(2026, 10, 1, 0, 0, tzinfo=ZoneInfo("Europe/Berlin"))
+V2_CUTOFF = "2026-10-01"
 
 
 def report(**kwargs):
@@ -110,14 +114,23 @@ def ollama_model_available(endpoint, expected_model):
 def ensure_config(request, *, apply):
     demand(__full_version_str__ == "3.3.0", "PAPERLESS_VERSION_UNREVIEWED")
     demand(isinstance(request, dict)
-           and request.get("protocol") == "catalog-v1", "INPUT_INVALID")
+           and request.get("protocol") in ("catalog-v1", "catalog-v2"), "INPUT_INVALID")
     demand(request.get("mode") in ("audit", "preview", "apply", "rollback"),
            "MODE_INVALID")
-    group_name = request.get("allowed_group")
-    demand(isinstance(group_name, str) and 1 <= len(group_name) <= 150
-           and "@" in group_name, "GROUP_UNREVIEWED")
-    groups = Group.objects.filter(name=group_name)
-    demand(groups.count() == 1, "GROUP_UNREVIEWED")
+    all_inbox = request["protocol"] == "catalog-v2"
+    if all_inbox:
+        demand(request.get("start_added_date") == V2_CUTOFF,
+               "CUTOFF_DATE_UNREVIEWED")
+        demand(request.get("allowed_group") in (None, ""),
+               "GROUP_SCOPE_MUST_BE_UNSET")
+        group = None
+    else:
+        group_name = request.get("allowed_group")
+        demand(isinstance(group_name, str) and 1 <= len(group_name) <= 150
+               and "@" in group_name, "GROUP_UNREVIEWED")
+        groups = Group.objects.filter(name=group_name)
+        demand(groups.count() == 1, "GROUP_UNREVIEWED")
+        group = groups.first()
     limit = request.get("min_document_id")
     demand(type(limit) is int and limit >= 0, "WATERMARK_INVALID")
     count = request.get("batch_size", 1)
@@ -153,19 +166,26 @@ def ensure_config(request, *, apply):
         demand(ai_ready, "AI_CONFIG_NOT_READY")
         demand(dns_is_private(endpoint), "OLLAMA_NETWORK_NOT_PRIVATE")
         demand(model_ready, "OLLAMA_MODEL_UNAVAILABLE")
-        demand(limit > 0 or bool(samples), "WATERMARK_REQUIRED")
-    return model_ready, groups.first(), count, samples, config
+        demand(all_inbox or limit > 0 or bool(samples), "WATERMARK_REQUIRED")
+    return model_ready, group, count, samples, config
 
 
-def eligible(doc, group, min_id, pilot):
-    if not doc or (not pilot and doc.pk <= min_id):
+def eligible(doc, group, min_id, pilot, *, all_inbox=False):
+    if not doc:
         return False
-    if not doc.owner_id or not doc.owner or not doc.owner.is_active:
-        return False
-    if doc.owner.is_staff or doc.owner.is_superuser:
-        return False
-    if not doc.owner.groups.filter(pk=group.pk).exists():
-        return False
+    if all_inbox:
+        # Import time (added), not document date (created) or document ID.
+        if doc.added is None or doc.added < IMPORT_CUTOFF:
+            return False
+    else:
+        if not pilot and doc.pk <= min_id:
+            return False
+        if not doc.owner_id or not doc.owner or not doc.owner.is_active:
+            return False
+        if doc.owner.is_staff or doc.owner.is_superuser:
+            return False
+        if not doc.owner.groups.filter(pk=group.pk).exists():
+            return False
     if not doc.tags.filter(is_inbox_tag=True).exists():
         return False
     if not doc.content or len(doc.content.strip()) < 30:
@@ -201,9 +221,10 @@ def init_journal():
         os.umask(old_umask)
 
 
-def guarded_document(doc_id, group, min_id, pilot):
+def guarded_document(doc_id, group, min_id, pilot, *, all_inbox=False):
     doc = Document.objects.filter(pk=doc_id).select_related("owner").first()
-    demand(eligible(doc, group, min_id, pilot), "DOCUMENT_NOT_ELIGIBLE")
+    demand(eligible(doc, group, min_id, pilot, all_inbox=all_inbox),
+           "DOCUMENT_NOT_ELIGIBLE")
     return doc
 
 
@@ -222,7 +243,7 @@ def resolve_choices(suggestions, owner):
     # belonging to someone else. Existing inbox tags remain on the document.
     tags = [tag for tag in tags
             if not tag.is_inbox_tag
-            and (tag.owner_id is None or tag.owner_id == owner.pk)]
+            and (tag.owner_id is None or (owner is not None and tag.owner_id == owner.pk))]
     correspondent = resolve_object(
         Correspondent, correspondents["new_names"],
         resolve_correspondent_ids(correspondents["existing_ids"], owner)
@@ -238,12 +259,13 @@ def resolve_choices(suggestions, owner):
     return tags, correspondent, kind
 
 
-def process_one(doc_id, group, minimum, pilot, db, *, notes_enabled=False):
+def process_one(doc_id, group, minimum, pilot, db, *, notes_enabled=False,
+                all_inbox=False):
     # All journal states (including review and no-change) are terminal from
     # the scheduler's perspective. Never replay an uncertain write.
     if db.execute("SELECT 1 FROM catalogue WHERE document_id=?", (doc_id,)).fetchone():
         return "ALREADY_RECORDED", 0, "NONE", "NONE"
-    doc = guarded_document(doc_id, group, minimum, pilot)
+    doc = guarded_document(doc_id, group, minimum, pilot, all_inbox=all_inbox)
     before = snapshot(doc)
     before_json = stable_snapshot(before)
     db.execute("INSERT INTO catalogue(document_id,state,before_json) VALUES (?,?,?)",
@@ -267,7 +289,8 @@ def process_one(doc_id, group, minimum, pilot, db, *, notes_enabled=False):
         notes_added = 0
         with transaction.atomic():
             current_doc = Document.objects.select_for_update().get(pk=doc_id)
-            demand(eligible(current_doc, group, minimum, pilot), "DOCUMENT_CHANGED")
+            demand(eligible(current_doc, group, minimum, pilot,
+                            all_inbox=all_inbox), "DOCUMENT_CHANGED")
             demand(stable_snapshot(snapshot(current_doc)) == before_json,
                    "DOCUMENT_CHANGED")
             changes = plan_changes(
@@ -278,7 +301,7 @@ def process_one(doc_id, group, minimum, pilot, db, *, notes_enabled=False):
             has_changes = has_metadata_changes(changes)
             # Successful classification with an empty permissible diff is NOT
             # an AI failure. Protect manual metadata and keep its inbox tag.
-            if notes_enabled:
+            if notes_enabled and not all_inbox:
                 demand(doc.owner.has_perm("documents.add_note"),
                        "NOTE_PERMISSION_DENIED")
             stage = "DB_WRITE"
@@ -299,7 +322,8 @@ def process_one(doc_id, group, minimum, pilot, db, *, notes_enabled=False):
             if notes_enabled:
                 # Native note model, no privileged API key or admin user.
                 # An atomic failure must roll back the metadata as well.
-                Note.objects.create(document=current_doc, user=doc.owner,
+                Note.objects.create(document=current_doc,
+                                    user=None if all_inbox else doc.owner,
                                     note=note_body)
                 notes_added = 1
             demand(current_doc.tags.filter(is_inbox_tag=True).exists(),
@@ -356,7 +380,7 @@ def process_one(doc_id, group, minimum, pilot, db, *, notes_enabled=False):
         return "REQUIRES_REVIEW", 0, stage, code
 
 
-def rollback_one(doc_id, group, db):
+def rollback_one(doc_id, group, db, *, all_inbox=False):
     row = db.execute(
         "SELECT state,before_json,after_json,applied_json FROM catalogue WHERE document_id=?",
         (doc_id,)
@@ -367,7 +391,8 @@ def rollback_one(doc_id, group, db):
            "ROLLBACK_REVIEW_REQUIRED")
     with transaction.atomic():
         doc = Document.objects.select_for_update().get(pk=doc_id)
-        demand(eligible(doc, group, 0, True), "ROLLBACK_REVIEW_REQUIRED")
+        demand(eligible(doc, group, 0, True,
+                        all_inbox=all_inbox), "ROLLBACK_REVIEW_REQUIRED")
         demand(stable_snapshot(snapshot(doc)) == after, "ROLLBACK_REVIEW_REQUIRED")
         # Only the recorded metadata is reverted; no document/ACL/storage edits.
         doc.title = before["title"]
@@ -392,24 +417,33 @@ def run():
             request, apply=(mode in ("apply", "rollback"))
         )
         min_id = request["min_document_id"]
-        queryset = Document.objects.filter(
-            tags__is_inbox_tag=True,
-            owner__groups=group,
-            owner__is_active=True,
-        ).distinct()
+        all_inbox = request["protocol"] == "catalog-v2"
+        if all_inbox:
+            queryset = Document.objects.filter(
+                tags__is_inbox_tag=True,
+                added__gte=IMPORT_CUTOFF,
+            ).distinct()
+        else:
+            queryset = Document.objects.filter(
+                tags__is_inbox_tag=True,
+                owner__groups=group,
+                owner__is_active=True,
+            ).distinct()
         if pilot:
             queryset = queryset.filter(pk__in=pilot)
-        else:
+        elif not all_inbox:
             queryset = queryset.filter(pk__gt=min_id)
         candidates = list(queryset.order_by("pk")[:30])
-        eligible_count = sum(eligible(d, group, min_id, bool(pilot))
+        eligible_count = sum(eligible(d, group, min_id, bool(pilot),
+                                      all_inbox=all_inbox)
                              for d in candidates)
         if mode in ("audit", "preview"):
             report(AUDIT="READ_ONLY", STATUS="READY" if ai_ready else "AI_CONFIG_NOT_READY",
                    PAPERLESS_VERSION="3.3.0", PROVIDER="OLLAMA_LOCAL_ONLY",
                    EMBEDDINGS="DISABLED" if not cfg.llm_embedding_backend else "CONFIG_UNACCEPTABLE",
                    CANDIDATES_SCAN_BOUND=30, ELIGIBLE_SAMPLE=eligible_count,
-                   POSTINGEST_WATERMARK="PRESENT" if min_id else "NOT_SET",
+                   POSTINGEST_WATERMARK="NOT_USED" if all_inbox else ("PRESENT" if min_id else "NOT_SET"),
+                   SELECTION_SCOPE="ALL_INBOX_FROM_2026_10_01" if all_inbox else "PARENT_POST_WATERMARK",
                    CHANGED=False)
             return
         demand(len(pilot) <= count, "PILOT_BATCH_INVALID")
@@ -433,7 +467,8 @@ def run():
                         ).fetchone()
                         if processed:
                             continue
-                        if eligible(candidate, group, min_id, False):
+                        if eligible(candidate, group, min_id, False,
+                                    all_inbox=all_inbox):
                             ids.append(candidate.pk)
                             if len(ids) >= count:
                                 break
@@ -447,12 +482,13 @@ def run():
                 failures = []
                 for doc_id in ids:
                     if mode == "rollback":
-                        rollback_one(doc_id, group, db)
+                        rollback_one(doc_id, group, db, all_inbox=all_inbox)
                         outcomes.append("ROLLED_BACK")
                     else:
                         outcome, note_count, failure_stage, failure_code = process_one(
                             doc_id, group, min_id, bool(pilot), db,
                             notes_enabled=request.get("notes_enabled", False),
+                            all_inbox=all_inbox,
                         )
                         outcomes.append(outcome)
                         notes_added += note_count
@@ -469,7 +505,8 @@ def run():
                        ROLLED_BACK=outcomes.count("ROLLED_BACK"),
                        CHANGED=notes_added > 0 or any(x in ("APPLIED", "ROLLED_BACK") for x in outcomes),
                        INBOX_TAG_REMOVAL="NEVER",
-                       DOCUMENT_ACL_CHANGES="NEVER")
+                       DOCUMENT_ACL_CHANGES="NEVER",
+                       SELECTION_SCOPE="ALL_INBOX_FROM_2026_10_01" if all_inbox else "PARENT_POST_WATERMARK")
     except PolicyError as exc:
         allowed = {
             "PAPERLESS_VERSION_UNREVIEWED", "INPUT_INVALID", "MODE_INVALID",
@@ -479,6 +516,7 @@ def run():
             "OLLAMA_NETWORK_NOT_PRIVATE", "WATERMARK_REQUIRED",
             "DATA_MOUNT_NOT_READY", "JOURNAL_UNSAFE", "DOCUMENT_NOT_ELIGIBLE",
             "PILOT_BATCH_INVALID", "PILOT_REQUIRED", "INBOX_REMOVED", "SNAPSHOT_INVALID",
+            "CUTOFF_DATE_UNREVIEWED", "GROUP_SCOPE_MUST_BE_UNSET",
             "ROLLBACK_UNAVAILABLE", "ROLLBACK_REVIEW_REQUIRED",
             "INBOX_TAG_REMOVED", "APP_CONFIG_MISSING", "OLLAMA_MODEL_UNAVAILABLE",
         }
