@@ -1,0 +1,174 @@
+---
+# Scope proof from actual Synology->Paperless receipts, then effective child ACL.
+# Do not build the vector index, grant model rights or invoke inference.
+- name: Verify Paperless children cannot access Eltern documents through native chat
+  hosts: venombox
+  become: true
+  gather_facts: false
+  tasks:
+    - name: Require exact target and no write approvals
+      ansible.builtin.assert:
+        that:
+          - inventory_hostname == 'venombox'
+          - not (paperless_native_de_chat_approved | default(false) | bool)
+          - not (paperless_native_chat_index_build_approved | default(false) | bool)
+          - not (paperless_native_chat_acl_modify_approved | default(false) | bool)
+        fail_msg: CHILD_CHAT_ACCESS_AUDIT_IS_READ_ONLY
+      no_log: true
+
+    - name: Verify existing unprivileged Paperless CT126
+      ansible.builtin.command:
+        argv: [pct, config, '126']
+      register: bp_child_guest
+      changed_when: false
+      no_log: true
+
+    - name: Reject wrong CT or unconfined guest
+      ansible.builtin.assert:
+        that:
+          - bp_child_guest.rc == 0
+          - "'hostname: bergen-paperless' in bp_child_guest.stdout_lines"
+          - "'unprivileged: 1' in bp_child_guest.stdout_lines"
+          - "'lxc.apparmor.profile: unconfined' not in bp_child_guest.stdout"
+      no_log: true
+
+    - name: Independently verify exact live Eltern and Familie source receipts and per-document ACLs
+      ansible.builtin.command:
+        argv:
+          - pct
+          - exec
+          - '126'
+          - --
+          - python3
+          - -c
+          - "{{ lookup('ansible.builtin.file', playbook_dir ~ '/../files/paperless/audit_native_chat_verified_group_imports.py', rstrip=False) }}"
+      changed_when: false
+      failed_when: false
+      register: bp_child_import_proof_raw
+      no_log: true
+
+    - name: Extract one bounded import proof without disclosing document IDs
+      ansible.builtin.set_fact:
+        bp_child_import_proof_frames: >-
+          {{ bp_child_import_proof_raw.stdout_lines | default([]) |
+             select('match', '^BERGEN_CHAT_GROUP_IMPORT_PROOF_V1:') | list }}
+      no_log: true
+
+    - name: Reject unverified receipt scope, unexpected frames or source errors
+      ansible.builtin.assert:
+        that:
+          - bp_child_import_proof_raw.rc == 0
+          - bp_child_import_proof_frames | length == 1
+          - bp_child_import_proof_frames[0] | length < 120000
+        fail_msg: CHILD_CHAT_SOURCE_SCOPE_NOT_PROVEN
+      no_log: true
+
+    - name: Decode internal protected source IDs in memory only
+      ansible.builtin.set_fact:
+        bp_child_import_proof: >-
+          {{ bp_child_import_proof_frames[0] |
+             regex_replace('^BERGEN_CHAT_GROUP_IMPORT_PROOF_V1:', '') | from_json }}
+      no_log: true
+
+    - name: Demand verified receipts with exact two group scopes
+      ansible.builtin.assert:
+        that:
+          - bp_child_import_proof.STATUS == 'VERIFIED'
+          - bp_child_import_proof.CHANGED == false
+          - bp_child_import_proof.DOCUMENTS_CHANGED == false
+          - bp_child_import_proof.protocol == 'native-chat-import-proof-v1'
+          - bp_child_import_proof.document_ids.keys() | list | sort == ['Eltern', 'Familie']
+          - bp_child_import_proof.document_ids.Eltern | length <= 5000
+          - bp_child_import_proof.document_ids.Familie | length <= 5000
+        fail_msg: CHILD_CHAT_IMPORT_PROOF_UNEXPECTED
+      no_log: true
+
+    - name: Verify future and current per-child access to all evidenced source documents
+      ansible.builtin.command:
+        argv:
+          - pct
+          - exec
+          - '126'
+          - --
+          - podman
+          - exec
+          - -i
+          - bergen-paperless
+          - python
+          - /usr/src/paperless/src/manage.py
+          - shell
+          - --verbosity=0
+          - -c
+          - "{{ lookup('ansible.builtin.file', playbook_dir ~ '/../files/paperless/audit_native_chat_child_boundary.py', rstrip=False) }}"
+        stdin: >-
+          {{ {'protocol': bp_child_import_proof.protocol,
+              'document_ids': bp_child_import_proof.document_ids} | to_json }}
+        stdin_add_newline: true
+      changed_when: false
+      failed_when: false
+      register: bp_child_boundary_raw
+      no_log: true
+
+    - name: Extract one bounded security report only
+      ansible.builtin.set_fact:
+        bp_child_boundary_frames: >-
+          {{ bp_child_boundary_raw.stdout_lines | default([]) |
+             select('match', '^BERGEN_PAPERLESS_CHAT_CHILD_BOUNDARY_V1:') | list }}
+      no_log: true
+
+    - name: Refuse incomplete, duplicated or unbounded security audit results
+      ansible.builtin.assert:
+        that:
+          - bp_child_boundary_raw.rc == 0
+          - bp_child_boundary_frames | length == 1
+          - bp_child_boundary_frames[0] | length < 2400
+        fail_msg: CHILD_CHAT_PERMISSION_AUDIT_MISSING
+      no_log: true
+
+    - name: Parse strictly aggregate access counters
+      ansible.builtin.set_fact:
+        bp_child_boundary: >-
+          {{ bp_child_boundary_frames[0] |
+             regex_replace('^BERGEN_PAPERLESS_CHAT_CHILD_BOUNDARY_V1:', '') | from_json }}
+      no_log: true
+
+    - name: Require proof of both chat access paths and unchanged permissions
+      ansible.builtin.assert:
+        that:
+          - bp_child_boundary.STATUS == 'INSPECTED'
+          - bp_child_boundary.AUDIT == 'READ_ONLY'
+          - bp_child_boundary.CHANGED == false
+          - bp_child_boundary.DOCUMENTS_CHANGED == false
+          - bp_child_boundary.USER_PERMISSIONS_CHANGED == false
+          - bp_child_boundary.MODEL_INFERENCE == 'NO'
+          - bp_child_boundary.PARENT_DOCUMENT_SCOPE | int > 0
+          - bp_child_boundary.ACTIVE_CHILD_IDENTITIES | int > 0
+          - bp_child_boundary.CHILD_PARENT_VISIBLE_NOW | int >= 0
+          - bp_child_boundary.CHILD_PARENT_VISIBLE_IF_MODEL_VIEW_GRANTED | int >= 0
+          - bp_child_boundary.CHILD_PARENT_SINGLE_DOCUMENT_ALLOW | int >= 0
+          - bp_child_boundary.CHAT_CHILD_PARENT_BOUNDARY in ['BLOCKED', 'NEGATIVE_ACL_CHECK_PASSED']
+          - bp_child_boundary.CHAT_RELEASE_GATE in ['BLOCKED_PARENT_ACCESS', 'USER_SESSION_AND_INDEX_TEST_STILL_REQUIRED']
+        fail_msg: CHILD_CHAT_ACCESS_NOT_PROVEN_OR_SCOPE_EMPTY
+      no_log: true
+
+    - name: Report aggregated effective and hypothetical Kinder scope access
+      ansible.builtin.debug:
+        msg:
+          - AUDIT=READ_ONLY
+          - "SOURCE_IMPORT_PARENTS={{ bp_child_boundary.SOURCE_IMPORT_PARENTS }}"
+          - "SOURCE_IMPORT_FAMILY={{ bp_child_boundary.SOURCE_IMPORT_FAMILY }}"
+          - "PARENT_DOCUMENT_SCOPE={{ bp_child_boundary.PARENT_DOCUMENT_SCOPE }}"
+          - "FAMILY_DOCUMENT_SCOPE={{ bp_child_boundary.FAMILY_DOCUMENT_SCOPE }}"
+          - "ACTIVE_CHILD_IDENTITIES={{ bp_child_boundary.ACTIVE_CHILD_IDENTITIES }}"
+          - "CHILD_MODEL_VIEW_ENABLED={{ bp_child_boundary.CHILD_MODEL_VIEW_ENABLED }}"
+          - "CHILD_MISSING_FAMILY_GROUP={{ bp_child_boundary.CHILD_MISSING_FAMILY_GROUP }}"
+          - "CHILD_PARENT_VISIBLE_NOW={{ bp_child_boundary.CHILD_PARENT_VISIBLE_NOW }}"
+          - "CHILD_PARENT_VISIBLE_IF_MODEL_VIEW_GRANTED={{ bp_child_boundary.CHILD_PARENT_VISIBLE_IF_MODEL_VIEW_GRANTED }}"
+          - "CHILD_PARENT_SINGLE_DOCUMENT_ALLOW={{ bp_child_boundary.CHILD_PARENT_SINGLE_DOCUMENT_ALLOW }}"
+          - "CHILD_FAMILY_VISIBLE_NOW={{ bp_child_boundary.CHILD_FAMILY_VISIBLE_NOW }}"
+          - "CHILD_FAMILY_VISIBLE_IF_MODEL_VIEW_GRANTED={{ bp_child_boundary.CHILD_FAMILY_VISIBLE_IF_MODEL_VIEW_GRANTED }}"
+          - "CHAT_CHILD_PARENT_BOUNDARY={{ bp_child_boundary.CHAT_CHILD_PARENT_BOUNDARY }}"
+          - "CHAT_RELEASE_GATE={{ bp_child_boundary.CHAT_RELEASE_GATE }}"
+          - DOCUMENTS_CHANGED=NO
+          - USER_PERMISSIONS_CHANGED=NO
+          - CHANGED=False
