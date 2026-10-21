@@ -25,6 +25,9 @@ on:
       - 'ansible/playbooks/audit-rocky-9-8-ct790-create-readonly.yml'
       - 'ansible/playbooks/create-rocky-9-8-ct790-offline.yml'
       - 'ansible/playbooks/audit-rocky-9-8-ct790-postcreate-readonly.yml'
+      - 'ansible/playbooks/audit-rocky-9-8-ct790-rootfs-release-readonly.yml'
+      - 'ansible/files/nextcloud/read_ct790_rootfs_release.py'
+      - 'tests/test_rocky_lxc_ct790_rootfs_release.py'
       - 'tests/test_rocky_lxc_ct790_postcreate_readonly.py'
       - 'tests/test_rocky_lxc_ct790_create_plan.py'
       - 'ansible/files/nextcloud/audit_rocky_lxc_idmap_metadata.py'
@@ -111,6 +114,11 @@ jobs:
           python3 -m unittest discover -s tests -p 'test_rocky_lxc_ct790_create_readonly.py'
           python3 -m unittest discover -s tests -p 'test_rocky_lxc_ct790_create_plan.py'
           python3 -m unittest discover -s tests -p 'test_rocky_lxc_ct790_postcreate_readonly.py'
+          python3 -m py_compile ansible/files/nextcloud/read_ct790_rootfs_release.py
+          python3 -m unittest discover -s tests -p 'test_rocky_lxc_ct790_rootfs_release.py'
+          ansible-playbook -i localhost, \
+            ansible/playbooks/audit-rocky-9-8-ct790-rootfs-release-readonly.yml \
+            --syntax-check
           ansible-playbook -i localhost, \
             ansible/playbooks/audit-rocky-9-8-ct790-postcreate-readonly.yml \
             --syntax-check
