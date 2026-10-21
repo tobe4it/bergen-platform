@@ -1,6 +1,6 @@
 ---
-# Read-only v2 import cutoff/group-parent summary. No timer or guest changes.
-- name: Audit real all-inbox cutoff eligibility and Eltern ownerless documents
+# Read-only regular v2 Posteingang cutoff summary; never filter owner or group.
+- name: Audit all imported Posteingang documents since October 1
   hosts: venombox
   become: true
   gather_facts: false
@@ -31,7 +31,7 @@
           - "'lxc.apparmor.profile: unconfined' not in bp_v2_scope_lxc.stdout"
       no_log: true
 
-    - name: Inspect October selection, parent group-only records and protected journal
+    - name: Inspect October Posteingang scope and protected journal irrespective of owner or group
       ansible.builtin.command:
         argv:
           - pct
@@ -86,13 +86,12 @@
           - bp_v2_scope_result.CHANGED == false
           - bp_v2_scope_result.MODEL_INFERENCE == 'NO'
           - bp_v2_scope_result.DOCUMENTS_CHANGED == 'NO'
-          - bp_v2_scope_result.TOTAL_POSTEINGANG_ADDED_SINCE_OCT1 | int >= 0
-          - bp_v2_scope_result.OWNERLESS_PARENT_SHARED | int <= bp_v2_scope_result.TOTAL_POSTEINGANG_ADDED_SINCE_OCT1 | int
-          - bp_v2_scope_result.OWNERLESS_PARENT_READY | int <= bp_v2_scope_result.OWNERLESS_PARENT_SHARED | int
-          - bp_v2_scope_result.OWNERLESS_PARENT_UNJOURNALIZED_READY | int <= bp_v2_scope_result.OWNERLESS_PARENT_READY | int
-          - bp_v2_scope_result.OCR_READY_UNVERSIONED | int <= bp_v2_scope_result.TOTAL_POSTEINGANG_ADDED_SINCE_OCT1 | int
-          - (bp_v2_scope_result.IN_SCOPE_JOURNAL_STATES.keys() | list | sort) == ['APPLIED', 'NO_CHANGE', 'PROCESSING', 'REQUIRES_REVIEW', 'ROLLED_BACK']
-          - bp_v2_scope_result.IN_SCOPE_JOURNAL_TOTAL | int == (bp_v2_scope_result.IN_SCOPE_JOURNAL_STATES.values() | map('int') | sum)
+          - bp_v2_scope_result.ALL_INBOX_ADDED_FROM_OCT1 | int >= 0
+          - bp_v2_scope_result.OCR_READY_UNVERSIONED | int <= bp_v2_scope_result.ALL_INBOX_ADDED_FROM_OCT1 | int
+          - bp_v2_scope_result.READY_UNJOURNALIZED | int <= bp_v2_scope_result.OCR_READY_UNVERSIONED | int
+          - bp_v2_scope_result.ALL_INBOX_ADDED_FROM_OCT1 | int == bp_v2_scope_result.OCR_READY_UNVERSIONED | int + bp_v2_scope_result.WAITING_OCR_OR_VERSION_REVIEW | int
+          - (bp_v2_scope_result.SCOPE_JOURNAL_STATES.keys() | list | sort) == ['APPLIED', 'NO_CHANGE', 'PROCESSING', 'REQUIRES_REVIEW', 'ROLLED_BACK']
+          - bp_v2_scope_result.SCOPE_JOURNAL_TOTAL | int == (bp_v2_scope_result.SCOPE_JOURNAL_STATES.values() | map('int') | sum)
         fail_msg: V2_SCOPE_AUDIT_COUNTERS_INVALID
       no_log: true
 
@@ -101,13 +100,12 @@
         msg:
           - AUDIT=READ_ONLY
           - STATUS=INSPECTED
-          - "TOTAL_POSTEINGANG_ADDED_SINCE_OCT1={{ bp_v2_scope_result.TOTAL_POSTEINGANG_ADDED_SINCE_OCT1 }}"
+          - "ALL_INBOX_ADDED_FROM_OCT1={{ bp_v2_scope_result.ALL_INBOX_ADDED_FROM_OCT1 }}"
           - "OCR_READY_UNVERSIONED={{ bp_v2_scope_result.OCR_READY_UNVERSIONED }}"
-          - "OWNERLESS_PARENT_SHARED={{ bp_v2_scope_result.OWNERLESS_PARENT_SHARED }}"
-          - "OWNERLESS_PARENT_READY={{ bp_v2_scope_result.OWNERLESS_PARENT_READY }}"
-          - "OWNERLESS_PARENT_UNJOURNALIZED_READY={{ bp_v2_scope_result.OWNERLESS_PARENT_UNJOURNALIZED_READY }}"
-          - "IN_SCOPE_JOURNAL_TOTAL={{ bp_v2_scope_result.IN_SCOPE_JOURNAL_TOTAL }}"
-          - "IN_SCOPE_JOURNAL_STATES={{ bp_v2_scope_result.IN_SCOPE_JOURNAL_STATES | to_json }}"
+          - "WAITING_OCR_OR_VERSION_REVIEW={{ bp_v2_scope_result.WAITING_OCR_OR_VERSION_REVIEW }}"
+          - "READY_UNJOURNALIZED={{ bp_v2_scope_result.READY_UNJOURNALIZED }}"
+          - "SCOPE_JOURNAL_TOTAL={{ bp_v2_scope_result.SCOPE_JOURNAL_TOTAL }}"
+          - "SCOPE_JOURNAL_STATES={{ bp_v2_scope_result.SCOPE_JOURNAL_STATES | to_json }}"
           - "SYSTEM_BAI_NOTES={{ bp_v2_scope_result.SYSTEM_BAI_NOTES }}"
           - MODEL_INFERENCE=NO
           - DOCUMENTS_CHANGED=NO
