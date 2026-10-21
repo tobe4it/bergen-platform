@@ -81,6 +81,30 @@ class TestNativeGermanChat(unittest.TestCase):
         self.assertNotIn("document_llmindex rebuild", s)
         self.assertIn('INDEX_CHANGED=False', s)
 
+    def test_readonly_chat_index_and_effective_acl_negative_audit(self):
+        """A parent-shared ownerless Document may be accessible to others."""
+        base = ROOT / "ansible/files/paperless"
+        index = (base / "audit_native_de_chat_index.py").read_text()
+        acl = (base / "audit_native_chat_ownerless_acl.py").read_text()
+        play = (ROOT / "ansible/playbooks/audit-paperless-native-chat-access-and-index-readonly.yml").read_text()
+        ast.parse(index)
+        ast.parse(acl)
+        yaml.safe_load(play)
+        self.assertIn('ai.llm_output_language == "de"', index)
+        self.assertIn("Document.objects.count()", index)
+        self.assertIn("INDEX_COVERAGE=\"NOT_PROVEN\"", index.replace("INDEX_COVERAGE=\"NOT_PROVEN\"", "INDEX_COVERAGE=\"NOT_PROVEN\"") if False else index) if False else None
+        self.assertIn('INDEX_COVERAGE="NOT_PROVEN"', index)
+        self.assertNotIn("get_vector_store(", index.split("def main():", 1)[1])
+        self.assertIn("permitted_document_ids(user)", acl)
+        self.assertIn("owner__isnull=True", acl)
+        self.assertIn("user.has_perm(\"documents.view_document\")", acl)
+        self.assertIn("CHILD_GROUP_VISIBLE_DOCUMENT_PAIRS", play)
+        self.assertIn("CHAT_RELEASE_GATE", play)
+        self.assertIn("DOCUMENTS_CHANGED=NO", play)
+        self.assertIn("MODEL_INFERENCE", index)
+        self.assertNotIn("Note.objects.create", acl)
+        self.assertNotIn("User.objects.create", acl)
+
     def test_playbook_audit_is_default_and_explicit_gate_for_mutations(self):
         p = yaml.safe_load(PLAY.read_text())[0]
         self.assertEqual(p["hosts"], "venombox")
