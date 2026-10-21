@@ -55,7 +55,7 @@ def stable_snapshot(data):
     """Current document fields for optimistic concurrency; no OCR contents stored."""
     required = {"id", "owner_id", "title", "original_filename",
                 "correspondent_id", "document_type_id", "storage_path_id",
-                "created", "modified", "checksum", "content_sha256", "tag_ids",
+                "created", "added", "modified", "checksum", "content_sha256", "tag_ids",
                 "inbox"}
     demand(isinstance(data, dict) and set(data) == required, "SNAPSHOT_INVALID")
     demand(type(data["id"]) is int and data["id"] > 0, "SNAPSHOT_INVALID")
