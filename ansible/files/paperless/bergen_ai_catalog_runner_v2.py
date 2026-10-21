@@ -57,7 +57,7 @@ def snapshot(doc):
         "correspondent_id": doc.correspondent_id,
         "document_type_id": doc.document_type_id,
         "storage_path_id": doc.storage_path_id,
-        "created": doc.created.isoformat(),
+        "created": doc.created.isoformat(), "added": doc.added.isoformat(),
         "modified": doc.modified.isoformat(),
         "checksum": doc.checksum,
         "content_sha256": __import__("hashlib").sha256(
@@ -312,6 +312,7 @@ def process_one(doc_id, group, minimum, pilot, db, *, notes_enabled=False):
                    and post["checksum"] == before["checksum"]
                    and post["content_sha256"] == before["content_sha256"]
                    and post["created"] == before["created"]
+                   and post["added"] == before["added"]
                    and post["original_filename"] == before["original_filename"]
                    and post["storage_path_id"] == before["storage_path_id"],
                    "UNEXPECTED_DOCUMENT_CHANGE")
