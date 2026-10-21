@@ -35,26 +35,25 @@ enabled merely by changing variables in the old v1 timer deploy.
 
 ## Deployment status
 
-**BLOCKED, DO NOT EXECUTE PRODUCTION UPGRADE YET.** An operator has
-clarified that imports from the shared Eltern folder have no document
-owner; they rely entirely on guardian group permissions. The preliminary
-v2 worker was found to pass `user=None` into native Paperless 3.3.0
-`get_ai_document_classification`, whose taxonomy-context retrieval
-interprets this as **unrestricted** access to similar documents. This
-could mix unrelated personal/group OCR into the local model prompt.
-The v2 runner now deliberately fails closed with
-`GROUP_ACL_CONTEXT_UNVERIFIED` *before* any inference or persistence,
-including in the read-only preview. The v1 production timer remains
-unchanged. The commands below are a reference for the eventual
-approved upgrade, **not operational instructions to execute now**.
+The original v2 design was **blocked** because native Paperless 3.3.0
+interprets `user=None` as **unrestricted** when retrieving other
+documents as context. The reviewed v2 worker now uses the existing local
+Ollama client with `build_prompt_without_rag`: the prompt contains only
+the current document, never other documents' text. Taxonomy candidates
+and matching are restricted to global, this document owner's, and
+objects explicitly shared with groups that have permissions on **this
+document**. The ACL scope is revalidated before writes. Group-only
+ownerless documents retain their existing ownership and permissions;
+system-created Notes use nullable `Note.user=None`.
 
-Future remediation requires a reviewed group ACL mapping to an
-appropriately restricted model context; native Note attribution must
-remain system/anonymous, original owner/group document permissions
-must not change, and document/taxonomy visibility must be verified
-separately. Run offline tests and a live read-only preview, then a
-one-document pilot *before* enabling v2 automation.
-
+**Operational gate:** this is not yet deployed. First select one
+ownerless document from the Eltern-shared Inbox, imported since
+2026-10-01, whose OCR is ready and which has not been journalized.
+Run the explicit one-document pilot and manually verify its Note and
+Inbox status. The timer-upgrade playbook independently requires
+proof of that same successful pilot in the SQLite journal and Paperless
+before changing the v1 job. A failed pilot must **never** be retried
+automatically; choose a separate unprocessed document if appropriate.
 
 The GitHub feature branch carries reviewed Python worker/policy v2,
 a separate **operator-approved** upgrade playbook, and offline regression
@@ -85,7 +84,41 @@ cd "$WT"
 )
 ```
 
-### 2. Explicit production upgrade (timer pauses during file installation)
+### 2. Run an explicitly selected one-document ownerless Eltern pilot
+
+Choose the **document ID** from the Paperless UI for one document
+matching this exact scope. This one-off execution can write metadata and
+a system-attributed Note to that one document; it does **not** update
+the timer. Check an accepted CT126 backup first. Replace `<DOC_ID>`
+with the actual integer (do not type angle brackets).
+
+```bash
+(
+set -euo pipefail
+BASE="$HOME/bergen-platform"
+WT="$HOME/bergen-platform-paperless-ai-catalog"
+cd "$WT"
+DOC_ID=123   # replace with exact unjournalized ownerless Eltern document ID
+"$BASE/.venv/bin/ansible-playbook" \
+  -i ansible/inventory.yml \
+  -i "$BASE/ansible/inventory.local.yml" \
+  ansible/playbooks/pilot-paperless-ai-v2-ownerless-inbox.yml \
+  --vault-id ai@prompt \
+  -e "@$BASE/ansible/vars/paperless-ai-catalog.local.yml" \
+  -e "paperless_ai_catalog_v2_pilot_document_id=$DOC_ID" \
+  -e '{
+    "paperless_ai_catalog_v2_pilot_approved": true,
+    "paperless_ai_catalog_verified_backup": true
+  }'
+)
+```
+
+Require `STATUS=COMPLETED`, `NOTE=SYSTEM_ATTRIBUTED`,
+`INBOX_TAG=RETAINED` and visible Note content in Paperless. If an
+audit or pilot fails, do not rerun against the same ID without a
+journal inspection. Preserve any manual metadata correction.
+
+### 3. Explicit production upgrade (timer pauses during file installation)
 
 The operator's existing October 2026 CT126 NFS backup was accepted
 for this project. `verified_backup=true` must still mean an
@@ -109,10 +142,15 @@ cd "$WT"
     "paperless_ai_catalog_v2_upgrade_approved": true,
     "paperless_ai_catalog_v2_all_owners_approved": true,
     "paperless_ai_catalog_v2_history_from_october_approved": true,
+    "paperless_ai_catalog_v2_pilot_document_id": 123,
     "paperless_ai_catalog_verified_backup": true
   }'
 )
 ```
+
+Replace the example pilot ID `123` with the **same exact ID**
+that passed the independent ownerless pilot. The deployment will refuse
+to run without that journal/Note proof.
 
 The playbook checks the original v1 policy, live active timer,
 Paperless guest identity, current Qwen backend and model, and a
