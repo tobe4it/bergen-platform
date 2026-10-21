@@ -88,6 +88,27 @@ class Ct790PostCreateReadOnlyTests(unittest.TestCase):
         ):
             self.assertIn(expected, self.source)
 
+    def test_zfs_list_column_option_is_one_argument(self):
+        # The ZFS CLI accepts comma-separated property names as the single
+        # value of -o. If Ansible splits them into separate argv elements,
+        # ZFS treats 'type', 'mountpoint', 'refquota' as dataset names.
+        matches = [
+            task["ansible.builtin.command"]["argv"]
+            for task in self.tasks
+            if task.get("ansible.builtin.command", {}).get("argv", [])[:2]
+               == ["zfs", "list"]
+        ]
+        self.assertEqual(matches, [[
+            "zfs", "list", "-H", "-p", "-o",
+            "name,type,mountpoint,refquota",
+            "{{ rocky_post_dataset }}",
+        ]])
+        self.assertEqual(len(matches[0]), 7)
+        self.assertEqual(matches[0][matches[0].index("-o") + 1],
+                         "name,type,mountpoint,refquota")
+        self.assertNotIn("argv: [zfs, list, -H, -p, -o, name,type,mountpoint,refquota,",
+                         self.source)
+
     def test_exact_pvesm_zfs_and_sha256_checks(self):
         for expected in (
             "get_checksum: true",
