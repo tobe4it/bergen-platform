@@ -30,13 +30,19 @@ Die OCR-/Versionsschutzprüfungen sind **keine** Eigentümer- oder
 Gruppenfilter: Dokumente ohne verwertbaren OCR-Text bleiben noch offen;
 versionierte Dokumente benötigen gesonderte Freigabe der Mutationslogik.
 
-## Stand
+## Produktivstand / Betriebsnachweis
 
-Der Quellcode, CI-Tests, Read-only-Audit und ein **einziger,
-separat freizugebender Upgrade-Schritt für den bestehenden Timer** liegen
-im Feature-Branch `feat/paperless-native-ai-inbox-catalog-20261018`.
-Der produktive Timer auf venombox wird durch GitHub-Commits **nicht**
-automatisch verändert. Der frühere alternative Upgrade-Pfad
+**Am 21.10.2026 04:04 Europe/Berlin produktiv aktiviert.** Der
+freigegebene Upgrade-Lauf meldete `ok=23 changed=4 failed=0`,
+`TIMER=ENABLED`, `OWNER_FILTER=NONE`, `ID_WATERMARK=NOT_USED`.
+Der unabhängige **08:04**-Audit bestätigte **38** relevante
+Posteingangsdokumente, `READY_UNJOURNALIZED=0`, `APPLIED=33`,
+`NO_CHANGE=1`, `REQUIRES_REVIEW=4` und `SYSTEM_BAI_NOTES=32`.
+**Die nachstehende Upgrade-Anleitung ist für eine bereits vollzogene
+einmalige Migration und darf auf dem produktiven v2-System nicht
+erneut ausgeführt werden.** Für den laufenden Betrieb gilt
+[das as-operated-Runbook](PAPERLESS-AI-INBOX-CATALOG-AS-OPERATED.md);
+ein Git-Release ist kein erneutes Live-Deployment. Der frühere alternative Upgrade-Pfad
 `upgrade-paperless-ai-inbox-catalog-all-inbox-oct2026.yml` ist
 aus Sicherheitsgründen ausdrücklich gesperrt. Ein gesonderter Eltern-
 oder Ein-Dokument-Pilot ist kein Bestandteil der regulären Auswahl.
