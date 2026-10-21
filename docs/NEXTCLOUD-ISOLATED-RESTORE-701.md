@@ -1709,3 +1709,79 @@ after refreshing the same clean worktree, with
 A successful independent CT790 post-create audit must still show
 `ROCKY_9_8_CT790_POSTCREATE_READ_ONLY_VERIFIED`, changed=0,
 failed=0, no CT startup and no template conversion.
+
+
+## CT790 independent post-create ZFS proof PASS and gated rootfs-release reads
+
+On 2026-10-21 the operator ran the **corrected**
+`ansible/playbooks/audit-rocky-9-8-ct790-postcreate-readonly.yml`
+with the actual created VMID 790. The independent post-create audit
+completed successfully:
+
+- `ROCKY_9_8_CT790_POSTCREATE_READ_ONLY_VERIFIED`
+- `venombox: ok=31 changed=0 unreachable=0 failed=0 skipped=0`
+- The exact upstream Rocky 9.8 template SHA256 was independently
+  verified unchanged.
+- The existing stopped, unprivileged, protected CT 790 was located
+  in cluster configuration; no NIC or autostart was present.
+- `pvesm path`, `pvesm list local-zfs --vmid 790`,
+  Proxmox's `local-zfs` storage pool definition, and
+  `zfs list` all agreed on the exact CT790 rootdir dataset
+  `rpool/data/subvol-790-disk-0`, its filesystem type and mountpoint.
+- The ZFS pool was healthy; the existing protected CT701 still
+  met its isolation constraints. Future VMIDs 702 and 791 were free.
+- No host or container changes, mount changes, guest start or
+  template conversion took place.
+
+This proof covers **configuration and ZFS metadata only**.
+It does **not** establish Rocky OS files in the newly created rootfs
+or a successful guest boot.
+
+The next separate no-write plan is
+`ansible/playbooks/audit-rocky-9-8-ct790-rootfs-release-readonly.yml`.
+It reimports the complete postcreate metadata-only audit; then
+inspects the `mounted` ZFS property and checks an **exact kernel
+mountpoint** with `findmnt --mountpoint`. If CT790's ZFS dataset
+is not **already mounted** at its PVE-resolved mountpoint, it
+**stops without mounting, extracting, or starting anything**.
+
+Only if both mount checks pass, Python directly opens two known
+release files (`etc/rocky-release` and `usr/lib/os-release`)
+using `O_NOFOLLOW | O_NOATIME | O_CLOEXEC` and bounded reads;
+it checks `etc/os-release` is the exact expected
+`../usr/lib/os-release` symlink **without following it**.
+The script is sent as an in-memory `python3 -c` argument from
+the controller, **not copied** to the host. It checks the literal
+release `Rocky Linux release 9.8 (Blue Onyx)`, `ID="rocky"`
+and `VERSION_ID="9.8"`. It makes no file changes, does
+not run any guest code, does not mount the rootfs itself and
+does not claim runtime validation.
+
+On bp-controller, after CI is successful, run with **no apply flags**:
+
+    BASE="$HOME/bergen-platform"
+    WT="$HOME/bergen-platform-nextcloud-restore"
+    BRANCH="feat/nextcloud-isolated-restore-701-20261019"
+    SSH_ARGS="-C -o ControlMaster=no -o ControlPath=none -o ConnectTimeout=10 -o ServerAliveInterval=10 -o ServerAliveCountMax=2"
+    if [ -n "$(git -C "$WT" status --porcelain)" ]; then
+      echo "STOP: dirty worktree"
+    else
+      git -C "$WT" fetch origin "$BRANCH" &&
+      git -C "$WT" switch --detach "origin/$BRANCH" &&
+      ANSIBLE_SSH_ARGS="$SSH_ARGS" "$BASE/.venv/bin/ansible-playbook" \
+        -i "$BASE/ansible/inventory.yml" \
+        -i "$BASE/ansible/inventory.local.yml" \
+        "$WT/ansible/playbooks/audit-rocky-9-8-ct790-rootfs-release-readonly.yml" \
+        --limit venombox --vault-id infra@prompt
+    fi
+
+If the rootfs was not already mounted, `zfs get mounted`
+will be `no` and the gate will fail closed. The user must
+separately review any future mounting proposal; a missing
+mount is not permission to run `pct mount` or `zfs mount`.
+
+Success only if all checks pass:
+`ROCKY_9_8_CT790_ROOTFS_RELEASE_READ_ONLY_VERIFIED`,
+`changed=0`, `failed=0`, no guest started, no new mount,
+no template conversion. A future offline-first-boot trial
+remains a separately approved gate.
