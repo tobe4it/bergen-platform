@@ -145,7 +145,12 @@ class CatalogPolicyTest(unittest.TestCase):
         self.assertIn("is_inbox_tag=True", source)
         self.assertIn("create_missing=False", source)
         self.assertIn('request.get("approved") is True', source)
-        self.assertIn('not config.llm_embedding_backend', source)
+        # The current v2 no-RAG worker is independently safe even if the
+        # separately approved local Paperless document chat uses bge-m3.
+        self.assertIn('config.llm_embedding_backend == "ollama"', source)
+        self.assertIn('config.llm_embedding_model in ("bge-m3", "bge-m3:latest")', source)
+        self.assertIn('build_prompt_without_rag(doc, AIConfig()', source)
+        self.assertIn('classify_v2_no_rag(doc, before_groups)', source)
         self.assertIn('JOURNAL_DB =', source)
         self.assertIn('fcntl.flock', source)
         self.assertIn('REQUIRES_REVIEW', source)
