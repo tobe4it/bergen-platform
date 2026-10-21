@@ -1,0 +1,189 @@
+---
+# PR #115: stage a *restart-required* GPU mapping on existing UNPRIVILEGED
+# bergen-ai LXC 110. Does NOT stop/start/reboot any LXC or systemd service.
+# Uses native Proxmox dev0/dev1 device nodes with uid of the EXISTING ollama
+# account, so no custom LXC idmap, /etc/subgid or guest group modification.
+- name: Stage explicitly approved and backed-up Bergen-AI GPU device mapping
+  hosts: venombox
+  become: true
+  gather_facts: false
+  vars:
+    bergen_ai_gpu_stage_target_ram: 32768
+    bergen_ai_gpu_stage_backup_dir: /var/lib/bergen-platform-recovery/ollama-gpu
+  tasks:
+    - name: Require standalone GPU/32GiB approval and non-check mode
+      ansible.builtin.assert:
+        that:
+          - inventory_hostname == 'venombox'
+          - not ansible_check_mode
+          - bergen_ai_gpu_stage_approved | default(false) | bool
+          - bergen_ai_gpu_stage_config_backup_approved | default(false) | bool
+          - bergen_ai_gpu_stage_target_ram == 32768
+        fail_msg: GPU_STAGE_APPROVAL_REQUIRED
+      no_log: true
+
+    - name: Re-verify live LXC, device identity and GPU service account
+      ansible.builtin.command:
+        argv:
+          - python3
+          - -c
+          - "{{ lookup('ansible.builtin.file', playbook_dir ~ '/../files/bergen_ai/audit_ollama_gpu_stage_readonly.py', rstrip=False) }}"
+      register: bergen_gpu_stage_raw
+      changed_when: false
+      failed_when: false
+      no_log: true
+
+    - name: Decode a single bounded framed readiness result
+      ansible.builtin.set_fact:
+        bergen_gpu_stage_frames: >-
+          {{ bergen_gpu_stage_raw.stdout_lines |
+             select('match', '^BERGEN_AI_GPU_STAGE_V1:') | list }}
+      no_log: true
+
+    - name: Require exactly one verified GPU readiness result
+      ansible.builtin.assert:
+        that:
+          - bergen_gpu_stage_raw.rc == 0
+          - bergen_gpu_stage_frames | length == 1
+          - bergen_gpu_stage_frames[0] | length < 1600
+        fail_msg: GPU_STAGE_READINESS_MISSING
+      no_log: true
+
+    - name: Parse only sanitized exact guest-device mapping metadata
+      ansible.builtin.set_fact:
+        bergen_gpu_stage: >-
+          {{ (bergen_gpu_stage_frames[0] |
+              regex_replace('^BERGEN_AI_GPU_STAGE_V1:', '')) | from_json }}
+      no_log: true
+
+    - name: Require an unmodified existing baseline and valid GID/UID
+      ansible.builtin.assert:
+        that:
+          - bergen_gpu_stage.AUDIT == 'READ_ONLY'
+          - not bergen_gpu_stage.CHANGED
+          - bergen_gpu_stage.STATUS == 'READY_FOR_REVIEW'
+          - bergen_gpu_stage.LXC_MEMORY_MIB == 16384
+          - bergen_gpu_stage.TARGET_MEMORY_MIB == 32768
+          - bergen_gpu_stage.GUEST_RENDER_GID | int > 0
+          - bergen_gpu_stage.GUEST_OLLAMA_UID | int > 0
+          - bergen_gpu_stage.RENDER_HOST_GID == 993
+          - bergen_gpu_stage.KFD_HOST_GID == 993
+          - bergen_gpu_stage.PASSTHROUGH_METHOD == 'PROXMOX_DEV0_DEV1'
+        fail_msg: GPU_BASELINE_CHANGED_ABORT
+      no_log: true
+
+    - name: Read current physical host memory availability
+      ansible.builtin.command:
+        argv: [awk, '/^MemAvailable:/ {print int($2 / 1024)}', /proc/meminfo]
+      register: bergen_gpu_avail_mem
+      changed_when: false
+      no_log: true
+
+    - name: Preserve minimum host available RAM before raising limit
+      ansible.builtin.assert:
+        that:
+          - bergen_gpu_avail_mem.stdout | int >= 20480
+        fail_msg: GPU_RAM_CAP_HEADROOM_INSUFFICIENT
+      no_log: true
+
+    - name: Create root-only one-time recovery directory
+      ansible.builtin.file:
+        path: "{{ bergen_ai_gpu_stage_backup_dir }}"
+        state: directory
+        owner: root
+        group: root
+        mode: '0700'
+
+    - name: Refuse to overwrite any prior LXC configuration preimage
+      ansible.builtin.stat:
+        path: "{{ bergen_ai_gpu_stage_backup_dir }}/lxc110-pre-gpu.conf"
+      register: bergen_gpu_previous_backup
+      no_log: true
+
+    - name: Require independent examination before repeat stage
+      ansible.builtin.assert:
+        that:
+          - not bergen_gpu_previous_backup.stat.exists
+        fail_msg: GPU_PREIMAGE_ALREADY_EXISTS_REVIEW_FIRST
+      no_log: true
+
+    - name: Save exact original Proxmox LXC config outside pmxcfs before any changes
+      ansible.builtin.copy:
+        src: /etc/pve/lxc/110.conf
+        dest: "{{ bergen_ai_gpu_stage_backup_dir }}/lxc110-pre-gpu.conf"
+        remote_src: true
+        force: false
+        owner: root
+        group: root
+        mode: '0600'
+      no_log: true
+
+    - name: Register only AMD render device as native Proxmox dev0
+      ansible.builtin.command:
+        argv:
+          - pct
+          - set
+          - '110'
+          - --dev0
+          - "path=/dev/dri/renderD128,uid={{ bergen_gpu_stage.GUEST_OLLAMA_UID }},gid={{ bergen_gpu_stage.GUEST_RENDER_GID }},mode=0660"
+      changed_when: true
+      no_log: true
+
+    - name: Register only AMD KFD device as native Proxmox dev1
+      ansible.builtin.command:
+        argv:
+          - pct
+          - set
+          - '110'
+          - --dev1
+          - "path=/dev/kfd,uid={{ bergen_gpu_stage.GUEST_OLLAMA_UID }},gid={{ bergen_gpu_stage.GUEST_RENDER_GID }},mode=0660"
+      changed_when: true
+      no_log: true
+
+    - name: Set reviewed 32GiB upper memory limit for existing Bergen-AI guest
+      ansible.builtin.command:
+        argv: [pct, set, '110', --memory, '32768']
+      changed_when: true
+      no_log: true
+
+    - name: Verify no restart has been requested by the playbook
+      ansible.builtin.command:
+        argv: [pct, config, '110']
+      register: bergen_gpu_staged_config
+      changed_when: false
+      no_log: true
+
+    - name: Refuse any unexpected staged Proxmox state
+      ansible.builtin.assert:
+        that:
+          - bergen_gpu_staged_config.rc == 0
+          - "'unprivileged: 1' in bergen_gpu_staged_config.stdout_lines"
+          - "'hostname: bergen-ai' in bergen_gpu_staged_config.stdout_lines"
+          - "'memory: 32768' in bergen_gpu_staged_config.stdout_lines"
+          - >-
+            ('dev0: path=/dev/dri/renderD128,uid=' ~
+            (bergen_gpu_stage.GUEST_OLLAMA_UID | string) ~
+            ',gid=' ~
+            (bergen_gpu_stage.GUEST_RENDER_GID | string) ~
+            ',mode=0660') in bergen_gpu_staged_config.stdout_lines
+          - >-
+            ('dev1: path=/dev/kfd,uid=' ~
+            (bergen_gpu_stage.GUEST_OLLAMA_UID | string) ~
+            ',gid=' ~
+            (bergen_gpu_stage.GUEST_RENDER_GID | string) ~
+            ',mode=0660') in bergen_gpu_staged_config.stdout_lines
+        fail_msg: GPU_STAGE_INCOMPLETE_REVIEW_RECOVERY_PREIMAGE
+      no_log: true
+
+    - name: Report staged but NOT LIVE device configuration
+      ansible.builtin.debug:
+        msg:
+          - STATUS=GPU_CONFIG_STAGED_ONLY
+          - LXC110_RAM_LIMIT_MIB=32768
+          - LXC110_UNPRIVILEGED=YES
+          - GPU_DEVICES=RENDER_AND_KFD
+          - GUEST_DEVICE_OWNER=EXISTING_OLLAMA_ACCOUNT
+          - RESTART_PERFORMED=NO
+          - GPU_INFERENCE_VERIFIED=NO
+          - ROLLBACK_PREIMAGE=ROOT_ONLY_LOCAL_COPY
+          - NEXT_STEP=INDEPENDENT_OPERATOR_MAINTENANCE_WINDOW_RESTART

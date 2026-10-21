@@ -1,0 +1,104 @@
+---
+# Rollback ONLY the unchanged, previously staged dev0/dev1 + 32 GiB RAM config.
+# Confirm guest was not rebooted since staging; this playbook cannot prove it.
+# Never force-copy a stale Proxmox config over unrelated operator changes.
+- name: Revert only exact staged Bergen-AI GPU settings before LXC restart
+  hosts: venombox
+  become: true
+  gather_facts: false
+  tasks:
+    - name: Require deliberate rollback of unchanged, not-yet-restarted LXC
+      ansible.builtin.assert:
+        that:
+          - inventory_hostname == 'venombox'
+          - not ansible_check_mode
+          - bergen_ai_gpu_rollback_approved | default(false) | bool
+          - bergen_ai_gpu_rollback_before_restart_confirmed | default(false) | bool
+        fail_msg: GPU_ROLLBACK_APPROVAL_REQUIRED
+      no_log: true
+
+    - name: Refuse rollback unless the only differences match the exact GPU stage
+      ansible.builtin.command:
+        argv:
+          - python3
+          - -c
+          - "{{ lookup('ansible.builtin.file', playbook_dir ~ '/../files/bergen_ai/audit_ollama_gpu_rollback_readonly.py', rstrip=False) }}"
+      register: bergen_gpu_rollback_raw
+      changed_when: false
+      failed_when: false
+      no_log: true
+
+    - name: Require one bounded exact-preimage status
+      ansible.builtin.set_fact:
+        bergen_gpu_rollback_frames: >-
+          {{ bergen_gpu_rollback_raw.stdout_lines |
+             select('match', '^BERGEN_AI_GPU_ROLLBACK_V1:') | list }}
+      no_log: true
+
+    - name: Stop if config drifted or preimage is absent
+      ansible.builtin.assert:
+        that:
+          - bergen_gpu_rollback_raw.rc == 0
+          - bergen_gpu_rollback_frames | length == 1
+          - bergen_gpu_rollback_frames[0] | length < 800
+        fail_msg: GPU_ROLLBACK_NOT_SAFE
+      no_log: true
+
+    - name: Decode guarded stage status
+      ansible.builtin.set_fact:
+        bergen_gpu_rollback: >-
+          {{ (bergen_gpu_rollback_frames[0] |
+             regex_replace('^BERGEN_AI_GPU_ROLLBACK_V1:', '')) | from_json }}
+      no_log: true
+
+    - name: Require exact-stage-only comparison before changing anything
+      ansible.builtin.assert:
+        that:
+          - bergen_gpu_rollback.AUDIT == 'READ_ONLY'
+          - bergen_gpu_rollback.STATUS == 'EXACT_STAGE_ONLY'
+          - not bergen_gpu_rollback.CHANGED
+          - bergen_gpu_rollback.RESTORE_MEMORY_MIB == 16384
+          - bergen_gpu_rollback.DEVICES_TO_REMOVE == ['dev0','dev1']
+        fail_msg: GPU_ROLLBACK_CONFIG_DRIFT
+      no_log: true
+
+    - name: Remove only added Proxmox GPU device nodes
+      ansible.builtin.command:
+        argv: [pct, set, '110', --delete, 'dev0,dev1']
+      changed_when: true
+      no_log: true
+
+    - name: Restore exact pre-stage RAM ceiling
+      ansible.builtin.command:
+        argv: [pct, set, '110', --memory, '16384']
+      changed_when: true
+      no_log: true
+
+    - name: Read restored Proxmox config
+      ansible.builtin.command:
+        argv: [pct, config, '110']
+      register: bergen_gpu_restored
+      changed_when: false
+      no_log: true
+
+    - name: Refuse unverified rollback
+      ansible.builtin.assert:
+        that:
+          - bergen_gpu_restored.rc == 0
+          - "'hostname: bergen-ai' in bergen_gpu_restored.stdout_lines"
+          - "'unprivileged: 1' in bergen_gpu_restored.stdout_lines"
+          - "'memory: 16384' in bergen_gpu_restored.stdout_lines"
+          - "'dev0:' not in bergen_gpu_restored.stdout"
+          - "'dev1:' not in bergen_gpu_restored.stdout"
+        fail_msg: GPU_ROLLBACK_INCOMPLETE_REVIEW_RECOVERY_PREIMAGE
+      no_log: true
+
+    - name: Report exact GPU stage rollback without service restart
+      ansible.builtin.debug:
+        msg:
+          - STATUS=RESTORED_PRE_STAGE_GPU_LIMITS
+          - LXC110_UNPRIVILEGED=YES
+          - LXC110_MEMORY_MIB=16384
+          - GPU_DEVICES_REMOVED=DEV0_DEV1_ONLY
+          - LXC_RESTART_PERFORMED=NO
+          - BACKUP_RETAINED_FOR_REVIEW=YES

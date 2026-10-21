@@ -1,0 +1,91 @@
+---
+# Emergency read-only diagnostic after an unsuccessful postboot readiness gate.
+# Executes on venombox through existing Proxmox transport. Does not reboot,
+# modify LXC, change GPU permissions, install anything or read Paperless data.
+- name: Diagnose restarted Bergen-AI LXC 110 without further modifications
+  hosts: venombox
+  become: true
+  gather_facts: false
+  tasks:
+    - name: Confine incident diagnosis to verified host
+      ansible.builtin.assert:
+        that:
+          - inventory_hostname == 'venombox'
+        fail_msg: WRONG_PROXMOX_HOST
+
+    - name: Inspect LXC110 and Ollama readiness layers independently
+      ansible.builtin.command:
+        argv:
+          - python3
+          - -c
+          - "{{ lookup('ansible.builtin.file', playbook_dir ~ '/../files/bergen_ai/diagnose_ollama_gpu_postboot_readonly.py', rstrip=False) }}"
+      register: bergen_gpu_incident_raw
+      changed_when: false
+      failed_when: false
+      check_mode: false
+      no_log: true
+
+    - name: Extract at most one short sanitized diagnosis
+      ansible.builtin.set_fact:
+        bergen_gpu_incident_frames: >-
+          {{ bergen_gpu_incident_raw.stdout_lines |
+             default([]) |
+             select('match', '^BERGEN_AI_GPU_DIAG_V1:') | list }}
+      no_log: true
+
+    - name: Refuse missing, oversized or ambiguous diagnostic response
+      ansible.builtin.assert:
+        that:
+          - bergen_gpu_incident_raw.rc == 0
+          - bergen_gpu_incident_frames | length == 1
+          - bergen_gpu_incident_frames[0] | length < 2800
+        fail_msg: GPU_DIAGNOSTIC_FRAME_INVALID
+      no_log: true
+
+    - name: Decode only safe independent classifications
+      ansible.builtin.set_fact:
+        bergen_gpu_incident: >-
+          {{ (bergen_gpu_incident_frames[0] |
+             regex_replace('^BERGEN_AI_GPU_DIAG_V1:', '')) | from_json }}
+      no_log: true
+
+    - name: Require read-only diagnostic identity, not successful guest state
+      ansible.builtin.assert:
+        that:
+          - bergen_gpu_incident.AUDIT == 'READ_ONLY'
+          - bergen_gpu_incident.CHANGED is boolean
+          - not bergen_gpu_incident.CHANGED
+          - not bergen_gpu_incident.GPU_INFERENCE_PROVEN
+          - bergen_gpu_incident.LXC110_CONFIG in ['EXPECTED','DRIFT','UNREADABLE','WRONG_IDENTITY']
+          - bergen_gpu_incident.LXC110_RUNTIME in ['RUNNING','NOT_CONFIRMED_RUNNING']
+          - bergen_gpu_incident.GUEST_PROBE in ['NOT_RUN','EXEC_FAILED','FRAME_INVALID','OK']
+        fail_msg: GPU_DIAGNOSTIC_FIELDS_INVALID
+      no_log: true
+
+    - name: Print safe reasons without document data or logs
+      ansible.builtin.debug:
+        msg:
+          - "AUDIT={{ bergen_gpu_incident.AUDIT }}"
+          - "CHANGED={{ bergen_gpu_incident.CHANGED }}"
+          - "LXC110_CONFIG={{ bergen_gpu_incident.LXC110_CONFIG }}"
+          - "LXC110_RUNTIME={{ bergen_gpu_incident.LXC110_RUNTIME }}"
+          - "GUEST_PROBE={{ bergen_gpu_incident.GUEST_PROBE }}"
+          - "OLLAMA_ACCOUNT={{ bergen_gpu_incident.OLLAMA_ACCOUNT }}"
+          - "RENDER_PRESENT={{ bergen_gpu_incident.RENDER_PRESENT }}"
+          - "RENDER_CHAR_OK={{ bergen_gpu_incident.RENDER_CHAR_OK }}"
+          - "RENDER_OWNERSHIP_OK={{ bergen_gpu_incident.RENDER_OWNERSHIP_OK }}"
+          - "RENDER_MODE_OK={{ bergen_gpu_incident.RENDER_MODE_OK }}"
+          - "RENDER_ACCESS_OK={{ bergen_gpu_incident.RENDER_ACCESS_OK }}"
+          - "KFD_PRESENT={{ bergen_gpu_incident.KFD_PRESENT }}"
+          - "KFD_CHAR_OK={{ bergen_gpu_incident.KFD_CHAR_OK }}"
+          - "KFD_OWNERSHIP_OK={{ bergen_gpu_incident.KFD_OWNERSHIP_OK }}"
+          - "KFD_MODE_OK={{ bergen_gpu_incident.KFD_MODE_OK }}"
+          - "KFD_ACCESS_OK={{ bergen_gpu_incident.KFD_ACCESS_OK }}"
+          - "OLLAMA_SERVICE={{ bergen_gpu_incident.OLLAMA_SERVICE }}"
+          - "OLLAMA_LOOPBACK_API={{ bergen_gpu_incident.OLLAMA_API }}"
+          - "QWEN14_PRESENT={{ bergen_gpu_incident.QWEN14_PRESENT }}"
+          - "MISTRAL12_PRESENT={{ bergen_gpu_incident.MISTRAL12_PRESENT }}"
+          - "BGE_M3_PRESENT={{ bergen_gpu_incident.BGE_M3_PRESENT }}"
+          - "CGROUP_MEMORY_MAX={{ bergen_gpu_incident.CGROUP_MEMORY_MAX }}"
+          - "GPU_INFERENCE_PROVEN=NO"
+          - "REBOOT_PERFORMED_BY_THIS_AUDIT=NO"

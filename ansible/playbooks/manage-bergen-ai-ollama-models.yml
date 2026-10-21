@@ -1,0 +1,176 @@
+---
+# Staged, narrowly-scoped model pull into EXISTING Ollama LXC 110.
+# No LXC/host configuration, GPU, RAM, systemd or Paperless changes.
+# Default is AUDIT ONLY. Requires approval for each requested list.
+- name: Plan or explicitly install approved Ollama models in Bergen-AI LXC 110
+  hosts: venombox
+  become: true
+  gather_facts: false
+  vars:
+    bergen_ai_models_action: "{{ bergen_ai_models_mode | default('audit') }}"
+    bergen_ai_models_requested: "{{ bergen_ai_ollama_requested_models | default(['qwen2.5:14b-instruct-q4_K_M', 'mistral-nemo:12b', 'bge-m3:latest']) }}"
+    bergen_ai_models_input:
+      protocol: v1
+      models: "{{ bergen_ai_models_requested }}"
+      large_model_review: "{{ bergen_ai_models_large_approved | default(false) | bool }}"
+  tasks:
+    - name: Restrict pull operation to approved known guest and explicit mode
+      ansible.builtin.assert:
+        that:
+          - inventory_hostname == 'venombox'
+          - bergen_ai_models_action in ['audit','apply']
+          - bergen_ai_models_requested is sequence
+          - bergen_ai_models_requested is not string
+          - not ansible_check_mode or bergen_ai_models_action != 'apply'
+          - bergen_ai_models_action != 'apply' or bergen_ai_models_approved | default(false) | bool
+          - bergen_ai_models_action != 'apply' or bergen_ai_models_download_window_approved | default(false) | bool
+        fail_msg: MODEL_INSTALL_APPROVAL_OR_SCOPE_MISSING
+      no_log: true
+
+    - name: Read exact running LXC 110 configuration without modification
+      ansible.builtin.command:
+        argv: [pct, config, '110']
+      register: bergen_ai_models_guest
+      changed_when: false
+      no_log: true
+
+    - name: Refuse other or privileged LXC, never modify rootfs/GPU/IDs here
+      ansible.builtin.assert:
+        that:
+          - bergen_ai_models_guest.rc == 0
+          - "'hostname: bergen-ai' in bergen_ai_models_guest.stdout_lines"
+          - "'unprivileged: 1' in bergen_ai_models_guest.stdout_lines"
+          - "'lxc.apparmor.profile: unconfined' not in bergen_ai_models_guest.stdout"
+        fail_msg: UNREVIEWED_LXC
+      no_log: true
+
+    - name: Query available model storage and exact installed model names through loopback
+      ansible.builtin.command:
+        argv:
+          - pct
+          - exec
+          - '110'
+          - --
+          - python3
+          - -c
+          - "{{ lookup('ansible.builtin.file', playbook_dir ~ '/../files/bergen_ai/plan_ollama_models_readonly.py', rstrip=False) }}"
+        stdin: "{{ bergen_ai_models_input | to_json }}"
+        stdin_add_newline: true
+      register: bergen_ai_models_plan_raw
+      changed_when: false
+      failed_when: false
+      no_log: true
+
+    - name: Extract only one bounded plan JSON frame
+      ansible.builtin.set_fact:
+        bergen_ai_model_frames: >-
+          {{ bergen_ai_models_plan_raw.stdout_lines |
+             select('match', '^BERGEN_AI_MODEL_PLAN_V1:') | list }}
+      no_log: true
+
+    - name: Refuse failed, unframed or oversized model plan
+      ansible.builtin.assert:
+        that:
+          - bergen_ai_models_plan_raw.rc == 0
+          - bergen_ai_model_frames | length == 1
+          - bergen_ai_model_frames[0] | length < 2200
+        fail_msg: OLLAMA_MODEL_PLAN_UNVERIFIED
+      no_log: true
+
+    - name: Parse only sanitized model plan
+      ansible.builtin.set_fact:
+        bergen_ai_model_plan: >-
+          {{ (bergen_ai_model_frames[0] |
+             regex_replace('^BERGEN_AI_MODEL_PLAN_V1:', '')) | from_json }}
+      no_log: true
+
+    - name: Require positive proof of model API and disk budget before any pull
+      ansible.builtin.assert:
+        that:
+          - bergen_ai_model_plan.AUDIT == 'READ_ONLY'
+          - bergen_ai_model_plan.CHANGED is boolean
+          - not bergen_ai_model_plan.CHANGED
+          - bergen_ai_model_plan.STATUS in ['READY_FOR_EXPLICIT_APPROVAL','DISK_CAPACITY_LOW']
+          - bergen_ai_model_plan.MISSING is sequence
+          - bergen_ai_model_plan.MISSING is not string
+          - bergen_ai_models_action != 'apply' or bergen_ai_model_plan.STATUS == 'READY_FOR_EXPLICIT_APPROVAL'
+          - bergen_ai_models_action != 'apply' or not bergen_ai_model_plan.LARGE_REQUESTED or (bergen_ai_models_large_approved | default(false) | bool)
+        fail_msg: OLLAMA_MODEL_CAPACITY_OR_APPROVAL_FAILED
+      no_log: true
+
+    - name: Print bounded read-only model installation plan
+      ansible.builtin.debug:
+        msg:
+          - "ACTION={{ bergen_ai_models_action }}"
+          - "AUDIT=READ_ONLY"
+          - "STATUS={{ bergen_ai_model_plan.STATUS }}"
+          - "MISSING={{ bergen_ai_model_plan.MISSING | join(',') }}"
+          - "FREE_GIB={{ bergen_ai_model_plan.FREE_GIB }}"
+          - "REQUIRED_FREE_GIB={{ bergen_ai_model_plan.MINIMUM_FREE_FOR_PULL_GIB }}"
+          - "LARGE_MODEL={{ bergen_ai_model_plan.LARGE_REQUESTED }}"
+          - "CHANGED=False"
+
+    - name: Pull only approved missing tags, keeping existing Ollama assets untouched
+      ansible.builtin.command:
+        argv:
+          - pct
+          - exec
+          - '110'
+          - --
+          - /usr/local/bin/ollama
+          - pull
+          - "{{ item }}"
+      environment:
+        OLLAMA_HOST: http://127.0.0.1:11434
+      loop: "{{ bergen_ai_model_plan.MISSING }}"
+      loop_control:
+        label: "{{ item }}"
+      async: 7200
+      poll: 30
+      register: bergen_ai_pulled
+      changed_when: true
+      when: bergen_ai_models_action == 'apply'
+      no_log: true
+
+    - name: Re-inventory after requested model pulls
+      ansible.builtin.command:
+        argv:
+          - pct
+          - exec
+          - '110'
+          - --
+          - python3
+          - -c
+          - "{{ lookup('ansible.builtin.file', playbook_dir ~ '/../files/bergen_ai/plan_ollama_models_readonly.py', rstrip=False) }}"
+        stdin: "{{ bergen_ai_models_input | to_json }}"
+        stdin_add_newline: true
+      register: bergen_ai_models_final_raw
+      changed_when: false
+      failed_when: false
+      no_log: true
+      when: bergen_ai_models_action == 'apply'
+
+    - name: Require all approved models present after installation
+      ansible.builtin.assert:
+        that:
+          - bergen_ai_models_final_raw.rc == 0
+          - bergen_ai_models_final_raw.stdout_lines | select('match', '^BERGEN_AI_MODEL_PLAN_V1:') | list | length == 1
+          - >-
+            (
+              (bergen_ai_models_final_raw.stdout_lines |
+               select('match', '^BERGEN_AI_MODEL_PLAN_V1:') | first |
+               regex_replace('^BERGEN_AI_MODEL_PLAN_V1:', '') | from_json).MISSING | length
+            ) == 0
+        fail_msg: MODEL_PULL_INVENTORY_NOT_CONFIRMED
+      when: bergen_ai_models_action == 'apply'
+      no_log: true
+
+    - name: Report verified installed models without starting model inference
+      ansible.builtin.debug:
+        msg:
+          - "ACTION=APPLY"
+          - "STATUS=MODEL_TAGS_PRESENT"
+          - "MODELS={{ bergen_ai_models_requested | join(',') }}"
+          - "PAPERLESS_AI_CHANGED=NO"
+          - "GPU_PASSTHROUGH_CHANGED=NO"
+      when: bergen_ai_models_action == 'apply'

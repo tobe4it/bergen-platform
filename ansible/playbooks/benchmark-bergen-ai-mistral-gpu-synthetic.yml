@@ -1,0 +1,85 @@
+---
+# Explicit, bounded model inference benchmark, NOT a read-only audit.
+# Loopback only, existing Mistral Nemo 12B, synthetic text; no documents or RAG.
+# Requires separate approval and a moment with no other Ollama models loaded.
+- name: Bench isolated Ollama MistralNemo12B GPU allocation on Bergen-AI LXC110
+  hosts: venombox
+  become: true
+  gather_facts: false
+  tasks:
+    - name: Require narrow benchmark approval on venombox
+      ansible.builtin.assert:
+        that:
+          - inventory_hostname == 'venombox'
+          - not ansible_check_mode
+          - bergen_ai_gpu_mistral_benchmark_approved | default(false) | bool
+          - bergen_ai_gpu_mistral_benchmark_window_approved | default(false) | bool
+        fail_msg: GPU_SYNTHETIC_BENCHMARK_APPROVAL_REQUIRED
+      no_log: true
+
+    - name: Run one synthetic loopback MistralNemo12B request and query local Ollama GPU placement
+      ansible.builtin.command:
+        argv:
+          - python3
+          - -c
+          - "{{ lookup('ansible.builtin.file', playbook_dir ~ '/../files/bergen_ai/benchmark_ollama_mistral_gpu_synthetic.py', rstrip=False) }}"
+      async: 420
+      poll: 15
+      register: bergen_ai_gpu_benchmark_raw
+      changed_when: true
+      failed_when: false
+      no_log: true
+
+    - name: Extract one short synthetic benchmark result only
+      ansible.builtin.set_fact:
+        bergen_ai_gpu_benchmark_frames: >-
+          {{ bergen_ai_gpu_benchmark_raw.stdout_lines | default([]) |
+             select('match','^BERGEN_AI_GPU_MISTRAL_BENCHMARK_V1:') | list }}
+      no_log: true
+
+    - name: Require completed and nonambiguous synthetic inference
+      ansible.builtin.assert:
+        that:
+          - bergen_ai_gpu_benchmark_raw.rc == 0
+          - bergen_ai_gpu_benchmark_frames | length == 1
+          - bergen_ai_gpu_benchmark_frames[0] | length < 1300
+        fail_msg: GPU_SYNTHETIC_BENCHMARK_UNVERIFIED_NO_AUTOMATIC_RETRY
+      no_log: true
+
+    - name: Decode sanitized inference metrics
+      ansible.builtin.set_fact:
+        bergen_ai_gpu_benchmark: >-
+          {{ (bergen_ai_gpu_benchmark_frames[0] |
+             regex_replace('^BERGEN_AI_GPU_MISTRAL_BENCHMARK_V1:','')) | from_json }}
+      no_log: true
+
+    - name: Require only the approved single synthetic MistralNemo12B sample
+      ansible.builtin.assert:
+        that:
+          - bergen_ai_gpu_benchmark.STATUS == 'SYNTHETIC_COMPLETED'
+          - bergen_ai_gpu_benchmark.MODEL == 'mistral-nemo:12b'
+          - bergen_ai_gpu_benchmark.PROMPT_KIND == 'SYNTHETIC_NO_DOCUMENTS'
+          - bergen_ai_gpu_benchmark.EVAL_TOKENS | int >= 64
+          - bergen_ai_gpu_benchmark.EVAL_TOKENS | int <= 192
+          - bergen_ai_gpu_benchmark.TOKENS_PER_SECOND | float > 0
+          - bergen_ai_gpu_benchmark.GPU_PLACEMENT in ['GPU_ALLOCATION_OBSERVED','CPU_ONLY_REPORTED','UNKNOWN']
+          - not bergen_ai_gpu_benchmark.CONFIGURATION_CHANGED
+          - not bergen_ai_gpu_benchmark.PAPERLESS_CHANGED
+        fail_msg: GPU_SYNTHETIC_BENCHMARK_FRAME_INVALID
+      no_log: true
+
+    - name: Report GPU allocation evidence and timings without exposing prompt output
+      ansible.builtin.debug:
+        msg:
+          - STATUS=SYNTHETIC_COMPLETED
+          - MODEL=MISTRAL_NEMO_12B
+          - PROMPT=PRIVATE_DATA_FREE_SYNTHETIC
+          - "TOKENS_PER_SECOND={{ bergen_ai_gpu_benchmark.TOKENS_PER_SECOND }}"
+          - "LOAD_SECONDS={{ bergen_ai_gpu_benchmark.LOAD_SECONDS }}"
+          - "EVAL_TOKENS={{ bergen_ai_gpu_benchmark.EVAL_TOKENS }}"
+          - "GPU_PLACEMENT={{ bergen_ai_gpu_benchmark.GPU_PLACEMENT }}"
+          - "GPU_ALLOCATED_GIB={{ bergen_ai_gpu_benchmark.GPU_ALLOCATED_GIB }}"
+          - MODEL_INFERENCE_COMPLETED=YES
+          - GPU_OFFLOAD_ONLY_IF_ALLOCATION_OBSERVED=YES
+          - PAPERLESS_CHANGED=NO
+          - PVE_CONFIG_CHANGED=NO

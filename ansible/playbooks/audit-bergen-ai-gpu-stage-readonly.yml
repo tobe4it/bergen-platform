@@ -1,0 +1,79 @@
+---
+# No host/LXC modifications. Gate for the separate GPU staging playbook.
+- name: Verify Bergen-AI Proxmox device passthrough is safe to stage
+  hosts: venombox
+  become: true
+  gather_facts: false
+  tasks:
+    - name: Require exact Proxmox host
+      ansible.builtin.assert:
+        that:
+          - inventory_hostname == 'venombox'
+
+    - name: Inspect exact PVE dev0/dev1 support and LXC 110 Ollama account
+      ansible.builtin.command:
+        argv:
+          - python3
+          - -c
+          - "{{ lookup('ansible.builtin.file', playbook_dir ~ '/../files/bergen_ai/audit_ollama_gpu_stage_readonly.py', rstrip=False) }}"
+      register: bergen_gpu_audit_raw
+      changed_when: false
+      failed_when: false
+      check_mode: false
+      no_log: true
+
+    - name: Extract only uniquely framed status
+      ansible.builtin.set_fact:
+        bergen_gpu_audit_frames: >-
+          {{ bergen_gpu_audit_raw.stdout_lines |
+             select('match', '^BERGEN_AI_GPU_STAGE_V1:') | list }}
+      no_log: true
+
+    - name: Reject missing, oversized or failed preflight
+      ansible.builtin.assert:
+        that:
+          - bergen_gpu_audit_raw.rc == 0
+          - bergen_gpu_audit_frames | length == 1
+          - bergen_gpu_audit_frames[0] | length < 1700
+        fail_msg: GPU_STAGING_PREFLIGHT_UNVERIFIED
+      no_log: true
+
+    - name: Decode only bounded non-identifying IDs and policy values
+      ansible.builtin.set_fact:
+        bergen_gpu_audit: >-
+          {{ (bergen_gpu_audit_frames[0] |
+              regex_replace('^BERGEN_AI_GPU_STAGE_V1:', '')) | from_json }}
+      no_log: true
+
+    - name: Require guest and host mapping ready for independent approval
+      ansible.builtin.assert:
+        that:
+          - bergen_gpu_audit.AUDIT == 'READ_ONLY'
+          - not bergen_gpu_audit.CHANGED
+          - bergen_gpu_audit.STATUS == 'READY_FOR_REVIEW'
+          - bergen_gpu_audit.LXC_MEMORY_MIB == 16384
+          - bergen_gpu_audit.TARGET_MEMORY_MIB == 32768
+          - bergen_gpu_audit.GUEST_RENDER_GID | int > 0
+          - bergen_gpu_audit.GUEST_OLLAMA_UID | int > 0
+          - bergen_gpu_audit.RENDER_HOST_GID == 993
+          - bergen_gpu_audit.KFD_HOST_GID == 993
+          - bergen_gpu_audit.PASSTHROUGH_METHOD == 'PROXMOX_DEV0_DEV1'
+        fail_msg: GPU_RESOURCE_OR_GID_NOT_READY
+      no_log: true
+
+    - name: Report only reviewed GPU readiness classification
+      ansible.builtin.debug:
+        msg:
+          - "AUDIT={{ bergen_gpu_audit.AUDIT }}"
+          - "CHANGED={{ bergen_gpu_audit.CHANGED }}"
+          - "STATUS={{ bergen_gpu_audit.STATUS }}"
+          - "LXC110_MEMORY_MIB={{ bergen_gpu_audit.LXC_MEMORY_MIB }}"
+          - "LXC110_CORES={{ bergen_gpu_audit.LXC_CORES }}"
+          - "TARGET_RAM_MIB={{ bergen_gpu_audit.TARGET_MEMORY_MIB }}"
+          - "RENDER_HOST_GID={{ bergen_gpu_audit.RENDER_HOST_GID }}"
+          - "KFD_HOST_GID={{ bergen_gpu_audit.KFD_HOST_GID }}"
+          - "GUEST_RENDER_GID={{ bergen_gpu_audit.GUEST_RENDER_GID }}"
+          - "GUEST_OLLAMA_UID={{ bergen_gpu_audit.GUEST_OLLAMA_UID }}"
+          - "OLLAMA_MEMBER_OF_RENDER={{ bergen_gpu_audit.OLLAMA_MEMBER_OF_RENDER }}"
+          - "PASSTHROUGH_METHOD={{ bergen_gpu_audit.PASSTHROUGH_METHOD }}"
+          - "GPU_RESTART_PERFORMED=NO"
