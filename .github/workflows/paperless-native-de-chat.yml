@@ -6,6 +6,9 @@ on:
       - 'ansible/files/paperless/bergen_ai_native_de_chat_config.py'
       - 'ansible/files/paperless/bergen_ai_catalog_runner.py'
       - 'ansible/playbooks/manage-paperless-native-de-chat.yml'
+      - 'ansible/playbooks/audit-paperless-native-chat-access-and-index-readonly.yml'
+      - 'ansible/files/paperless/audit_native_de_chat_index.py'
+      - 'ansible/files/paperless/audit_native_chat_ownerless_acl.py'
       - 'tests/test_paperless_native_de_chat.py'
       - '.github/workflows/paperless-native-de-chat.yml'
       - 'docs/PAPERLESS-NATIVE-DE-CHAT.md'
@@ -15,6 +18,9 @@ on:
       - 'ansible/files/paperless/bergen_ai_native_de_chat_config.py'
       - 'ansible/files/paperless/bergen_ai_catalog_runner.py'
       - 'ansible/playbooks/manage-paperless-native-de-chat.yml'
+      - 'ansible/playbooks/audit-paperless-native-chat-access-and-index-readonly.yml'
+      - 'ansible/files/paperless/audit_native_de_chat_index.py'
+      - 'ansible/files/paperless/audit_native_chat_ownerless_acl.py'
       - 'tests/test_paperless_native_de_chat.py'
       - '.github/workflows/paperless-native-de-chat.yml'
 
@@ -35,5 +41,7 @@ jobs:
         run: python -m unittest discover -s tests -p 'test_paperless_native_de_chat.py' -v
       - name: Preserve all-Inbox processing safety regression
         run: python -m unittest discover -s tests -p 'test_paperless_ai_v2_all_inbox_since_october.py' -v
-      - name: Check native AI audit and controlled apply syntax
-        run: ansible-playbook -i ansible/inventory.yml ansible/playbooks/manage-paperless-native-de-chat.yml --syntax-check
+      - name: Check native AI and effective chat permission audits syntax
+        run: |
+          ansible-playbook -i ansible/inventory.yml ansible/playbooks/manage-paperless-native-de-chat.yml --syntax-check
+          ansible-playbook -i ansible/inventory.yml ansible/playbooks/audit-paperless-native-chat-access-and-index-readonly.yml --syntax-check
