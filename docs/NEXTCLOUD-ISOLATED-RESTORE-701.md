@@ -1599,3 +1599,78 @@ https://github.com/proxmox/pve-docs/blob/master/generated/pct.1-synopsis.adoc
 
 The production mx2 mail service, old mx1, protected CT701,
 network policy, and main branch remain untouched.
+
+
+## Rocky 9.8 CT790 created offline; independent postcreate audit
+
+The user separately and explicitly approved **only one stopped,
+protected, unprivileged, networkless CT790 create**, after the
+complete signed-rootfs, user namespace and Proxmox prereq gates
+had passed. The user applied the previously reviewed two-parameter
+approval run from commit
+`adf91a9aac4088b5428e91c589f588798c9b867d`.
+
+Operator-supplied actual result (2026-10-21):
+
+- `ROCKY_9_8_CT790_CREATED_OFFLINE_PROTECTED_STOPPED`
+- `bp-controller: ok=6 changed=0 unreachable=0 failed=0`
+- `venombox: ok=42 changed=1 unreachable=0 failed=0 skipped=1`
+- Exact created CTID `790` with hostname `rocky9-base-790`,
+  `local-zfs:16` rootfs, 2 cores, 2048 MiB RAM, zero swap.
+- The created guest was **stopped**, protected, unprivileged,
+  `onboot=0` and had **zero network interfaces**.
+- After create the same run checked `pct config 790`, `pct status 790`
+  and independently reviewed the existing protected CT701 config.
+  No reported CT701 changes; no guest start, template conversion or
+  network permissions were authorized.
+
+**Do not run create-rocky-9-8-ct790-offline.yml again.** Unlike
+prior pre-create checks, VMID790 **must now exist**, and the pre-create
+gate will (correctly) reject a replay due to the VMID collision.
+
+A new `ansible/playbooks/audit-rocky-9-8-ct790-postcreate-readonly.yml`
+performs independent **read-only** inspection of the actual CT790
+instance without importing any pre-create gate. It asserts the
+reviewed stopped, protected, unprivileged, networkless configuration;
+the CT790 cluster identity and free planned VMIDs 702/791;
+a new source-template SHA256 check; exactly one CT790 rootdir reported
+by `pvesm list local-zfs --vmid 790`; a `pvesm path`
+resolution of that volume; the configured local-zfs pool;
+and matching ZFS filesystem dataset and mountpoint metadata using
+`zfs list`. It also checks CT701 isolation again.
+
+The postcreate audit does **not** call `pct mount`,
+`pct start`, `pct exec`, `pct template`, `pct set`,
+`zfs mount`, `zfs set`, any deletion, or any program that writes
+guest content. It does **not** assert the Rocky release inside the
+unstarted rootfs or successful boot/runtime compatibility.
+If the resulting ZFS mountpoint is unexpected, stop for review;
+do not mount or unmount anything merely to make the audit pass.
+
+On bp-controller (NO apply variables):
+
+    BASE="$HOME/bergen-platform"
+    WT="$HOME/bergen-platform-nextcloud-restore"
+    BRANCH="feat/nextcloud-isolated-restore-701-20261019"
+    SSH_ARGS="-C -o ControlMaster=no -o ControlPath=none -o ConnectTimeout=10 -o ServerAliveInterval=10 -o ServerAliveCountMax=2"
+    if [ -n "$(git -C "$WT" status --porcelain)" ]; then
+      echo "STOP: dirty worktree"
+    else
+      git -C "$WT" fetch origin "$BRANCH" &&
+      git -C "$WT" switch --detach "origin/$BRANCH" &&
+      ANSIBLE_SSH_ARGS="$SSH_ARGS" "$BASE/.venv/bin/ansible-playbook" \
+        -i "$BASE/ansible/inventory.yml" \
+        -i "$BASE/ansible/inventory.local.yml" \
+        "$WT/ansible/playbooks/audit-rocky-9-8-ct790-postcreate-readonly.yml" \
+        --limit venombox --vault-id infra@prompt
+    fi
+
+Expected only if all checks complete:
+`ROCKY_9_8_CT790_POSTCREATE_READ_ONLY_VERIFIED`,
+`changed=0`, `failed=0`,
+`pct_start_authorized=false` and
+`pct_template_authorized=false`.
+
+Existing CT701, mx1, mx2, production Nextcloud and network
+configuration remain out of scope. Starting or converting CT790
+will require its own explicit permission and separate checks.
