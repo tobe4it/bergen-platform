@@ -88,6 +88,31 @@ class AllInboxTests(unittest.TestCase):
                          "TIMER=STOPPED_FAIL_CLOSED"):
             self.assertIn(expected,txt)
 
+    def test_regular_pipeline_is_not_group_or_pilot_scoped(self):
+        runner = RUNNER.read_text()
+        upgrade = UPGRADE.read_text()
+        audit = (ROOT / "ansible/files/paperless/audit_ai_catalog_v2_scope_readonly.py").read_text()
+        audit_playbook = (ROOT / "ansible/playbooks/audit-paperless-ai-v2-scope-readonly.yml").read_text()
+        self.assertIn("tags__is_inbox_tag=True", runner)
+        self.assertIn("added__gte=IMPORT_CUTOFF", runner)
+        self.assertIn("all_inbox = request[\"protocol\"] == \"catalog-v2\"", runner)
+        self.assertIn("paperless_ai_catalog_v2_regular_pipeline_approved", upgrade)
+        self.assertNotIn("paperless_ai_catalog_v2_pilot_document_id", upgrade)
+        self.assertNotIn("audit_ai_catalog_v2_pilot_success.py", upgrade)
+        self.assertIn("ALL_INBOX_ADDED_FROM_OCT1", audit)
+        self.assertIn("READY_UNJOURNALIZED", audit)
+        self.assertNotIn("Eltern@bergen.intern", audit)
+        self.assertNotIn("owner__groups", audit)
+        self.assertNotIn("GroupObjectPermission", audit)
+        self.assertNotIn("OWNERLESS_PARENT_", audit_playbook)
+        self.assertNotIn("Eltern", audit_playbook)
+        self.assertIn("all_tag_ids.update(tag.get_ancestors_pks())", runner)
+
+    def test_alternative_cutover_is_blocked(self):
+        legacy = (ROOT / "ansible/playbooks/upgrade-paperless-ai-inbox-catalog-all-inbox-oct2026.yml").read_text()
+        self.assertIn("DEPRECATED_ALL_INBOX_V2_UPGRADE_USE_GUARDED_REGULAR_PIPELINE", legacy)
+        self.assertIn("- false  # DEPRECATED:", legacy)
+
     def test_runner_keeps_failed_entry_and_system_note(self):
         src=RUNNER.read_text()
         ast.parse(src)
