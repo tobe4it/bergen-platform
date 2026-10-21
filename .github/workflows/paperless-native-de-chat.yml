@@ -9,6 +9,9 @@ on:
       - 'ansible/playbooks/audit-paperless-native-chat-access-and-index-readonly.yml'
       - 'ansible/files/paperless/audit_native_de_chat_index.py'
       - 'ansible/files/paperless/audit_native_chat_ownerless_acl.py'
+      - 'ansible/files/paperless/audit_native_chat_verified_group_imports.py'
+      - 'ansible/files/paperless/audit_native_chat_child_boundary.py'
+      - 'ansible/playbooks/audit-paperless-native-chat-child-boundary-readonly.yml'
       - 'tests/test_paperless_native_de_chat.py'
       - '.github/workflows/paperless-native-de-chat.yml'
       - 'docs/PAPERLESS-NATIVE-DE-CHAT.md'
@@ -21,6 +24,9 @@ on:
       - 'ansible/playbooks/audit-paperless-native-chat-access-and-index-readonly.yml'
       - 'ansible/files/paperless/audit_native_de_chat_index.py'
       - 'ansible/files/paperless/audit_native_chat_ownerless_acl.py'
+      - 'ansible/files/paperless/audit_native_chat_verified_group_imports.py'
+      - 'ansible/files/paperless/audit_native_chat_child_boundary.py'
+      - 'ansible/playbooks/audit-paperless-native-chat-child-boundary-readonly.yml'
       - 'tests/test_paperless_native_de_chat.py'
       - '.github/workflows/paperless-native-de-chat.yml'
 
@@ -45,3 +51,4 @@ jobs:
         run: |
           ansible-playbook -i ansible/inventory.yml ansible/playbooks/manage-paperless-native-de-chat.yml --syntax-check
           ansible-playbook -i ansible/inventory.yml ansible/playbooks/audit-paperless-native-chat-access-and-index-readonly.yml --syntax-check
+          ansible-playbook -i ansible/inventory.yml ansible/playbooks/audit-paperless-native-chat-child-boundary-readonly.yml --syntax-check
