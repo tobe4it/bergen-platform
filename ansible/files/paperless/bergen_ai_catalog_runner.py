@@ -123,6 +123,13 @@ def ensure_config(request, *, apply):
                "CUTOFF_DATE_UNREVIEWED")
         demand(request.get("allowed_group") in (None, ""),
                "GROUP_SCOPE_MUST_BE_UNSET")
+        # v2 includes ownerless documents with group-only ACLs. In upstream
+        # Paperless 3.3.0, get_taxonomy_context(document, user=None) treats
+        # None as unrestricted when searching similar documents, and can
+        # expose unrelated personal/group OCR as LLM context. It is not safe
+        # to activate this branch until v2 uses a permission-scoped identity
+        # or a no-RAG classification path that also handles group taxonomy.
+        demand(False, "GROUP_ACL_CONTEXT_UNVERIFIED")
         group = None
     else:
         group_name = request.get("allowed_group")
@@ -517,6 +524,7 @@ def run():
             "DATA_MOUNT_NOT_READY", "JOURNAL_UNSAFE", "DOCUMENT_NOT_ELIGIBLE",
             "PILOT_BATCH_INVALID", "PILOT_REQUIRED", "INBOX_REMOVED", "SNAPSHOT_INVALID",
             "CUTOFF_DATE_UNREVIEWED", "GROUP_SCOPE_MUST_BE_UNSET",
+            "GROUP_ACL_CONTEXT_UNVERIFIED",
             "ROLLBACK_UNAVAILABLE", "ROLLBACK_REVIEW_REQUIRED",
             "INBOX_TAG_REMOVED", "APP_CONFIG_MISSING", "OLLAMA_MODEL_UNAVAILABLE",
         }
