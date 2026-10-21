@@ -2088,3 +2088,65 @@ The next stage is an **independent running-container read-only
 service-health audit**, followed by a separately approved
 graceful shutdown policy if appropriate. Until such an
 audit and further approval, leave CT790 running and networkless.
+
+
+## CT790 independent running-state and systemd health inventory: no-write gate
+
+The next verification is now
+`ansible/playbooks/audit-rocky-9-8-ct790-running-readonly.yml`.
+It is **intentionally separate** from the first-boot and stopped
+guest preflights, since the successfully started CT790 is now
+expected to be **RUNNING**.
+
+The playbook makes no Proxmox or guest configuration changes,
+does not import any stopped-container check, and only runs
+`hostname -s`, `pct status 790`, `pct config 790`,
+a known bounded `pct exec 790 -- /bin/sh -ec …` identity probe,
+`pct exec 790 -- systemctl --no-pager is-system-running`,
+`pct exec 790 -- systemctl --no-pager --plain --no-legend
+list-units --state=failed`, and `pct config 701`.
+
+Before the guest probe, it demands that CT790 is already
+running with its unchanged protected, unprivileged, NIC-less,
+no-mount/no-hook approved Proxmox config. The in-guest probe
+rechecks Rocky 9.8, systemd as PID1, hostname, no
+non-loopback interfaces, and nonidentity user namespace. CT701
+remains protected and NIC-less.
+
+The systemd running status (`running`, `degraded` or
+`starting`) and count of failed-unit diagnostic output lines
+are recorded separately from isolation validation. A
+`degraded` state may be captured as `REQUIRES_SEPARATE_REVIEW`;
+it is **not** silently described as healthy. Unit details are
+not disclosed in Ansible output. This is a bounded health
+inventory, not remediation. It is possible to require a
+subsequent scoped read-only fault inventory if systemd reports
+failed units.
+
+Execute on `bp-controller` using only the branch's verified
+commit and a clean worktree, **without** any apply variables:
+
+    BASE="$HOME/bergen-platform"
+    WT="$HOME/bergen-platform-nextcloud-restore"
+    BRANCH="feat/nextcloud-isolated-restore-701-20261019"
+    SSH_ARGS="-C -o ControlMaster=no -o ControlPath=none -o ConnectTimeout=10 -o ServerAliveInterval=10 -o ServerAliveCountMax=2"
+    if [ -n "$(git -C "$WT" status --porcelain)" ]; then
+      echo "STOP: dirty worktree"
+    else
+      git -C "$WT" fetch origin "$BRANCH" &&
+      git -C "$WT" switch --detach "origin/$BRANCH" &&
+      ANSIBLE_SSH_ARGS="$SSH_ARGS" "$BASE/.venv/bin/ansible-playbook" \
+        -i "$BASE/ansible/inventory.yml" \
+        -i "$BASE/ansible/inventory.local.yml" \
+        "$WT/ansible/playbooks/audit-rocky-9-8-ct790-running-readonly.yml" \
+        --limit venombox --vault-id infra@prompt
+    fi
+
+Only if all checks complete:
+`ROCKY_9_8_CT790_RUNNING_READ_ONLY_INVENTORY_RECORDED`,
+`changed=0`, `failed=0`, with bounded
+`systemd_state` and `failed_unit_output_lines`.
+This still does not authorize CT790 shutdown,
+network attachment, restart or template conversion. A later
+controlled shutdown and image lifecycle change will each
+require explicit separate operator approval.
