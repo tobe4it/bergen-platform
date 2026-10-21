@@ -159,7 +159,81 @@ Indexierung bleibt ein **separat freizugebender Vorgang**.
 Ein vorhandenes `llmindex.db` ohne Abdeckungsnachweis bedeutet nicht,
 dass alle berechtigten Dokumente bereits indiziert sind.
 
-## 6. Referenz zur Tag-Regel
+## 6. Priorität: Kinder dürfen Eltern-Dokumente nicht chatten
+
+**Verbindliche Architekturentscheidung (21.10.2026):** Kein Wechsel
+des Gruppendokument-Eigentümers von `admin` zu `thomas`.
+Der bestehende Sender-/Empfänger-Reconciler prüft Eigentümer
+`admin`, Eltern-Gruppenrechte `view_document/change_document`,
+Familien-Gruppenrecht `view_document` und persönliche
+Änderungsrechte der Eltern auf Familiendokumente. Diese
+gruppenbezogene Aufteilung bleibt maßgeblich.
+
+**Nicht ausreichend** ist allein
+`CHILD_GROUP_MODEL_VIEWERS=0` aus dem älteren Audit:
+Ohne allgemeines `documents.view_document` ist der native
+Chat-Endpunkt ohnehin gesperrt. Sobald Kinder später dieses
+allgemeine Modellrecht für ihren berechtigten Dokumentenchat
+erhalten, darf es keinen Zugriff auf `Paperless/Eltern`
+ermöglichen. Aus dem vorhandenen Import-Audit vom 21.10.2026
+stammen `OWNERLESS_PARENT_SHARED=0` und
+`CHILD_GROUP_VISIBLE_DOCUMENT_PAIRS=0`; diese
+Aussage allein deckt **nicht** alle an `admin` übertragenen
+Elterndokumente ab.
+
+Für diesen Zweck gibt es einen **neuen rein lesenden
+Live-Negativtest**, der die echten importierten PDFs
+über die geschützten Empfängerquittungen samt
+SHA-256, Eigentümer und ACL nachweist, alle manuell
+mit der Elterngruppe geteilten Dokumente hinzunimmt
+und den Berechtigungsfilter für jedes aktive Kinderkonto
+prüft:
+
+- **Aktuell wirksamer Zugriff** auf Elterndokumente;
+- **hypothetischer Zugriff nach künftiger Erteilung
+  von `documents.view_document`**, ohne die Berechtigung
+  tatsächlich zu gewähren;
+- Einzel-Dokument-Chatprüfung
+  `has_perms_owner_aware(user, 'view_document', doc)`
+  zusätzlich zur archivweiten `permitted_document_ids`-Filterung;
+- Vergleich der erwarteten Familienfreigabe,
+  ohne irgendein Dokument, Benutzerrecht oder einen Index
+  zu ändern.
+
+Der Prüfbericht enthält ausschließlich Zählwerte.
+**Jeder positive Elternzugriff für Kinder blockiert den Chat.**
+Auch bei einem grünen ORM-Negativtest bleibt ein echter
+angemeldeter Kinder-Chat-/Sitzungstest vor Freigabe nötig.
+
+```bash
+(
+set -euo pipefail
+BASE="$HOME/bergen-platform"
+WT="$HOME/bergen-platform-paperless-ai-catalog"
+test -z "$(git -C "$WT" status --porcelain)" || exit 1
+git -C "$WT" fetch origin feat/paperless-native-german-ai-chat-20261021
+git -C "$WT" switch --detach origin/feat/paperless-native-german-ai-chat-20261021
+cd "$WT"
+"$BASE/.venv/bin/ansible-playbook" \
+  -i ansible/inventory.yml \
+  -i "$BASE/ansible/inventory.local.yml" \
+  ansible/playbooks/audit-paperless-native-chat-child-boundary-readonly.yml \
+  --vault-id ai@prompt \
+  -e "@$BASE/ansible/vars/paperless-ai-catalog.local.yml"
+)
+```
+
+Das `CHAT_CHILD_PARENT_BOUNDARY`-Gate muss
+`NEGATIVE_ACL_CHECK_PASSED` liefern;
+`CHILD_PARENT_VISIBLE_NOW`,
+`CHILD_PARENT_VISIBLE_IF_MODEL_VIEW_GRANTED` und
+`CHILD_PARENT_SINGLE_DOCUMENT_ALLOW` müssen **jeweils null** sein.
+Fehlende Kinderidentitäten, Importquittungen, Modelleinstellungen
+oder unvollständige Gruppenbeweise brechen die Prüfung
+sicherheitshalber ab. Der Chatindex wird von diesem Playbook
+weder erstellt noch verändert.
+
+## 7. Referenz zur Tag-Regel
 
 **Unverändert:** Vorhandene berechtigte Tags dürfen automatisch
 ergänzt werden. Neue deutsche Tag-Vorschläge werden **ausschließlich**
