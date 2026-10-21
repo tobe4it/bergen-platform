@@ -1,0 +1,266 @@
+---
+# Explicit scoped v2 upgrade of an ALREADY running Bergen Paperless AI timer.
+# NEVER invoked by generic deploy or pilot. Leaves timer disabled on failure.
+- name: Review exact all-owner inbox cutoff and controlled timer upgrade
+  hosts: venombox
+  become: true
+  gather_facts: false
+  vars:
+    bp_upgrade_policy_path: /etc/bergen-platform/paperless-ai/catalog-policy.json
+    bp_upgrade_dir: /etc/bergen-platform/paperless-ai
+    bp_upgrade_cutoff: '2026-10-01'
+  tasks:
+    - name: Demand operator-approved v2 upgrade, accepted backup and exact target
+      ansible.builtin.assert:
+        that:
+          - inventory_hostname == 'venombox'
+          - not ansible_check_mode
+          - paperless_ai_catalog_v2_upgrade_approved | default(false) | bool
+          - paperless_ai_catalog_verified_backup | default(false) | bool
+          - paperless_ai_catalog_v2_all_owners_approved | default(false) | bool
+          - paperless_ai_catalog_v2_history_from_october_approved | default(false) | bool
+        fail_msg: ALL_INBOX_CUTOFF_V2_EXPLICIT_APPROVAL_REQUIRED
+      no_log: true
+
+    - name: Check expected existing Paperless LXC
+      ansible.builtin.command:
+        argv: [pct, config, '126']
+      changed_when: false
+      register: bp_upgrade_guest
+      no_log: true
+
+    - name: Refuse unexpected or privileged Paperless guest
+      ansible.builtin.assert:
+        that:
+          - bp_upgrade_guest.rc == 0
+          - "'hostname: bergen-paperless' in bp_upgrade_guest.stdout_lines"
+          - "'unprivileged: 1' in bp_upgrade_guest.stdout_lines"
+          - "'lxc.apparmor.profile: unconfined' not in bp_upgrade_guest.stdout"
+      no_log: true
+
+    - name: Read only original root-protected v1 catalog configuration
+      ansible.builtin.slurp:
+        src: "{{ bp_upgrade_policy_path }}"
+      register: bp_upgrade_original_blob
+      no_log: true
+
+    - name: Decode current policy only within Ansible memory
+      ansible.builtin.set_fact:
+        bp_upgrade_original: "{{ bp_upgrade_original_blob.content | b64decode | from_json }}"
+      no_log: true
+
+    - name: Require exact known timer baseline before any upgrade
+      ansible.builtin.assert:
+        that:
+          - bp_upgrade_original.protocol == 'catalog-v1'
+          - bp_upgrade_original.mode == 'apply'
+          - bp_upgrade_original.allowed_group == 'Eltern@bergen.intern'
+          - bp_upgrade_original.pilot_ids == []
+          - bp_upgrade_original.batch_size == 1
+          - bp_upgrade_original.notes_enabled == true
+          - bp_upgrade_original.approved == true
+          - bp_upgrade_original.min_document_id | int > 0
+          - bp_upgrade_original.expected_model is match('^[A-Za-z0-9_.:-]{1,96}$')
+          - bp_upgrade_original.expected_endpoint is match('^http://[A-Za-z0-9.:-]+:11434/?$')
+        fail_msg: ALL_INBOX_V2_ORIGINAL_TIMER_POLICY_NOT_RECOGNIZED
+      no_log: true
+
+    - name: Verify original timer enabled before upgrade
+      ansible.builtin.command:
+        argv: [systemctl, is-enabled, bergen-ai-catalog.timer]
+      changed_when: false
+      register: bp_upgrade_enabled
+      no_log: true
+
+    - name: Verify original timer active before upgrade
+      ansible.builtin.command:
+        argv: [systemctl, is-active, bergen-ai-catalog.timer]
+      changed_when: false
+      register: bp_upgrade_active
+      no_log: true
+
+    - name: Refuse non-active or unexpected automation
+      ansible.builtin.assert:
+        that:
+          - bp_upgrade_enabled.stdout | trim == 'enabled'
+          - bp_upgrade_active.stdout | trim == 'active'
+        fail_msg: ALL_INBOX_V2_ORIGINAL_TIMER_NOT_ACTIVE
+      no_log: true
+
+    - name: Preview v2 selection with exact local model and no writes
+      ansible.builtin.command:
+        argv:
+          - pct
+          - exec
+          - '126'
+          - --
+          - podman
+          - exec
+          - -i
+          - bergen-paperless
+          - python
+          - /usr/src/paperless/src/manage.py
+          - shell
+          - --verbosity=0
+          - -c
+          - "{{ lookup('ansible.builtin.file', playbook_dir ~ '/../files/paperless/bergen_ai_catalog_policy.py', rstrip=False) ~ '\n' ~ lookup('ansible.builtin.file', playbook_dir ~ '/../files/paperless/bergen_ai_catalog_runner.py', rstrip=False) }}"
+        stdin: >-
+          {{ {'protocol':'catalog-v2', 'mode':'preview',
+              'start_added_date':bp_upgrade_cutoff,
+              'allowed_group': none, 'min_document_id':0,
+              'expected_model':bp_upgrade_original.expected_model,
+              'expected_endpoint':bp_upgrade_original.expected_endpoint,
+              'pilot_ids':[], 'batch_size':1, 'notes_enabled':true,
+              'approved':false} | to_json }}
+        stdin_add_newline: true
+      changed_when: false
+      failed_when: false
+      register: bp_upgrade_preview
+      no_log: true
+
+    - name: Extract single sanitized cutoff preflight status
+      ansible.builtin.set_fact:
+        bp_upgrade_preview_frames: >-
+          {{ bp_upgrade_preview.stdout_lines | default([]) |
+             select('match', '^BERGEN_PAPERLESS_AI_CATALOG_V1:') | list }}
+      no_log: true
+
+    - name: Refuse any v2 implementation or model mismatch
+      ansible.builtin.assert:
+        that:
+          - bp_upgrade_preview.rc == 0
+          - bp_upgrade_preview_frames | length == 1
+          - bp_upgrade_preview_frames[0] | length < 1800
+          - (bp_upgrade_preview_frames[0] |
+             regex_replace('^BERGEN_PAPERLESS_AI_CATALOG_V1:', '') |
+             from_json).STATUS == 'READY'
+          - (bp_upgrade_preview_frames[0] |
+             regex_replace('^BERGEN_PAPERLESS_AI_CATALOG_V1:', '') |
+             from_json).SELECTION_SCOPE == 'ALL_INBOX_FROM_2026_10_01'
+          - (bp_upgrade_preview_frames[0] |
+             regex_replace('^BERGEN_PAPERLESS_AI_CATALOG_V1:', '') |
+             from_json).CHANGED == false
+        fail_msg: ALL_INBOX_V2_SELECTION_PREFLIGHT_FAILED
+      no_log: true
+
+    - name: Upgrade only one installed Bergen-AI timer and policy fail-closed
+      block:
+        - name: Disable timer before changing installed worker or policy
+          ansible.builtin.systemd:
+            name: bergen-ai-catalog.timer
+            enabled: false
+            state: stopped
+
+        - name: Require existing one-shot is not running before copying files
+          ansible.builtin.command:
+            argv: [systemctl, is-active, bergen-ai-catalog.service]
+          register: bp_upgrade_service_state
+          changed_when: false
+          failed_when: false
+          no_log: true
+
+        - name: Refuse upgrading during active inference
+          ansible.builtin.assert:
+            that:
+              - bp_upgrade_service_state.stdout | trim in ['inactive', 'failed']
+            fail_msg: ALL_INBOX_V2_SERVICE_BUSY
+          no_log: true
+
+        - name: Install reviewed v2 policy library and runner on Proxmox host
+          ansible.builtin.copy:
+            src: "{{ playbook_dir }}/../files/paperless/{{ item }}"
+            dest: "{{ bp_upgrade_dir }}/{{ item }}"
+            owner: root
+            group: root
+            mode: '0600'
+            backup: true
+          loop:
+            - bergen_ai_catalog_policy.py
+            - bergen_ai_catalog_runner.py
+          no_log: true
+
+        - name: Install exact v2 all-inbox policy with historical import cutoff
+          ansible.builtin.copy:
+            content: >-
+              {{ {'protocol':'catalog-v2', 'mode':'apply',
+                  'start_added_date':bp_upgrade_cutoff,
+                  'allowed_group':none, 'min_document_id':0,
+                  'expected_model':bp_upgrade_original.expected_model,
+                  'expected_endpoint':bp_upgrade_original.expected_endpoint,
+                  'pilot_ids':[], 'batch_size':1, 'notes_enabled':true,
+                  'approved':true} | to_json }}
+            dest: "{{ bp_upgrade_policy_path }}"
+            owner: root
+            group: root
+            mode: '0600'
+            backup: true
+          no_log: true
+
+        - name: Verify installed policy exactly matches approved v2 scope
+          ansible.builtin.slurp:
+            src: "{{ bp_upgrade_policy_path }}"
+          register: bp_upgrade_installed_blob
+          no_log: true
+
+        - name: Confirm exact installed protocol and fixed timestamp
+          ansible.builtin.assert:
+            that:
+              - (bp_upgrade_installed_blob.content | b64decode | from_json).protocol == 'catalog-v2'
+              - (bp_upgrade_installed_blob.content | b64decode | from_json).start_added_date == '2026-10-01'
+              - (bp_upgrade_installed_blob.content | b64decode | from_json).allowed_group == none
+              - (bp_upgrade_installed_blob.content | b64decode | from_json).min_document_id == 0
+              - (bp_upgrade_installed_blob.content | b64decode | from_json).notes_enabled == true
+            fail_msg: ALL_INBOX_V2_INSTALLED_SCOPE_UNVERIFIED
+          no_log: true
+
+        - name: Reenable the existing one-shot timer without triggering service
+          ansible.builtin.systemd:
+            name: bergen-ai-catalog.timer
+            enabled: true
+            state: started
+
+        - name: Verify upgraded timer is enabled and active
+          ansible.builtin.command:
+            argv: [systemctl, show, bergen-ai-catalog.timer, -p, ActiveState, -p, UnitFileState]
+          register: bp_upgrade_finished
+          changed_when: false
+          no_log: true
+
+        - name: Assert upgraded timer status
+          ansible.builtin.assert:
+            that:
+              - "'ActiveState=active' in bp_upgrade_finished.stdout_lines"
+              - "'UnitFileState=enabled' in bp_upgrade_finished.stdout_lines"
+          no_log: true
+
+      rescue:
+        - name: Keep timer disabled after any partial v2 upgrade
+          ansible.builtin.systemd:
+            name: bergen-ai-catalog.timer
+            enabled: false
+            state: stopped
+
+        - name: Report safe stopped upgrade for operator review
+          ansible.builtin.debug:
+            msg:
+              - ALL_INBOX_V2_UPGRADE=NOT_ATTESTED
+              - TIMER=STOPPED_FAIL_CLOSED
+              - MANUAL_REVIEW_REQUIRED=YES
+              - OLD_JOURNAL_UNCHANGED_BY_DEPLOYMENT=YES
+
+        - name: Fail without automatic downgrade or document replay
+          ansible.builtin.fail:
+            msg: ALL_INBOX_V2_TIMER_UPGRADE_FAILED
+
+    - name: Report sanitized successful all-owner date-based upgrade
+      ansible.builtin.debug:
+        msg:
+          - TIMER=ENABLED
+          - SELECTION=ALL_DOCUMENTS_WITH_INBOX_TAG
+          - ADDED_FROM=2026-10-01T00:00:00_EUROPE_BERLIN
+          - OWNER_FILTER=NONE
+          - ID_WATERMARK=NOT_USED
+          - NOTES=SYSTEM_ATTRIBUTED
+          - EXISTING_JOURNAL_RECORDS=SKIPPED_NO_RETRY
+          - DOCUMENT_INBOX_TAG=RETAINED
+          - BATCH_SIZE=1
