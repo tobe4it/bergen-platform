@@ -2045,3 +2045,46 @@ systemd writes to the new disposable CT790 rootfs. Creation,
 guest restart/stop, template conversion, CT701 changes, host
 network changes and any production-system modifications are
 not included.
+
+
+## CT790 first boot confirmed running, networkless and unprivileged (2026-10-21)
+
+After an independent and explicit CT790-only first-boot authorization,
+the operator executed
+`ansible/playbooks/start-rocky-9-8-ct790-offline.yml`
+with the exact two approval variables. The live result on
+`venombox` was:
+
+- `ROCKY_9_8_CT790_FIRSTBOOT_STARTED_NETWORKLESS_VERIFIED`
+- `venombox: ok=66 changed=1 unreachable=0 failed=0 skipped=1`
+- Exactly one `pct start 790` changed state; successful subsequent
+  `pct status 790` established `RUNNING`.
+- The in-guest bounded probe verified Rocky Linux 9.8,
+  systemd as PID 1, hostname `rocky9-base-790`,
+  **zero non-loopback network devices**, and
+  an unprivileged/nonidentity Linux UID mapping.
+- PVE configuration compared byte-for-byte unchanged across
+  startup; existing protected, offline CT701 remained unchanged.
+- No network interface was attached; the running CT790 remains
+  unprivileged and protected, with autostart disabled.
+- **No automatic stop, restart, rollback or Proxmox template
+  conversion** took place. First systemd initialization may
+  have modified only CT790's own disposable rootfs.
+
+This is evidence that the newly provisioned pinned Rocky 9.8
+rootfs **can start and operate as an isolated unprivileged
+LXC on the real PVE host**. It is not a blanket declaration
+that every systemd unit is healthy or that the instance is
+ready for a reusable, stopped Proxmox template.
+
+**Critical operational boundary:** CT790 is currently RUNNING.
+Do not re-execute the stopped-container-firstboot or creation
+playbooks. Both require a stopped/no-existing-VMID state and are
+not applicable after the successful start. No permission to
+stop, shutdown, restart, roll back, modify host networking,
+change CT701 or run `pct template 790` has been granted.
+
+The next stage is an **independent running-container read-only
+service-health audit**, followed by a separately approved
+graceful shutdown policy if appropriate. Until such an
+audit and further approval, leave CT790 running and networkless.
