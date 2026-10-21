@@ -1974,3 +1974,38 @@ Creating or modifying VMIDs 701, 702, 790 or 791 beyond
 the explicitly authorized CT790 first boot, attaching a
 NIC, invoking `pct template`, modifying mx1/mx2 or
 restoring the production Nextcloud data remain out of scope.
+
+
+## CT790 first-boot proposal default Read-only PASS (2026-10-21)
+
+At 2026-10-21 13:59 (operator terminal), the user executed
+`ansible/playbooks/start-rocky-9-8-ct790-offline.yml` **without**
+the separately required two start-approval variables on `venombox`.
+The audited plan completed as designed:
+
+- `ROCKY_9_8_CT790_FIRSTBOOT_PLAN_READ_ONLY_READY`
+- `venombox: ok=52 changed=0 unreachable=0 failed=0 skipped=15`
+- Expected rootfs `local-zfs:subvol-790-disk-0`.
+- The first-start operation and all post-start verification tasks
+  were **skipped**, including `pct start 790`, `pct exec 790`
+  and the subsequent CT701 comparison.
+- `pct_start_authorized=false`,
+  `pct_template_authorized=false`, `guest_started=false`.
+- The same-run prior preflight checks established CT790 was stopped,
+  protected, unprivileged, with zero configured NICs,
+  no unreviewed mounts/hooks and Rocky 9.8 in its pinned ZFS rootfs.
+  CT701 remained unchanged.
+
+This is a **plan-readiness** observation, not authorization or
+evidence of successful boot. The user has not yet given fresh
+approval to the subsequent first-start mutation. Even with zero
+NICs, boot-time systemd writes can occur in CT790's disposable
+rootfs, and an unsuccessful `pct start` can leave it running or
+partially initialized. Do not perform any automatic stop,
+restart, rollback or destruction on failure.
+
+Pending: an independent, explicit single-VMID CT790-only approval
+for exactly one `pct start 790` followed by bounded read-only
+guest identity, UID namespace and zero-nonloopback-NIC checks.
+No CT701 start, NIC attachment, Proxmox template conversion,
+Nextcloud restore, or production changes are implied.
