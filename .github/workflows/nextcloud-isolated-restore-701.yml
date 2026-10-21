@@ -26,6 +26,8 @@ on:
       - 'ansible/playbooks/create-rocky-9-8-ct790-offline.yml'
       - 'ansible/playbooks/audit-rocky-9-8-ct790-postcreate-readonly.yml'
       - 'ansible/playbooks/audit-rocky-9-8-ct790-rootfs-release-readonly.yml'
+      - 'ansible/playbooks/audit-rocky-9-8-ct790-firstboot-readonly.yml'
+      - 'tests/test_rocky_lxc_ct790_firstboot_readonly.py'
       - 'ansible/files/nextcloud/read_ct790_rootfs_release.py'
       - 'tests/test_rocky_lxc_ct790_rootfs_release.py'
       - 'tests/test_rocky_lxc_ct790_postcreate_readonly.py'
@@ -116,6 +118,10 @@ jobs:
           python3 -m unittest discover -s tests -p 'test_rocky_lxc_ct790_postcreate_readonly.py'
           python3 -m py_compile ansible/files/nextcloud/read_ct790_rootfs_release.py
           python3 -m unittest discover -s tests -p 'test_rocky_lxc_ct790_rootfs_release.py'
+          python3 -m unittest discover -s tests -p 'test_rocky_lxc_ct790_firstboot_readonly.py'
+          ansible-playbook -i localhost, \
+            ansible/playbooks/audit-rocky-9-8-ct790-firstboot-readonly.yml \
+            --syntax-check
           ansible-playbook -i localhost, \
             ansible/playbooks/audit-rocky-9-8-ct790-rootfs-release-readonly.yml \
             --syntax-check
