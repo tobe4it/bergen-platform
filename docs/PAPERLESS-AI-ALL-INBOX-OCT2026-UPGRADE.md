@@ -1,8 +1,18 @@
 # Paperless Bergen-AI v2: every Inbox document imported since 2026-10-01
 
-**Status:** code and CI reviewed; production upgrade requires a separate, explicit
-approved operator run on `bp-controller`. The existing parent-only v1 timer
-**remains the live worker until that run completes**.
+**DEPRECATED — NICHT AUSFÜHREN (21.10.2026).** Die hier referenzierte
+alternative v2-Implementierung verwendete Paperless' native
+`user=None`-Ähnlichkeitsrecherche und konnte unzulässig Texte anderer
+Dokumente in den LLM-Kontext aufnehmen. Das alternative
+`upgrade-paperless-ai-inbox-catalog-all-inbox-oct2026.yml` ist
+absichtlich mit einem dauerhaften Fehlergate gesperrt. Der **reguläre**
+Bergen-AI-Timer wurde am 21.10.2026 bereits über
+`upgrade-paperless-ai-all-inbox-since-20261001.yml` produktiv auf v2
+umgestellt. Die alte Anleitung ist nur noch **archiviertes Designmaterial**.
+Maßgeblich:
+[produktiver Iststand](PAPERLESS-AI-INBOX-CATALOG-AS-OPERATED.md) und
+[Release v0.16.0](releases/v0.16.0.md).
+**Nicht den alten Upgrade-Befehl verwenden oder v2 erneut deployen.**
 
 ## Scope
 
