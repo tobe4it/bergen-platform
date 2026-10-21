@@ -286,7 +286,7 @@
           exact_template_sha256_verified: true
           pve_rootfs_volume_verified: true
           zfs_rootfs_dataset_verified: true
-          source_rootfs_unpacked_by_pct_create: true
+          rootfs_contents_independently_read: false
           os_release_inside_new_rootfs_verified: false
           runtime_compatibility_tested: false
           ct701_reviewed_isolated: true
