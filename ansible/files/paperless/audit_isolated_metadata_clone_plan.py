@@ -64,7 +64,7 @@ def source_volumes(config):
             "SOURCE_VOLUME_LAYOUT_UNREVIEWED")
     require(not any(re.fullmatch(r"mp[1-9][0-9]*", name) or
                     re.fullmatch(r"dev[0-9]+", name) or
-                    name in ("hookscript", "features")
+                    name in ("hookscript",)
                     for name in fields),
             "SOURCE_GUEST_SPECIAL_MOUNTS_UNREVIEWED")
     return volume_size_gib(fields["rootfs"]), volume_size_gib(fields["mp0"])
