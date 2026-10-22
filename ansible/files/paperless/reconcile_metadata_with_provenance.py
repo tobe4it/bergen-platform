@@ -163,6 +163,25 @@ def main():
                 return False
             cur.execute("SELECT obj_description(%s::regclass)", [LEDGER])
             require(cur.fetchone()[0] == COMMENT, "LEDGER_OWNER_UNVERIFIED")
+            # Refuse a same-named but incompatible/altered table, even when
+            # its externally stored comment happens to match.
+            cur.execute(
+                "SELECT column_name, data_type, is_nullable "
+                "FROM information_schema.columns WHERE table_schema='public' "
+                "AND table_name='bergen_platform_paperless_acl_grants_v1'")
+            cols = {name: (kind, nullable)
+                    for name, kind, nullable in cur.fetchall()}
+            require(cols == {
+                "subject_kind": ("character varying", "NO"),
+                "subject_id": ("bigint", "NO"),
+                "permission_id": ("bigint", "NO"),
+                "object_pk": ("character varying", "NO"),
+            }, "LEDGER_SCHEMA_UNREVIEWED")
+            cur.execute(
+                "SELECT count(*) FROM pg_constraint "
+                "WHERE conrelid=to_regclass(%s) AND contype='p'",
+                [LEDGER])
+            require(cur.fetchone()[0] == 1, "LEDGER_PRIMARY_KEY_UNREVIEWED")
             return True
 
         def ledger_rows(cur, present):
