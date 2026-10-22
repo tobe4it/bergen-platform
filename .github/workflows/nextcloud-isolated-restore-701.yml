@@ -37,6 +37,9 @@ on:
       - 'ansible/playbooks/audit-rocky-9-8-ct790-sanitization-targets-readonly.yml'
       - 'ansible/files/nextcloud/audit_ct790_sanitation_targets.py'
       - 'tests/test_rocky_lxc_ct790_sanitation_targets_readonly.py'
+      - 'ansible/playbooks/audit-rocky-9-8-ct790-backup-candidates-readonly.yml'
+      - 'ansible/files/nextcloud/audit_ct790_backup_candidates_readonly.py'
+      - 'tests/test_rocky_lxc_ct790_backup_candidates_readonly.py'
       - 'ansible/files/nextcloud/audit_ct790_firstboot_identity_units.py'
       - 'tests/test_rocky_lxc_ct790_firstboot_identity_units_readonly.py'
       - 'tests/test_rocky_lxc_ct790_template_sanitation_plan.py'
@@ -156,6 +159,11 @@ jobs:
           python3 -m unittest discover -s tests -p 'test_rocky_lxc_ct790_firstboot_identity_units_readonly.py'
           python3 -m py_compile ansible/files/nextcloud/audit_ct790_sanitation_targets.py
           python3 -m unittest discover -s tests -p 'test_rocky_lxc_ct790_sanitation_targets_readonly.py'
+          python3 -m py_compile ansible/files/nextcloud/audit_ct790_backup_candidates_readonly.py
+          python3 -m unittest discover -s tests -p 'test_rocky_lxc_ct790_backup_candidates_readonly.py'
+          ansible-playbook -i localhost, \
+            ansible/playbooks/audit-rocky-9-8-ct790-backup-candidates-readonly.yml \
+            --syntax-check
           ansible-playbook -i localhost, \
             ansible/playbooks/audit-rocky-9-8-ct790-sanitization-targets-readonly.yml \
             --syntax-check
