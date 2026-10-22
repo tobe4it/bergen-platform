@@ -8,6 +8,17 @@
   vars:
     bp_pinned_config_script: "{{ lookup('ansible.builtin.file', playbook_dir ~ '/../files/paperless/audit_pinned_archive_restore_config.py', rstrip=False) }}"
     bp_pinned_archive_sha: "7f0ad64c2c7bc3bdca53be5766fbabc62feadd74025e811e52712e78b8bee24f"
+    bp_pinned_allowed_lxc_classes:
+      - APPARMOR_OVERRIDE
+      - CGROUP_DEVICE_OVERRIDE
+      - MOUNT_OVERRIDE
+      - CAPABILITY_OVERRIDE
+      - SECCOMP_OVERRIDE
+      - IDMAP_OVERRIDE
+      - NETWORK_OVERRIDE
+      - HOST_HOOK_OVERRIDE
+      - ENVIRONMENT_OVERRIDE
+      - OTHER_LXC_OVERRIDE
   tasks:
     - name: Restrict archived configuration inspection to read only
       ansible.builtin.assert:
@@ -72,6 +83,29 @@
                 'ARCHIVED_NETWORK_LAYOUT_UNREVIEWED',
                 'BACKUP_CHANGED_DURING_CONFIG_READ','UNCLASSIFIED'
               ] else 'UNCLASSIFIED' }}"
+
+    - name: Refuse invalid non-identifying LXC classification frame
+      ansible.builtin.assert:
+        that:
+          - bp_pinned_config.LXC_OVERRIDE_COUNT | default(-1) | int >= 1
+          - bp_pinned_config.LXC_OVERRIDE_COUNT | int <= 32
+          - bp_pinned_config.LXC_OVERRIDE_CLASSES | default([]) | length >= 1
+          - bp_pinned_config.LXC_OVERRIDE_CLASSES | length <= 10
+          - bp_pinned_config.LXC_OVERRIDE_CLASSES | difference(bp_pinned_allowed_lxc_classes) | length == 0
+        fail_msg: ARCHIVED_LXC_OVERRIDE_CLASSIFICATION_INVALID
+      no_log: true
+      when: bp_pinned_config.STATUS == 'BLOCKED' and
+            bp_pinned_config.REASON | default('') == 'ARCHIVED_LXC_OVERRIDE_PRESENT'
+
+    - name: Show only bounded categories of archived LXC overrides
+      ansible.builtin.debug:
+        msg:
+          - "LXC_OVERRIDE_COUNT={{ bp_pinned_config.LXC_OVERRIDE_COUNT }}"
+          - "LXC_OVERRIDE_CLASSES={{ bp_pinned_config.LXC_OVERRIDE_CLASSES | sort | join(',') }}"
+          - ARCHIVED_LXC_OVERRIDE_REMAINS_BLOCKED=YES
+          - CHANGED=False
+      when: bp_pinned_config.STATUS == 'BLOCKED' and
+            bp_pinned_config.REASON | default('') == 'ARCHIVED_LXC_OVERRIDE_PRESENT'
 
     - name: Reject untrusted archive and any interpretation as approved isolation
       ansible.builtin.assert:
