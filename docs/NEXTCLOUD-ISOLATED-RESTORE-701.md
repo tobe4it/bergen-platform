@@ -2563,3 +2563,93 @@ its exact tested on-host command, and read-only confirmation
 that CT790 is stopped and its PVE config/CT701 are unchanged.
 If systemd becomes degraded again before invocation, the
 same-run healthy guest gate will fail closed.
+
+
+## CT790 approved healthy-only shutdown blocked by renewed degraded state (2026-10-22)
+
+At 2026-10-22 08:58 operator terminal time the previously
+explicitly authorized **healthy-only** shutdown playbook
+`ansible/playbooks/shutdown-rocky-9-8-ct790-offline.yml`
+was run with its two exact apply variables. The nested read-only
+runtime check reported:
+
+- `ROCKY_9_8_CT790_RUNNING_READ_ONLY_INVENTORY_RECORDED`
+- `systemd_state=degraded`, `failed_unit_output_lines=1`
+  and `systemd_health=REQUIRES_SEPARATE_REVIEW`.
+- `ct790_status=RUNNING`, zero non-loopback interfaces,
+  nonidentity UID namespace, protected CT701 unchanged.
+- The healthy-only condition
+  `rocky_running_systemd.stdout | trim == 'running'`
+  failed **before** the `pct shutdown` operation.
+- `venombox ok=17 changed=0 failed=1 skipped=0`.
+- **No shutdown was attempted.** No automatic retry,
+  service reset, forced stop, guest state changes, networking
+  changes or template conversion took place.
+
+The repeated `degraded` state is consistent with the previously
+journal-confirmed `dnf-makecache.service` DNS error, but **this
+specific 08:58 failure has not been independently identified**.
+The previous healthy-only human approval is **not** permission
+to weaken that guard implicitly or run another automatic attempt.
+
+### Separate, narrowly scoped exception proposal
+
+The distinct
+`ansible/playbooks/shutdown-rocky-9-8-ct790-dnf-exception-offline.yml`
+uses a **new, separate explicit approval token** and defaults
+to a read-only plan. It imports the complete same-run, running
+CT790 isolation audit and permits **only**:
+
+1. `systemd=running` and zero failed units, **or**
+2. `systemd=degraded` with exactly one failed unit,
+   parsed and independently verified as
+   `dnf-makecache.service` with
+   `LoadState=loaded`, `ActiveState=failed`,
+   `SubState=failed`, `Result=exit-code`,
+   `ExecMainCode=1`, `ExecMainStatus=1`.
+
+Any other failed unit, multiple failed units, unreadable
+or changing unit status, new NIC, config drift, wrong VMID,
+unprotected guest, or changed CT701 isolation **fails closed**.
+The plan rechecks current state before any separately
+approved action. No DNF service state is modified and no
+`systemctl reset-failed` is permitted. This exception is
+limited to a **graceful shutdown decision**, never acceptance
+of a degraded general-purpose production template.
+
+A future **newly and explicitly authorized** apply could
+execute exactly one `pct shutdown 790 --timeout 90 --forceStop 0`.
+A timeout never falls back to `pct stop`; no repeat,
+restart, rollback, template conversion or cleanup is permitted.
+The original healthy-only shutdown playbook remains unchanged.
+
+Run the new playbook **without any apply or confirm variables**
+to review only its plan, with a clean commit-pinned worktree
+on bp-controller:
+
+    BASE="$HOME/bergen-platform"
+    WT="$HOME/bergen-platform-nextcloud-restore"
+    BRANCH="feat/nextcloud-isolated-restore-701-20261019"
+    SSH_ARGS="-C -o ControlMaster=no -o ControlPath=none -o ConnectTimeout=10 -o ServerAliveInterval=10 -o ServerAliveCountMax=2"
+    if [ -n "$(git -C "$WT" status --porcelain)" ]; then
+      echo "STOP: dirty worktree"
+    else
+      git -C "$WT" fetch origin "$BRANCH" &&
+      git -C "$WT" switch --detach "origin/$BRANCH" &&
+      ANSIBLE_SSH_ARGS="$SSH_ARGS" "$BASE/.venv/bin/ansible-playbook" \
+        -i "$BASE/ansible/inventory.yml" \
+        -i "$BASE/ansible/inventory.local.yml" \
+        "$WT/ansible/playbooks/shutdown-rocky-9-8-ct790-dnf-exception-offline.yml" \
+        --limit venombox --vault-id infra@prompt
+    fi
+
+The bounded nonmutating receipt is
+`ROCKY_9_8_CT790_DNF_EXCEPTION_SHUTDOWN_PLAN_READ_ONLY_READY`
+with `changed=0 failed=0` when either eligible state
+is proven. After that, obtain a **new explicit human approval**
+specifically naming the sole-failed-DNF exception and
+one-time CT790 graceful shutdown before passing any apply
+variables.
+
+Do not convert CT790 into a template until separately approved
+post-shutdown rootfs sanitation and VMID policy reviews.
