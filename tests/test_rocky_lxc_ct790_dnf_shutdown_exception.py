@@ -71,7 +71,7 @@ class DnfShutdownExceptionPolicyTests(unittest.TestCase):
                 if cmd[:3] == ["pct", "exec", "790"] or cmd[:2] == ["python3", "-c"] or cmd[:2] == ["pct", "config"]:
                     self.assertIs(task.get("no_log"), True)
         self.assertEqual(commands.count(expected), 1)
-        self.assertEqual(len(commands), 13)
+        self.assertEqual(len(commands), 12)
 
     def test_default_preview_and_new_exact_scope_approval(self):
         for snippet in (
