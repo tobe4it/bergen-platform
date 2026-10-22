@@ -2369,11 +2369,15 @@ and separately authorized; this diagnosis does not permit it.
 A separate default read-only journal classification step has been
 added at
 `ansible/playbooks/diagnose-rocky-9-8-ct790-dnf-journal-readonly.yml`.
-It imports the previously verified read-only running-guest and
-single-failed-unit gates before accessing the journal. It requires:
+It imports the independent read-only **running-guest** audit
+and now requires that the previously degraded CT790 has recovered to
+**systemd=running with zero failed units** before accessing historical
+journal records. It requires:
 
-- Exactly `dnf-makecache.service` failed, with `Result=exit-code`
-  and `ExecMainStatus=1`; current `systemd=degraded`.
+- The earlier independently documented failed unit was
+  `dnf-makecache.service` at `2026-10-22 05:32:41 UTC`, with
+  `Result=exit-code` and `ExecMainStatus=1`; the **current**
+  same-run status must instead be `systemd=running`, zero failed units.
 - Protected unprivileged running CT790 with zero non-loopback
   interfaces and unchanged protected CT701.
 - Guest journal strictly limited to unit
@@ -2392,9 +2396,9 @@ Possible sanitized results:
 `REPOSITORY_METADATA_ERROR_OBSERVED_CAUSE_UNDETERMINED`,
 or `NO_RECOGNIZED_CAUSE_IN_BOUNDED_JOURNAL`. A category is not
 proof of exhaustive root cause. If journal output changes,
-is unreadable, grows beyond bounds, or the failed unit is no
-longer the sole failure, the diagnosis fails closed with no
-service modification or shutdown.
+is unreadable, grows beyond bounds, or the running CT790 loses
+its healthy systemd/no-failed-units state, the diagnosis fails closed
+with no service modification or shutdown.
 
 No `dnf` command, service restart, `reset-failed`, DNF
 timer modification, network attachment, shutdown or Proxmox
@@ -2423,3 +2427,46 @@ and **no apply variables**:
 Expected: `ROCKY_9_8_CT790_DNF_JOURNAL_CLASSIFIED_READ_ONLY`,
 `changed=0`, `failed=0`. Any shutdown and future image
 change remain separately gated.
+
+
+## CT790 recovered systemd state and historical journal gate correction (2026-10-22)
+
+The user's run at 07:46 on 2026-10-22, following the prior
+06:19 UTC-recorded failure investigation, returned:
+
+- `ROCKY_9_8_CT790_RUNNING_READ_ONLY_INVENTORY_RECORDED`
+  with `container_status=RUNNING`, `systemd_state=running`,
+  `failed_unit_output_lines=0`,
+  `systemd_health=RUNNING_WITH_ZERO_FAILED_UNIT_LINES`.
+- CT790 still had no non-loopback interfaces and retained its
+  nonidentity user namespace. CT701 was unchanged.
+- The first nested read-only audit was healthy; the older,
+  stricter single-current-failed-unit diagnosis then
+  **correctly blocked** because the state was no longer
+  `degraded`. Recap: `venombox ok=17 changed=0 failed=1`.
+- **No shutdown, `reset-failed`, restart or template conversion**
+  was executed by the user's diagnostic playbook.
+
+The transition to `running` does not establish whether the
+failed DNF unit retried successfully, systemd garbage-collected
+its unit state, or some other process intervened. It is
+incorrect to state that the incident was caused by offline DNS
+without examining historical evidence.
+
+The DNF journal read-only playbook was corrected so its
+same-run guard imports the running-container isolation check,
+**requires current `systemd=running` with zero failed units**,
+and reads only the previously scoped **historical**
+`dnf-makecache.service` journal time range. No service state
+changes are needed and the earlier strict failed-unit
+diagnostic is left intact for future contemporaneous failures.
+The resulting categories remain evidence classifications only.
+A failing journal read or missing historical messages is
+not authority to restart the service or relax isolation.
+
+The separately gated orderly shutdown proposal
+`shutdown-rocky-9-8-ct790-offline.yml` remains
+**unapproved**. It may be eligible for its default read-only
+plan inspection now that healthy systemd is observed,
+but any actual shutdown still requires a separate explicit
+CT790-only approval.
