@@ -33,6 +33,9 @@ on:
       - 'ansible/playbooks/shutdown-rocky-9-8-ct790-dnf-exception-offline.yml'
       - 'ansible/playbooks/audit-rocky-9-8-ct790-postshutdown-sanitization-readonly.yml'
       - 'ansible/playbooks/plan-rocky-9-8-ct790-template-sanitization-readonly.yml'
+      - 'ansible/playbooks/audit-rocky-9-8-ct790-firstboot-identity-units-readonly.yml'
+      - 'ansible/files/nextcloud/audit_ct790_firstboot_identity_units.py'
+      - 'tests/test_rocky_lxc_ct790_firstboot_identity_units_readonly.py'
       - 'tests/test_rocky_lxc_ct790_template_sanitation_plan.py'
       - 'ansible/files/nextcloud/inventory_ct790_stopped_rootfs_sanitation.py'
       - 'tests/test_rocky_lxc_ct790_postshutdown_sanitation_readonly.py'
@@ -146,6 +149,11 @@ jobs:
           python3 -m py_compile ansible/files/nextcloud/inventory_ct790_stopped_rootfs_sanitation.py
           python3 -m unittest discover -s tests -p 'test_rocky_lxc_ct790_postshutdown_sanitation_readonly.py'
           python3 -m unittest discover -s tests -p 'test_rocky_lxc_ct790_template_sanitation_plan.py'
+          python3 -m py_compile ansible/files/nextcloud/audit_ct790_firstboot_identity_units.py
+          python3 -m unittest discover -s tests -p 'test_rocky_lxc_ct790_firstboot_identity_units_readonly.py'
+          ansible-playbook -i localhost, \
+            ansible/playbooks/audit-rocky-9-8-ct790-firstboot-identity-units-readonly.yml \
+            --syntax-check
           ansible-playbook -i localhost, \
             ansible/playbooks/plan-rocky-9-8-ct790-template-sanitization-readonly.yml \
             --syntax-check
