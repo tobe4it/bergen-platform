@@ -11,9 +11,11 @@ No services are restarted.
 - PR #112 installed an automatically scheduled NFS backup, containing
   Nextcloud files, configuration and MariaDB export, with a verified SHA-256.
 - The old mx1 Cloud is stale relative to mx2.
-- A complete isolated recovery test from Synology has NOT yet been proved.
-- MX1 cleanup must wait for restore proof, snapshot/retention review and
-  separately approved scope.
+- The **production migration/recovery onto mx2** was independently functionally
+  verified. Do not conflate that completed migration with a separate optional
+  disaster-recovery exercise restoring a later mx2 backup into CT701.
+- Any cleanup requires a current mx1 scope/dependency review, retention review,
+  explicit removal approval, and post-removal checks of mx2 and mx1 mail services.
 
 ## Execute from bp-controller
 
@@ -62,22 +64,72 @@ If wrong hostname is detected, STOP; do not override the guard.
 
 Unknown and inaccessible results are NOT proof of absence.
 
-## Isolated recovery prerequisite on venombox (separate implementation)
+## Corrected project boundary: proven production migration, optional DR exercise
 
-Create a new, network-isolated disposable test guest, not connected to live
-mx1/mx2 SQL databases, DNS identities or public services. In this guest:
-1. Verify the Synology COMPLETE, SHA256SUMS and archive.
-2. Extract nextcloud.tar.gz into a distinct test filesystem with GNU tar ACL,
-   owner and xattr support. Never extract into production.
-3. Import nextcloud.sql.gz into a new, empty, isolated MariaDB database.
-4. Preserve and review config.php secrets but replace test-only trusted
-   domains, connection settings and external side effects. No mail notifications
-   or sync with production users. Keep restored cron disabled.
-5. Confirm the copied Nextcloud version starts, schema is valid, and representative
-   files and public share metadata are present. Run app/ACL checks appropriate
-   to the test guest and document recovery time and blockers.
-6. Record results before approving ANY deletion from mx1.
+The Nextcloud migration/recovery onto `mx2` and its operational checks were
+**already completed**. `mx2` now serves the live Cloud; `mx1` is a stale
+post-cutover copy and must **not** be reintroduced as a writable fallback.
+The fact that both installations were previously observed at version
+31.0.14.1 does not make their databases and file trees interchangeable.
 
-After restore success and separate operator approval, develop a guarded cleanup
-PR, preserving Postfix, Dovecot, certificates with remaining consumers,
-WireGuard, mail data, and the historical archives for the retention period.
+A **new** isolated exercise restoring the latest `mx2` backup in CT701
+is useful disaster-recovery assurance, but **is not a newly imposed
+prerequisite** to removing the old `mx1` installation. Keep the CT701
+and CT790 workstreams separate from this retirement.
+
+The following still require dedicated review before any delete action:
+- Current verified `mx2` production health and the already recorded
+  production cutover/recovery evidence; preserve usable `mx2` backup copies.
+- Exact obsolete `mx1` application tree and its `data` subtree: ensure
+  no unrelated service, nested mount, external storage, or host symlink
+  would be affected. The old tree is not the live Cloud.
+- MariaDB **schema `nextcloud` only**, with explicit proof it is not
+  used by mail or any other application; preserve server, accounts and
+  other schemas. No database drop is currently authorized.
+- Nginx: identify all effective Cloud vhost references and other names
+  sharing certificate lineages, proxies, include files or hooks.
+  Do not remove a shared certificate, webserver or renewal hook.
+- Cron and service/timer inventory: only verified Nextcloud-specific
+  entries can later be proposed for removal. Preserve system-wide
+  PHP-FPM, MariaDB, nginx, Postfix, Dovecot, WireGuard and mail delivery.
+- Confirm independent historic backup retention needs and rollback plan
+  for unintended effects, then request **a separate exact-scope removal
+  approval**. No blanket removal or package purge.
+
+### Recorded mx1 live read-only audit, 19 October 2026
+
+The existing playbook
+`ansible/playbooks/audit-mx1-nextcloud-retirement-readonly.yml`
+was executed against the independently hostname-verified legacy mx1.
+Operator receipt: `MX1_NEXTCLOUD_RETIREMENT_READ_ONLY_COMPLETE`,
+`changed=0 failed=0`. The sanitized findings were:
+
+| Item | Observed |
+| --- | --- |
+| Legacy Nextcloud `occ` and config | Present |
+| Old installation tree | Approximately 9.5 GB |
+| Old `data` subtree | Approximately 8.2 GB |
+| MariaDB schema `nextcloud` | Present |
+| Nextcloud `occ` | 31.0.14.1, maintenance enabled; no DB upgrade needed |
+| Active Nextcloud cron entries | 0 in apache and root crontabs |
+| Nginx | Active, effective config valid; two Cloud-vhost candidates, five Cloud references |
+| PHP-FPM / MariaDB | Active; shared services must remain |
+| Postfix / Dovecot | Active; must remain |
+| Collabora container matches | 0 |
+
+This report is an **inventory**, not a safe deletion manifest:
+the two Nginx candidates, five references, ownership of shared
+runtime services, unknown other vhosts/cert consumers and exact
+obsolete schema ownership need a narrower review before a deletion
+plan is executable. No live cleanup was performed.
+
+### Separate disaster-recovery project
+
+An additional offline restore of a completed `mx2` Synology snapshot,
+with isolated filesystem and MariaDB, remains a distinct
+`Nextcloud DR` test. It can improve recovery assurance and provide
+a measured RTO, but it does not retroactively invalidate the
+already verified successful production migration to `mx2`.
+
+No commands in this document authorize deletion on `mx1`
+or deployment changes on `mx2`.
