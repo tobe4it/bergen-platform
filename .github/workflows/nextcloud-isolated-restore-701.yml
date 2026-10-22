@@ -31,6 +31,9 @@ on:
       - 'ansible/playbooks/audit-rocky-9-8-ct790-running-readonly.yml'
       - 'ansible/playbooks/shutdown-rocky-9-8-ct790-offline.yml'
       - 'ansible/playbooks/diagnose-rocky-9-8-ct790-failed-unit-readonly.yml'
+      - 'ansible/playbooks/diagnose-rocky-9-8-ct790-dnf-journal-readonly.yml'
+      - 'ansible/files/nextcloud/classify_ct790_dnf_makecache_journal.py'
+      - 'tests/test_rocky_lxc_ct790_dnf_journal_readonly.py'
       - 'ansible/files/nextcloud/parse_ct790_failed_unit.py'
       - 'tests/test_rocky_lxc_ct790_failed_unit_diagnostic.py'
       - 'tests/test_rocky_lxc_ct790_shutdown_plan.py'
@@ -134,6 +137,11 @@ jobs:
           python3 -m unittest discover -s tests -p 'test_rocky_lxc_ct790_shutdown_plan.py'
           python3 -m py_compile ansible/files/nextcloud/parse_ct790_failed_unit.py
           python3 -m unittest discover -s tests -p 'test_rocky_lxc_ct790_failed_unit_diagnostic.py'
+          python3 -m py_compile ansible/files/nextcloud/classify_ct790_dnf_makecache_journal.py
+          python3 -m unittest discover -s tests -p 'test_rocky_lxc_ct790_dnf_journal_readonly.py'
+          ansible-playbook -i localhost, \
+            ansible/playbooks/diagnose-rocky-9-8-ct790-dnf-journal-readonly.yml \
+            --syntax-check
           ansible-playbook -i localhost, \
             ansible/playbooks/diagnose-rocky-9-8-ct790-failed-unit-readonly.yml \
             --syntax-check
