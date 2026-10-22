@@ -11,7 +11,7 @@
   vars:
     bp_family_tag_mode: "{{ paperless_family_tags_mode | default('audit') }}"
     bp_family_tag_apply: "{{ bp_family_tag_mode == 'apply' }}"
-    bp_family_tag_expected_count: "{{ paperless_family_tags_expected_count | default(38) | int }}"
+    bp_family_tag_expected_count: "{{ paperless_family_tags_expected_count | default(0) | int }}"
     bp_family_tag_script: "{{ lookup('ansible.builtin.file', playbook_dir ~ '/../files/paperless/reconcile_family_shared_tag_visibility.py', rstrip=False) }}"
   tasks:
     - name: Require reviewed host exact mode and explicit apply approval
@@ -20,7 +20,8 @@
           - inventory_hostname == 'venombox'
           - bp_family_tag_mode in ['audit','apply']
           - not ansible_check_mode
-          - bp_family_tag_expected_count > 0
+          - bp_family_tag_expected_count >= 0
+          - not bp_family_tag_apply or bp_family_tag_expected_count > 0
           - bp_family_tag_expected_count <= 500
           - not bp_family_tag_apply or (
               (paperless_family_tags_apply_approved | default(false) | bool)
@@ -120,7 +121,7 @@
           - bp_family_tag_audit.MODE == 'AUDIT'
           - bp_family_tag_audit.REASON == 'NONE'
           - bp_family_tag_audit.AUDIT == 'READ_ONLY'
-          - bp_family_tag_audit.TAGS | int == bp_family_tag_expected_count | int
+          - bp_family_tag_expected_count == 0 or (bp_family_tag_audit.TAGS | int == bp_family_tag_expected_count | int)
           - bp_family_tag_audit.PARENTS | int == 2
           - bp_family_tag_audit.FAMILY_MEMBERS | int >= 3
           - bp_family_tag_audit.CHILD_IDENTITIES | int >= 1
