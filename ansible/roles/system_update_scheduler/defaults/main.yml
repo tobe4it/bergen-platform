@@ -1,0 +1,6 @@
+---
+system_update_scheduler_user: ansible
+system_update_scheduler_repo: /home/ansible/bergen-platform-updates
+system_update_scheduler_config: /home/ansible/.config/bergen-updates/config.json
+system_update_scheduler_calendar: '*-*-* 04:15:00 Europe/Berlin'
+system_update_scheduler_watchdog: false

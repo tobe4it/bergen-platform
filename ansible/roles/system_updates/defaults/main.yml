@@ -1,0 +1,5 @@
+---
+system_updates_apply: false
+system_updates_restart_services: []
+system_updates_health_urls: []
+system_updates_dnf_metadata_verified: false

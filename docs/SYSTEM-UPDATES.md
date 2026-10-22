@@ -1,0 +1,186 @@
+# Daily OS security updates and change reports
+
+Status: implementation; live deployment and delivery must be verified on the
+controller. Nothing in this change asserts that production PHP is patched.
+
+## Scope and policy
+
+The runner enumerates **all hosts in all configured inventories**, including hosts
+without host variables. This is not network discovery: unlisted machines need to
+be added to the local inventory. The historical inventory contains an `ansible-old`
+local alias: exclude it explicitly if it duplicates the current controller.
+Existing MQ systems live in a separate repository; this does not change MQ policy.
+
+Each host has one explicit policy in a private JSON file: `security`, `audit`, or
+`excluded` (with reason). Unknown hosts default to audit and are reported. Put an
+explicit low-impact security host in `canaries`; subsequent hosts are processed
+sequentially. A failed/unreachable host stops further installations, but other
+hosts are still audited. Audit refreshes metadata; it does not install packages.
+
+Proxmox nodes, controllers, database servers and appliances should initially use
+`audit` until their application-specific checks, maintenance and backup policy
+are established. No automatic reboot, repository change, crypto-policy change,
+major application upgrade or container image replacement is performed. Weekly
+nonsecurity updates are not implemented by this security-only workflow.
+
+### Security coverage
+
+APT uses python3-apt, trusted Debian/Debian-Security or Ubuntu origins for the
+running release's security suite, exact versions, held-package detection,
+`--only-upgrade`, `--no-remove` and a simulated transaction before installation.
+Dependencies may also change; the before/after package inventory records them.
+APT preferences/repository suitability must be reviewed before enabling a host.
+Configuration files are preserved with force-confdef/force-confold; .dpkg-dist
+files may need manual reconciliation. Third-party/ESM suites are not covered.
+
+DNF uses Ansible's security filter and requires `dnf_metadata_verified: true` only
+after checking that relevant repositories publish usable updateinfo. Zero
+candidates never proves that third-party software has no vulnerabilities.
+Requires the distribution's Python DNF bindings. DNF5 needs compatible Ansible.
+
+Reboot reporting uses Debian's marker where present and DNF needs-restarting.
+A missing Debian marker is only a marker result, not proof that all processes use
+new libraries; nonstandard kernels/services need separate checks. The standalone `/usr/bin/needs-restarting` checker is used when installed; its
+absence is treated as unknown, not a clean result. LXC kernel updates belong
+to the host. No automatic rollback is attempted after partial transactions.
+
+## Controller prerequisites
+
+- Dedicated clean checkout of this branch/commit (no automatic git pull in timer).
+- Python 3 and ansible-core 2.19.x in the existing controller virtualenv.
+- Existing inventory files, verified SSH host keys, noninteractive SSH and become.
+- If needed, `vault_password_file` points to an existing private, noninteractive
+  credential file; never pass passwords on command lines or store in Git.
+- A current recoverable backup according to each application's policy. This
+  workflow does not create or independently prove backups.
+- Debian/Ubuntu: python3-apt already installed on managed hosts.
+
+## Private configuration
+
+Use `scripts/configure_system_updates.py --help` to create the private configuration
+with a hidden SMTP password prompt, or copy
+`ansible/examples/system-updates/config.json.example` to
+`~/.config/bergen-updates/config.json`, mode 0600; directory mode 0700. Replace
+absolute paths for the actual controller account and available inventory files.
+Set SMTP host, username, sender and recipient to the agreed Bergen-Mail values.
+Password belongs in a separate mode-0600 file referenced by `password_file`.
+No password is printed or included in mail reports. STARTTLS and certificate
+verification are mandatory. The runner never sends through Gmail.
+
+A host policy looks like this (replace service/URL placeholders with live values):
+
+```json
+"policies": {
+  "canary-host": {
+    "mode": "security",
+    "restart_services": ["php8.2-fpm", "nginx"],
+    "health_urls": ["https://application.example.net/status.php"]
+  },
+  "hypervisor": {"mode": "audit"},
+  "old-alias": {"mode": "excluded", "reason": "Duplicate controller alias"}
+},
+"canaries": ["canary-host"]
+```
+
+Service names and URLs are illustrative, not auto-detected live facts. All listed
+health URLs must return HTTP 200 with valid TLS before/after the transaction.
+Checks run from the managed host; choose unauthenticated minimal health endpoints
+without secrets in URLs. Include every relevant long-running consumer in restart
+policy. Package scripts can also restart services during installation. Security
+hosts without restart/check policy are rejected before updating anything.
+
+## First run and activation
+
+From the clean dedicated checkout:
+
+```sh
+python3 scripts/system_updates.py --config "$HOME/.config/bergen-updates/config.json" --audit-only
+```
+
+Confirm inventory completeness, operating systems, security source coverage,
+backups, service checks, and actual delivery to the recipient. Update the private
+host policies, then execute the first policy run:
+
+```sh
+python3 scripts/system_updates.py --config "$HOME/.config/bergen-updates/config.json"
+```
+
+Install the scheduler using the existing virtualenv and inventory. The role
+requires a private config owned by `ansible` and a clean checkout at
+`/home/ansible/bergen-platform-updates` by default. Override role variables for
+other paths/accounts. Never copy the example paths blindly to a different user.
+
+```sh
+../bergen-platform/.venv/bin/ansible-playbook \
+  -i ../bergen-platform/ansible/inventory.yml \
+  ansible/playbooks/install-system-update-scheduler.yml --limit bp-controller
+systemctl status bergen-system-updates.timer
+systemctl list-timers bergen-system-updates.timer
+```
+
+Default: daily **04:15 Europe/Berlin**, up to five minutes randomized delay,
+missed runs caught up after reboot. Installation enables the timer; an immediate
+manual first run above verifies actual operation. Existing apt/dnf timers are not
+disabled. Avoid overlapping patch managers; package locks are never removed.
+
+## Change evidence and failure handling
+
+Every run writes mode-0600 JSON, text, HTML and MIME mail into a private run
+subdirectory. The report includes UTC start/end, unique ID, Git commit, config
+fingerprint, per-host policy/status, package before/after differences, explicit
+service restarts, reboot marker, checks, pending holds and follow-up priorities.
+No raw Ansible output, environment or inventory hostvars is attached. Advisory/CVE
+IDs are explicitly marked uncollected; no unsupported CVE-remediation claim.
+
+The SMTP delivery record distinguishes server acceptance from actual inbox
+receipt. Run exit codes: 0 completed (may contain warnings), 1 update/observer
+failure, 2 delivery failure, 3 overlapping run. Failed mail keeps the original
+report. Retry **mail only**, without rerunning package transactions:
+
+```sh
+python3 scripts/system_updates.py --config "$HOME/.config/bergen-updates/config.json" \
+  --retry-report "$HOME/.local/state/bergen-updates/RUN_ID/report.json"
+```
+
+A timeout means remote state is unknown; inspect package manager processes/locks
+before another run. The systemd journal records bounded failure categories.
+Private reports have no automatic retention deletion; include them in storage
+capacity/retention policy. Never commit reports or SMTP credentials.
+
+## Independent watchdog
+
+Install a second dedicated checkout and private SMTP config on an **independent
+machine**, not merely another service on the controller. Add this config section:
+
+```json
+"watchdog": {
+  "ssh_target": "ansible@bp-controller",
+  "heartbeat_path": "/home/ansible/.local/state/bergen-updates/last-completed.json",
+  "max_age_hours": 30
+}
+```
+
+Verify noninteractive SSH with known host keys and least-privilege read access to
+that heartbeat. Run `scripts/system_updates.py --config CONFIG --watchdog` on the
+observer. Install the same scheduler role with `system_update_scheduler_watchdog:
+true`, `system_update_scheduler_calendar: '*-*-* 09:00:00 Europe/Berlin'`, observer
+paths/user and an inventory mapping the selected observer into `controllers` for
+this installation only. It sends an alert if the controller is unreachable or the
+last completed-and-SMTP-accepted run is older than 30 hours. A fresh error report
+already alerts through the normal run. Monitoring is **not active until this
+second installation is completed**. If Bergen-Mail itself fails, independent
+mail delivery is unavailable too; use an external monitoring channel for that.
+
+## Validation
+
+```sh
+python -m unittest discover -s tests -p test_system_updates.py -v
+ansible-playbook --syntax-check ansible/playbooks/system-updates.yml
+ansible-playbook --syntax-check ansible/playbooks/install-system-update-scheduler.yml
+```
+
+Offline tests cover security origin filtering, holds, no downgrade, package
+changes, fail-stop behavior with continued reporting, unreachable hosts,
+credential omission, HTML escaping, TLS failure and independent watchdog alerts.
+They do not replace a first live audit, canary update, second idempotent run,
+application checks and mailbox receipt verification.

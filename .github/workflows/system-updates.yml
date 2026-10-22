@@ -1,0 +1,35 @@
+name: System update regression
+on:
+  pull_request:
+    paths:
+      - 'scripts/system_updates.py'
+      - 'scripts/configure_system_updates.py'
+      - 'ansible/**/system*update*'
+      - 'ansible/roles/system_updates/**'
+      - 'ansible/roles/system_update_scheduler/**'
+      - 'ansible/library/bergen_apt_security.py'
+      - 'tests/test_system_updates.py'
+      - '.github/workflows/system-updates.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'scripts/system_updates.py'
+      - 'scripts/configure_system_updates.py'
+      - 'ansible/roles/system_updates/**'
+      - 'ansible/roles/system_update_scheduler/**'
+      - 'ansible/library/bergen_apt_security.py'
+      - 'tests/test_system_updates.py'
+permissions:
+  contents: read
+jobs:
+  tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: pip install 'ansible-core>=2.19,<2.20'
+      - run: python -m unittest discover -s tests -p test_system_updates.py -v
+      - run: ansible-playbook --syntax-check ansible/playbooks/system-updates.yml
+      - run: ansible-playbook --syntax-check ansible/playbooks/install-system-update-scheduler.yml

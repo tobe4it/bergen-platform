@@ -1,0 +1,17 @@
+{
+  "inventories": ["/home/ansible/bergen-platform/ansible/inventory.yml", "/home/ansible/bergen-platform/ansible/inventory.local.yml"],
+  "ansible_inventory": "/home/ansible/bergen-platform/.venv/bin/ansible-inventory",
+  "ansible_playbook": "/home/ansible/bergen-platform/.venv/bin/ansible-playbook",
+  "state_dir": "/home/ansible/.local/state/bergen-updates",
+  "host_timeout_seconds": 3600,
+  "canaries": [],
+  "policies": {},
+  "smtp": {
+    "host": "mail.example.net",
+    "port": 587,
+    "username": "updates@example.net",
+    "password_file": "/home/ansible/.config/bergen-updates/smtp-password",
+    "sender": "updates@example.net",
+    "recipient": "operator@example.net"
+  }
+}

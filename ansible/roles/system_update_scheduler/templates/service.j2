@@ -1,0 +1,15 @@
+[Unit]
+Description=Bergen Platform {{ 'independent update watchdog' if system_update_scheduler_watchdog | bool else 'daily security updates and change report' }}
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=oneshot
+User={{ system_update_scheduler_user }}
+WorkingDirectory={{ system_update_scheduler_repo }}
+Environment=ANSIBLE_CONFIG={{ system_update_scheduler_repo }}/ansible.cfg
+ExecStart=/usr/bin/python3 {{ system_update_scheduler_repo }}/scripts/system_updates.py --config {{ system_update_scheduler_config }}{{ ' --watchdog' if system_update_scheduler_watchdog | bool else '' }}
+UMask=0077
+TimeoutStartSec=infinity
+StandardOutput=journal
+StandardError=journal

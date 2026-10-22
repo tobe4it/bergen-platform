@@ -1,0 +1,48 @@
+---
+- name: Validate scheduler paths and identity
+  ansible.builtin.assert:
+    that:
+      - system_update_scheduler_user is match('^[a-z_][a-z0-9_-]*$')
+      - system_update_scheduler_repo is match('^/[a-zA-Z0-9_./-]+$')
+      - system_update_scheduler_config is match('^/[a-zA-Z0-9_./-]+$')
+      - system_update_scheduler_calendar is match('^[a-zA-Z0-9*: ./-]+$')
+
+- name: Inspect private configuration
+  ansible.builtin.stat:
+    path: '{{ system_update_scheduler_config }}'
+  register: scheduler_config
+
+- name: Require existing private configuration owned by service account
+  ansible.builtin.assert:
+    that:
+      - scheduler_config.stat.exists
+      - scheduler_config.stat.mode == '0600'
+      - scheduler_config.stat.pw_name == system_update_scheduler_user
+
+- name: Validate configuration without revealing secrets
+  ansible.builtin.command:
+    argv:
+      - /usr/bin/python3
+      - -c
+      - "import sys; sys.path.insert(0, sys.argv[1]); import system_updates as u; u.validate(u.private_json(sys.argv[2]))"
+      - '{{ system_update_scheduler_repo }}/scripts'
+      - '{{ system_update_scheduler_config }}'
+  become: true
+  become_user: '{{ system_update_scheduler_user }}'
+  changed_when: false
+  no_log: true
+
+- name: Install daily service and timer
+  ansible.builtin.template:
+    src: '{{ item }}.j2'
+    dest: "/etc/systemd/system/bergen-{{ 'updates-watchdog' if system_update_scheduler_watchdog | bool else 'system-updates' }}.{{ item }}"
+    mode: '0644'
+  loop: [service, timer]
+  register: scheduler_units
+
+- name: Enable daily timer
+  ansible.builtin.systemd:
+    name: "bergen-{{ 'updates-watchdog' if system_update_scheduler_watchdog | bool else 'system-updates' }}.timer"
+    daemon_reload: '{{ scheduler_units.changed }}'
+    enabled: true
+    state: started
