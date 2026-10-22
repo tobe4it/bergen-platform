@@ -85,8 +85,9 @@ class TemplateSanitationPlanTests(unittest.TestCase):
             "pct_template_authorized: false",
             "apply_authorized: false",
             "KEEP_INTACT_FOR_NETWORKED_CLONES_UNLESS_SEPARATELY_APPROVED",
+            "PREFER_EMPTY_MACHINE_ID_FOR_UNIQUE_CLONE_ID_WITHOUT_FIRSTBOOT_AFTER_CLONE_TEST",
             "INVESTIGATE_CONTENTS_DO_NOT_DELETE_DIRECTORY",
-            "REMOVE_EXACT_VERIFIED_HOST_KEY_PAIRS_ONLY_AFTER_FIRST_BOOT_REGENERATION_PROOF",
+            "REMOVE_EXACT_VERIFIED_HOST_KEY_PAIRS_ONLY_AFTER_CONFIRMING_NO_SSHD_AND_OPTIONAL_CLONE_PROVISIONING",
         ):
             self.assertIn(proof, self.raw)
 
