@@ -1,0 +1,106 @@
+---
+# No-write-only CT790 backup provenance gate. Existing NFS mounts only.
+# Any snapshot/vzdump findings are candidate metadata, NOT restore proof.
+- import_playbook: audit-rocky-9-8-ct790-sanitization-targets-readonly.yml
+
+- name: Review existing CT790 rollback candidates without storage mutations
+  hosts: venombox
+  become: true
+  gather_facts: false
+  any_errors_fatal: true
+  tasks:
+    - name: Require independently verified same-run CT790/CT701, ZFS and candidate-file scopes
+      ansible.builtin.assert:
+        that:
+          - inventory_hostname == 'venombox'
+          - rocky_post_host.stdout == 'venombox'
+          - "'status: stopped' in rocky_targets_after_status.stdout_lines"
+          - rocky_targets_ct701_after.stdout == rocky_post_ct701.stdout
+          - rocky_post_dataset is match('^rpool/data/subvol-790-disk-[0-9]+$')
+          - rocky_post_rootfs_path.stdout | trim is match('^/rpool/data/subvol-790-disk-[0-9]+$')
+          - rocky_sanitation_mounted.stdout | trim == 'yes'
+          - rocky_sanitation_findmnt.stdout == rocky_release_findmnt.stdout
+          - (rocky_targets_probe.stdout | from_json).result == 'ROCKY_9_8_CT790_EXACT_SANITATION_TARGETS_READ_ONLY_INVENTORIED'
+          - not ansible_check_mode
+        fail_msg: Snapshot and backup inventory requires same-run stopped and isolated CT790 proofs.
+
+    - name: Verify stopped CT790 before read-only backup inventory
+      ansible.builtin.command:
+        argv: [pct, status, '790']
+      changed_when: false
+      register: rocky_backup_before_status
+
+    - name: Refuse any unexpected CT790 start
+      ansible.builtin.assert:
+        that:
+          - "'status: stopped' in rocky_backup_before_status.stdout_lines"
+
+    - name: Inspect only CT790 snapshot metadata and preexisting NFS backup candidates
+      ansible.builtin.command:
+        argv:
+          - python3
+          - -c
+          - "{{ lookup('ansible.builtin.file', playbook_dir ~ '/../files/nextcloud/audit_ct790_backup_candidates_readonly.py') }}"
+          - "{{ rocky_post_dataset }}"
+      changed_when: false
+      failed_when: false
+      no_log: true
+      register: rocky_backup_candidate_audit
+
+    - name: Demand bounded no-change backup candidate report with recovery gate closed
+      ansible.builtin.assert:
+        that:
+          - rocky_backup_candidate_audit.rc == 0
+          - rocky_backup_candidate_audit.stdout | length <= 4096
+          - (rocky_backup_candidate_audit.stdout | from_json).result == 'ROCKY_9_8_CT790_BACKUP_CANDIDATES_READ_ONLY_RECORDED'
+          - (rocky_backup_candidate_audit.stdout | from_json).vmid == 790
+          - (rocky_backup_candidate_audit.stdout | from_json).snapshot_candidates.snapshot_recovery_proven == false
+          - (rocky_backup_candidate_audit.stdout | from_json).scoped_nfs_backup_candidates.archive_integrity_proven == false
+          - (rocky_backup_candidate_audit.stdout | from_json).scoped_nfs_backup_candidates.restore_test_proven == false
+          - (rocky_backup_candidate_audit.stdout | from_json).backup_recoverability_proven == false
+          - (rocky_backup_candidate_audit.stdout | from_json).sanitation_authorized == false
+          - (rocky_backup_candidate_audit.stdout | from_json).pct_template_authorized == false
+          - (rocky_backup_candidate_audit.stdout | from_json).files_written == 0
+          - (rocky_backup_candidate_audit.stdout | from_json).mount_operations == 0
+          - (rocky_backup_candidate_audit.stdout | from_json).guest_started == false
+        fail_msg: Backup metadata survey unsafe; no guest writes or cleanup.
+
+    - name: Verify CT790 remains stopped after backup candidate inspection
+      ansible.builtin.command:
+        argv: [pct, status, '790']
+      changed_when: false
+      register: rocky_backup_after_status
+
+    - name: Require no CT790 startup
+      ansible.builtin.assert:
+        that:
+          - "'status: stopped' in rocky_backup_after_status.stdout_lines"
+
+    - name: Verify CT701 configuration remains unchanged
+      ansible.builtin.command:
+        argv: [pct, config, '701']
+      changed_when: false
+      no_log: true
+      register: rocky_backup_ct701_after
+
+    - name: Require protected CT701 still unchanged
+      ansible.builtin.assert:
+        that:
+          - rocky_backup_ct701_after.stdout == rocky_post_ct701.stdout
+
+    - name: Report backup candidates but never claim restore eligibility
+      ansible.builtin.debug:
+        msg:
+          result: ROCKY_9_8_CT790_BACKUP_CANDIDATES_READ_ONLY_RECORDED
+          vmid: 790
+          snapshot_candidates: "{{ (rocky_backup_candidate_audit.stdout | from_json).snapshot_candidates }}"
+          scoped_nfs_backup_candidates: "{{ (rocky_backup_candidate_audit.stdout | from_json).scoped_nfs_backup_candidates }}"
+          backup_recoverability_proven: false
+          restore_test_performed: false
+          ct790_status: STOPPED
+          ct701_config_unchanged: true
+          files_written: 0
+          mount_operations: 0
+          sanitation_authorized: false
+          pct_template_authorized: false
+          next_gate: Restore-proof remains unverified; review snapshot/backup scope, test recovery in approved disposable target, then separately approve sanitation.
