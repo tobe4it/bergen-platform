@@ -238,3 +238,36 @@ failure prevents a premature restore or timer activation. Do not
 allowlist any override for CT826 merely based on its category.
 Review actual required LXC runtime functionality **privately** and
 design a stripped no-network test configuration with a separate approval.
+
+
+## Phase D.5: Exact FUSE-pattern recognition without copying device access
+
+The archived CT126 configuration has been confirmed to contain exactly
+two extra LXC settings classified only as one \`CGROUP_DEVICE_OVERRIDE\`
+and one \`MOUNT_OVERRIDE\`. This is consistent with, but does not prove,
+a FUSE host-device allowance.
+
+A further **read-only** pinned-backup audit compares the *in-memory*
+values to an exact narrow FUSE pattern: device rule
+\`c 10:229 rwm\` and an LXC mount for \`/dev/fuse\` with explicitly
+recognized bind and create-file options. No actual archive key/value
+or host path is emitted. Only these fixed results appear:
+
+- \`CGROUP_DEVICE_PROFILE=EXACT_FUSE_DEVICE_10_229\` or
+  \`OTHER_OR_MISSING_CGROUP_RULE\`;
+- \`MOUNT_ENTRY_PROFILE=EXACT_FUSE_DEVICE_BIND\` or
+  \`OTHER_OR_MISSING_MOUNT_RULE\`;
+- \`FUSE_PAIR_PROFILE=MATCHES_KNOWN_FUSE_PATTERN\` or
+  \`NOT_PROVEN\`.
+
+**A known FUSE pair does not authorize restore or passthrough.**
+The inspection deliberately stays \`STATUS=BLOCKED\` and Ansible
+\`failed=1,changed=0\`. The proposed test clone must omit inherited
+raw LXC device and mount rules, and must have no NIC before first boot.
+Whether PostgreSQL and Podman can run without FUSE requires a
+separate isolated integration test; do not assume either way.
+
+Proxmox documentation: normal restore reuses backed-up config;
+advanced restore overrides rootfs/mpX. A safe no-network lifecycle
+needs independently verified configuration before the test guest
+can ever start.
