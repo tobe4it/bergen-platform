@@ -30,6 +30,8 @@ on:
       - 'ansible/playbooks/start-rocky-9-8-ct790-offline.yml'
       - 'ansible/playbooks/audit-rocky-9-8-ct790-running-readonly.yml'
       - 'ansible/playbooks/shutdown-rocky-9-8-ct790-offline.yml'
+      - 'ansible/playbooks/shutdown-rocky-9-8-ct790-dnf-exception-offline.yml'
+      - 'tests/test_rocky_lxc_ct790_dnf_shutdown_exception.py'
       - 'ansible/playbooks/diagnose-rocky-9-8-ct790-failed-unit-readonly.yml'
       - 'ansible/playbooks/diagnose-rocky-9-8-ct790-dnf-journal-readonly.yml'
       - 'ansible/files/nextcloud/classify_ct790_dnf_makecache_journal.py'
@@ -135,6 +137,10 @@ jobs:
           python3 -m unittest discover -s tests -p 'test_rocky_lxc_ct790_firstboot_plan.py'
           python3 -m unittest discover -s tests -p 'test_rocky_lxc_ct790_running_readonly.py'
           python3 -m unittest discover -s tests -p 'test_rocky_lxc_ct790_shutdown_plan.py'
+          python3 -m unittest discover -s tests -p 'test_rocky_lxc_ct790_dnf_shutdown_exception.py'
+          ansible-playbook -i localhost, \
+            ansible/playbooks/shutdown-rocky-9-8-ct790-dnf-exception-offline.yml \
+            --syntax-check
           python3 -m py_compile ansible/files/nextcloud/parse_ct790_failed_unit.py
           python3 -m unittest discover -s tests -p 'test_rocky_lxc_ct790_failed_unit_diagnostic.py'
           python3 -m py_compile ansible/files/nextcloud/classify_ct790_dnf_makecache_journal.py
