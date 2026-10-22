@@ -1,0 +1,128 @@
+---
+# No-write review of exact per-instance identity metadata on CT790.
+# Same-run 65-task stopped/rootfs/firstboot/CT701 provenance audit.
+# No pct start/exec/mount/template, zfs mount, cleanup or host-key contents.
+- import_playbook: audit-rocky-9-8-ct790-firstboot-identity-units-readonly.yml
+
+- name: Verify exact candidate files and policy decisions for stopped Rocky 9.8 CT790
+  hosts: venombox
+  become: true
+  gather_facts: false
+  any_errors_fatal: true
+  tasks:
+    - name: Require same-run stopped exact guest, SSH-unit and existing rootfs proofs
+      ansible.builtin.assert:
+        that:
+          - inventory_hostname == 'venombox'
+          - rocky_post_host.stdout == 'venombox'
+          - "'status: stopped' in rocky_identity_after_status.stdout_lines"
+          - "'status: stopped' in rocky_post_state.stdout_lines"
+          - rocky_post_rootfs_path.stdout | trim is match('^/rpool/data/subvol-790-disk-[0-9]+$')
+          - rocky_sanitation_mounted.stdout | trim == 'yes'
+          - rocky_sanitation_findmnt.stdout == rocky_release_findmnt.stdout
+          - "'protection: 1' in rocky_post_config.stdout_lines"
+          - "'unprivileged: 1' in rocky_post_config.stdout_lines"
+          - "'onboot: 0' in rocky_post_config.stdout_lines"
+          - "'template: 1' not in rocky_post_config.stdout_lines"
+          - rocky_identity_ct701_after.stdout == rocky_post_ct701.stdout
+          - (rocky_sanitation_survey.stdout | from_json).categories.etc_machine_id.state == 'SET_32HEX'
+          - (rocky_sanitation_survey.stdout | from_json).categories.ssh_host_keys.ssh_host_private_key_name_count == 3
+          - (rocky_sanitation_survey.stdout | from_json).categories.ssh_host_keys.ssh_host_public_key_name_count == 3
+          - (rocky_sanitation_survey.stdout | from_json).categories.systemd_random_seed.size_nonzero
+          - (rocky_identity_unit_audit.stdout | from_json).executables.sshd_daemon.state == 'ABSENT'
+          - (rocky_identity_unit_audit.stdout | from_json).executables.sshd_keygen_helper.state == 'ABSENT'
+          - (rocky_identity_unit_audit.stdout | from_json).executables.ssh_keygen_binary.executable_by_any
+        fail_msg: Exact stopped CT790 and firstboot unit proofs required; do not change guest.
+
+    - name: Recheck guest stopped directly before exact identity metadata inspection
+      ansible.builtin.command:
+        argv: [pct, status, '790']
+      changed_when: false
+      register: rocky_targets_before_status
+
+    - name: Refuse unexpected startup
+      ansible.builtin.assert:
+        that:
+          - "'status: stopped' in rocky_targets_before_status.stdout_lines"
+
+    - name: Inspect exact host key file metadata, machine ID and timer state without content reads
+      ansible.builtin.command:
+        argv:
+          - python3
+          - -c
+          - "{{ lookup('ansible.builtin.file', playbook_dir ~ '/../files/nextcloud/audit_ct790_sanitation_targets.py') }}"
+          - "{{ rocky_post_rootfs_path.stdout | trim }}"
+      changed_when: false
+      failed_when: false
+      no_log: true
+      register: rocky_targets_probe
+
+    - name: Require sanitized bounded fixed file metadata with no guest writes
+      ansible.builtin.assert:
+        that:
+          - rocky_targets_probe.rc == 0
+          - rocky_targets_probe.stdout | length <= 10000
+          - (rocky_targets_probe.stdout | from_json).result == 'ROCKY_9_8_CT790_EXACT_SANITATION_TARGETS_READ_ONLY_INVENTORIED'
+          - (rocky_targets_probe.stdout | from_json).vmid == 790
+          - (rocky_targets_probe.stdout | from_json).fixed_files_inspected == 9
+          - (rocky_targets_probe.stdout | from_json).fixed_directories_inspected == 5
+          - (rocky_targets_probe.stdout | from_json).host_key_files | length == 6
+          - (rocky_targets_probe.stdout | from_json).directory_metadata | length == 5
+          - not (rocky_targets_probe.stdout | from_json).ssh_key_contents_read
+          - not (rocky_targets_probe.stdout | from_json).machine_id_contents_read
+          - not (rocky_targets_probe.stdout | from_json).arbitrary_names_disclosed
+          - (rocky_targets_probe.stdout | from_json).files_written == 0
+          - (rocky_targets_probe.stdout | from_json).mount_operations == 0
+          - not (rocky_targets_probe.stdout | from_json).guest_started
+          - not (rocky_targets_probe.stdout | from_json).sanitation_authorized
+          - not (rocky_targets_probe.stdout | from_json).template_authorized
+        fail_msg: Unexpected or unbounded metadata, refuse all proposed cleanup.
+
+    - name: Recheck CT790 stopped state after exact metadata survey
+      ansible.builtin.command:
+        argv: [pct, status, '790']
+      changed_when: false
+      register: rocky_targets_after_status
+
+    - name: Require CT790 remained stopped
+      ansible.builtin.assert:
+        that:
+          - "'status: stopped' in rocky_targets_after_status.stdout_lines"
+
+    - name: Recheck protected CT701 config unchanged
+      ansible.builtin.command:
+        argv: [pct, config, '701']
+      changed_when: false
+      no_log: true
+      register: rocky_targets_ct701_after
+
+    - name: Require CT701 config did not drift
+      ansible.builtin.assert:
+        that:
+          - rocky_targets_ct701_after.stdout == rocky_post_ct701.stdout
+
+    - name: Report candidate metadata and noninteractive firstboot strategy only
+      ansible.builtin.debug:
+        msg:
+          result: ROCKY_9_8_CT790_EXACT_SANITATION_TARGETS_READ_ONLY_RECORDED
+          vmid: 790
+          guest_status: STOPPED
+          rocky_version: '9.8'
+          machine_id: "{{ (rocky_targets_probe.stdout | from_json).machine_id_metadata }}"
+          ssh_host_key_pairs_exact: "{{ (rocky_targets_probe.stdout | from_json).host_key_exact_pairs_present }}"
+          ssh_host_key_file_metadata: "{{ (rocky_targets_probe.stdout | from_json).host_key_files }}"
+          random_seed: "{{ (rocky_targets_probe.stdout | from_json).random_seed_metadata }}"
+          dnf_timer_stamp: "{{ (rocky_targets_probe.stdout | from_json).dnf_timer_stamp_metadata }}"
+          directory_metadata: "{{ (rocky_targets_probe.stdout | from_json).directory_metadata }}"
+          machine_id_policy: REVIEW_EMPTY_FILE_FOR_NONINTERACTIVE_PER_CLONE_ID_NOT_SYSTEMD_FIRSTBOOT
+          ssh_policy: OPTIONAL_ONLY_NO_SSHD_OR_AUTOREGENERATION_PROVEN
+          dnf_database_policy: PRESERVE_UNTIL_SEPARATELY_REVIEWED
+          networkmanager_runtime_policy: PRESERVE_UNTIL_SEPARATELY_REVIEWED
+          file_writes: 0
+          new_mount_created: false
+          guest_started: false
+          ct701_config_unchanged: true
+          sanitation_complete: false
+          sanitation_authorized: false
+          pct_template_authorized: false
+          next_gate: Review exact candidate metadata including any symlinks, hardlinks and unexpected names; separately approve and prove a fail-closed idempotent cleanup with backup before template conversion.
