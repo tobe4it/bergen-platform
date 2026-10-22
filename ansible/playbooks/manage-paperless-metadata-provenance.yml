@@ -1,0 +1,281 @@
+---
+# Paperless 3.3.0: native view-metadata reconciliation, read-only by default.
+# Apply requires reviewed exact inventory counters AND recent NFS backup.
+# This playbook NEVER installs/enables timers, alters documents or their ACLs.
+- name: Audit or explicitly bootstrap provenance-safe Paperless metadata grants
+  hosts: venombox
+  become: true
+  gather_facts: false
+  vars:
+    bp_tax_mode: "{{ paperless_taxonomy_mode | default('audit') }}"
+    bp_tax_apply: "{{ bp_tax_mode == 'apply' }}"
+    bp_tax_script: "{{ lookup('ansible.builtin.file', playbook_dir ~ '/../files/paperless/reconcile_metadata_with_provenance.py', rstrip=False) }}"
+    bp_tax_expected:
+      documents: "{{ paperless_taxonomy_expected_documents | default(-1) | int }}"
+      users: "{{ paperless_taxonomy_expected_users | default(-1) | int }}"
+      tags: "{{ paperless_taxonomy_expected_tags | default(-1) | int }}"
+      type_gaps: "{{ paperless_taxonomy_expected_type_gaps | default(-1) | int }}"
+      corr_gaps: "{{ paperless_taxonomy_expected_correspondent_gaps | default(-1) | int }}"
+      tag_gaps: "{{ paperless_taxonomy_expected_tag_gaps | default(-1) | int }}"
+      managed_revocations: "{{ paperless_taxonomy_expected_managed_revocations | default(-1) | int }}"
+      thomas_private: "{{ paperless_taxonomy_expected_thomas_private | default(-1) | int }}"
+    bp_tax_frame: "BERGEN_PAPERLESS_METADATA_RECONCILER_V1:"
+  tasks:
+    - name: Require an exact host and independent change approval
+      ansible.builtin.assert:
+        that:
+          - inventory_hostname == 'venombox'
+          - not ansible_check_mode
+          - bp_tax_mode in ['audit','apply']
+          - not (paperless_family_tags_apply_approved | default(false) | bool)
+          - not (paperless_linked_metadata_apply_approved | default(false) | bool)
+          - not (paperless_chat_proxy_apply_approved | default(false) | bool)
+          - not bp_tax_apply or (paperless_taxonomy_apply_approved | default(false) | bool)
+          - not bp_tax_apply or (paperless_taxonomy_database_ledger_approved | default(false) | bool)
+          - not bp_tax_apply or (paperless_ai_catalog_verified_backup | default(false) | bool)
+          - not bp_tax_apply or (bp_tax_expected.documents | int > 0)
+          - not bp_tax_apply or (bp_tax_expected.users | int >= 3)
+          - not bp_tax_apply or (bp_tax_expected.tags | int >= 0)
+          - not bp_tax_apply or (bp_tax_expected.thomas_private | int > 0)
+          - not bp_tax_apply or (bp_tax_expected.type_gaps | int >= 0)
+          - not bp_tax_apply or (bp_tax_expected.corr_gaps | int >= 0)
+          - not bp_tax_apply or (bp_tax_expected.tag_gaps | int >= 0)
+          - not bp_tax_apply or (bp_tax_expected.managed_revocations | int >= 0)
+        fail_msg: PAPERLESS_METADATA_PROVENANCE_APPLY_NOT_APPROVED
+      no_log: true
+
+    - name: Check actual Paperless CT126 confinement
+      ansible.builtin.command:
+        argv: [pct, config, '126']
+      changed_when: false
+      register: bp_tax_ct
+      no_log: true
+
+    - name: Reject unexpected or privileged database guest
+      ansible.builtin.assert:
+        that:
+          - bp_tax_ct.rc == 0
+          - "'hostname: bergen-paperless' in bp_tax_ct.stdout_lines"
+          - "'unprivileged: 1' in bp_tax_ct.stdout_lines"
+          - "'lxc.apparmor.profile: unconfined' not in bp_tax_ct.stdout"
+          - "bp_tax_ct.stdout_lines | select('match', '^rootfs: local-zfs:') | list | length == 1"
+          - "bp_tax_ct.stdout_lines | select('match', '^mp0: local-zfs:.*mp=/srv/bergen-paperless,backup=1(,|$)') | list | length == 1"
+        fail_msg: PAPERLESS_METADATA_PROVENANCE_GUEST_NOT_REVIEWED
+      no_log: true
+
+    - name: Require a recent NFS CT126 backup before writing provenance or grants
+      ansible.builtin.command:
+        argv:
+          - bash
+          - -euo
+          - pipefail
+          - -c
+          - |
+            target=/mnt/pve/bergen-synology-backup
+            fs="$(findmnt --mountpoint "$target" -n -o FSTYPE)"
+            [[ "$fs" = nfs || "$fs" = nfs4 ]]
+            find "$target/dump" -maxdepth 1 -type f \
+              -name 'vzdump-lxc-126-*.tar.zst' -mmin -2880 \
+              -size +1M -print -quit | grep -q .
+      changed_when: false
+      no_log: true
+      when: bp_tax_apply
+
+    - name: Compute exactly one read-only current metadata reconciliation plan
+      ansible.builtin.command:
+        argv:
+          - pct
+          - exec
+          - '126'
+          - --
+          - podman
+          - exec
+          - -i
+          - bergen-paperless
+          - python
+          - /usr/src/paperless/src/manage.py
+          - shell
+          - --verbosity=0
+          - -c
+          - "{{ bp_tax_script }}"
+        stdin: "{{ {'protocol':'bergen-paperless-metadata-reconciler-v1','mode':'audit','approved':false} | to_json }}"
+        stdin_add_newline: true
+      register: bp_tax_audit_raw
+      changed_when: false
+      failed_when: false
+      no_log: true
+
+    - name: Extract exactly one bounded sanitized audit report
+      ansible.builtin.set_fact:
+        bp_tax_audit_frames: >-
+          {{ bp_tax_audit_raw.stdout_lines | default([]) |
+             select('match', '^BERGEN_PAPERLESS_METADATA_RECONCILER_V1:') | list }}
+      no_log: true
+
+    - name: Refuse missing duplicate or unbounded report
+      ansible.builtin.assert:
+        that:
+          - bp_tax_audit_raw.rc == 0
+          - bp_tax_audit_frames | length == 1
+          - bp_tax_audit_frames[0] | length < 1800
+        fail_msg: PAPERLESS_METADATA_PROVENANCE_AUDIT_MISSING
+      no_log: true
+
+    - name: Parse aggregate counts and refusal codes only
+      ansible.builtin.set_fact:
+        bp_tax_audit: >-
+          {{ bp_tax_audit_frames[0] |
+             regex_replace('^BERGEN_PAPERLESS_METADATA_RECONCILER_V1:', '') | from_json }}
+      no_log: true
+
+    - name: Expose only allowlisted preflight refusal reason
+      ansible.builtin.debug:
+        msg:
+          - "STATUS={{ bp_tax_audit.STATUS if bp_tax_audit.STATUS in ['INSPECTED','BLOCKED'] else 'UNCLASSIFIED' }}"
+          - "REASON={{ bp_tax_audit.REASON | default('NONE') if
+              bp_tax_audit.REASON | default('NONE') in [
+                'NONE','REQUEST_TOO_LARGE','REQUEST_UNREVIEWED',
+                'AUDIT_GATE_UNREVIEWED','APPLY_GATE_UNREVIEWED',
+                'VERSION_UNREVIEWED','DATABASE_UNREVIEWED',
+                'FAMILY_MEMBERSHIP_UNREVIEWED','SERVICE_ACCOUNT_IN_FAMILY',
+                'PERMISSION_TARGET_UNREVIEWED','DATABASE_SCHEMA_UNREVIEWED',
+                'LEDGER_OWNER_UNVERIFIED','LEDGER_TOO_LARGE',
+                'LEDGER_CONTENT_UNREVIEWED','DOCUMENT_POPULATION_UNREVIEWED',
+                'TAXONOMY_POPULATION_UNREVIEWED','PARENT_DOCUMENT_SCOPE_UNREVIEWED',
+                'METADATA_MODEL_PERMISSIONS_MISSING','CHILD_SEES_ELTERN_DOCUMENT',
+                'DOCUMENT_METADATA_UNRESOLVED','THOMAS_PRIVATE_NOT_PROVEN',
+                'CHILD_SEES_THOMAS_PRIVATE_DOCUMENT','UNCLASSIFIED'
+              ] else 'UNCLASSIFIED' }}"
+      when: not bp_tax_apply
+
+    - name: Require privacy and no-write invariants before any apply
+      ansible.builtin.assert:
+        that:
+          - bp_tax_audit.STATUS == 'INSPECTED'
+          - bp_tax_audit.MODE == 'AUDIT'
+          - bp_tax_audit.CHANGED == false
+          - bp_tax_audit.DOCUMENT_ACLS_CHANGED == 'NO'
+          - bp_tax_audit.LEDGER in ['VALID','ABSENT']
+          - bp_tax_audit.DOCUMENTS | int > 0
+          - bp_tax_audit.USERS | int >= 3
+          - bp_tax_audit.THOMAS_PRIVATE | int >= 1
+          - bp_tax_audit.CHILD_SEES_ELTERN_DOCUMENTS | int == 0
+          - bp_tax_audit.CHILD_SEES_THOMAS_PRIVATE_DOCUMENTS | int == 0
+        fail_msg: PAPERLESS_METADATA_PROVENANCE_PRIVACY_PRECHECK_FAILED
+      no_log: true
+
+    - name: Report present view grants and provenance gaps without names or IDs
+      ansible.builtin.debug:
+        msg:
+          - AUDIT=READ_ONLY
+          - "LEDGER={{ bp_tax_audit.LEDGER }}"
+          - "DOCUMENTS={{ bp_tax_audit.DOCUMENTS }}"
+          - "USERS={{ bp_tax_audit.USERS }}"
+          - "TAGS={{ bp_tax_audit.TAGS }}"
+          - "TYPE_GAPS={{ bp_tax_audit.TYPE_GAPS }}"
+          - "CORR_GAPS={{ bp_tax_audit.CORR_GAPS }}"
+          - "TAG_GAPS={{ bp_tax_audit.TAG_GAPS }}"
+          - "MANAGED_REVOCATIONS={{ bp_tax_audit.MANAGED_REVOCATIONS }}"
+          - "MANAGED_GRANTS={{ bp_tax_audit.MANAGED_GRANTS }}"
+          - "THOMAS_PRIVATE={{ bp_tax_audit.THOMAS_PRIVATE }}"
+          - DOCUMENT_ACLS_CHANGED=NO
+          - CHANGED=False
+      when: not bp_tax_apply
+
+    - name: Match exact live audit counts to independently reviewed apply scope
+      ansible.builtin.assert:
+        that:
+          - bp_tax_audit.DOCUMENTS | int == bp_tax_expected.documents | int
+          - bp_tax_audit.USERS | int == bp_tax_expected.users | int
+          - bp_tax_audit.TAGS | int == bp_tax_expected.tags | int
+          - bp_tax_audit.TYPE_GAPS | int == bp_tax_expected.type_gaps | int
+          - bp_tax_audit.CORR_GAPS | int == bp_tax_expected.corr_gaps | int
+          - bp_tax_audit.TAG_GAPS | int == bp_tax_expected.tag_gaps | int
+          - bp_tax_audit.MANAGED_REVOCATIONS | int == bp_tax_expected.managed_revocations | int
+          - bp_tax_audit.THOMAS_PRIVATE | int == bp_tax_expected.thomas_private | int
+        fail_msg: PAPERLESS_METADATA_PROVENANCE_PINNED_SCOPE_DRIFTED
+      no_log: true
+      when: bp_tax_apply
+
+    - name: Apply only reviewed view grants and tracked managed grant revocations
+      ansible.builtin.command:
+        argv:
+          - pct
+          - exec
+          - '126'
+          - --
+          - podman
+          - exec
+          - -i
+          - bergen-paperless
+          - python
+          - /usr/src/paperless/src/manage.py
+          - shell
+          - --verbosity=0
+          - -c
+          - "{{ bp_tax_script }}"
+        stdin: >-
+          {{ {'protocol':'bergen-paperless-metadata-reconciler-v1',
+              'mode':'apply','approved':true,
+              'expected':{
+                'documents':bp_tax_expected.documents | int,
+                'users':bp_tax_expected.users | int,
+                'tags':bp_tax_expected.tags | int,
+                'type_gaps':bp_tax_expected.type_gaps | int,
+                'corr_gaps':bp_tax_expected.corr_gaps | int,
+                'tag_gaps':bp_tax_expected.tag_gaps | int,
+                'managed_revocations':bp_tax_expected.managed_revocations | int,
+                'thomas_private':bp_tax_expected.thomas_private | int
+              }} | to_json }}
+        stdin_add_newline: true
+      register: bp_tax_apply_raw
+      failed_when: false
+      changed_when: >-
+        bp_tax_audit.LEDGER == 'ABSENT' or
+        (bp_tax_audit.TYPE_GAPS | int > 0) or
+        (bp_tax_audit.CORR_GAPS | int > 0) or
+        (bp_tax_audit.TAG_GAPS | int > 0) or
+        (bp_tax_audit.MANAGED_REVOCATIONS | int > 0)
+      no_log: true
+      when: bp_tax_apply
+
+    - name: Extract exactly one bounded apply report
+      ansible.builtin.set_fact:
+        bp_tax_apply_frames: >-
+          {{ bp_tax_apply_raw.stdout_lines | default([]) |
+             select('match', '^BERGEN_PAPERLESS_METADATA_RECONCILER_V1:') | list }}
+      no_log: true
+      when: bp_tax_apply
+
+    - name: Reject unverified ledger/bootstrap/apply result
+      ansible.builtin.assert:
+        that:
+          - bp_tax_apply_raw.rc == 0
+          - bp_tax_apply_frames | length == 1
+          - bp_tax_apply_frames[0] | length < 1800
+          - (bp_tax_apply_frames[0] | regex_replace('^BERGEN_PAPERLESS_METADATA_RECONCILER_V1:', '') | from_json).STATUS == 'APPLIED'
+          - (bp_tax_apply_frames[0] | regex_replace('^BERGEN_PAPERLESS_METADATA_RECONCILER_V1:', '') | from_json).LEDGER == 'VALID'
+          - (bp_tax_apply_frames[0] | regex_replace('^BERGEN_PAPERLESS_METADATA_RECONCILER_V1:', '') | from_json).DOCUMENT_ACLS_CHANGED == 'NO'
+          - (bp_tax_apply_frames[0] | regex_replace('^BERGEN_PAPERLESS_METADATA_RECONCILER_V1:', '') | from_json).DOCUMENT_TAGS_CHANGED == 'NO'
+          - (bp_tax_apply_frames[0] | regex_replace('^BERGEN_PAPERLESS_METADATA_RECONCILER_V1:', '') | from_json).GLOBAL_PERMISSIONS_CHANGED == 'NO'
+          - (bp_tax_apply_frames[0] | regex_replace('^BERGEN_PAPERLESS_METADATA_RECONCILER_V1:', '') | from_json).THOMAS_PRIVATE_DENIED_TO_NADJA | int == bp_tax_expected.thomas_private | int
+          - (bp_tax_apply_frames[0] | regex_replace('^BERGEN_PAPERLESS_METADATA_RECONCILER_V1:', '') | from_json).CHILD_SEES_ELTERN_DOCUMENTS | int == 0
+          - (bp_tax_apply_frames[0] | regex_replace('^BERGEN_PAPERLESS_METADATA_RECONCILER_V1:', '') | from_json).CHILD_SEES_THOMAS_PRIVATE_DOCUMENTS | int == 0
+        fail_msg: PAPERLESS_METADATA_PROVENANCE_APPLY_UNVERIFIED
+      no_log: true
+      when: bp_tax_apply
+
+    - name: Report completed metadata-only apply without object names
+      ansible.builtin.debug:
+        msg:
+          - "ADDED_TAG_GRANTS={{ bp_tax_audit.TAG_GAPS }}"
+          - "ADDED_TYPE_GRANTS={{ bp_tax_audit.TYPE_GAPS }}"
+          - "ADDED_CORRESPONDENT_GRANTS={{ bp_tax_audit.CORR_GAPS }}"
+          - "REVOKED_ONLY_MANAGED_GRANTS={{ bp_tax_audit.MANAGED_REVOCATIONS }}"
+          - LEDGER=VALID
+          - DOCUMENT_ACLS_CHANGED=NO
+          - DOCUMENT_TAGS_CHANGED=NO
+          - OTHER_MODEL_PERMISSIONS_CHANGED=NO
+          - TIMER=NOT_INSTALLED_BY_THIS_PLAYBOOK
+          - NEXT_GATE=INDEPENDENT_READ_ONLY_AUDIT_AND_EXPLICIT_TIMER_ACTIVATION
+      when: bp_tax_apply
