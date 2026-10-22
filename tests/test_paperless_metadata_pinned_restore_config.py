@@ -118,6 +118,59 @@ class PinnedRestoreConfigSafety(unittest.TestCase):
         self.assertEqual(str(caught.exception),
                          "ARCHIVED_LXC_OVERRIDE_SCOPE_UNREVIEWED")
 
+    def test_exact_fuse_pair_is_identified_but_restore_stays_blocked(self):
+        variants = (
+            "/dev/fuse dev/fuse none bind,create=file",
+            "/dev/fuse dev/fuse none bind,optional,create=file",
+            "/dev/fuse dev/fuse none bind,create=file,optional 0 0",
+        )
+        for value in variants:
+            with self.subTest(pattern=value):
+                raw = (SAMPLE
+                       + "lxc.cgroup2.devices.allow: c 10:229 rwm\\n"
+                       + "lxc.mount.entry: " + value + "\\n")
+                with self.assertRaises(self.blocked) as caught:
+                    self.sanitize(raw)
+                refusal = caught.exception
+                self.assertEqual(str(refusal),
+                                 "ARCHIVED_LXC_OVERRIDE_PRESENT")
+                self.assertEqual(refusal.lxc_count, 2)
+                self.assertEqual(refusal.cgroup_profile,
+                                 "EXACT_FUSE_DEVICE_10_229")
+                self.assertEqual(refusal.mount_profile,
+                                 "EXACT_FUSE_DEVICE_BIND")
+                self.assertEqual(refusal.fuse_pair,
+                                 "MATCHES_KNOWN_FUSE_PATTERN")
+
+    def test_non_fuse_override_must_not_be_called_fuse(self):
+        raw = (SAMPLE
+               + "lxc.cgroup2.devices.allow: c 10:200 rwm\\n"
+               + "lxc.mount.entry: /dev/net/tun dev/net/tun none bind,create=file\\n")
+        with self.assertRaises(self.blocked) as caught:
+            self.sanitize(raw)
+        refusal = caught.exception
+        self.assertEqual(str(refusal), "ARCHIVED_LXC_OVERRIDE_PRESENT")
+        self.assertEqual(refusal.cgroup_profile,
+                         "OTHER_OR_MISSING_CGROUP_RULE")
+        self.assertEqual(refusal.mount_profile,
+                         "OTHER_OR_MISSING_MOUNT_RULE")
+        self.assertEqual(refusal.fuse_pair, "NOT_PROVEN")
+        self.assertNotIn("/dev/net/tun", repr(refusal.fuse_pair))
+
+    def test_fuse_pair_is_not_proven_if_extra_rule_exists(self):
+        raw = (SAMPLE
+               + "lxc.cgroup2.devices.allow: c 10:229 rwm\\n"
+               + "lxc.mount.entry: /dev/fuse dev/fuse none bind,create=file\\n"
+               + "lxc.cap.keep: sys_admin\\n")
+        with self.assertRaises(self.blocked) as caught:
+            self.sanitize(raw)
+        refusal = caught.exception
+        self.assertEqual(refusal.cgroup_profile,
+                         "EXACT_FUSE_DEVICE_10_229")
+        self.assertEqual(refusal.mount_profile,
+                         "EXACT_FUSE_DEVICE_BIND")
+        self.assertEqual(refusal.fuse_pair, "NOT_PROVEN")
+
     def test_identity_refusal_allowlist_stays_explicit_and_private(self):
         content = PLAY.read_text()
         for code in (
@@ -131,6 +184,9 @@ class PinnedRestoreConfigSafety(unittest.TestCase):
         self.assertIn("ARCHIVED_LXC_OVERRIDE_REMAINS_BLOCKED=YES", content)
         self.assertIn("bp_pinned_allowed_lxc_classes", content)
         self.assertIn("ARCHIVED_LXC_OVERRIDE_CLASSIFICATION_INVALID", content)
+        self.assertIn("FUSE_PAIR_PROFILE", content)
+        self.assertIn("MATCHES_KNOWN_FUSE_PATTERN", content)
+        self.assertIn("ARCHIVED_LXC_OVERRIDE_REMAINS_BLOCKED=YES", content)
 
     def test_unreviewed_additional_mount_is_rejected(self):
         with self.assertRaises(self.blocked):
