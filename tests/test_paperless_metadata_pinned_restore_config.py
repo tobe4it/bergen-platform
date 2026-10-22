@@ -127,8 +127,8 @@ class PinnedRestoreConfigSafety(unittest.TestCase):
         for value in variants:
             with self.subTest(pattern=value):
                 raw = (SAMPLE
-                       + "lxc.cgroup2.devices.allow: c 10:229 rwm\\n"
-                       + "lxc.mount.entry: " + value + "\\n")
+                       + "lxc.cgroup2.devices.allow: c 10:229 rwm\n"
+                       + "lxc.mount.entry: " + value + "\n")
                 with self.assertRaises(self.blocked) as caught:
                     self.sanitize(raw)
                 refusal = caught.exception
@@ -144,8 +144,8 @@ class PinnedRestoreConfigSafety(unittest.TestCase):
 
     def test_non_fuse_override_must_not_be_called_fuse(self):
         raw = (SAMPLE
-               + "lxc.cgroup2.devices.allow: c 10:200 rwm\\n"
-               + "lxc.mount.entry: /dev/net/tun dev/net/tun none bind,create=file\\n")
+               + "lxc.cgroup2.devices.allow: c 10:200 rwm\n"
+               + "lxc.mount.entry: /dev/net/tun dev/net/tun none bind,create=file\n")
         with self.assertRaises(self.blocked) as caught:
             self.sanitize(raw)
         refusal = caught.exception
@@ -159,9 +159,9 @@ class PinnedRestoreConfigSafety(unittest.TestCase):
 
     def test_fuse_pair_is_not_proven_if_extra_rule_exists(self):
         raw = (SAMPLE
-               + "lxc.cgroup2.devices.allow: c 10:229 rwm\\n"
-               + "lxc.mount.entry: /dev/fuse dev/fuse none bind,create=file\\n"
-               + "lxc.cap.keep: sys_admin\\n")
+               + "lxc.cgroup2.devices.allow: c 10:229 rwm\n"
+               + "lxc.mount.entry: /dev/fuse dev/fuse none bind,create=file\n"
+               + "lxc.cap.keep: sys_admin\n")
         with self.assertRaises(self.blocked) as caught:
             self.sanitize(raw)
         refusal = caught.exception
