@@ -1,0 +1,98 @@
+---
+# Read-only Paperless browser chat failures across CT125 and CT126.
+# Explicitly no raw proxy/application logs, user identities, IDs or response texts.
+- name: Inspect failed native Paperless browser chat without modifying services
+  hosts: venombox
+  become: true
+  gather_facts: false
+  vars:
+    bp_browser_chat_audit_script: "{{ lookup('ansible.builtin.file', playbook_dir ~ '/../files/paperless/audit_browser_chat_failure_readonly.py', rstrip=False) }}"
+  tasks:
+    - name: Require exact Proxmox host and no write approval
+      ansible.builtin.assert:
+        that:
+          - inventory_hostname == 'venombox'
+          - not ansible_check_mode
+          - not (paperless_chat_proxy_apply_approved | default(false) | bool)
+          - not (paperless_family_tags_apply_approved | default(false) | bool)
+        fail_msg: PAPERLESS_BROWSER_CHAT_AUDIT_ONLY
+
+    - name: Verify Nginx CT125 identity and confinement
+      ansible.builtin.command:
+        argv: [pct, config, '125']
+      register: bp_browser_chat_ct125
+      changed_when: false
+      no_log: true
+
+    - name: Verify Paperless CT126 identity and confinement
+      ansible.builtin.command:
+        argv: [pct, config, '126']
+      register: bp_browser_chat_ct126
+      changed_when: false
+      no_log: true
+
+    - name: Reject unexpected guests
+      ansible.builtin.assert:
+        that:
+          - "'hostname: bergen-proxy' in bp_browser_chat_ct125.stdout_lines"
+          - "'hostname: bergen-paperless' in bp_browser_chat_ct126.stdout_lines"
+          - "'unprivileged: 1' in bp_browser_chat_ct125.stdout_lines"
+          - "'unprivileged: 1' in bp_browser_chat_ct126.stdout_lines"
+          - "'lxc.apparmor.profile: unconfined' not in bp_browser_chat_ct125.stdout"
+          - "'lxc.apparmor.profile: unconfined' not in bp_browser_chat_ct126.stdout"
+        fail_msg: PAPERLESS_BROWSER_CHAT_GUEST_UNVERIFIED
+      no_log: true
+
+    - name: Collect only aggregate proxy and backend error counts
+      ansible.builtin.command:
+        argv:
+          - python3
+          - -c
+          - "{{ bp_browser_chat_audit_script }}"
+      changed_when: false
+      failed_when: false
+      register: bp_browser_chat_audit_raw
+      no_log: true
+
+    - name: Extract exactly one bounded sanitized frame
+      ansible.builtin.set_fact:
+        bp_browser_chat_audit_frames: >-
+          {{ bp_browser_chat_audit_raw.stdout_lines | default([]) |
+             select('match', '^BERGEN_PAPERLESS_CHAT_BROWSER_FAILURE_V1:') | list }}
+      no_log: true
+
+    - name: Reject missing or ambiguous diagnostics
+      ansible.builtin.assert:
+        that:
+          - bp_browser_chat_audit_raw.rc == 0
+          - bp_browser_chat_audit_frames | length == 1
+          - bp_browser_chat_audit_frames[0] | length < 3200
+        fail_msg: PAPERLESS_BROWSER_CHAT_AUDIT_RESULT_MISSING
+      no_log: true
+
+    - name: Parse only selected aggregate status and error categories
+      ansible.builtin.set_fact:
+        bp_browser_chat_audit: >-
+          {{ bp_browser_chat_audit_frames[0] |
+             regex_replace('^BERGEN_PAPERLESS_CHAT_BROWSER_FAILURE_V1:', '') | from_json }}
+      no_log: true
+
+    - name: Require verified proxy output but permit absent backend logs
+      ansible.builtin.assert:
+        that:
+          - bp_browser_chat_audit.STATUS in ['INSPECTED','PROXY_ONLY']
+          - bp_browser_chat_audit.ACCESS is sequence
+          - bp_browser_chat_audit.ERROR_COUNTS is mapping
+        fail_msg: PAPERLESS_BROWSER_CHAT_LOG_INSPECTION_BLOCKED
+      no_log: true
+
+    - name: Report browser chat HTTP statuses and sanitised backend errors
+      ansible.builtin.debug:
+        msg:
+          - AUDIT=READ_ONLY
+          - "STATUS={{ bp_browser_chat_audit.STATUS }}"
+          - "CHAT_REQUESTS={{ bp_browser_chat_audit.ACCESS }}"
+          - "PROXY_ERRORS={{ bp_browser_chat_audit.ERROR_COUNTS }}"
+          - "BACKEND_ERRORS={{ bp_browser_chat_audit.BACKEND_ERROR_COUNTS | default('NOT_READABLE') }}"
+          - CHANGED=False
+          - CHAT_RELEASE_GATE=BLOCKED_PENDING_BROWSER_SUCCESS
