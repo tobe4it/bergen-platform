@@ -288,6 +288,9 @@ def main():
 
         with transaction.atomic():
             with connection.cursor() as cursor:
+                # A consistent snapshot: changes to relevant documents/ACL
+                # committed concurrently force a safe serializable abort.
+                cursor.execute("SET TRANSACTION ISOLATION LEVEL SERIALIZABLE")
                 cursor.execute("SELECT pg_advisory_xact_lock(%s)", [LOCK_KEY])
                 # Concurrent document and ACL changes are caught by snapshot
                 # checks. Protected changes to other rows cause rollback.
@@ -335,11 +338,14 @@ def main():
                             user_id=subject, permission_id=perm_id,
                             content_type_id=targets[perm_id][1],
                             object_pk=object_pk)
-                    cursor.execute(
-                        "INSERT INTO " + LEDGER +
-                        " (subject_kind,subject_id,permission_id,object_pk) "
-                        "VALUES (%s,%s,%s,%s)",
-                        [kind,subject,perm_id,object_pk])
+                    if (kind, subject, perm_id, object_pk) not in managed:
+                        # Recreated missing guardian row retains existing
+                        # provenance; never insert a duplicate ledger key.
+                        cursor.execute(
+                            "INSERT INTO " + LEDGER +
+                            " (subject_kind,subject_id,permission_id,object_pk) "
+                            "VALUES (%s,%s,%s,%s)",
+                            [kind,subject,perm_id,object_pk])
 
                 # revoke only persisted exact provenance rows; never inferred
                 # historical family grants or manually created user grants.
