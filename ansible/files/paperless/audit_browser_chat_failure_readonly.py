@@ -41,7 +41,7 @@ for p in paths:
                                 STATUS=m.group(4),
                                 BODY_BYTES=int(m.group(5))))
 reasons = {
-    "UPSTREAM_READ_BODY_TIMEOUT": "upstream timed out",
+    "UPSTREAM_TIMEOUT": "upstream timed out",
     "UPSTREAM_CLOSED": "upstream prematurely closed",
     "CLIENT_ABORT": "client prematurely closed",
     "RESET": "connection reset by peer",
@@ -97,6 +97,9 @@ def main():
                 STATUS="PROXY_ONLY", ACCESS=proxy["ACCESS"],
                 ERROR_COUNTS=proxy["ERROR_COUNTS"], BACKEND="NOT_READABLE"),
                 sort_keys=True))
+            return
+        if len(logs[0]) + len(logs[1]) > 3000000:
+            print(FRAME + json.dumps({"STATUS":"BACKEND_LOG_TOO_LARGE", "CHANGED":False}))
             return
         raw = logs[0] + "\n" + logs[1]
         patterns = {
