@@ -1,29 +1,32 @@
 ---
-# Narrow DNF journal classification only after independent, same-run CT790
-# one-failed-unit proof. Zero guest/host writes, no service changes or shutdown.
-- import_playbook: diagnose-rocky-9-8-ct790-failed-unit-readonly.yml
+# Historical DNF journal classification after independent same-run proof that
+# CT790 has recovered to RUNNING with zero current failures. No shutdown,
+# service changes, guest writes or disclosure of raw repository URLs.
+- import_playbook: audit-rocky-9-8-ct790-running-readonly.yml
 
-- name: Classify only CT790 failed dnf-makecache journal without raw disclosure
+- name: Classify historical dnf-makecache error on recovered CT790 without raw disclosure
   hosts: venombox
   become: true
   gather_facts: false
   any_errors_fatal: true
   tasks:
-    - name: Require exact same-run failed DNF unit and isolated RUNNING CT790
+    - name: Require recovered systemd and same-run isolated running CT790
       ansible.builtin.assert:
         that:
           - inventory_hostname == 'venombox'
           - rocky_running_host.stdout == 'venombox'
-          - rocky_failed_unit_name == 'dnf-makecache.service'
-          - rocky_failed_unit_fields.ActiveState == 'failed'
-          - rocky_failed_unit_fields.Result == 'exit-code'
-          - rocky_failed_unit_fields.ExecMainStatus == '1'
-          - rocky_running_systemd.stdout | trim == 'degraded'
-          - "'status: running' in rocky_failed_unit_final_status.stdout_lines"
+          - rocky_running_systemd.stdout | trim == 'running'
+          - rocky_running_failed_units.rc == 0
+          - rocky_running_failed_units.stdout_lines | length == 0
+          - "'status: running' in rocky_running_final_status.stdout_lines"
+          - "'hostname: rocky9-base-790' in rocky_running_config.stdout_lines"
+          - "'protection: 1' in rocky_running_config.stdout_lines"
+          - "'unprivileged: 1' in rocky_running_config.stdout_lines"
+          - "'onboot: 0' in rocky_running_config.stdout_lines"
           - "'NON_LOOPBACK_DEVICES=0' in rocky_running_guest.stdout_lines"
           - "'GUEST_IDMAP_NONIDENTITY=YES' in rocky_running_guest.stdout_lines"
           - "'hostname: nextcloud-restore-701' in rocky_running_ct701.stdout_lines"
-        fail_msg: Exact degraded DNF unit and CT790 isolation proof missing; do not execute any journal command.
+        fail_msg: "Recovered healthy isolated CT790 proof missing; do not execute any journal command."
 
     - name: Read only bounded time-window DNF unit journal on running CT790
       ansible.builtin.command:
@@ -104,9 +107,10 @@
         msg:
           result: ROCKY_9_8_CT790_DNF_JOURNAL_CLASSIFIED_READ_ONLY
           vmid: 790
-          failed_unit: dnf-makecache.service
-          systemd_state: degraded
-          failure_time_utc: '2026-10-22 05:32:41'
+          historical_failed_unit: dnf-makecache.service
+          current_systemd_state: "{{ rocky_running_systemd.stdout | trim }}"
+          currently_failed_units: 0
+          historical_failure_time_utc: '2026-10-22 05:32:41'
           category: "{{ (rocky_dnf_category.stdout | from_json).category }}"
           bounded_journal_lines: "{{ (rocky_dnf_category.stdout | from_json).bounded_journal_lines }}"
           dns_error_observed: "{{ (rocky_dnf_category.stdout | from_json).dns_error_observed }}"
@@ -121,4 +125,4 @@
           pct_shutdown_authorized: false
           pct_stop_authorized: false
           pct_template_authorized: false
-          next_gate: Review observed category and decide whether offline DNF timer policy or separately approved graceful shutdown should change.
+          next_gate: Review historical cause without inferring persistent failure; any offline timer change or shutdown needs separate authorization.
