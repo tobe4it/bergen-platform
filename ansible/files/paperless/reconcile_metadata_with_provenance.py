@@ -48,6 +48,32 @@ def delta(required, actual, managed):
     return required - actual, managed - required
 
 
+def user_metadata_policy(user_id, visible_document_ids, document_map,
+                         type_permission_id, correspondent_permission_id,
+                         visible_type_ids, visible_correspondent_ids, managed):
+    """Pure policy: required metadata grants from documents user can view.
+
+    The document_map must contain (pk, owner_id, type_id, correspondent_id)
+    rows already validated by the caller. The helper cannot grant access to
+    any document and never adopts preexisting unrelated metadata grants.
+    """
+    types = {document_map[pk][2] for pk in visible_document_ids
+             if document_map[pk][2] is not None}
+    correspondents = {document_map[pk][3] for pk in visible_document_ids
+                      if document_map[pk][3] is not None}
+    grants = {("user", user_id, type_permission_id, str(pk))
+              for pk in types - visible_type_ids}
+    grants |= {("user", user_id, correspondent_permission_id, str(pk))
+               for pk in correspondents - visible_correspondent_ids}
+    grants |= {entry for entry in managed
+               if entry[0] == "user" and entry[1] == user_id and
+               ((entry[2] == type_permission_id
+                 and int(entry[3]) in types)
+                or (entry[2] == correspondent_permission_id
+                    and int(entry[3]) in correspondents))}
+    return grants, types, correspondents
+
+
 def frame(status, **kw):
     payload = dict(STATUS=status, **kw)
     message = FRAME + json.dumps(payload, separators=(",", ":"), sort_keys=True)
@@ -257,15 +283,13 @@ def main():
                     fresh, Correspondent, "view_correspondent"))
                 # Keep managed grants needed by visible documents even if
                 # another owner-based access path now also provides visibility.
-                required |= {("user", fresh.pk, type_perm.id, str(x))
-                             for x in user_types - visible_types}
-                required |= {("user", fresh.pk, corr_perm.id, str(x))
-                             for x in user_corrs - visible_corrs}
-                required |= {entry for entry in managed if entry[0] == "user"
-                             and entry[1] == fresh.pk and
-                             ((entry[2] == type_perm.id and int(entry[3]) in user_types)
-                              or (entry[2] == corr_perm.id
-                                  and int(entry[3]) in user_corrs))}
+                user_required, checked_types, checked_corrs = user_metadata_policy(
+                    fresh.pk, visible, dmap, type_perm.id, corr_perm.id,
+                    visible_types, visible_corrs, managed)
+                require(checked_types == user_types and
+                        checked_corrs == user_corrs,
+                        "DOCUMENT_METADATA_POLICY_MISMATCH")
+                required |= user_required
             thomas, nadja = parents
             private = set(Document.objects.filter(
                 owner=thomas).values_list("pk", flat=True)) - rights[nadja.pk][0]
