@@ -160,3 +160,56 @@ network or backup writes.
 Even if Zstd/tar checks pass, restore compatibility, required metadata
 or PostgreSQL startup/recovery remain unproven. At present, there is
 no automatic restore or boot operation prepared/approved.
+
+
+## Phase D.3: Verify exact pinned backed-up CT config (no write)
+
+The last archive check on 22.10.2026 succeeded:
+- size 1748 MiB
+- SHA256
+  \`7f0ad64c2c7bc3bdca53be5766fbabc62feadd74025e811e52712e78b8bee24f\`
+- Zstandard PASSED; TAR directory scan PASSED.
+
+Read-only audit: \`audit-paperless-metadata-pinned-restore-config.yml\`.
+It verifies the full SHA256 **again**, asks Proxmox for the archive
+volume path and its embedded \`pct.conf\` using the native
+\`pvesm extractconfig\` command, validates archive unprivileged mode,
+rootfs and backup-included mp0, checks for additional mounts, hooks and
+LXC overrides, and emits **only sanitized categories**.
+
+The archive is expected to contain a network interface because the
+production source is networked. That network **must not be inherited
+by a booted test clone**. Any later restore is a *separately approved*
+write and must be followed by independent inspection that the clone
+has zero net interfaces and onboot=0, then a separate boot gate.
+Do not interpret an archived network setting as proof of offline
+isolation.
+
+\`\`\`bash
+(
+  set -euo pipefail
+  BASE="$HOME/bergen-platform"
+  cd "$HOME/bergen-platform-metadata-auto"
+  test -z "$(git status --porcelain)"
+
+  "$BASE/.venv/bin/python" -m unittest discover -s tests \\
+    -p 'test_paperless_metadata_pinned_restore_config.py' -v
+
+  "$BASE/.venv/bin/ansible-playbook" \\
+    -i ansible/inventory.yml \\
+    -i "$BASE/ansible/inventory.local.yml" \\
+    ansible/playbooks/audit-paperless-metadata-pinned-restore-config.yml \\
+    --vault-id ai@prompt
+)
+\`\`\`
+
+The expected status is \`PINNED_ARCHIVE_CONFIG_REVIEWED\`, with
+\`RESTORE_PERFORMED=NO\`, \`NETWORK_ISOLATION_PROVEN=NO\` and
+\`CLONE_CREATED=NO\`. If backup rotation creates a newer archive
+before inspection, \`ARCHIVE_FINGERPRINT_DRIFT\` is **expected**;
+do not silently repin. Independently validate the new archive and
+explicitly approve a new fingerprint instead.
+
+A later restore must not occur solely because this audit passed.
+Proxmox restores stored CT properties by default; the network
+inheritance issue must be handled before any guest startup.
