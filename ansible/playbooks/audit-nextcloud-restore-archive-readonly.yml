@@ -1,0 +1,109 @@
+---
+# Read-only hash, tar and SQL-gzip audit. Runs on venombox itself without
+# starting LXC 701 or extracting a single file.
+- name: Independently validate the pinned Nextcloud recovery archive
+  hosts: venombox
+  gather_facts: false
+  become: true
+  any_errors_fatal: true
+  vars:
+    restore_fixed_id: 20261019T043001Z-3349088
+    restore_fixed_sha256: 7f6c4eac26b60c7756a33bdfe6d0afb970f3bd1babd6074c321b2c51a3815e76
+  tasks:
+    - name: Confirm intended physical host
+      ansible.builtin.command:
+        argv: [hostname, -s]
+      register: restore_actual_host
+      changed_when: false
+
+    - name: Refuse auditing outside venombox
+      ansible.builtin.assert:
+        that:
+          - inventory_hostname == 'venombox'
+          - restore_actual_host.stdout == 'venombox'
+
+    - name: Confirm 701 is still stopped
+      ansible.builtin.command:
+        argv: [pct, status, '701']
+      register: restore_ct_status
+      changed_when: false
+
+    - name: Inspect exact restored guest boundaries
+      ansible.builtin.command:
+        argv: [pct, config, '701']
+      register: restore_ct_config
+      changed_when: false
+
+    - name: Require stopped, unprivileged and networkless 701
+      ansible.builtin.assert:
+        that:
+          - "'status: stopped' in restore_ct_status.stdout"
+          - "'hostname: nextcloud-restore-701' in restore_ct_config.stdout"
+          - "'unprivileged: 1' in restore_ct_config.stdout"
+          - "'protection: 1' in restore_ct_config.stdout"
+          - "'onboot: 0' in restore_ct_config.stdout"
+          - "not (restore_ct_config.stdout is search('(?m)^net[0-9]+:'))"
+
+    - name: Verify local audit script syntax on controller
+      ansible.builtin.command:
+        argv:
+          - python3
+          - -c
+          - >-
+            import ast, pathlib;
+            ast.parse(pathlib.Path("{{ playbook_dir }}/../files/nextcloud/audit_verified_restore_archive.py").read_text())
+      delegate_to: localhost
+      become: false
+      changed_when: false
+
+    - name: Rehash and inspect archive contents and compressed SQL without extracting
+      ansible.builtin.command:
+        argv:
+          - python3
+          - -c
+          - "{{ lookup('ansible.builtin.file', playbook_dir ~ '/../files/nextcloud/audit_verified_restore_archive.py') }}"
+          - "{{ restore_fixed_id }}"
+          - "{{ restore_fixed_sha256 }}"
+      register: restore_archive_audit
+      changed_when: false
+      failed_when: false
+      no_log: true
+
+    - name: Report sanitized archive audit failure if one occurred
+      ansible.builtin.debug:
+        msg:
+          status: NEXTCLOUD_RESTORE_ARCHIVE_AUDIT_FAILED
+          reason: >-
+            {{ restore_archive_audit.stdout_lines[0]
+               if (restore_archive_audit.stdout_lines | default([]) | length > 0)
+                  and (restore_archive_audit.stdout_lines[0] is match('^NEXTCLOUD_RESTORE_ARCHIVE_AUDIT_FAILED=[A-Z0-9_]{1,80}$'))
+               else 'UNCLASSIFIED_ARCHIVE_AUDIT_FAILURE' }}
+      when: restore_archive_audit.rc != 0
+
+    - name: Require audit-only two-frame success and fixed snapshot identity
+      ansible.builtin.assert:
+        that:
+          - restore_archive_audit.rc == 0
+          - restore_archive_audit.stdout_lines | length == 2
+          - restore_archive_audit.stdout_lines[1] == 'NEXTCLOUD_RESTORE_ARCHIVE_AUDIT=PASS'
+          - (restore_archive_audit.stdout_lines[0] | from_json).snapshot_id == restore_fixed_id
+          - (restore_archive_audit.stdout_lines[0] | from_json).sha256_verified | bool
+          - (restore_archive_audit.stdout_lines[0] | from_json).tar_catalog_safe | bool
+          - (restore_archive_audit.stdout_lines[0] | from_json).sql_gzip_valid | bool
+          - not ((restore_archive_audit.stdout_lines[0] | from_json).archive_extracted | bool)
+        fail_msg: Restore archive not independently validated; do not extract or import.
+      no_log: true
+
+    - name: Report only nonsensitive validation results
+      ansible.builtin.debug:
+        msg: "{{ restore_archive_audit.stdout_lines[0] | from_json }}"
+
+    - name: Report complete non-mutating archive preflight
+      ansible.builtin.debug:
+        msg:
+          result: NEXTCLOUD_RESTORE_ARCHIVE_READ_ONLY_VERIFIED
+          guest_started: false
+          archive_extracted: false
+          sql_imported: false
+          mx1_changed: false
+          mx2_changed: false

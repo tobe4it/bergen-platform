@@ -1,0 +1,95 @@
+---
+# Diagnostic only: classify non-regular TAR records without exposing paths.
+# Does not authorize extraction, import or changing existing guest state.
+- name: Diagnose non-regular entries in verified Nextcloud archive
+  hosts: venombox
+  gather_facts: false
+  become: true
+  any_errors_fatal: true
+  vars:
+    restore_fixed_id: 20261019T043001Z-3349088
+    restore_fixed_sha256: 7f6c4eac26b60c7756a33bdfe6d0afb970f3bd1babd6074c321b2c51a3815e76
+  tasks:
+    - name: Verify exact physical Proxmox host
+      ansible.builtin.command:
+        argv: [hostname, -s]
+      register: diag_host
+      changed_when: false
+
+    - name: Refuse diagnostics on other hosts
+      ansible.builtin.assert:
+        that:
+          - inventory_hostname == 'venombox'
+          - diag_host.stdout == 'venombox'
+
+    - name: Read existing guest status
+      ansible.builtin.command:
+        argv: [pct, status, '701']
+      register: diag_guest_status
+      changed_when: false
+
+    - name: Read existing guest configuration
+      ansible.builtin.command:
+        argv: [pct, config, '701']
+      register: diag_guest_config
+      changed_when: false
+
+    - name: Refuse unsafe restore guest state
+      ansible.builtin.assert:
+        that:
+          - "'status: stopped' in diag_guest_status.stdout"
+          - "'hostname: nextcloud-restore-701' in diag_guest_config.stdout"
+          - "'unprivileged: 1' in diag_guest_config.stdout"
+          - "'protection: 1' in diag_guest_config.stdout"
+          - "'onboot: 0' in diag_guest_config.stdout"
+          - "not (diag_guest_config.stdout is search('(?m)^net[0-9]+:'))"
+
+    - name: Classify TAR entry types with pinned checksum, no extraction
+      ansible.builtin.command:
+        argv:
+          - python3
+          - -c
+          - "{{ lookup('ansible.builtin.file', playbook_dir ~ '/../files/nextcloud/diagnose_restore_archive_member_types.py') }}"
+          - "{{ restore_fixed_id }}"
+          - "{{ restore_fixed_sha256 }}"
+      changed_when: false
+      register: diag_result
+      failed_when: false
+      no_log: true
+
+    - name: Report sanitized diagnostic error, if any
+      ansible.builtin.debug:
+        msg:
+          status: ARCHIVE_TYPE_DIAGNOSTIC_FAILED
+          reason: >-
+            {{ diag_result.stdout_lines[0]
+               if (diag_result.stdout_lines | default([]) | length > 0)
+                  and (diag_result.stdout_lines[0] is match('^NEXTCLOUD_ARCHIVE_TYPE_DIAGNOSTIC_FAILED=[A-Z0-9_]{1,80}$'))
+               else 'UNCLASSIFIED_DIAGNOSTIC_FAILURE' }}
+      when: diag_result.rc != 0
+
+    - name: Require exactly one bounded type-summary record and completion marker
+      ansible.builtin.assert:
+        that:
+          - diag_result.rc == 0
+          - diag_result.stdout_lines | length == 2
+          - diag_result.stdout_lines[1] == 'NEXTCLOUD_ARCHIVE_TYPE_DIAGNOSTIC=COMPLETE'
+          - (diag_result.stdout_lines[0] | from_json).archive_sha256_matches_pinned | bool
+          - (diag_result.stdout_lines[0] | from_json).diagnostic_only | bool
+          - not ((diag_result.stdout_lines[0] | from_json).archive_extracted | bool)
+        fail_msg: Type diagnostic was not independently completed; keep extraction blocked.
+      no_log: true
+
+    - name: Report only aggregate TAR entry types and categorical link target risks
+      ansible.builtin.debug:
+        msg: "{{ diag_result.stdout_lines[0] | from_json }}"
+
+    - name: Mark nonmutating diagnosis complete, not clearance for restoration
+      ansible.builtin.debug:
+        msg:
+          result: NEXTCLOUD_ARCHIVE_TYPE_DIAGNOSTIC_READ_ONLY_COMPLETE
+          extraction_permitted: false
+          import_permitted: false
+          guest_started: false
+          mx1_changed: false
+          mx2_changed: false

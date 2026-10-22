@@ -1,0 +1,184 @@
+---
+# Independent AFTER-FIRST-BOOT audit of the already running CT790.
+# No imports of stopped-guest preflights. NO pct start/stop/mount/template/set.
+# All commands are read-only; systemctl diagnostic states may be degraded.
+- name: Independently inspect already-running offline Rocky 9.8 CT790
+  hosts: venombox
+  become: true
+  gather_facts: false
+  any_errors_fatal: true
+  tasks:
+    - name: Read exact host name without changes
+      ansible.builtin.command:
+        argv: [hostname, -s]
+      changed_when: false
+      register: rocky_running_host
+
+    - name: Require exact PVE host and fixed running guest VMID
+      ansible.builtin.assert:
+        that:
+          - inventory_hostname == 'venombox'
+          - rocky_running_host.stdout == 'venombox'
+
+    - name: Observe running state of only CT790
+      ansible.builtin.command:
+        argv: [pct, status, '790']
+      changed_when: false
+      register: rocky_running_status
+
+    - name: Require existing CT790 is running before attaching a read-only probe
+      ansible.builtin.assert:
+        that:
+          - "'status: running' in rocky_running_status.stdout_lines"
+        fail_msg: CT790 is not running; do not start or restore it during an audit.
+
+    - name: Re-read existing CT790 configuration without modifications
+      ansible.builtin.command:
+        argv: [pct, config, '790']
+      changed_when: false
+      no_log: true
+      register: rocky_running_config
+
+    - name: Reject unreviewed CT790 network mount hook or unprivileged drift
+      ansible.builtin.assert:
+        that:
+          - "'hostname: rocky9-base-790' in rocky_running_config.stdout_lines"
+          - "'ostype: centos' in rocky_running_config.stdout_lines"
+          - "'cores: 2' in rocky_running_config.stdout_lines"
+          - "'memory: 2048' in rocky_running_config.stdout_lines"
+          - "'swap: 0' in rocky_running_config.stdout_lines"
+          - "'unprivileged: 1' in rocky_running_config.stdout_lines"
+          - "'protection: 1' in rocky_running_config.stdout_lines"
+          - "'onboot: 0' in rocky_running_config.stdout_lines"
+          - >-
+            (rocky_running_config.stdout_lines
+             | select('match', '^rootfs: local-zfs:subvol-790-disk-[0-9]+,size=16G(?:$|,)')
+             | list | length) == 1
+          - >-
+            (rocky_running_config.stdout
+             | regex_findall('(?m)^([^\s:\n][^:\n]*):')
+             | difference(['arch','cores','features','hostname','memory','onboot','ostype','protection','rootfs','swap','unprivileged'])
+             | length) == 0
+          - >-
+            not (rocky_running_config.stdout
+             is search('(?m)^(?:net[0-9]+|mp[0-9]+|dev[0-9]+|hookscript|lxc[.]|startup|nameserver|searchdomain|lock|template|tags):'))
+          - >-
+            not (rocky_running_config.stdout
+             is search('(?m)^features: (?!nesting=0$)'))
+          - >-
+            not (rocky_running_config.stdout
+             is search('(?m)^arch: (?!amd64$)'))
+        fail_msg: CT790 is running with unreviewed PVE configuration; do not modify it automatically.
+
+    - name: Execute existing bounded guest probe only inside running CT790
+      ansible.builtin.command:
+        argv:
+          - pct
+          - exec
+          - '790'
+          - --
+          - /bin/sh
+          - -ec
+          - "{{ lookup('ansible.builtin.file', playbook_dir ~ '/../files/nextcloud/inspect_rocky_ct790_firstboot_runtime.sh') }}"
+      changed_when: false
+      failed_when: false
+      no_log: true
+      register: rocky_running_guest
+
+    - name: Require independent Rocky 9.8 systemd isolation and zero network devices
+      ansible.builtin.assert:
+        that:
+          - rocky_running_guest.rc == 0
+          - "'ROCKY_9_8_CT790_RUNTIME_IDENTITY=VERIFIED' in rocky_running_guest.stdout_lines"
+          - "'PID1=systemd' in rocky_running_guest.stdout_lines"
+          - "'NON_LOOPBACK_DEVICES=0' in rocky_running_guest.stdout_lines"
+          - "'GUEST_IDMAP_NONIDENTITY=YES' in rocky_running_guest.stdout_lines"
+          - "'RUNTIME_GUEST_WRITE_OPERATIONS=NONE_BY_PROBE' in rocky_running_guest.stdout_lines"
+        fail_msg: Actual in-guest identity or isolation changed; no automated remediation permitted.
+
+    - name: Observe systemd overall state without starting or stopping any unit
+      ansible.builtin.command:
+        argv: [pct, exec, '790', --, systemctl, --no-pager, is-system-running]
+      changed_when: false
+      failed_when: false
+      no_log: true
+      register: rocky_running_systemd
+
+    - name: Require a recognized bounded systemd runtime state
+      ansible.builtin.assert:
+        that:
+          - rocky_running_systemd.rc in [0, 1]
+          - rocky_running_systemd.stdout | trim in ['running', 'degraded', 'starting']
+        fail_msg: systemd runtime state was not inspectable; do not auto-restart services.
+
+    - name: Inspect failed systemd unit list without changing service state
+      ansible.builtin.command:
+        argv: [pct, exec, '790', --, systemctl, --no-pager, --plain, --no-legend, list-units, --state=failed]
+      changed_when: false
+      failed_when: false
+      no_log: true
+      register: rocky_running_failed_units
+
+    - name: Refuse unreadable or unbounded failed-unit diagnostic output
+      ansible.builtin.assert:
+        that:
+          - rocky_running_failed_units.rc == 0
+          - rocky_running_failed_units.stdout | length <= 8192
+          - rocky_running_failed_units.stdout_lines | length <= 100
+        fail_msg: Failed-unit inventory unavailable or too large; do not change or repair services automatically.
+
+    - name: Re-read protected CT701 configuration without changing it
+      ansible.builtin.command:
+        argv: [pct, config, '701']
+      changed_when: false
+      register: rocky_running_ct701
+      no_log: true
+
+    - name: Require CT701 still has exact offline protection
+      ansible.builtin.assert:
+        that:
+          - "'hostname: nextcloud-restore-701' in rocky_running_ct701.stdout_lines"
+          - "'unprivileged: 1' in rocky_running_ct701.stdout_lines"
+          - "'protection: 1' in rocky_running_ct701.stdout_lines"
+          - "'onboot: 0' in rocky_running_ct701.stdout_lines"
+          - >-
+            not (rocky_running_ct701.stdout is
+             search('(?m)^(?:net[0-9]+|lxc[.]net):'))
+        fail_msg: CT701 isolation changed; no automatic repair permitted.
+
+    - name: Independently recheck CT790 still running after diagnostic reads
+      ansible.builtin.command:
+        argv: [pct, status, '790']
+      changed_when: false
+      register: rocky_running_final_status
+
+    - name: Reject CT790 unexpected stop without starting it
+      ansible.builtin.assert:
+        that:
+          - "'status: running' in rocky_running_final_status.stdout_lines"
+        fail_msg: CT790 changed runtime state unexpectedly; do not restart it.
+
+    - name: Report observed service state separately from enforced isolation
+      ansible.builtin.debug:
+        msg:
+          result: ROCKY_9_8_CT790_RUNNING_READ_ONLY_INVENTORY_RECORDED
+          vmid: 790
+          rocky_version: '9.8'
+          container_status: RUNNING
+          systemd_pid1_verified: true
+          systemd_state: "{{ rocky_running_systemd.stdout | trim }}"
+          failed_unit_output_lines: "{{ rocky_running_failed_units.stdout_lines | length }}"
+          systemd_health: >-
+            {{ 'RUNNING_WITH_ZERO_FAILED_UNIT_LINES'
+               if (rocky_running_systemd.stdout | trim == 'running'
+                   and rocky_running_failed_units.stdout_lines | length == 0)
+               else 'REQUIRES_SEPARATE_REVIEW' }}
+          actual_nonloopback_network_interfaces: 0
+          user_namespace_nonidentity: true
+          ct701_offline_protection_verified: true
+          files_written_by_probe: 0
+          host_config_changed: false
+          guest_state_changed_by_audit: false
+          pct_stop_authorized: false
+          pct_template_authorized: false
+          next_gate: Review runtime health and separately approve any graceful shutdown; no implicit stop or template conversion.

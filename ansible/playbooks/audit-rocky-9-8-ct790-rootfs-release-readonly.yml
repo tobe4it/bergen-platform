@@ -1,0 +1,115 @@
+---
+# Post-create release inspection WITHOUT pct mount/start/exec, zfs mount,
+# file writes, or temporary code copied to venombox.
+# Imports the independently passed metadata-only post-create preflight.
+- import_playbook: audit-rocky-9-8-ct790-postcreate-readonly.yml
+
+- name: Read existing mounted CT790 Rocky release metadata with no changes
+  hosts: venombox
+  become: true
+  gather_facts: false
+  any_errors_fatal: true
+  tasks:
+    - name: Require independently verified stopped and owned CT790 rootfs
+      ansible.builtin.assert:
+        that:
+          - inventory_hostname == 'venombox'
+          - rocky_post_host.stdout == 'venombox'
+          - rocky_post_rootfs_volid is match('^local-zfs:subvol-790-disk-[0-9]+$')
+          - rocky_post_dataset is match('^rpool/data/subvol-790-disk-[0-9]+$')
+          - rocky_post_rootfs_path.stdout | trim is match('^/rpool/data/subvol-790-disk-[0-9]+$')
+          - "'status: stopped' in rocky_post_state.stdout_lines"
+          - "'protection: 1' in rocky_post_config.stdout_lines"
+          - "'unprivileged: 1' in rocky_post_config.stdout_lines"
+          - rocky_post_template_file.stat.checksum == '1fd0ade221871319d5ae7bed9ece57c001d79ef950c1263814d5b8d48779b7e5'
+          - rocky_post_zfs_dataset.rc == 0
+        fail_msg: CT790 metadata proof required before touching its existing rootfs.
+
+    - name: Read existing ZFS mounted property without changing mount state
+      ansible.builtin.command:
+        argv: [zfs, get, -H, -o, value, mounted, "{{ rocky_post_dataset }}"]
+      changed_when: false
+      register: rocky_release_zfs_mounted
+
+    - name: Refuse automatic mounting or reading an unmounted rootfs
+      ansible.builtin.assert:
+        that:
+          - rocky_release_zfs_mounted.stdout | trim == 'yes'
+        fail_msg: CT790 rootdir is not already mounted; do not mount it automatically.
+
+    - name: Identify only the exact CT790 mountpoint from the kernel mount table
+      ansible.builtin.command:
+        argv:
+          - findmnt
+          - -rn
+          - --mountpoint
+          - "{{ rocky_post_rootfs_path.stdout | trim }}"
+          - -o
+          - SOURCE,FSTYPE,TARGET
+      changed_when: false
+      register: rocky_release_findmnt
+
+    - name: Require a single exact kernel ZFS mount of the CT790 dataset
+      ansible.builtin.assert:
+        that:
+          - rocky_release_findmnt.stdout_lines | length == 1
+          - rocky_release_findmnt.stdout.split() | length == 3
+          - rocky_release_findmnt.stdout.split()[0] == rocky_post_dataset
+          - rocky_release_findmnt.stdout.split()[1] == 'zfs'
+          - rocky_release_findmnt.stdout.split()[2] == rocky_post_rootfs_path.stdout | trim
+        fail_msg: The target mountpoint is not exactly the authorized CT790 ZFS dataset.
+
+    - name: Read fixed OS release paths without symlink traversal or atime changes
+      ansible.builtin.command:
+        argv:
+          - python3
+          - -c
+          - "{{ lookup('ansible.builtin.file', playbook_dir ~ '/../files/nextcloud/read_ct790_rootfs_release.py') }}"
+          - "{{ rocky_post_rootfs_path.stdout | trim }}"
+      changed_when: false
+      failed_when: false
+      no_log: true
+      register: rocky_release_inspected
+
+    - name: Require two bounded release reads and expected Rocky 9.8 identity
+      ansible.builtin.assert:
+        that:
+          - rocky_release_inspected.rc == 0
+          - (rocky_release_inspected.stdout | from_json).result == 'ROCKY_9_8_CT790_ROOTFS_RELEASE_READ_ONLY_VERIFIED'
+          - (rocky_release_inspected.stdout | from_json).os_id == 'rocky'
+          - (rocky_release_inspected.stdout | from_json).os_version_id == '9.8'
+          - (rocky_release_inspected.stdout | from_json).rocky_release_verified
+          - (rocky_release_inspected.stdout | from_json).os_release_symlink_verified
+          - (rocky_release_inspected.stdout | from_json).rootfs_files_read == 2
+          - (rocky_release_inspected.stdout | from_json).files_written == 0
+          - not (rocky_release_inspected.stdout | from_json).ct790_started
+          - not (rocky_release_inspected.stdout | from_json).pct_start_authorized
+        fail_msg: Rocky release proof failed. CT790 remains stopped; inspect the bounded reason without changing mount/guest state.
+
+    - name: Verify CT790 still stopped after on-host file reads
+      ansible.builtin.command:
+        argv: [pct, status, '790']
+      changed_when: false
+      register: rocky_release_post_status
+
+    - name: Refuse any unexpected CT790 startup
+      ansible.builtin.assert:
+        that:
+          - "'status: stopped' in rocky_release_post_status.stdout_lines"
+
+    - name: Report only read-only Rocky 9.8 metadata result
+      ansible.builtin.debug:
+        msg:
+          result: ROCKY_9_8_CT790_ROOTFS_RELEASE_READ_ONLY_VERIFIED
+          vmid: 790
+          rocky_version: '9.8'
+          rootfs_files_read: 2
+          mounted_preexisting: true
+          new_mount_created: false
+          files_written_by_audit: 0
+          guest_status: STOPPED
+          ct701_changed: false
+          runtime_tested: false
+          pct_start_authorized: false
+          pct_template_authorized: false
+          next_gate: Separate review of isolated first-boot policy; start remains unauthorized.

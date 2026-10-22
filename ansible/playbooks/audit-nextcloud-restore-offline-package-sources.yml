@@ -1,0 +1,156 @@
+---
+# Read-only inventory for planning compatible offline RPM acquisition.
+# No dnf operations, guest restart, service writes or production changes.
+- name: Register exact existing production RPM reference
+  hosts: localhost
+  gather_facts: false
+  connection: local
+  tasks:
+    - name: Require reviewed source identity and protected site-local variables
+      ansible.builtin.assert:
+        that:
+          - mail_tls_source_address is defined
+          - mail_tls_source_ssh_user is defined
+          - nextcloud_stack_host_fqdn == 'mx.thebergens.net'
+          - not ansible_check_mode
+        fail_msg: Prior reviewed mx2 source settings required.
+      no_log: true
+
+    - name: Register original production source without modifying it
+      ansible.builtin.add_host:
+        name: selected-nextcloud-rpm-source
+        groups: nextcloud_restore_rpm_reference
+        ansible_host: "{{ mail_tls_source_address }}"
+        ansible_user: "{{ mail_tls_source_ssh_user }}"
+        ansible_python_interpreter: /usr/bin/python3
+      changed_when: false
+
+- name: Inspect running networkless test guest's baseline RPMs
+  hosts: venombox
+  gather_facts: false
+  become: true
+  any_errors_fatal: true
+  tasks:
+    - name: Verify exact host identity
+      ansible.builtin.command:
+        argv: [hostname, -s]
+      register: rpm_host
+      changed_when: false
+
+    - name: Read currently running guest status
+      ansible.builtin.command:
+        argv: [pct, status, '701']
+      changed_when: false
+      register: rpm_guest_state
+
+    - name: Read unmodified guest configuration
+      ansible.builtin.command:
+        argv: [pct, config, '701']
+      changed_when: false
+      register: rpm_guest_config
+
+    - name: Require original protected, running and networkless guest
+      ansible.builtin.assert:
+        that:
+          - inventory_hostname == 'venombox'
+          - rpm_host.stdout == 'venombox'
+          - "'status: running' in rpm_guest_state.stdout"
+          - "'hostname: nextcloud-restore-701' in rpm_guest_config.stdout"
+          - "'unprivileged: 1' in rpm_guest_config.stdout"
+          - "'onboot: 0' in rpm_guest_config.stdout"
+          - "'protection: 1' in rpm_guest_config.stdout"
+          - "rpm_guest_config.stdout is search('(?m)^rootfs: local-zfs:')"
+          - "not (rpm_guest_config.stdout is search('(?m)^(?:net[0-9]+|mp[0-9]+|dev[0-9]+|lxc\\.mount\\.entry):'))"
+
+    - name: Read guest package and repository metadata through pct exec
+      ansible.builtin.command:
+        argv:
+          - pct
+          - exec
+          - '701'
+          - --
+          - /usr/bin/python3
+          - -c
+          - "{{ lookup('ansible.builtin.file', playbook_dir ~ '/../files/nextcloud/inspect_restore_rpm_inventory.py') }}"
+          - guest
+      register: guest_rpm_inventory
+      failed_when: false
+      changed_when: false
+      no_log: true
+
+    - name: Require sanitized guest metadata frame and no package operations
+      ansible.builtin.assert:
+        that:
+          - guest_rpm_inventory.rc == 0
+          - guest_rpm_inventory.stdout_lines | length == 2
+          - guest_rpm_inventory.stdout_lines[1] == 'NEXTCLOUD_RESTORE_PACKAGE_INVENTORY=COMPLETE'
+          - (guest_rpm_inventory.stdout_lines[0] | from_json).role == 'guest'
+          - (guest_rpm_inventory.stdout_lines[0] | from_json).os_id == 'rocky'
+          - (guest_rpm_inventory.stdout_lines[0] | from_json).os_version is match('^9\\.[0-9]+$')
+          - not ((guest_rpm_inventory.stdout_lines[0] | from_json).network_changes | bool)
+          - not ((guest_rpm_inventory.stdout_lines[0] | from_json).package_installation | bool)
+        fail_msg: Guest metadata or isolated identity unproven; stop offline package planning.
+      no_log: true
+
+    - name: Display only allowlisted guest package details
+      ansible.builtin.debug:
+        msg: "{{ guest_rpm_inventory.stdout_lines[0] | from_json }}"
+
+- name: Inventory production runtime package names without modifications
+  hosts: nextcloud_restore_rpm_reference
+  gather_facts: false
+  become: true
+  any_errors_fatal: true
+  tasks:
+    - name: Read exact production hostname
+      ansible.builtin.command:
+        argv: [hostname, -f]
+      register: rpm_reference_host
+      changed_when: false
+
+    - name: Prevent inspecting any host other than mx2
+      ansible.builtin.assert:
+        that:
+          - rpm_reference_host.stdout == 'mx.thebergens.net'
+          - rpm_reference_host.stdout == nextcloud_stack_host_fqdn
+
+    - name: Collect RPM providers, enabled repository IDs and extensions read-only
+      ansible.builtin.command:
+        argv:
+          - /usr/bin/python3
+          - -c
+          - "{{ lookup('ansible.builtin.file', playbook_dir ~ '/../files/nextcloud/inspect_restore_rpm_inventory.py') }}"
+          - source
+      register: source_rpm_inventory
+      changed_when: false
+      failed_when: false
+      no_log: true
+
+    - name: Require bounded, sanitized source inventory
+      ansible.builtin.assert:
+        that:
+          - source_rpm_inventory.rc == 0
+          - source_rpm_inventory.stdout_lines | length == 2
+          - source_rpm_inventory.stdout_lines[1] == 'NEXTCLOUD_RESTORE_PACKAGE_INVENTORY=COMPLETE'
+          - (source_rpm_inventory.stdout_lines[0] | from_json).role == 'source'
+          - (source_rpm_inventory.stdout_lines[0] | from_json).os_version is match('^9\\.[0-9]+$')
+          - (source_rpm_inventory.stdout_lines[0] | from_json).dnf_present | bool
+          - not ((source_rpm_inventory.stdout_lines[0] | from_json).package_installation | bool)
+          - not ((source_rpm_inventory.stdout_lines[0] | from_json).network_changes | bool)
+        fail_msg: Source RPM inventory incomplete; no RPM acquisition approved.
+      no_log: true
+
+    - name: Display safe package versions and provider evidence
+      ansible.builtin.debug:
+        msg: "{{ source_rpm_inventory.stdout_lines[0] | from_json }}"
+
+    - name: Report only completed read-only dependency reconnaissance
+      ansible.builtin.debug:
+        msg:
+          result: NEXTCLOUD_RESTORE_OFFLINE_PACKAGE_INVENTORY_READY
+          guest_network: NONE
+          rpm_downloads_performed: false
+          rpm_installations_performed: false
+          archive_extracted: false
+          database_imported: false
+          production_changed: false

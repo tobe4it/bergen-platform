@@ -1,0 +1,180 @@
+---
+# Default READ ONLY. Separately approved one-time graceful shutdown ONLY.
+# No forced stop, restart, delete, cleanup, network, mount, or template conversion.
+# Proxmox --forceStop 0 means timeout is a failure, NEVER an implicit hard-stop.
+- import_playbook: audit-rocky-9-8-ct790-running-readonly.yml
+
+- name: Review or separately approve only one graceful CT790 shutdown
+  hosts: venombox
+  become: true
+  gather_facts: false
+  any_errors_fatal: true
+  vars:
+    rocky_shutdown_apply: "{{ rocky_ct790_shutdown_apply | default(false) | bool }}"
+    rocky_shutdown_confirm_exact: SHUTDOWN_ONLY_RUNNING_NETWORKLESS_CT790
+    rocky_shutdown_timeout_seconds: 90
+  tasks:
+    - name: Demand exact running Rocky 9.8 CT790 and healthy same-run isolation proof
+      ansible.builtin.assert:
+        that:
+          - inventory_hostname == 'venombox'
+          - rocky_running_host.stdout == 'venombox'
+          - "'status: running' in rocky_running_final_status.stdout_lines"
+          - "'status: running' in rocky_running_status.stdout_lines"
+          - "'hostname: rocky9-base-790' in rocky_running_config.stdout_lines"
+          - "'unprivileged: 1' in rocky_running_config.stdout_lines"
+          - "'protection: 1' in rocky_running_config.stdout_lines"
+          - "'onboot: 0' in rocky_running_config.stdout_lines"
+          - rocky_running_systemd.stdout | trim == 'running'
+          - rocky_running_failed_units.rc == 0
+          - rocky_running_failed_units.stdout_lines | length == 0
+          - "'ROCKY_9_8_CT790_RUNTIME_IDENTITY=VERIFIED' in rocky_running_guest.stdout_lines"
+          - "'NON_LOOPBACK_DEVICES=0' in rocky_running_guest.stdout_lines"
+          - "'GUEST_IDMAP_NONIDENTITY=YES' in rocky_running_guest.stdout_lines"
+          - rocky_shutdown_timeout_seconds == 90
+          - not ansible_check_mode
+        fail_msg: One-time graceful shutdown requires currently running healthy isolated protected CT790 and same-run proof.
+
+    - name: Read PVE installed shutdown usage without changing CT790
+      ansible.builtin.command:
+        argv: [pct, help, shutdown]
+      changed_when: false
+      register: rocky_shutdown_help
+
+    - name: Refuse unreviewed force stop or timeout syntax
+      ansible.builtin.assert:
+        that:
+          - rocky_shutdown_help.rc == 0
+          - rocky_shutdown_help.stdout is search('(?i)pct shutdown')
+          - rocky_shutdown_help.stdout is search('--timeout')
+          - rocky_shutdown_help.stdout is search('--forceStop')
+        fail_msg: Proxmox installed pct shutdown command differs from reviewed flags.
+
+    - name: Present default nonmutating graceful shutdown proposal
+      ansible.builtin.debug:
+        msg:
+          result: ROCKY_9_8_CT790_SHUTDOWN_PLAN_READ_ONLY_READY
+          vmid: 790
+          current_status: RUNNING
+          systemd_state: running
+          failed_unit_output_lines: 0
+          actual_nonloopback_interfaces: 0
+          one_possible_future_command: pct shutdown 790 --timeout 90 --forceStop 0
+          shutdown_requested: false
+          force_stop_authorized: false
+          pct_stop_authorized: false
+          pct_template_authorized: false
+          expected_guest_write_scope: CT790 own disposable rootfs during orderly systemd shutdown
+          ct701_unchanged: true
+          changes: 0
+          next_gate: Separate explicit CT790-only human approval for one graceful shutdown, without force stop or automatic retry.
+      when: not rocky_shutdown_apply | bool
+
+    - name: Require separately approved exact two-variable graceful shutdown authorization
+      ansible.builtin.assert:
+        that:
+          - rocky_ct790_shutdown_apply is defined
+          - rocky_ct790_shutdown_apply | bool
+          - rocky_ct790_shutdown_confirm is defined
+          - rocky_ct790_shutdown_confirm == rocky_shutdown_confirm_exact
+        fail_msg: Only separate exact one-time CT790 graceful shutdown approval can enable mutations.
+      when: rocky_shutdown_apply | bool
+
+    - name: Read exact CT790 config immediately before an approved graceful shutdown
+      ansible.builtin.command:
+        argv: [pct, config, '790']
+      changed_when: false
+      no_log: true
+      register: rocky_shutdown_last_config
+      when: rocky_shutdown_apply | bool
+
+    - name: Reject PVE CT790 configuration drift before approved shutdown
+      ansible.builtin.assert:
+        that:
+          - rocky_shutdown_last_config.stdout == rocky_running_config.stdout
+        fail_msg: CT790 PVE configuration changed since the same-run no-write preflight.
+      when: rocky_shutdown_apply | bool
+
+    - name: Independently confirm CT790 is still running just before shutdown
+      ansible.builtin.command:
+        argv: [pct, status, '790']
+      changed_when: false
+      register: rocky_shutdown_before_state
+      when: rocky_shutdown_apply | bool
+
+    - name: Refuse re-run when CT790 is already stopped or runtime drifted
+      ansible.builtin.assert:
+        that:
+          - "'status: running' in rocky_shutdown_before_state.stdout_lines"
+        fail_msg: CT790 no longer running; do not repeat or force a shutdown.
+      when: rocky_shutdown_apply | bool
+
+    - name: Request only one explicitly approved graceful CT790 shutdown, never force stop
+      ansible.builtin.command:
+        argv: [pct, shutdown, '790', --timeout, '90', --forceStop, '0']
+      changed_when: true
+      register: rocky_shutdown_operation
+      no_log: true
+      when: rocky_shutdown_apply | bool
+
+    - name: Read CT790 status after single graceful shutdown request
+      ansible.builtin.command:
+        argv: [pct, status, '790']
+      changed_when: false
+      register: rocky_shutdown_after_state
+      when: rocky_shutdown_apply | bool
+
+    - name: Require CT790 stopped without force, retries or fallback commands
+      ansible.builtin.assert:
+        that:
+          - "'status: stopped' in rocky_shutdown_after_state.stdout_lines"
+        fail_msg: CT790 state after graceful shutdown unexpected; no force stop, retry, rollback or restart is permitted.
+      when: rocky_shutdown_apply | bool
+
+    - name: Confirm original CT790 PVE configuration unchanged after shutdown
+      ansible.builtin.command:
+        argv: [pct, config, '790']
+      changed_when: false
+      no_log: true
+      register: rocky_shutdown_after_config
+      when: rocky_shutdown_apply | bool
+
+    - name: Refuse any unexpected CT790 post-shutdown config changes
+      ansible.builtin.assert:
+        that:
+          - rocky_shutdown_after_config.stdout == rocky_running_config.stdout
+        fail_msg: CT790 PVE config changed during shutdown; no automated changes authorized.
+      when: rocky_shutdown_apply | bool
+
+    - name: Confirm protected CT701 unchanged after graceful CT790 shutdown
+      ansible.builtin.command:
+        argv: [pct, config, '701']
+      changed_when: false
+      no_log: true
+      register: rocky_shutdown_ct701_after
+      when: rocky_shutdown_apply | bool
+
+    - name: Demand exact protected offline CT701 configuration unchanged
+      ansible.builtin.assert:
+        that:
+          - rocky_shutdown_ct701_after.stdout == rocky_running_ct701.stdout
+        fail_msg: CT701 changed unexpectedly; no automated remediation is authorized.
+      when: rocky_shutdown_apply | bool
+
+    - name: Report only verified graceful CT790 shutdown, no template conversion
+      ansible.builtin.debug:
+        msg:
+          result: ROCKY_9_8_CT790_GRACEFUL_SHUTDOWN_STOPPED_VERIFIED
+          vmid: 790
+          status: STOPPED
+          force_stopped: false
+          shutdown_attempts_by_this_run: 1
+          configured_nonloopback_network_interfaces: 0
+          pve_ct790_config_unchanged: true
+          ct701_config_unchanged: true
+          rootfs_may_have_systemd_shutdown_writes: true
+          pct_template_authorized: false
+          pct_start_authorized: false
+          no_automatic_restart_or_rollback: true
+          next_gate: Independently verify stopped rootfs and template sanitation policy; conversion requires separate approval.
+      when: rocky_shutdown_apply | bool

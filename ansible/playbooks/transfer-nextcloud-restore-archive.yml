@@ -1,0 +1,96 @@
+---
+# The source/archive path, destination, expected hash and isolation are
+# rechecked by the transport on each run. Default is SSH-only read-only.
+- name: Transport one completed Nextcloud archive via the controller
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  any_errors_fatal: true
+  tasks:
+    - name: Require reviewed source and destination transport inventory
+      ansible.builtin.assert:
+        that:
+          - mail_tls_source_address is defined
+          - mail_tls_source_ssh_user is defined
+          - nextcloud_stack_host_fqdn is defined
+          - nextcloud_stack_host_fqdn == 'mx.thebergens.net'
+          - nextcloud_backup_nfs_source is defined
+          - nextcloud_backup_mount == '/mnt/nextcloud-backup'
+          - nextcloud_restore_snapshot_id is defined
+          - nextcloud_restore_snapshot_id is match('^20[0-9]{6}T[0-9]{6}Z-[0-9]+$')
+          - hostvars['venombox'].ansible_host is defined
+          - hostvars['venombox'].ansible_user is defined
+          - mail_tls_source_address != hostvars['venombox'].ansible_host
+          - not ansible_check_mode
+        fail_msg: Restore source, snapshot, inventory and destination must be independently approved.
+      no_log: true
+
+    - name: Require transport script is exact regular file
+      ansible.builtin.stat:
+        path: "{{ playbook_dir }}/../files/nextcloud/stream_verified_restore_archive.py"
+        follow: false
+      register: restore_transport_script
+
+    - name: Refuse untrusted controller script
+      ansible.builtin.assert:
+        that:
+          - restore_transport_script.stat.isreg | default(false)
+          - not (restore_transport_script.stat.islnk | default(false))
+
+    - name: Require syntax-valid transport before attempting SSH
+      ansible.builtin.command:
+        argv:
+          - python3
+          - -c
+          - >-
+            import ast, pathlib;
+            ast.parse(pathlib.Path("{{ playbook_dir }}/../files/nextcloud/stream_verified_restore_archive.py").read_text())
+      changed_when: false
+
+    - name: Probe strict SSH to mx2 and venombox, then optionally stream once
+      ansible.builtin.command:
+        argv: >-
+          {{ [
+              'python3',
+              playbook_dir ~ '/../files/nextcloud/stream_verified_restore_archive.py',
+              '--source', mail_tls_source_address,
+              '--source-user', mail_tls_source_ssh_user,
+              '--source-port', mail_tls_source_ssh_port | default(22) | string,
+              '--target', hostvars['venombox'].ansible_host,
+              '--target-user', hostvars['venombox'].ansible_user,
+              '--target-port', hostvars['venombox'].ansible_port | default(22) | string,
+              '--snapshot', nextcloud_restore_snapshot_id,
+              '--export', nextcloud_backup_nfs_source
+             ] + (['--apply'] if (nextcloud_restore_transfer_apply | default(false) | bool) else []) }}
+      changed_when:
+        - nextcloud_restore_transfer_apply | default(false) | bool
+        - "'NEXTCLOUD_RESTORE_ARCHIVE_ALREADY_VERIFIED=YES' not in restore_transfer_result.stdout_lines"
+      register: restore_transfer_result
+      no_log: true
+
+    - name: Require expected exact successful probe or receipt
+      ansible.builtin.assert:
+        that:
+          - restore_transfer_result.rc == 0
+          - >-
+            ('NEXTCLOUD_RESTORE_ARCHIVE_TRANSFER_COMPLETE=YES'
+              if (nextcloud_restore_transfer_apply | default(false) | bool)
+              else 'NEXTCLOUD_RESTORE_TRANSFER_READ_ONLY_READY')
+            in restore_transfer_result.stdout_lines
+          - "'NEXTCLOUD_RESTORE_SSH_BOTH_ENDPOINTS_VERIFIED=YES' in restore_transfer_result.stdout_lines"
+          - "'SNAPSHOT_ID=' ~ nextcloud_restore_snapshot_id in restore_transfer_result.stdout_lines"
+        fail_msg: Transfer not proved. Never treat partial data as recoverable.
+      no_log: true
+
+    - name: Report strictly bounded transfer status
+      ansible.builtin.debug:
+        msg:
+          state: "{{ 'NEXTCLOUD_RESTORE_ARCHIVE_TRANSFER_COMPLETE' if (nextcloud_restore_transfer_apply | default(false) | bool) else 'NEXTCLOUD_RESTORE_TRANSFER_READ_ONLY_READY' }}"
+          snapshot_id: "{{ nextcloud_restore_snapshot_id }}"
+          hash_verified: "{{ 'SOURCE_CONTROLLER_AND_DESTINATION' if (nextcloud_restore_transfer_apply | default(false) | bool) else 'NOT_REHASHED_IN_PROBE' }}"
+          preexisting_verified_archive: "{{ 'NEXTCLOUD_RESTORE_ARCHIVE_ALREADY_VERIFIED=YES' in restore_transfer_result.stdout_lines }}"
+          network_created: false
+          guest_started: false
+          mx1_changed: false
+          mx2_changed: false
+          destination: /var/lib/vz/nextcloud-restore-test

@@ -1,0 +1,146 @@
+---
+# Read-only follow-up for an already-running VMID 701.
+# No pct start/stop, no package installation, no network or disk changes.
+- name: Diagnose existing isolated Rocky Linux 9 restore guest
+  hosts: venombox
+  gather_facts: false
+  become: true
+  any_errors_fatal: true
+  tasks:
+    - name: Confirm exact restore host
+      ansible.builtin.command:
+        argv: [hostname, -s]
+      changed_when: false
+      register: diag_hostname
+
+    - name: Require exact venombox node
+      ansible.builtin.assert:
+        that:
+          - inventory_hostname == 'venombox'
+          - diag_hostname.stdout == 'venombox'
+
+    - name: Read current guest status
+      ansible.builtin.command:
+        argv: [pct, status, '701']
+      changed_when: false
+      register: diag_status
+
+    - name: Read current guest configuration
+      ansible.builtin.command:
+        argv: [pct, config, '701']
+      changed_when: false
+      register: diag_config
+
+    - name: Refuse unexpected running guest or attached network
+      ansible.builtin.assert:
+        that:
+          - "'status: running' in diag_status.stdout"
+          - "'hostname: nextcloud-restore-701' in diag_config.stdout"
+          - "'unprivileged: 1' in diag_config.stdout"
+          - "'onboot: 0' in diag_config.stdout"
+          - "'protection: 1' in diag_config.stdout"
+          - "'ostype: centos' in diag_config.stdout"
+          - "diag_config.stdout is search('(?m)^rootfs: local-zfs:')"
+          - "not (diag_config.stdout is search('(?m)^(?:net[0-9]+|mp[0-9]+|dev[0-9]+|lxc\\.mount\\.entry):'))"
+        fail_msg: Running guest no longer matches the protected offline test.
+
+    - name: Probe only basic guest command execution
+      ansible.builtin.command:
+        argv: [pct, exec, '701', --, /bin/sh, -c, "printf 'GUEST_EXEC_READY\\n'"]
+      register: diag_exec
+      changed_when: false
+      failed_when: false
+      no_log: true
+
+    - name: Report bounded pct-exec probe result
+      ansible.builtin.debug:
+        msg:
+          state: "{{ 'GUEST_EXEC_READY' if (diag_exec.rc == 0 and diag_exec.stdout_lines == ['GUEST_EXEC_READY']) else 'GUEST_EXEC_UNAVAILABLE' }}"
+          return_code: "{{ diag_exec.rc }}"
+          untrusted_stderr_suppressed: true
+          no_changes: true
+
+    - name: Stop if pct exec is unavailable
+      ansible.builtin.assert:
+        that:
+          - diag_exec.rc == 0
+          - diag_exec.stdout_lines == ['GUEST_EXEC_READY']
+        fail_msg: Guest pct-exec is not working; review LXC runtime status before continuing.
+
+    - name: Read guest release, network interfaces and RPM package status
+      ansible.builtin.command:
+        argv:
+          - pct
+          - exec
+          - '701'
+          - --
+          - /bin/sh
+          - -ec
+          - |
+            if test ! -r /etc/os-release; then
+              printf 'OS_FILE_MISSING=YES\n'
+              exit 72
+            fi
+            ID=UNAVAILABLE
+            VERSION_ID=UNAVAILABLE
+            . /etc/os-release
+            printf 'OS_ID=%s\n' "$ID"
+            printf 'OS_VERSION=%s\n' "$VERSION_ID"
+            # /sys/class/net/bonding_masters is a control file, NOT an
+            # interface. Kernel netdevices are symlink directory entries.
+            test -L /sys/class/net/lo
+            count=0
+            for entry in /sys/class/net/*; do
+              test -L "$entry" || continue
+              case "$entry" in */lo) ;; *) count=$((count + 1)) ;; esac
+            done
+            printf 'NON_LOOPBACK_DEVICES=%s\n' "$count"
+            if command -v rpm >/dev/null 2>&1; then
+              printf 'RPM_COMMAND=AVAILABLE\n'
+              for package in php-cli php-fpm php-mysqlnd mariadb-server mariadb nginx httpd tar gzip rsync python3 openssl; do
+                if rpm -q "$package" >/dev/null 2>&1; then
+                  printf 'RPM_%s=INSTALLED\n' "$package"
+                else
+                  printf 'RPM_%s=ABSENT\n' "$package"
+                fi
+              done
+            else
+              printf 'RPM_COMMAND=MISSING\n'
+            fi
+            printf 'GUEST_INVENTORY_COMPLETE=YES\n'
+      register: diag_runtime
+      changed_when: false
+      failed_when: false
+      no_log: true
+
+    - name: Report only allowlisted guest runtime diagnostics
+      ansible.builtin.debug:
+        msg:
+          guest_exec_return_code: "{{ diag_runtime.rc }}"
+          guest_os_id: "{{ 'rocky' if 'OS_ID=rocky' in diag_runtime.stdout_lines else 'UNEXPECTED_OR_MISSING' }}"
+          guest_os_version: "{{ (diag_runtime.stdout_lines | select('match', '^OS_VERSION=9(\\.[0-9]+)?$') | list | first | default('VERSION_NOT_CONFIRMED')) }}"
+          non_loopback_interfaces: "{{ (diag_runtime.stdout_lines | select('match', '^NON_LOOPBACK_DEVICES=[0-9]+$') | list | first | default('NOT_REPORTED')) }}"
+          rpm_command: "{{ 'AVAILABLE' if 'RPM_COMMAND=AVAILABLE' in diag_runtime.stdout_lines else 'UNAVAILABLE' }}"
+          packages: "{{ diag_runtime.stdout_lines | select('match', '^RPM_[a-zA-Z0-9_-]+=(?:INSTALLED|ABSENT)$') | list }}"
+          inventory_marker_present: "{{ 'GUEST_INVENTORY_COMPLETE=YES' in diag_runtime.stdout_lines }}"
+          sensitive_output_suppressed: true
+
+    - name: Require Rocky 9, zero networking and complete package inventory
+      ansible.builtin.assert:
+        that:
+          - diag_runtime.rc == 0
+          - "'OS_ID=rocky' in diag_runtime.stdout_lines"
+          - "diag_runtime.stdout is search('(?m)^OS_VERSION=9(?:\\.[0-9]+)?$')"
+          - "'NON_LOOPBACK_DEVICES=0' in diag_runtime.stdout_lines"
+          - "'RPM_COMMAND=AVAILABLE' in diag_runtime.stdout_lines"
+          - "'GUEST_INVENTORY_COMPLETE=YES' in diag_runtime.stdout_lines"
+        fail_msg: Guest runtime inventory not fully proven. Do not restore until investigated.
+
+    - name: Report isolated runtime inventory success with no modifications
+      ansible.builtin.debug:
+        msg:
+          result: NEXTCLOUD_RESTORE_701_RUNNING_OFFLINE_INVENTORY_VERIFIED
+          changed: false
+          extracted: false
+          database_imported: false
+          production_changed: false

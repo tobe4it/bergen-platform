@@ -1,0 +1,219 @@
+---
+# Boundaries-only audit for transferring a fully-verified Nextcloud snapshot.
+# No transfer, mount, guest start, package installation or database writes.
+- name: Register the reviewed production source for backup inventory
+  hosts: localhost
+  gather_facts: false
+  connection: local
+  tasks:
+    - name: Require existing reviewed Nextcloud backup source identity
+      ansible.builtin.assert:
+        that:
+          - mail_tls_source_address is defined
+          - mail_tls_source_ssh_user is defined
+          - nextcloud_stack_host_fqdn is defined
+          - nextcloud_backup_mount is defined
+          - nextcloud_backup_nfs_source is defined
+          - nextcloud_backup_mount == '/mnt/nextcloud-backup'
+          - not ansible_check_mode
+      no_log: true
+
+    - name: Register only the original production backup host
+      ansible.builtin.add_host:
+        name: selected-nextcloud-restore-source
+        groups: nextcloud_restore_readonly_source
+        ansible_host: "{{ mail_tls_source_address }}"
+        ansible_user: "{{ mail_tls_source_ssh_user }}"
+        ansible_python_interpreter: /usr/bin/python3
+      changed_when: false
+
+- name: Recheck offline restore guest boundary on venombox
+  hosts: venombox
+  gather_facts: false
+  become: true
+  any_errors_fatal: true
+  tasks:
+    - name: Require venombox identity
+      ansible.builtin.command:
+        argv: [hostname, -s]
+      changed_when: false
+      register: restore_host_identity
+
+    - name: Require original reviewed Proxmox node
+      ansible.builtin.assert:
+        that:
+          - restore_host_identity.stdout == 'venombox'
+
+    - name: Inspect guest state without starting it
+      ansible.builtin.command:
+        argv: [pct, status, '701']
+      changed_when: false
+      register: restore_guest_status
+
+    - name: Inspect guest config without changing it
+      ansible.builtin.command:
+        argv: [pct, config, '701']
+      changed_when: false
+      register: restore_guest_config
+
+    - name: Assert VMID is exactly protected offline restore guest
+      ansible.builtin.assert:
+        that:
+          - "'status: stopped' in restore_guest_status.stdout"
+          - "'hostname: nextcloud-restore-701' in restore_guest_config.stdout"
+          - "'unprivileged: 1' in restore_guest_config.stdout"
+          - "'onboot: 0' in restore_guest_config.stdout"
+          - "'protection: 1' in restore_guest_config.stdout"
+          - "'rootfs: local-zfs:' in restore_guest_config.stdout"
+          - "not (restore_guest_config.stdout is search('(?m)^net[0-9]+:'))"
+        fail_msg: Restore guest is not isolated and stopped. Stop before any transfer.
+
+    - name: Confirm the protected staging directory exists
+      ansible.builtin.stat:
+        path: /var/lib/vz/nextcloud-restore-test
+        follow: false
+      register: restore_workspace
+
+    - name: Require root-only staging directory
+      ansible.builtin.assert:
+        that:
+          - restore_workspace.stat.isdir | default(false)
+          - not (restore_workspace.stat.islnk | default(false))
+          - restore_workspace.stat.pw_name == 'root'
+          - restore_workspace.stat.mode == '0700'
+
+    - name: Verify root staging has capacity for archive plus extracted files
+      ansible.builtin.command:
+        argv:
+          - python3
+          - -c
+          - "import shutil; print(shutil.disk_usage('/var/lib/vz/nextcloud-restore-test').free)"
+      register: restore_free_bytes
+      changed_when: false
+
+    - name: Require at least 30 GiB staging headroom
+      ansible.builtin.assert:
+        that:
+          - restore_free_bytes.stdout | int > 30 * 1024 ** 3
+
+    - name: Report untouched and isolated restore destination
+      ansible.builtin.debug:
+        msg:
+          destination: VENOMBOX_701_ISOLATED_STOPPED
+          archive_written: false
+          test_guest_started: false
+          existing_guests_modified: false
+
+- name: Examine most recent verified Synology snapshot on mx2
+  hosts: nextcloud_restore_readonly_source
+  gather_facts: false
+  become: true
+  any_errors_fatal: true
+  tasks:
+    - name: Independently validate exact mx2 identity
+      ansible.builtin.command:
+        argv: [hostname, -f]
+      register: restore_source_hostname
+      changed_when: false
+
+    - name: Reject unexpected SSH source host
+      ansible.builtin.assert:
+        that:
+          - restore_source_hostname.stdout == nextcloud_stack_host_fqdn
+          - restore_source_hostname.stdout == 'mx.thebergens.net'
+
+    - name: Inspect exact expected existing NFS source
+      ansible.builtin.command:
+        argv: [findmnt, -rn, -o, SOURCE, -M, "{{ nextcloud_backup_mount }}"]
+      changed_when: false
+      register: restore_source_export
+
+    - name: Require intended existing Synology export
+      ansible.builtin.assert:
+        that:
+          - restore_source_export.stdout == nextcloud_backup_nfs_source
+
+    - name: Validate only latest committed snapshot metadata
+      ansible.builtin.command:
+        argv:
+          - python3
+          - -c
+          - |
+            from pathlib import Path
+            import json
+            import re
+            import sys
+
+            mount = Path(sys.argv[1])
+            marker = Path("/var/lib/bergen-nextcloud-backup/last-success.txt")
+            if marker.is_symlink() or not marker.is_file():
+                raise SystemExit("LAST_SUCCESS_UNSAFE")
+            lines = marker.read_text().splitlines()
+            if len(lines) != 3:
+                raise SystemExit("LAST_SUCCESS_FORMAT")
+            stamp, destination, digest = lines
+            if not re.fullmatch(r"20\d{6}T\d{6}Z-\d+", stamp):
+                raise SystemExit("LAST_SUCCESS_STAMP")
+            if not re.fullmatch(r"[0-9a-f]{64}", digest):
+                raise SystemExit("LAST_SUCCESS_DIGEST")
+            base = mount / "mx2-nextcloud"
+            path = Path(destination)
+            if path.parent != base or path.name != ("backup-" + stamp):
+                raise SystemExit("LAST_SUCCESS_LOCATION")
+            if path.is_symlink() or not path.is_dir():
+                raise SystemExit("BACKUP_SET_UNAVAILABLE")
+            archive = path / "nextcloud.tar.gz"
+            if archive.is_symlink() or not archive.is_file():
+                raise SystemExit("ARCHIVE_NOT_REGULAR")
+            sha = path / "SHA256SUMS"
+            complete = path / "COMPLETE"
+            if sha.read_text().strip() != digest + "  nextcloud.tar.gz":
+                raise SystemExit("SHA256SUMS_MISMATCH")
+            if complete.read_text().strip() != "VERIFIED_SHA256=" + digest:
+                raise SystemExit("COMPLETE_MISMATCH")
+            print(json.dumps({
+                "snapshot_id": stamp,
+                "archive_bytes": archive.stat().st_size,
+                "committed": True,
+                "complete": True,
+                "transfer_performed": False,
+                "note": "prior SHA256 verification already performed by operator"
+            }, sort_keys=True))
+          - "{{ nextcloud_backup_mount }}"
+      register: restore_source_snapshot
+      changed_when: false
+      no_log: true
+
+    - name: Require sanitized single-record source output
+      ansible.builtin.assert:
+        that:
+          - restore_source_snapshot.stdout_lines | length == 1
+          - (restore_source_snapshot.stdout | from_json).committed | bool
+          - (restore_source_snapshot.stdout | from_json).archive_bytes | int > 0
+      no_log: true
+
+    - name: Display sanitized chosen source snapshot
+      ansible.builtin.debug:
+        msg: "{{ restore_source_snapshot.stdout | from_json }}"
+
+    - name: Inspect versions for a compatible offline restore
+      ansible.builtin.command:
+        argv: "{{ item }}"
+      changed_when: false
+      failed_when: false
+      loop:
+        - [php, -v]
+        - [mariadb, --version]
+        - [rpm, -q, php-cli, php-fpm, mariadb-server]
+      register: restore_versions
+      no_log: true
+
+    - name: Report runtime version preflight, without publishing full package inventory
+      ansible.builtin.debug:
+        msg:
+          php_first_line: "{{ (restore_versions.results[0].stdout_lines | default([]) | first) | default('UNAVAILABLE') }}"
+          mariadb_first_line: "{{ (restore_versions.results[1].stdout_lines | default([]) | first) | default('UNAVAILABLE') }}"
+          rpm_packages_available: "{{ restore_versions.results[2].rc == 0 }}"
+          storage_export_unchanged: true
+          backup_archive_not_copied: true
+          read_only_complete: NEXTCLOUD_RESTORE_TRANSFER_PREFLIGHT_READY

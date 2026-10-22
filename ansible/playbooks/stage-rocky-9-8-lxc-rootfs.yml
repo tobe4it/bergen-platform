@@ -1,0 +1,182 @@
+---
+# Default is fully read-only. The only mutation path is a separately
+# authorized exact file copy followed by verified, no-overwrite hardlink commit.
+# This playbook DOES NOT extract TAR, create a CT, or change a network.
+- import_playbook: audit-rocky-9-8-direct-import-staging-readonly.yml
+
+- name: Optionally stage exact signed Rocky rootfs as a PVE-local template file
+  hosts: venombox
+  become: true
+  gather_facts: false
+  any_errors_fatal: true
+  vars:
+    rocky_source: /home/ansible/rocky9-lxc-20261018/rootfs.tar.xz
+    rocky_expected_sha256: 1fd0ade221871319d5ae7bed9ece57c001d79ef950c1263814d5b8d48779b7e5
+    rocky_expected_bytes: 107425612
+    rocky_dest_dir: /var/lib/vz/template/cache
+    rocky_final: /var/lib/vz/template/cache/rockylinux-9.8-lxc_20261018_amd64.tar.xz
+    rocky_incoming: /var/lib/vz/template/cache/.incoming-rockylinux-9.8-lxc_20261018_amd64.tar.xz.part
+    rocky_apply: "{{ rocky_rootfs_staging_apply | default(false) | bool }}"
+  tasks:
+    - name: Demand same-run structural and destination readiness before any apply
+      ansible.builtin.assert:
+        that:
+          - hostvars['bp-controller'].rocky_direct_source_audit is defined
+          - (hostvars['bp-controller'].rocky_direct_source_audit.stdout | from_json).result == 'ROCKY_LXC_ROOTFS_STRUCTURAL_AUDIT_PASS'
+          - (hostvars['bp-controller'].rocky_direct_source_audit.stdout | from_json).sha256_verified
+          - rocky_direct_target_file is defined
+          - not rocky_direct_target_file.stat.exists
+          - rocky_direct_incoming_file is defined
+          - not rocky_direct_incoming_file.stat.exists
+          - rocky_direct_host.stdout == 'venombox'
+          - rocky_expected_sha256 == '1fd0ade221871319d5ae7bed9ece57c001d79ef950c1263814d5b8d48779b7e5'
+          - rocky_expected_bytes == 107425612
+          - rocky_final == rocky_dest_dir ~ '/rockylinux-9.8-lxc_20261018_amd64.tar.xz'
+          - rocky_incoming == rocky_dest_dir ~ '/.incoming-rockylinux-9.8-lxc_20261018_amd64.tar.xz.part'
+          - not ansible_check_mode
+        fail_msg: Same-run signed-rootfs and PVE staging assertions required.
+
+    - name: Report read-only state when staging not explicitly approved
+      ansible.builtin.debug:
+        msg:
+          status: ROCKY_9_8_ROOTFS_STAGING_READ_ONLY_READY
+          archive_transferred: false
+          template_created: false
+          guest_created: false
+          ct701_changed: false
+          network_changed: false
+          rootfs_staging_apply_authorized: false
+      when: not rocky_apply | bool
+
+    - name: Require separate explicit apply approval for file-only staging
+      ansible.builtin.assert:
+        that:
+          - rocky_rootfs_staging_apply is defined
+          - rocky_rootfs_staging_apply | bool
+        fail_msg: Explicit rocky_rootfs_staging_apply approval missing.
+      when: rocky_apply | bool
+
+    - name: Copy immutable archive into new root-only incoming file on approval
+      ansible.builtin.copy:
+        src: "{{ rocky_source }}"
+        dest: "{{ rocky_incoming }}"
+        owner: root
+        group: root
+        mode: '0600'
+        force: false
+        unsafe_writes: false
+        follow: false
+      register: rocky_staged_copy
+      when: rocky_apply | bool
+
+    - name: Demand new incoming file was actually created
+      ansible.builtin.assert:
+        that:
+          - rocky_staged_copy.changed
+          - rocky_staged_copy.dest == rocky_incoming
+        fail_msg: Incoming archive not uniquely transferred; do not publish.
+      when: rocky_apply | bool
+
+    - name: Atomically publish after exact size SHA256 and root ownership checks
+      ansible.builtin.command:
+        argv:
+          - python3
+          - -c
+          - |
+            import hashlib, os, socket, stat, sys
+            root, pending, final, expected_sha, expected_size = sys.argv[1:]
+            if os.geteuid() != 0 or socket.gethostname().split('.')[0] != 'venombox':
+                raise SystemExit(70)
+            if root != '/var/lib/vz/template/cache':
+                raise SystemExit(71)
+            if pending != root + '/.incoming-rockylinux-9.8-lxc_20261018_amd64.tar.xz.part':
+                raise SystemExit(72)
+            if final != root + '/rockylinux-9.8-lxc_20261018_amd64.tar.xz':
+                raise SystemExit(73)
+            if expected_sha != '1fd0ade221871319d5ae7bed9ece57c001d79ef950c1263814d5b8d48779b7e5' or int(expected_size) != 107425612:
+                raise SystemExit(74)
+            for ancestor in ('/var/lib/vz', '/var/lib/vz/template', root):
+                st = os.lstat(ancestor)
+                if not stat.S_ISDIR(st.st_mode) or st.st_uid != 0 or st.st_mode & 0o022:
+                    raise SystemExit(75)
+            if os.path.lexists(final):
+                raise SystemExit(76)
+            fd = os.open(pending, os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC)
+            try:
+                st = os.fstat(fd)
+                if not stat.S_ISREG(st.st_mode) or st.st_uid != 0 or st.st_gid != 0 or stat.S_IMODE(st.st_mode) != 0o600 or st.st_size != int(expected_size):
+                    raise SystemExit(77)
+                digest = hashlib.sha256()
+                while True:
+                    block = os.read(fd, 1048576)
+                    if not block:
+                        break
+                    digest.update(block)
+                if digest.hexdigest() != expected_sha:
+                    raise SystemExit(78)
+                os.fsync(fd)
+                now = os.fstat(fd)
+                if (st.st_dev, st.st_ino, st.st_size, st.st_mtime_ns, st.st_ctime_ns) != (now.st_dev, now.st_ino, now.st_size, now.st_mtime_ns, now.st_ctime_ns):
+                    raise SystemExit(79)
+                os.link(pending, final, follow_symlinks=False)
+                os.unlink(pending)
+                dirfd = os.open(root, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+                try:
+                    os.fsync(dirfd)
+                finally:
+                    os.close(dirfd)
+            finally:
+                os.close(fd)
+            print('ROCKY_9_8_ROOTFS_ATOMIC_STAGING_COMMITTED=YES')
+          - "{{ rocky_dest_dir }}"
+          - "{{ rocky_incoming }}"
+          - "{{ rocky_final }}"
+          - "{{ rocky_expected_sha256 }}"
+          - "{{ rocky_expected_bytes | string }}"
+      register: rocky_stage_commit
+      changed_when: true
+      when: rocky_apply | bool
+
+    - name: Verify exact receipt before considering the transfer complete
+      ansible.builtin.assert:
+        that:
+          - "'ROCKY_9_8_ROOTFS_ATOMIC_STAGING_COMMITTED=YES' in rocky_stage_commit.stdout_lines"
+        fail_msg: The target commit receipt did not confirm successful staging.
+      when: rocky_apply | bool
+
+    - name: Hash committed template file without following symbolic links
+      ansible.builtin.stat:
+        path: "{{ rocky_final }}"
+        follow: false
+        get_checksum: true
+        checksum_algorithm: sha256
+      register: rocky_committed_stat
+      when: rocky_apply | bool
+
+    - name: Refuse any incorrect final template metadata or content
+      ansible.builtin.assert:
+        that:
+          - rocky_committed_stat.stat.isreg | default(false)
+          - not (rocky_committed_stat.stat.islnk | default(false))
+          - rocky_committed_stat.stat.pw_name == 'root'
+          - rocky_committed_stat.stat.gr_name == 'root'
+          - rocky_committed_stat.stat.mode == '0600'
+          - rocky_committed_stat.stat.size == rocky_expected_bytes
+          - rocky_committed_stat.stat.checksum == rocky_expected_sha256
+        fail_msg: Staged archive final SHA256/mode mismatch; refuse template import.
+      when: rocky_apply | bool
+
+    - name: Report only bounded post-transfer outcome
+      ansible.builtin.debug:
+        msg:
+          status: ROCKY_9_8_ROOTFS_STAGED_SHA256_VERIFIED
+          destination: "local:vztmpl/rockylinux-9.8-lxc_20261018_amd64.tar.xz"
+          sha256_verified: true
+          transferred_bytes: 107425612
+          guest_created: false
+          ct701_changed: false
+          network_changed: false
+          rootfs_extracted: false
+          pct_create_authorized: false
+          next_gate: Separately audit PVE template metadata and guest-creation semantics.
+      when: rocky_apply | bool

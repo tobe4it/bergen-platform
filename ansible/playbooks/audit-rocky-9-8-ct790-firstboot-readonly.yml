@@ -1,0 +1,132 @@
+---
+# FIRST-BOOT PRECONDITIONS ONLY. NO pct start, mount, template, config, network.
+# Re-prove the existing CT790, its PVE/ZFS bindings and Rocky 9.8 release.
+- import_playbook: audit-rocky-9-8-ct790-rootfs-release-readonly.yml
+
+- name: Audit exact stopped CT790 for a separately authorized first boot
+  hosts: venombox
+  become: true
+  gather_facts: false
+  any_errors_fatal: true
+  vars:
+    rocky_firstboot_vmid: 790
+    rocky_firstboot_allowed_config_keys:
+      - arch
+      - cores
+      - features
+      - hostname
+      - memory
+      - onboot
+      - ostype
+      - protection
+      - rootfs
+      - swap
+      - unprivileged
+  tasks:
+    - name: Require same-run independent CT790 and rootfs release proofs
+      ansible.builtin.assert:
+        that:
+          - inventory_hostname == 'venombox'
+          - rocky_firstboot_vmid == 790
+          - rocky_post_host.stdout == 'venombox'
+          - "'status: stopped' in rocky_post_state.stdout_lines"
+          - "'status: stopped' in rocky_release_post_status.stdout_lines"
+          - (rocky_release_inspected.stdout | from_json).result == 'ROCKY_9_8_CT790_ROOTFS_RELEASE_READ_ONLY_VERIFIED'
+          - (rocky_release_inspected.stdout | from_json).os_version_id == '9.8'
+          - rocky_release_zfs_mounted.stdout | trim == 'yes'
+          - rocky_post_rootfs_volid is match('^local-zfs:subvol-790-disk-[0-9]+$')
+          - rocky_post_template_file.stat.checksum == '1fd0ade221871319d5ae7bed9ece57c001d79ef950c1263814d5b8d48779b7e5'
+        fail_msg: Signed Rocky 9.8 rootfs, stopped CT790 and owned ZFS dataset must be reverified.
+
+    - name: Re-read current CT790 configuration immediately before policy review
+      ansible.builtin.command:
+        argv: [pct, config, '790']
+      register: rocky_firstboot_config
+      changed_when: false
+      no_log: true
+
+    - name: Demand only reviewed Proxmox configuration keys exist
+      ansible.builtin.assert:
+        that:
+          - >-
+            (rocky_firstboot_config.stdout
+             | regex_findall('(?m)^([^\\s:\\n][^:\\n]*):')
+             | difference(rocky_firstboot_allowed_config_keys)
+             | length) == 0
+          - >-
+            (rocky_firstboot_config.stdout
+             | regex_findall('(?m)^([^\\s:\\n][^:\\n]*):')
+             | length) >= 9
+          - >-
+            not (rocky_firstboot_config.stdout
+             is search('(?m)^(?:net[0-9]+|mp[0-9]+|dev[0-9]+|hookscript|lxc[.]|startup|nameserver|searchdomain|lock|template|tags):'))
+        fail_msg: CT790 contains unreviewed PVE settings, hooks, networking or mount entries.
+
+    - name: Demand exact unprivileged protected stopped and offline first-boot configuration
+      ansible.builtin.assert:
+        that:
+          - "'hostname: rocky9-base-790' in rocky_firstboot_config.stdout_lines"
+          - "'ostype: centos' in rocky_firstboot_config.stdout_lines"
+          - "'cores: 2' in rocky_firstboot_config.stdout_lines"
+          - "'memory: 2048' in rocky_firstboot_config.stdout_lines"
+          - "'swap: 0' in rocky_firstboot_config.stdout_lines"
+          - "'unprivileged: 1' in rocky_firstboot_config.stdout_lines"
+          - "'protection: 1' in rocky_firstboot_config.stdout_lines"
+          - "'onboot: 0' in rocky_firstboot_config.stdout_lines"
+          - >-
+            (rocky_firstboot_config.stdout_lines
+             | select('match', '^rootfs: local-zfs:subvol-790-disk-[0-9]+,size=16G(?:$|,)')
+             | list | length) == 1
+          - >-
+            not (rocky_firstboot_config.stdout is
+             search('(?m)^features: (?!nesting=0$)'))
+          - >-
+            not (rocky_firstboot_config.stdout is
+             search('(?m)^arch: (?!amd64$)'))
+        fail_msg: Exact approved CT790 resource, privilege, isolation or rootfs attributes changed.
+
+    - name: Require Proxmox start command is documented on this exact host
+      ansible.builtin.command:
+        argv: [pct, help, start]
+      changed_when: false
+      register: rocky_firstboot_start_help
+
+    - name: Refuse unreviewed PVE first-start command semantics
+      ansible.builtin.assert:
+        that:
+          - rocky_firstboot_start_help.rc == 0
+          - rocky_firstboot_start_help.stdout is search('(?i)pct start')
+        fail_msg: Unexpected installed Proxmox pct start command; do not proceed.
+
+    - name: Re-read final CT790 stopped status without starting it
+      ansible.builtin.command:
+        argv: [pct, status, '790']
+      changed_when: false
+      register: rocky_firstboot_status
+
+    - name: Require CT790 still stopped after final policy inspection
+      ansible.builtin.assert:
+        that:
+          - "'status: stopped' in rocky_firstboot_status.stdout_lines"
+
+    - name: Record bounded first-boot review result without any start authorization
+      ansible.builtin.debug:
+        msg:
+          result: ROCKY_9_8_CT790_FIRSTBOOT_PREFLIGHT_READ_ONLY_READY
+          vmid: 790
+          rocky_version: '9.8'
+          rootfs: "{{ rocky_post_rootfs_volid }}"
+          currently_stopped: true
+          unprivileged: true
+          protected: true
+          onboot: false
+          network_interfaces_configured: 0
+          additional_mounts: 0
+          hooks_detected: false
+          guest_started: false
+          changes: 0
+          ct701_unchanged: true
+          pct_start_authorized: false
+          pct_template_authorized: false
+          runtime_behavior_tested: false
+          next_gate: Obtain separate explicit one-time start approval after reviewing systemd and offline guest write risks.

@@ -1,0 +1,169 @@
+---
+# CT790-only guarded Rocky 9.8 extraction/create plan.
+# DEFAULT = READ ONLY. Do not execute apply before separate operator approval.
+# The exact signed source and staged template read-only checks run again first.
+- import_playbook: audit-rocky-9-8-ct790-create-readonly.yml
+
+- name: Review or explicitly create ONLY isolated Rocky 9.8 base CT790
+  hosts: venombox
+  become: true
+  gather_facts: false
+  any_errors_fatal: true
+  vars:
+    rocky_create_vmid: 790
+    rocky_create_hostname: rocky9-base-790
+    rocky_create_template: local:vztmpl/rockylinux-9.8-lxc_20261018_amd64.tar.xz
+    rocky_create_rootfs: local-zfs:16
+    rocky_create_apply: "{{ rocky_ct790_create_apply | default(false) | bool }}"
+    rocky_create_exact_approval: CREATE_ONLY_OFFLINE_ROCKY_9_8_CT790
+  tasks:
+    - name: Require same-run signed template and owner mapping proof
+      ansible.builtin.assert:
+        that:
+          - inventory_hostname == 'venombox'
+          - rocky_after_host.stdout == 'venombox'
+          - rocky_after_file.stat.checksum == '1fd0ade221871319d5ae7bed9ece57c001d79ef950c1263814d5b8d48779b7e5'
+          - not rocky_after_ct790_config.stat.exists
+          - not rocky_after_vm790_config.stat.exists
+          - >-
+            ((rocky_after_cluster.stdout | from_json)
+             | selectattr('vmid', 'equalto', 790) | list | length) == 0
+          - hostvars['bp-controller'].rocky_ct790_ownership is defined
+          - (hostvars['bp-controller'].rocky_ct790_ownership.stdout | from_json).default_idmap_compatibility
+          - (rocky_ct790_subid.stdout | from_json).result == 'DEFAULT_UNPRIVILEGED_65536_IDMAP_POSSIBLE'
+          - rocky_create_vmid == 790
+          - rocky_create_hostname == 'rocky9-base-790'
+          - rocky_create_template == 'local:vztmpl/rockylinux-9.8-lxc_20261018_amd64.tar.xz'
+          - rocky_create_rootfs == 'local-zfs:16'
+          - not ansible_check_mode
+        fail_msg: Same-run evidence, scope, or guest identity differs from reviewed CT790-only plan.
+
+    - name: Prove no creation request is present by default
+      ansible.builtin.debug:
+        msg:
+          result: ROCKY_9_8_CT790_CREATE_PLAN_READ_ONLY_READY
+          target_vmid: 790
+          proposed_hostname: rocky9-base-790
+          exact_source_template: "{{ rocky_create_template }}"
+          rootfs: "{{ rocky_create_rootfs }}"
+          cores: 2
+          memory_mib: 2048
+          swap_mib: 0
+          unprivileged: true
+          protected: true
+          onboot: false
+          initial_start: false
+          network_interfaces: 0
+          script_created_guest: false
+          existing_ct701_changed: false
+          pct_create_authorized: false
+          next_gate: Separate explicit CT790-only operator approval and post-create review.
+      when: not rocky_create_apply | bool
+
+    - name: Refuse apply unless separate exact one-CT authorization is supplied
+      ansible.builtin.assert:
+        that:
+          - rocky_ct790_create_apply is defined
+          - rocky_ct790_create_apply | bool
+          - rocky_ct790_create_confirm is defined
+          - rocky_ct790_create_confirm == rocky_create_exact_approval
+        fail_msg: CT790-only create requires separate explicit exact approval.
+      when: rocky_create_apply | bool
+
+    - name: Create only explicitly approved stopped protected networkless Rocky 9.8 CT790
+      ansible.builtin.command:
+        argv:
+          - pct
+          - create
+          - '790'
+          - local:vztmpl/rockylinux-9.8-lxc_20261018_amd64.tar.xz
+          - --hostname
+          - rocky9-base-790
+          - --ostype
+          - centos
+          - --rootfs
+          - local-zfs:16
+          - --cores
+          - '2'
+          - --memory
+          - '2048'
+          - --swap
+          - '0'
+          - --unprivileged
+          - '1'
+          - --onboot
+          - '0'
+          - --features
+          - nesting=0
+          - --start
+          - '0'
+          - --protection
+          - '1'
+      register: rocky_ct790_created
+      when: rocky_create_apply | bool
+      no_log: true
+
+    - name: Inspect CT790 exact resulting configuration without modifying it
+      ansible.builtin.command:
+        argv: [pct, config, '790']
+      changed_when: false
+      register: rocky_ct790_new_config
+      no_log: true
+      when: rocky_create_apply | bool
+
+    - name: Inspect CT790 runtime state without starting it
+      ansible.builtin.command:
+        argv: [pct, status, '790']
+      changed_when: false
+      register: rocky_ct790_new_status
+      when: rocky_create_apply | bool
+
+    - name: Fail closed unless new CT790 is stopped protected and has no NIC
+      ansible.builtin.assert:
+        that:
+          - "'hostname: rocky9-base-790' in rocky_ct790_new_config.stdout"
+          - "'unprivileged: 1' in rocky_ct790_new_config.stdout"
+          - "'protection: 1' in rocky_ct790_new_config.stdout"
+          - "'onboot: 0' in rocky_ct790_new_config.stdout"
+          - "rocky_ct790_new_config.stdout is search('(?m)^rootfs: local-zfs:subvol-790-disk-[0-9]+,size=16G(?:$|,)')"
+          - "not (rocky_ct790_new_config.stdout is search('(?m)^(?:net[0-9]+|lxc\\.net):'))"
+          - "'status: stopped' in rocky_ct790_new_status.stdout"
+        fail_msg: CT790 created but postconditions differ; do not start or attempt cleanup.
+      when: rocky_create_apply | bool
+
+    - name: Confirm original protected CT701 still unchanged after CT790 creation
+      ansible.builtin.command:
+        argv: [pct, config, '701']
+      changed_when: false
+      register: rocky_ct701_after_create
+      no_log: true
+      when: rocky_create_apply | bool
+
+    - name: Refuse any deviation in protected offline CT701
+      ansible.builtin.assert:
+        that:
+          - "'hostname: nextcloud-restore-701' in rocky_ct701_after_create.stdout"
+          - "'unprivileged: 1' in rocky_ct701_after_create.stdout"
+          - "'onboot: 0' in rocky_ct701_after_create.stdout"
+          - "'protection: 1' in rocky_ct701_after_create.stdout"
+          - "not (rocky_ct701_after_create.stdout is search('(?m)^(?:net[0-9]+|lxc\\.net):'))"
+        fail_msg: CT701 protection or isolation changed unexpectedly.
+      when: rocky_create_apply | bool
+
+    - name: Report bounded creation receipt without starting a guest
+      ansible.builtin.debug:
+        msg:
+          result: ROCKY_9_8_CT790_CREATED_OFFLINE_PROTECTED_STOPPED
+          vmid: 790
+          unprivileged: true
+          protected: true
+          onboot: false
+          running: false
+          network_interfaces: 0
+          initial_rootfs_gib: 16
+          ct701_unchanged: true
+          network_egress_authorized: false
+          guest_started: false
+          template_converted: false
+          next_gate: Separate exact unprivileged-guest audit before any start or template conversion.
+      when: rocky_create_apply | bool

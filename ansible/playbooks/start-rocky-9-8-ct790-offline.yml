@@ -1,0 +1,190 @@
+---
+# Default: read-only proposal. NO start without a *new*, CT790-only human approval.
+# Single allowed mutation after same-run preflight: pct start 790.
+# A first boot may write machine-id, systemd state and journal to the new rootfs.
+# NEVER auto stop, restart, retry, restore, destroy or convert to template.
+- import_playbook: audit-rocky-9-8-ct790-firstboot-readonly.yml
+
+- name: Review or expressly perform ONE networkless Rocky 9.8 CT790 first boot
+  hosts: venombox
+  become: true
+  gather_facts: false
+  any_errors_fatal: true
+  vars:
+    rocky_start_apply: "{{ rocky_ct790_first_start_apply | default(false) | bool }}"
+    rocky_exact_first_start_confirm: START_ONLY_NETWORKLESS_ROCKY_9_8_CT790
+  tasks:
+    - name: Demand same-run PVE rootfs release and exact stopped CT790 proof
+      ansible.builtin.assert:
+        that:
+          - inventory_hostname == 'venombox'
+          - rocky_post_host.stdout == 'venombox'
+          - "'status: stopped' in rocky_firstboot_status.stdout_lines"
+          - "'status: stopped' in rocky_release_post_status.stdout_lines"
+          - rocky_release_zfs_mounted.stdout | trim == 'yes'
+          - (rocky_release_inspected.stdout | from_json).result == 'ROCKY_9_8_CT790_ROOTFS_RELEASE_READ_ONLY_VERIFIED'
+          - rocky_post_rootfs_volid is match('^local-zfs:subvol-790-disk-[0-9]+$')
+          - rocky_post_template_file.stat.checksum == '1fd0ade221871319d5ae7bed9ece57c001d79ef950c1263814d5b8d48779b7e5'
+          - "'unprivileged: 1' in rocky_firstboot_config.stdout_lines"
+          - "'protection: 1' in rocky_firstboot_config.stdout_lines"
+          - "'onboot: 0' in rocky_firstboot_config.stdout_lines"
+          - not ansible_check_mode
+        fail_msg: Approved stopped CT790 and independently verified Rocky image not proven.
+
+    - name: Show exact no-write plan when first boot is not approved
+      ansible.builtin.debug:
+        msg:
+          result: ROCKY_9_8_CT790_FIRSTBOOT_PLAN_READ_ONLY_READY
+          vmid: 790
+          planned_command: pct start 790
+          allowed_mutation: Single offline first boot of this existing CT790
+          expected_rootfs: "{{ rocky_post_rootfs_volid }}"
+          pve_configured_interfaces: 0
+          additional_mounts: 0
+          ct701_changed: false
+          guest_started: false
+          currently_stopped: true
+          running_status_or_runtime_checked: false
+          pct_start_authorized: false
+          pct_template_authorized: false
+          no_auto_stop_restart_or_rollback: true
+          next_gate: Separate explicit one-time approval to start CT790 and allow in-guest read-only validation.
+      when: not rocky_start_apply | bool
+
+    - name: Require a separate exact operator authorization for ONE first boot
+      ansible.builtin.assert:
+        that:
+          - rocky_ct790_first_start_apply is defined
+          - rocky_ct790_first_start_apply | bool
+          - rocky_ct790_first_start_confirm is defined
+          - rocky_ct790_first_start_confirm == rocky_exact_first_start_confirm
+        fail_msg: CT790 first boot requires a new exact two-variable human approval.
+      when: rocky_start_apply | bool
+
+    - name: Read CT790 configuration again immediately before any approved start
+      ansible.builtin.command:
+        argv: [pct, config, '790']
+      changed_when: false
+      no_log: true
+      register: rocky_start_final_config
+      when: rocky_start_apply | bool
+
+    - name: Refuse a changed container configuration after same-run policy review
+      ansible.builtin.assert:
+        that:
+          - rocky_start_final_config.stdout == rocky_firstboot_config.stdout
+        fail_msg: CT790 PVE config changed between policy review and approval step.
+      when: rocky_start_apply | bool
+
+    - name: Read CT790 state one last time before a new start
+      ansible.builtin.command:
+        argv: [pct, status, '790']
+      changed_when: false
+      register: rocky_start_final_stopped
+      when: rocky_start_apply | bool
+
+    - name: Refuse a second boot or any unexpected already-running CT790
+      ansible.builtin.assert:
+        that:
+          - "'status: stopped' in rocky_start_final_stopped.stdout_lines"
+        fail_msg: Refuse repeat or drifted CT790 start.
+      when: rocky_start_apply | bool
+
+    - name: Start ONLY separately approved stopped networkless CT790 one time
+      ansible.builtin.command:
+        argv: [pct, start, '790']
+      changed_when: true
+      register: rocky_start_operation
+      no_log: true
+      when: rocky_start_apply | bool
+
+    - name: Read CT790 status after single approved first start
+      ansible.builtin.command:
+        argv: [pct, status, '790']
+      changed_when: false
+      register: rocky_start_result_status
+      when: rocky_start_apply | bool
+
+    - name: Require CT790 is running without retrying or auto stopping
+      ansible.builtin.assert:
+        that:
+          - "'status: running' in rocky_start_result_status.stdout_lines"
+        fail_msg: CT790 first start outcome unexpected; do not retry or auto stop. Inspect running state.
+      when: rocky_start_apply | bool
+
+    - name: Confirm running CT790 has no newly configured network interface
+      ansible.builtin.command:
+        argv: [pct, config, '790']
+      changed_when: false
+      no_log: true
+      register: rocky_start_after_config
+      when: rocky_start_apply | bool
+
+    - name: Fail closed if the running CT790 PVE config differs from reviewed policy
+      ansible.builtin.assert:
+        that:
+          - rocky_start_after_config.stdout == rocky_firstboot_config.stdout
+        fail_msg: CT790 config changed during start; no automated changes or cleanup permitted.
+      when: rocky_start_apply | bool
+
+    - name: Inspect Rocky guest identity and actual network interfaces with no writes
+      ansible.builtin.command:
+        argv:
+          - pct
+          - exec
+          - '790'
+          - --
+          - /bin/sh
+          - -ec
+          - "{{ lookup('ansible.builtin.file', playbook_dir ~ '/../files/nextcloud/inspect_rocky_ct790_firstboot_runtime.sh') }}"
+      changed_when: false
+      failed_when: false
+      no_log: true
+      register: rocky_start_runtime
+      when: rocky_start_apply | bool
+
+    - name: Require actual running Rocky 9.8 systemd and zero non-loopback devices
+      ansible.builtin.assert:
+        that:
+          - rocky_start_runtime.rc == 0
+          - "'ROCKY_9_8_CT790_RUNTIME_IDENTITY=VERIFIED' in rocky_start_runtime.stdout_lines"
+          - "'PID1=systemd' in rocky_start_runtime.stdout_lines"
+          - "'NON_LOOPBACK_DEVICES=0' in rocky_start_runtime.stdout_lines"
+          - "'GUEST_IDMAP_NONIDENTITY=YES' in rocky_start_runtime.stdout_lines"
+          - "'RUNTIME_GUEST_WRITE_OPERATIONS=NONE_BY_PROBE' in rocky_start_runtime.stdout_lines"
+        fail_msg: "Guest identity/network/userns evidence absent. CT790 may still be running: do not retry, stop or destroy automatically."
+      when: rocky_start_apply | bool
+
+    - name: Review CT701 still-isolated PVE config after CT790 first boot
+      ansible.builtin.command:
+        argv: [pct, config, '701']
+      changed_when: false
+      no_log: true
+      register: rocky_start_ct701_after
+      when: rocky_start_apply | bool
+
+    - name: Require protected CT701 configuration unchanged after first boot
+      ansible.builtin.assert:
+        that:
+          - rocky_start_ct701_after.stdout == rocky_post_ct701.stdout
+        fail_msg: Protected CT701 unexpectedly changed; do not perform any automatic remediation.
+      when: rocky_start_apply | bool
+
+    - name: Report only the bounded first-boot result; no template conversion
+      ansible.builtin.debug:
+        msg:
+          result: ROCKY_9_8_CT790_FIRSTBOOT_STARTED_NETWORKLESS_VERIFIED
+          vmid: 790
+          rocky_version: '9.8'
+          guest_pid1: systemd
+          status: RUNNING
+          interfaces_other_than_loopback: 0
+          unprivileged_user_namespace_verified: true
+          pve_configuration_unchanged: true
+          ct701_unchanged: true
+          rootfs_may_have_systemd_boot_writes: true
+          automatic_cleanup_or_stop: false
+          pct_template_authorized: false
+          pct_stop_authorized: false
+          next_gate: Separately evaluate guest runtime service health and controlled shutdown/template policy.
+      when: rocky_start_apply | bool

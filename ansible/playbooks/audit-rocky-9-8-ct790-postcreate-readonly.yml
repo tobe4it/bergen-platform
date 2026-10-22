@@ -1,0 +1,297 @@
+---
+# Independent strictly read-only check AFTER the user-approved CT790 creation.
+# Never import pre-create gates: VMID790 and its ZFS subvol must now exist.
+# Do not start, mount, modify, template, clone or delete any guest or filesystem.
+- name: Independently audit existing stopped protected networkless Rocky 9.8 CT790
+  hosts: venombox
+  become: true
+  gather_facts: false
+  any_errors_fatal: true
+  vars:
+    rocky_post_vmid: 790
+    rocky_post_hostname: rocky9-base-790
+    rocky_post_template: local:vztmpl/rockylinux-9.8-lxc_20261018_amd64.tar.xz
+    rocky_post_template_path: /var/lib/vz/template/cache/rockylinux-9.8-lxc_20261018_amd64.tar.xz
+    rocky_post_sha256: 1fd0ade221871319d5ae7bed9ece57c001d79ef950c1263814d5b8d48779b7e5
+  tasks:
+    - name: Identify actual host
+      ansible.builtin.command:
+        argv: [hostname, -s]
+      changed_when: false
+      register: rocky_post_host
+
+    - name: Demand reviewed host and identifiers before reading guest metadata
+      ansible.builtin.assert:
+        that:
+          - inventory_hostname == 'venombox'
+          - rocky_post_host.stdout == 'venombox'
+          - rocky_post_vmid == 790
+          - rocky_post_hostname == 'rocky9-base-790'
+          - rocky_post_template == 'local:vztmpl/rockylinux-9.8-lxc_20261018_amd64.tar.xz'
+          - rocky_post_template_path == '/var/lib/vz/template/cache/rockylinux-9.8-lxc_20261018_amd64.tar.xz'
+          - rocky_post_sha256 == '1fd0ade221871319d5ae7bed9ece57c001d79ef950c1263814d5b8d48779b7e5'
+
+    - name: Read PVE version
+      ansible.builtin.command:
+        argv: [pveversion]
+      changed_when: false
+      register: rocky_post_version
+
+    - name: Refuse unexpected Proxmox major version
+      ansible.builtin.assert:
+        that:
+          - rocky_post_version.stdout is match('^pve-manager/9[.]')
+
+    - name: Inspect CT790 LXC config without following links
+      ansible.builtin.stat:
+        path: /etc/pve/lxc/790.conf
+        follow: false
+        get_checksum: false
+      register: rocky_post_ct_file
+
+    - name: Refuse missing or linked CT790 LXC config
+      ansible.builtin.assert:
+        that:
+          - rocky_post_ct_file.stat.isreg | default(false)
+          - not (rocky_post_ct_file.stat.islnk | default(false))
+
+    - name: Inspect VM790 QEMU config without following links
+      ansible.builtin.stat:
+        path: /etc/pve/qemu-server/790.conf
+        follow: false
+      register: rocky_post_vm_file
+
+    - name: Refuse any VM790 config collision
+      ansible.builtin.assert:
+        that:
+          - not rocky_post_vm_file.stat.exists
+
+    - name: Read the created CT790 configuration without modifications
+      ansible.builtin.command:
+        argv: [pct, config, '790']
+      changed_when: false
+      no_log: true
+      register: rocky_post_config
+
+    - name: Read CT790 stopped state independently
+      ansible.builtin.command:
+        argv: [pct, status, '790']
+      changed_when: false
+      register: rocky_post_state
+
+    - name: Demand exact approved offline guest properties
+      ansible.builtin.assert:
+        that:
+          - "'hostname: rocky9-base-790' in rocky_post_config.stdout_lines"
+          - "'ostype: centos' in rocky_post_config.stdout_lines"
+          - "'cores: 2' in rocky_post_config.stdout_lines"
+          - "'memory: 2048' in rocky_post_config.stdout_lines"
+          - "'swap: 0' in rocky_post_config.stdout_lines"
+          - "'unprivileged: 1' in rocky_post_config.stdout_lines"
+          - "'protection: 1' in rocky_post_config.stdout_lines"
+          - "'onboot: 0' in rocky_post_config.stdout_lines"
+          - "'status: stopped' in rocky_post_state.stdout_lines"
+          - >-
+            (rocky_post_config.stdout_lines
+             | select('match', '^rootfs: local-zfs:subvol-790-disk-[0-9]+,size=16G(?:$|,)')
+             | list | length) == 1
+          - >-
+            (rocky_post_config.stdout_lines
+             | select('match', '^rootfs: ') | list | length) == 1
+          - >-
+            not (rocky_post_config.stdout is
+             search('(?m)^(?:net[0-9]+|mp[0-9]+|dev[0-9]+|hookscript|lxc[.]net|lxc[.]mount[.]entry|lxc[.]idmap|lxc[.]apparmor[.]profile|lxc[.]cgroup)[^:]*:'))
+          - "'template: 1' not in rocky_post_config.stdout_lines"
+        fail_msg: CT790 differs from approved stopped, protected and networkless base guest; do not start or modify.
+
+    - name: Derive existing CT790 rootfs storage ID from verified exact config
+      ansible.builtin.set_fact:
+        rocky_post_rootfs_volid: >-
+          {{ ((rocky_post_config.stdout_lines | select('match', '^rootfs: ') | list | first)
+              | regex_replace('^rootfs: ', '')).split(',')[0] }}
+      changed_when: false
+
+    - name: Require exact allocated CT790 ZFS rootdir volid format
+      ansible.builtin.assert:
+        that:
+          - rocky_post_rootfs_volid is match('^local-zfs:subvol-790-disk-[0-9]+$')
+          - rocky_post_rootfs_volid != rocky_post_template
+
+    - name: Read all cluster VMID assignments without changes
+      ansible.builtin.command:
+        argv: [pvesh, get, /cluster/resources, --type, vm, --output-format, json]
+      changed_when: false
+      register: rocky_post_cluster
+
+    - name: Require exactly one CT790 on expected cluster node and future IDs free
+      ansible.builtin.assert:
+        that:
+          - >-
+            ((rocky_post_cluster.stdout | from_json)
+             | selectattr('vmid', 'equalto', 790) | list | length) == 1
+          - rocky_post_cluster_ct.type == 'lxc'
+          - rocky_post_cluster_ct.node == 'venombox'
+          - >-
+            ((rocky_post_cluster.stdout | from_json)
+             | selectattr('vmid', 'in', [702, 791]) | list | length) == 0
+        fail_msg: Unexpected cluster VMID assignment or CT790 location.
+      vars:
+        rocky_post_cluster_ct: >-
+          {{ ((rocky_post_cluster.stdout | from_json)
+               | selectattr('vmid', 'equalto', 790) | list | first) }}
+
+    - name: Independently rehash exact signed Rocky 9.8 source template on PVE host
+      ansible.builtin.stat:
+        path: "{{ rocky_post_template_path }}"
+        follow: false
+        get_checksum: true
+        checksum_algorithm: sha256
+      register: rocky_post_template_file
+
+    - name: Require originally signed image remains unchanged
+      ansible.builtin.assert:
+        that:
+          - rocky_post_template_file.stat.isreg | default(false)
+          - not (rocky_post_template_file.stat.islnk | default(false))
+          - rocky_post_template_file.stat.pw_name == 'root'
+          - rocky_post_template_file.stat.gr_name == 'root'
+          - rocky_post_template_file.stat.mode == '0600'
+          - rocky_post_template_file.stat.size == 107425612
+          - rocky_post_template_file.stat.checksum == rocky_post_sha256
+
+    - name: Resolve CT790 ZFS rootdir through Proxmox
+      ansible.builtin.command:
+        argv: [pvesm, path, "{{ rocky_post_rootfs_volid }}"]
+      changed_when: false
+      register: rocky_post_rootfs_path
+
+    - name: Demand absolute nonempty ZFS rootdir path
+      ansible.builtin.assert:
+        that:
+          - rocky_post_rootfs_path.stdout is match('^/[A-Za-z0-9/_-]+$')
+          - "'..' not in rocky_post_rootfs_path.stdout.split('/')"
+          - rocky_post_rootfs_path.stdout != '/'
+          - rocky_post_rootfs_path.stdout != '/var/lib/vz'
+
+    - name: List only CT790 rootdir volumes in local-zfs storage
+      ansible.builtin.command:
+        argv: [pvesm, list, local-zfs, --vmid, '790']
+      changed_when: false
+      register: rocky_post_storage_list
+
+    - name: Demand exact owned rootdir is listed by Proxmox
+      ansible.builtin.assert:
+        that:
+          - >-
+            rocky_post_storage_list.stdout is search(
+              '(?m)^' ~ (rocky_post_rootfs_volid | regex_escape) ~
+              '[ ]+subvol[ ]+rootdir[ ]+')
+          - >-
+            (rocky_post_storage_list.stdout_lines |
+             select('match', '^local-zfs:subvol-790-disk-[0-9]+[ ]+') |
+             list | length) == 1
+        fail_msg: Proxmox does not report exactly one CT790 ZFS rootdir.
+
+    - name: Read Proxmox storage mapping without changes
+      ansible.builtin.command:
+        argv: [pvesh, get, /storage, --output-format, json]
+      changed_when: false
+      register: rocky_post_storage_json
+
+    - name: Require one approved ZFS rootdir storage definition
+      ansible.builtin.assert:
+        that:
+          - >-
+            ((rocky_post_storage_json.stdout | from_json)
+             | selectattr('storage', 'equalto', 'local-zfs') | list | length) == 1
+          - rocky_post_zfs_storage.type == 'zfspool'
+          - "'rootdir' in rocky_post_zfs_storage.content.split(',')"
+          - rocky_post_zfs_storage.pool is match('^[A-Za-z0-9_.-]+(?:/[A-Za-z0-9_.-]+)*$')
+          - not (rocky_post_zfs_storage.disable | default(false) | bool)
+          - >-
+            (rocky_post_zfs_storage.nodes is not defined)
+            or ('venombox' in rocky_post_zfs_storage.nodes.split(','))
+      vars:
+        rocky_post_zfs_storage: >-
+          {{ ((rocky_post_storage_json.stdout | from_json)
+             | selectattr('storage', 'equalto', 'local-zfs') | list | first) }}
+
+    - name: Derive exact ZFS dataset from configured storage pool and CT790 volume
+      ansible.builtin.set_fact:
+        rocky_post_dataset: >-
+          {{ ((rocky_post_storage_json.stdout | from_json)
+             | selectattr('storage', 'equalto', 'local-zfs') | list | first).pool
+             ~ '/' ~ rocky_post_rootfs_volid.split(':')[1] }}
+      changed_when: false
+
+    - name: Read the specific existing CT790 ZFS dataset without mounting it
+      ansible.builtin.command:
+        argv: [zfs, list, -H, -p, -o, "name,type,mountpoint,refquota", "{{ rocky_post_dataset }}"]
+      changed_when: false
+      register: rocky_post_zfs_dataset
+
+    - name: Require a filesystem dataset at the Proxmox-resolved location
+      ansible.builtin.assert:
+        that:
+          - rocky_post_zfs_dataset.stdout_lines | length == 1
+          - rocky_post_zfs_columns | length == 4
+          - rocky_post_zfs_columns[0] == rocky_post_dataset
+          - rocky_post_zfs_columns[1] == 'filesystem'
+          - rocky_post_zfs_columns[2] == rocky_post_rootfs_path.stdout | trim
+        fail_msg: CT790 rootdir does not correspond to expected ZFS filesystem.
+      vars:
+        rocky_post_zfs_columns: "{{ rocky_post_zfs_dataset.stdout.split('\t') }}"
+
+    - name: Check ZFS pool health without modifying datasets
+      ansible.builtin.command:
+        argv: [zpool, status, -x]
+      changed_when: false
+      register: rocky_post_zpool
+
+    - name: Require healthy ZFS and no pool degradation
+      ansible.builtin.assert:
+        that:
+          - rocky_post_zpool.stdout is search('all pools are healthy')
+
+    - name: Inspect protected CT701 configuration without any guest mutation
+      ansible.builtin.command:
+        argv: [pct, config, '701']
+      changed_when: false
+      register: rocky_post_ct701
+      no_log: true
+
+    - name: Confirm CT701 is still protected, unprivileged and networkless
+      ansible.builtin.assert:
+        that:
+          - "'hostname: nextcloud-restore-701' in rocky_post_ct701.stdout_lines"
+          - "'unprivileged: 1' in rocky_post_ct701.stdout_lines"
+          - "'protection: 1' in rocky_post_ct701.stdout_lines"
+          - "'onboot: 0' in rocky_post_ct701.stdout_lines"
+          - >-
+            not (rocky_post_ct701.stdout is
+             search('(?m)^(?:net[0-9]+|lxc[.]net):'))
+
+    - name: Report post-create verification without claiming an actual runtime test
+      ansible.builtin.debug:
+        msg:
+          result: ROCKY_9_8_CT790_POSTCREATE_READ_ONLY_VERIFIED
+          host: venombox
+          vmid: 790
+          status: STOPPED
+          guest_started: false
+          network_interfaces: 0
+          unprivileged: true
+          protected: true
+          onboot: false
+          exact_template_sha256_verified: true
+          pve_rootfs_volume_verified: true
+          zfs_rootfs_dataset_verified: true
+          rootfs_contents_independently_read: false
+          os_release_inside_new_rootfs_verified: false
+          runtime_compatibility_tested: false
+          ct701_reviewed_isolated: true
+          future_vmids_702_791_free: true
+          changed: false
+          pct_start_authorized: false
+          pct_template_authorized: false
+          next_gate: Review read-only rootfs OS metadata and independent later boot policy.

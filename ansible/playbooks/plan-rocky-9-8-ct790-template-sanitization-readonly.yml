@@ -1,0 +1,98 @@
+---
+# REVIEW PLAN ONLY, never an apply playbook.
+# Independently prove stopped protected CT790 and exact preexisting ZFS rootfs.
+# Pure asserts and sanitized recommendation report; no mutations at any flag.
+- import_playbook: audit-rocky-9-8-ct790-postshutdown-sanitization-readonly.yml
+
+- name: Review precise clone-identity sanitation scope for stopped Rocky 9.8 CT790
+  hosts: venombox
+  become: true
+  gather_facts: false
+  any_errors_fatal: true
+  vars:
+    rocky_sanitation_apply_authorized: false
+    rocky_template_conversion_authorized: false
+  tasks:
+    - name: Require exact no-write same-run CT790 stopped-rootfs and CT701 evidence
+      ansible.builtin.assert:
+        that:
+          - inventory_hostname == 'venombox'
+          - rocky_post_host.stdout == 'venombox'
+          - "'status: stopped' in rocky_sanitation_after_status.stdout_lines"
+          - "'status: stopped' in rocky_post_state.stdout_lines"
+          - rocky_sanitation_mounted.stdout | trim == 'yes'
+          - rocky_sanitation_findmnt.stdout == rocky_release_findmnt.stdout
+          - rocky_post_rootfs_path.stdout | trim is match('^/rpool/data/subvol-790-disk-[0-9]+$')
+          - "'protection: 1' in rocky_post_config.stdout_lines"
+          - "'unprivileged: 1' in rocky_post_config.stdout_lines"
+          - "'onboot: 0' in rocky_post_config.stdout_lines"
+          - "'template: 1' not in rocky_post_config.stdout_lines"
+          - (rocky_sanitation_survey.stdout | from_json).result == 'ROCKY_9_8_CT790_STOPPED_ROOTFS_SANITATION_READ_ONLY_INVENTORIED'
+          - (rocky_sanitation_survey.stdout | from_json).files_written == 0
+          - (rocky_sanitation_survey.stdout | from_json).mount_operations == 0
+          - rocky_sanitation_ct701_config_after.stdout == rocky_post_ct701.stdout
+          - not rocky_sanitation_apply_authorized
+          - not rocky_template_conversion_authorized
+        fail_msg: "Scope or state changed. This is a no-write proposal only: never run cleanup, mount or template conversion."
+
+    - name: Require independently observed bounded identity and state categories
+      ansible.builtin.assert:
+        that:
+          - rocky_sanitation_categories | length == 12
+          - rocky_sanitation_categories.etc_machine_id.state == 'SET_32HEX'
+          - rocky_sanitation_categories.dbus_machine_id.state == 'ABSENT'
+          - rocky_sanitation_categories.ssh_host_keys.state == 'DIRECTORY_PRESENT'
+          - rocky_sanitation_categories.ssh_host_keys.ssh_host_private_key_name_count == 3
+          - rocky_sanitation_categories.ssh_host_keys.ssh_host_public_key_name_count == 3
+          - rocky_sanitation_categories.systemd_random_seed.state == 'REGULAR_FILE_PRESENT'
+          - rocky_sanitation_categories.systemd_random_seed.size_nonzero
+          - rocky_sanitation_categories.persistent_journal.state == 'ABSENT'
+          - rocky_sanitation_categories.network_manager_connections.state == 'DIRECTORY_PRESENT'
+          - rocky_sanitation_categories.network_manager_connections.top_level_entries == 0
+          - rocky_sanitation_categories.dhcp_state.state == 'ABSENT'
+          - rocky_sanitation_categories.dnf_package_cache.state == 'DIRECTORY_PRESENT'
+          - rocky_sanitation_categories.dnf_package_cache.top_level_entries == 8
+          - rocky_sanitation_categories.dnf_runtime_state.state == 'DIRECTORY_PRESENT'
+          - rocky_sanitation_categories.dnf_runtime_state.top_level_entries == 4
+          - rocky_sanitation_categories.network_manager_runtime.state == 'DIRECTORY_PRESENT'
+          - rocky_sanitation_categories.network_manager_runtime.top_level_entries == 4
+          - rocky_sanitation_categories.systemd_timers_state.state == 'DIRECTORY_PRESENT'
+          - rocky_sanitation_categories.systemd_timers_state.top_level_entries == 1
+        fail_msg: "Observed per-instance artifacts drifted since the 2026-10-22 post-shutdown audit; review a new no-write inventory first."
+      vars:
+        rocky_sanitation_categories: "{{ (rocky_sanitation_survey.stdout | from_json).categories }}"
+
+    - name: Report remediation DESIGN ONLY with separate first-boot and apply proof gates
+      ansible.builtin.debug:
+        msg:
+          result: ROCKY_9_8_CT790_TEMPLATE_SANITATION_PLAN_READ_ONLY_READY
+          vmid: 790
+          guest_state: STOPPED
+          rootfs_mount_state: PREEXISTING_EXACT_ZFS_MOUNT
+          observed_machine_id: SET_32HEX
+          observed_ssh_host_private_key_count: 3
+          observed_ssh_host_public_key_count: 3
+          observed_random_seed: NONEMPTY_FILE
+          observed_timer_entries: 1
+          observed_dnf_cache_entries: 8
+          observed_dnf_state_entries: 4
+          observed_networkmanager_state_entries: 4
+          machine_id_future_action: PREFER_EMPTY_MACHINE_ID_FOR_UNIQUE_CLONE_ID_WITHOUT_FIRSTBOOT_AFTER_CLONE_TEST
+          ssh_host_keys_future_action: REMOVE_EXACT_VERIFIED_HOST_KEY_PAIRS_ONLY_AFTER_CONFIRMING_NO_SSHD_AND_OPTIONAL_CLONE_PROVISIONING
+          random_seed_future_action: REMOVE_ONLY_EXACT_OLD_SEED_WITH_STAGED_FIRST_BOOT_REGENERATION
+          systemd_timer_state_future_action: REVIEW_EXACT_ENTRY_AND_CLEAR_CLONE_SPECIFIC_STAMP_IF_CONFIRMED
+          dnf_cache_future_action: ENUMERATE_EXACT_CACHE_SCOPE_BEFORE_SEPARATELY_APPROVED_REMOVAL
+          dnf_runtime_state_future_action: INVESTIGATE_CONTENTS_DO_NOT_DELETE_DIRECTORY
+          networkmanager_runtime_future_action: INVESTIGATE_CONTENTS_DO_NOT_DELETE_DIRECTORY
+          dnf_makecache_timer_policy: KEEP_INTACT_FOR_NETWORKED_CLONES_UNLESS_SEPARATELY_APPROVED
+          absent_journal_and_dhcp_action: NONE
+          empty_networkmanager_connections_action: NONE
+          cloud_init_state_action: REVIEW_INVENTORY_CATEGORY_BEFORE_DECISION
+          rootfs_sanitation_complete: false
+          cleanup_executed: false
+          files_written: 0
+          guest_started: false
+          new_mount_created: false
+          pct_template_authorized: false
+          apply_authorized: false
+          next_gate: Review exact per-file metadata and prove unique clone machine ID; SSH disabled in base and optional per-clone key provisioning; then separately approve scoped idempotent sanitation.

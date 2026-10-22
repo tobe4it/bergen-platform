@@ -1,0 +1,399 @@
+name: Isolated Nextcloud restore 701 preflight
+
+on:
+  pull_request:
+    paths:
+      - 'ansible/playbooks/prepare-nextcloud-isolated-restore-701.yml'
+      - 'ansible/playbooks/audit-nextcloud-restore-transfer-readonly.yml'
+      - 'ansible/playbooks/transfer-nextcloud-restore-archive.yml'
+      - 'ansible/files/nextcloud/stream_verified_restore_archive.py'
+      - 'ansible/files/nextcloud/audit_verified_restore_archive.py'
+      - 'ansible/files/nextcloud/diagnose_restore_archive_member_types.py'
+      - 'ansible/playbooks/diagnose-nextcloud-restore-archive-types-readonly.yml'
+      - 'tests/test_nextcloud_restore_archive_type_diagnostic.py'
+      - 'tests/test_nextcloud_restore_archive_symlink_audit.py'
+      - 'ansible/playbooks/audit-nextcloud-restore-archive-readonly.yml'
+      - 'ansible/playbooks/inspect-nextcloud-restore-701-offline-runtime.yml'
+      - 'ansible/playbooks/inspect-nextcloud-restore-701-running-readonly.yml'
+      - 'ansible/playbooks/audit-nextcloud-restore-offline-package-sources.yml'
+      - 'ansible/playbooks/audit-rocky-9-lxc-template-builder-readonly.yml'
+      - 'ansible/playbooks/audit-rocky-9-lxc-rootfs-readonly.yml'
+      - 'ansible/playbooks/audit-rocky-9-lxc-rootfs-privileged-modes-readonly.yml'
+      - 'ansible/playbooks/audit-rocky-9-8-direct-import-staging-readonly.yml'
+      - 'ansible/playbooks/stage-rocky-9-8-lxc-rootfs.yml'
+      - 'ansible/playbooks/audit-rocky-9-8-staged-template-readonly.yml'
+      - 'ansible/playbooks/audit-rocky-9-8-ct790-create-readonly.yml'
+      - 'ansible/playbooks/create-rocky-9-8-ct790-offline.yml'
+      - 'ansible/playbooks/audit-rocky-9-8-ct790-postcreate-readonly.yml'
+      - 'ansible/playbooks/audit-rocky-9-8-ct790-rootfs-release-readonly.yml'
+      - 'ansible/playbooks/audit-rocky-9-8-ct790-firstboot-readonly.yml'
+      - 'ansible/playbooks/start-rocky-9-8-ct790-offline.yml'
+      - 'ansible/playbooks/audit-rocky-9-8-ct790-running-readonly.yml'
+      - 'ansible/playbooks/shutdown-rocky-9-8-ct790-offline.yml'
+      - 'ansible/playbooks/shutdown-rocky-9-8-ct790-dnf-exception-offline.yml'
+      - 'ansible/playbooks/audit-rocky-9-8-ct790-postshutdown-sanitization-readonly.yml'
+      - 'ansible/playbooks/plan-rocky-9-8-ct790-template-sanitization-readonly.yml'
+      - 'ansible/playbooks/audit-rocky-9-8-ct790-firstboot-identity-units-readonly.yml'
+      - 'ansible/playbooks/audit-rocky-9-8-ct790-sanitization-targets-readonly.yml'
+      - 'ansible/files/nextcloud/audit_ct790_sanitation_targets.py'
+      - 'tests/test_rocky_lxc_ct790_sanitation_targets_readonly.py'
+      - 'ansible/playbooks/audit-rocky-9-8-ct790-backup-candidates-readonly.yml'
+      - 'ansible/files/nextcloud/audit_ct790_backup_candidates_readonly.py'
+      - 'tests/test_rocky_lxc_ct790_backup_candidates_readonly.py'
+      - 'ansible/files/nextcloud/audit_ct790_firstboot_identity_units.py'
+      - 'tests/test_rocky_lxc_ct790_firstboot_identity_units_readonly.py'
+      - 'tests/test_rocky_lxc_ct790_template_sanitation_plan.py'
+      - 'ansible/files/nextcloud/inventory_ct790_stopped_rootfs_sanitation.py'
+      - 'tests/test_rocky_lxc_ct790_postshutdown_sanitation_readonly.py'
+      - 'tests/test_rocky_lxc_ct790_dnf_shutdown_exception.py'
+      - 'ansible/playbooks/diagnose-rocky-9-8-ct790-failed-unit-readonly.yml'
+      - 'ansible/playbooks/diagnose-rocky-9-8-ct790-dnf-journal-readonly.yml'
+      - 'ansible/files/nextcloud/classify_ct790_dnf_makecache_journal.py'
+      - 'tests/test_rocky_lxc_ct790_dnf_journal_readonly.py'
+      - 'ansible/files/nextcloud/parse_ct790_failed_unit.py'
+      - 'tests/test_rocky_lxc_ct790_failed_unit_diagnostic.py'
+      - 'tests/test_rocky_lxc_ct790_shutdown_plan.py'
+      - 'tests/test_rocky_lxc_ct790_running_readonly.py'
+      - 'ansible/files/nextcloud/inspect_rocky_ct790_firstboot_runtime.sh'
+      - 'tests/test_rocky_lxc_ct790_firstboot_plan.py'
+      - 'tests/test_rocky_lxc_ct790_firstboot_readonly.py'
+      - 'ansible/files/nextcloud/read_ct790_rootfs_release.py'
+      - 'tests/test_rocky_lxc_ct790_rootfs_release.py'
+      - 'tests/test_rocky_lxc_ct790_postcreate_readonly.py'
+      - 'tests/test_rocky_lxc_ct790_create_plan.py'
+      - 'ansible/files/nextcloud/audit_rocky_lxc_idmap_metadata.py'
+      - 'tests/test_rocky_lxc_ct790_create_readonly.py'
+      - 'tests/test_rocky_lxc_staged_template_readonly.py'
+      - 'tests/test_rocky_lxc_rootfs_stage.py'
+      - 'tests/test_rocky_lxc_direct_staging_readonly.py'
+      - 'ansible/files/nextcloud/audit_rocky_lxc_rootfs_privileged_modes.py'
+      - 'tests/test_rocky_lxc_rootfs_privileged_modes.py'
+      - 'ansible/playbooks/diagnose-rocky-9-lxc-rootfs-symlinks-readonly.yml'
+      - 'ansible/files/nextcloud/diagnose_rocky_lxc_rootfs_symlinks.py'
+      - 'tests/test_rocky_lxc_rootfs_symlink_diagnostic.py'
+      - 'ansible/files/nextcloud/audit_rocky_lxc_rootfs.py'
+      - 'tests/test_rocky_lxc_rootfs_structural_audit.py'
+      - 'ansible/playbooks/bootstrap-controller.yml'
+      - 'ansible/files/nextcloud/inspect_restore_rpm_inventory.py'
+      - 'tests/test_nextcloud_restore_701_iface_count.py'
+      - 'docs/NEXTCLOUD-ISOLATED-RESTORE-701.md'
+      - '.github/workflows/nextcloud-isolated-restore-701.yml'
+  push:
+    branches: [feat/nextcloud-isolated-restore-701-20261019]
+
+jobs:
+  offline-guest-boundaries:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install Ansible
+        run: python3 -m pip install 'ansible-core>=2.16,<2.21'
+      - name: Install controller bootstrap collection dependency
+        run: ansible-galaxy collection install ansible.posix
+      - name: Syntax
+        run: |
+          ansible-playbook -i localhost, \
+            ansible/playbooks/prepare-nextcloud-isolated-restore-701.yml \
+            --syntax-check
+          ansible-playbook -i localhost, \
+            ansible/playbooks/audit-nextcloud-restore-transfer-readonly.yml \
+            --syntax-check
+          ansible-playbook -i localhost, \
+            ansible/playbooks/transfer-nextcloud-restore-archive.yml \
+            --syntax-check
+          python3 -m py_compile ansible/files/nextcloud/stream_verified_restore_archive.py
+          python3 -m py_compile ansible/files/nextcloud/audit_verified_restore_archive.py
+          python3 -m py_compile ansible/files/nextcloud/diagnose_restore_archive_member_types.py
+          ansible-playbook -i localhost, \
+            ansible/playbooks/diagnose-nextcloud-restore-archive-types-readonly.yml \
+            --syntax-check
+          python3 -m unittest discover -s tests -p 'test_nextcloud_restore_archive_type_diagnostic.py'
+          python3 -m unittest discover -s tests -p 'test_nextcloud_restore_archive_symlink_audit.py'
+          python3 -m unittest discover -s tests -p 'test_nextcloud_restore_701_iface_count.py'
+          ansible-playbook -i localhost, \
+            ansible/playbooks/audit-nextcloud-restore-archive-readonly.yml \
+            --syntax-check
+          ansible-playbook -i localhost, \
+            ansible/playbooks/inspect-nextcloud-restore-701-offline-runtime.yml \
+            --syntax-check
+          ansible-playbook -i localhost, \
+            ansible/playbooks/inspect-nextcloud-restore-701-running-readonly.yml \
+            --syntax-check
+          ansible-playbook -i localhost, \
+            ansible/playbooks/audit-nextcloud-restore-offline-package-sources.yml \
+            --syntax-check
+          python3 -m py_compile ansible/files/nextcloud/inspect_restore_rpm_inventory.py
+          ansible-playbook -i localhost, \
+            ansible/playbooks/audit-rocky-9-lxc-template-builder-readonly.yml \
+            --syntax-check
+          ansible-playbook -i localhost, \
+            ansible/playbooks/bootstrap-controller.yml \
+            --syntax-check
+          python3 -m py_compile ansible/files/nextcloud/audit_rocky_lxc_rootfs.py
+          python3 -m unittest discover -s tests -p 'test_rocky_lxc_rootfs_structural_audit.py'
+          python3 -m py_compile ansible/files/nextcloud/audit_rocky_lxc_rootfs_privileged_modes.py
+          python3 -m unittest discover -s tests -p 'test_rocky_lxc_rootfs_privileged_modes.py'
+          python3 -m unittest discover -s tests -p 'test_rocky_lxc_direct_staging_readonly.py'
+          python3 -m unittest discover -s tests -p 'test_rocky_lxc_rootfs_stage.py'
+          python3 -m unittest discover -s tests -p 'test_rocky_lxc_staged_template_readonly.py'
+          python3 -m py_compile ansible/files/nextcloud/audit_rocky_lxc_idmap_metadata.py
+          python3 -m unittest discover -s tests -p 'test_rocky_lxc_ct790_create_readonly.py'
+          python3 -m unittest discover -s tests -p 'test_rocky_lxc_ct790_create_plan.py'
+          python3 -m unittest discover -s tests -p 'test_rocky_lxc_ct790_postcreate_readonly.py'
+          python3 -m py_compile ansible/files/nextcloud/read_ct790_rootfs_release.py
+          python3 -m unittest discover -s tests -p 'test_rocky_lxc_ct790_rootfs_release.py'
+          python3 -m unittest discover -s tests -p 'test_rocky_lxc_ct790_firstboot_readonly.py'
+          python3 -m unittest discover -s tests -p 'test_rocky_lxc_ct790_firstboot_plan.py'
+          python3 -m unittest discover -s tests -p 'test_rocky_lxc_ct790_running_readonly.py'
+          python3 -m unittest discover -s tests -p 'test_rocky_lxc_ct790_shutdown_plan.py'
+          python3 -m unittest discover -s tests -p 'test_rocky_lxc_ct790_dnf_shutdown_exception.py'
+          python3 -m py_compile ansible/files/nextcloud/inventory_ct790_stopped_rootfs_sanitation.py
+          python3 -m unittest discover -s tests -p 'test_rocky_lxc_ct790_postshutdown_sanitation_readonly.py'
+          python3 -m unittest discover -s tests -p 'test_rocky_lxc_ct790_template_sanitation_plan.py'
+          python3 -m py_compile ansible/files/nextcloud/audit_ct790_firstboot_identity_units.py
+          python3 -m unittest discover -s tests -p 'test_rocky_lxc_ct790_firstboot_identity_units_readonly.py'
+          python3 -m py_compile ansible/files/nextcloud/audit_ct790_sanitation_targets.py
+          python3 -m unittest discover -s tests -p 'test_rocky_lxc_ct790_sanitation_targets_readonly.py'
+          python3 -m py_compile ansible/files/nextcloud/audit_ct790_backup_candidates_readonly.py
+          python3 -m unittest discover -s tests -p 'test_rocky_lxc_ct790_backup_candidates_readonly.py'
+          ansible-playbook -i localhost, \
+            ansible/playbooks/audit-rocky-9-8-ct790-backup-candidates-readonly.yml \
+            --syntax-check
+          ansible-playbook -i localhost, \
+            ansible/playbooks/audit-rocky-9-8-ct790-sanitization-targets-readonly.yml \
+            --syntax-check
+          ansible-playbook -i localhost, \
+            ansible/playbooks/audit-rocky-9-8-ct790-firstboot-identity-units-readonly.yml \
+            --syntax-check
+          ansible-playbook -i localhost, \
+            ansible/playbooks/plan-rocky-9-8-ct790-template-sanitization-readonly.yml \
+            --syntax-check
+          ansible-playbook -i localhost, \
+            ansible/playbooks/audit-rocky-9-8-ct790-postshutdown-sanitization-readonly.yml \
+            --syntax-check
+          ansible-playbook -i localhost, \
+            ansible/playbooks/shutdown-rocky-9-8-ct790-dnf-exception-offline.yml \
+            --syntax-check
+          python3 -m py_compile ansible/files/nextcloud/parse_ct790_failed_unit.py
+          python3 -m unittest discover -s tests -p 'test_rocky_lxc_ct790_failed_unit_diagnostic.py'
+          python3 -m py_compile ansible/files/nextcloud/classify_ct790_dnf_makecache_journal.py
+          python3 -m unittest discover -s tests -p 'test_rocky_lxc_ct790_dnf_journal_readonly.py'
+          ansible-playbook -i localhost, \
+            ansible/playbooks/diagnose-rocky-9-8-ct790-dnf-journal-readonly.yml \
+            --syntax-check
+          ansible-playbook -i localhost, \
+            ansible/playbooks/diagnose-rocky-9-8-ct790-failed-unit-readonly.yml \
+            --syntax-check
+          ansible-playbook -i localhost, \
+            ansible/playbooks/shutdown-rocky-9-8-ct790-offline.yml \
+            --syntax-check
+          ansible-playbook -i localhost, \
+            ansible/playbooks/audit-rocky-9-8-ct790-running-readonly.yml \
+            --syntax-check
+          sh -n ansible/files/nextcloud/inspect_rocky_ct790_firstboot_runtime.sh
+          ansible-playbook -i localhost, \
+            ansible/playbooks/start-rocky-9-8-ct790-offline.yml \
+            --syntax-check
+          ansible-playbook -i localhost, \
+            ansible/playbooks/audit-rocky-9-8-ct790-firstboot-readonly.yml \
+            --syntax-check
+          ansible-playbook -i localhost, \
+            ansible/playbooks/audit-rocky-9-8-ct790-rootfs-release-readonly.yml \
+            --syntax-check
+          ansible-playbook -i localhost, \
+            ansible/playbooks/audit-rocky-9-8-ct790-postcreate-readonly.yml \
+            --syntax-check
+          ansible-playbook -i localhost, \
+            ansible/playbooks/create-rocky-9-8-ct790-offline.yml \
+            --syntax-check
+          ansible-playbook -i localhost, \
+            ansible/playbooks/audit-rocky-9-8-ct790-create-readonly.yml \
+            --syntax-check
+          ansible-playbook -i localhost, \
+            ansible/playbooks/audit-rocky-9-8-staged-template-readonly.yml \
+            --syntax-check
+          ansible-playbook -i localhost, \
+            ansible/playbooks/stage-rocky-9-8-lxc-rootfs.yml \
+            --syntax-check
+          ansible-playbook -i localhost, \
+            ansible/playbooks/audit-rocky-9-8-direct-import-staging-readonly.yml \
+            --syntax-check
+          ansible-playbook -i localhost, \
+            ansible/playbooks/audit-rocky-9-lxc-rootfs-privileged-modes-readonly.yml \
+            --syntax-check
+          python3 -m py_compile ansible/files/nextcloud/diagnose_rocky_lxc_rootfs_symlinks.py
+          python3 -m unittest discover -s tests -p 'test_rocky_lxc_rootfs_symlink_diagnostic.py'
+          ansible-playbook -i localhost, \
+            ansible/playbooks/diagnose-rocky-9-lxc-rootfs-symlinks-readonly.yml \
+            --syntax-check
+          ansible-playbook -i localhost, \
+            ansible/playbooks/audit-rocky-9-lxc-rootfs-readonly.yml \
+            --syntax-check
+      - name: Verify offline-only initial provisioning
+        run: |
+          python3 - <<'PY'
+          import yaml
+          from pathlib import Path
+          source = Path("ansible/playbooks/prepare-nextcloud-isolated-restore-701.yml").read_text()
+          plays = yaml.safe_load(source)
+          assert len(plays) == 1
+          assert plays[0]["hosts"] == "venombox"
+          tasks = plays[0]["tasks"]
+          create = [t for t in tasks if t.get("name", "").startswith("Create expressly approved")]
+          assert len(create) == 1
+          argv = create[0]["ansible.builtin.command"]["argv"]
+          assert argv[:2] == ["pct", "create"]
+          assert "--net0" not in argv and "--net1" not in argv
+          for key, expected in [
+              ("--unprivileged", "1"), ("--onboot", "0"),
+              ("--start", "0"), ("--protection", "1"),
+          ]:
+              assert argv[argv.index(key)+1] == expected
+          assert "nextcloud_restore_701_apply" in create[0]["when"]
+          forbidden = {
+              "ansible.builtin.shell", "ansible.builtin.script",
+              "ansible.builtin.raw", "ansible.builtin.template",
+              "ansible.builtin.systemd", "ansible.builtin.service",
+          }
+          assert not any(any(k in forbidden for k in t) for t in tasks)
+          transfer = Path("ansible/files/nextcloud/stream_verified_restore_archive.py").read_text()
+          assert 'StrictHostKeyChecking=yes' in transfer
+          assert 'ForwardAgent=no' in transfer
+          assert 'O_NOFOLLOW' in transfer
+          assert 'sha256' in transfer
+          assert '/var/lib/vz/nextcloud-restore-test' in transfer
+          assert '20261019T' not in transfer
+          assert '--apply' in transfer
+          assert 'TARGET_ARCHIVE_SHA256_VERIFIED=YES' in transfer
+          assert 'NEXTCLOUD_RESTORE_ARCHIVE_ALREADY_VERIFIED=YES' in transfer
+          assert 'NEXTCLOUD_RESTORE_ARCHIVE_RECEIPT_RECOVERED=YES' in transfer
+          archive = Path("ansible/files/nextcloud/audit_verified_restore_archive.py").read_text()
+          assert 'PINNED_SHA256_MISMATCH' in archive
+          assert 'UNSAFE_ARCHIVE_SEGMENT' in archive
+          assert 'DUPLICATE_ARCHIVE_MEMBER' in archive
+          assert 'SQL_DATABASE_NOT_CONFIRMED' in archive
+          assert 'tarfile.open(archive, "r:gz")' in archive
+          assert 'validate_symbolic_links(seen, links)' in archive
+          assert 'SYMLINK_CHAIN_DEPTH_EXCEEDED' in archive
+          assert 'SYMLINK_ESCAPE' in archive
+          assert 'DANGLING_SYMLINK_TARGET' in archive
+          diag = Path("ansible/files/nextcloud/diagnose_restore_archive_member_types.py").read_text()
+          assert 'DIAGNOSTIC_FAILED=' in diag
+          assert 'tarfile.open(archive, "r:gz")' in diag
+          assert 'NEXTCLOUD_ARCHIVE_TYPE_DIAGNOSTIC=COMPLETE' in diag
+          assert 'archive_extracted": False' in diag
+
+          boot = yaml.safe_load(Path("ansible/playbooks/inspect-nextcloud-restore-701-offline-runtime.yml").read_text())
+          assert len(boot) == 1 and boot[0]["hosts"] == "venombox"
+          tasks_boot = boot[0]["tasks"]
+          start_tasks = [t for t in tasks_boot if t.get("name", "").startswith("Start only explicitly approved")]
+          assert len(start_tasks) == 1
+          assert start_tasks[0]["ansible.builtin.command"]["argv"] == ["pct","start","701"]
+          assert "nextcloud_restore_701_start" in start_tasks[0]["when"]
+          assert not any(any(key in t for key in ("ansible.builtin.shell", "ansible.builtin.template", "ansible.builtin.file", "ansible.builtin.copy")) for t in tasks_boot)
+          assert "NON_LOOPBACK_DEVICES=0" in Path("ansible/playbooks/inspect-nextcloud-restore-701-offline-runtime.yml").read_text()
+          running = yaml.safe_load(Path("ansible/playbooks/inspect-nextcloud-restore-701-running-readonly.yml").read_text())
+          assert len(running) == 1 and running[0]["hosts"] == "venombox"
+          running_tasks = running[0]["tasks"]
+          assert not any(t.get("ansible.builtin.command",{}).get("argv",[])[:2] in (["pct","start"],["pct","stop"],["pct","set"],["pct","mount"]) for t in running_tasks)
+          assert not any(any(key in t for key in ("ansible.builtin.shell","ansible.builtin.template","ansible.builtin.file","ansible.builtin.copy")) for t in running_tasks)
+          assert "NON_LOOPBACK_DEVICES=0" in Path("ansible/playbooks/inspect-nextcloud-restore-701-running-readonly.yml").read_text()
+          rpm = yaml.safe_load(Path("ansible/playbooks/audit-nextcloud-restore-offline-package-sources.yml").read_text())
+          assert len(rpm) == 3
+          assert [p["hosts"] for p in rpm] == ["localhost", "venombox", "nextcloud_restore_rpm_reference"]
+          assert all(
+              not any(k in t for k in ("ansible.builtin.shell","ansible.builtin.script","ansible.builtin.raw","ansible.builtin.copy","ansible.builtin.template","ansible.builtin.file","ansible.builtin.dnf","ansible.builtin.yum"))
+              for p in rpm for t in p["tasks"]
+          )
+          assert all(
+              t.get("ansible.builtin.command",{}).get("argv",[])[:2] not in
+              (["pct","start"],["pct","stop"],["pct","set"],["pct","push"])
+              for p in rpm for t in p["tasks"]
+          )
+          source_inventory = Path("ansible/files/nextcloud/inspect_restore_rpm_inventory.py").read_text()
+          assert 'package_installation": False' in source_inventory
+          assert 'network_changes": False' in source_inventory
+          assert 'rpm", "-qa"' in source_inventory
+          assert 'ALLOWED_ID' in source_inventory
+          builder = yaml.safe_load(Path("ansible/playbooks/audit-rocky-9-lxc-template-builder-readonly.yml").read_text())
+          assert len(builder) == 1 and builder[0]["hosts"] == "venombox"
+          tasks_builder = builder[0]["tasks"]
+          assert all(
+              isinstance(condition, str)
+              for task in tasks_builder
+              for condition in task.get("ansible.builtin.assert", {}).get("that", [])
+          ), "All Ansible assert conditions must be strings, not YAML mappings"
+          assert not any(any(key in t for key in (
+              "ansible.builtin.shell", "ansible.builtin.script",
+              "ansible.builtin.raw", "ansible.builtin.copy",
+              "ansible.builtin.template", "ansible.builtin.file",
+              "ansible.builtin.dnf", "ansible.builtin.yum",
+              "ansible.builtin.systemd", "ansible.builtin.service",
+          )) for t in tasks_builder)
+          assert not any(t.get("ansible.builtin.command", {}).get("argv", [])[:2] in (
+              ["pct", "create"], ["pct", "set"], ["pct", "start"],
+              ["pct", "stop"], ["pct", "destroy"], ["pct", "template"],
+              ["pct", "clone"], ["pct", "push"], ["pveam", "download"],
+              ["pvesm", "alloc"],
+          ) for t in tasks_builder)
+          assert "ROCKY_9_8_LXC_TEMPLATE_BUILDER_READ_ONLY_READY" in Path(
+              "ansible/playbooks/audit-rocky-9-lxc-template-builder-readonly.yml"
+          ).read_text()
+          controller = yaml.safe_load(Path("ansible/playbooks/bootstrap-controller.yml").read_text())
+          assert len(controller) == 1 and controller[0]["hosts"] == "bp-controller"
+          assert set(("gnupg", "gpgv", "file")).issubset(set(controller[0]["vars"]["controller_packages"]))
+          tagged = [
+              task for task in controller[0]["tasks"]
+              if "controller_packages" in task.get("tags", [])
+          ]
+          assert len(tagged) == 5
+          assert tagged[0]["ansible.builtin.assert"]["that"] == [
+              "inventory_hostname == 'bp-controller'",
+              "ansible_facts['distribution'] == 'Debian'",
+              "ansible_facts['distribution_major_version'] == '13'",
+          ]
+          assert all(
+              "ansible.builtin.apt" in task or
+              "ansible.builtin.assert" in task or
+              "ansible.builtin.stat" in task
+              for task in tagged
+          )
+          apt_tasks = [task["ansible.builtin.apt"] for task in tagged if "ansible.builtin.apt" in task]
+          assert len(apt_tasks) == 2
+          assert apt_tasks[1]["state"] == "present"
+          assert all(
+              task.get("ansible.builtin.command", {}).get("argv", [])[:2] not in
+              (["pct", "create"], ["pct", "set"], ["pct", "start"])
+              for task in tagged
+          )
+          structural = yaml.safe_load(Path("ansible/playbooks/audit-rocky-9-lxc-rootfs-readonly.yml").read_text())
+          assert len(structural) == 1
+          assert structural[0]["hosts"] == "bp-controller"
+          assert structural[0]["connection"] == "local"
+          assert structural[0]["become"] is False
+          struct_tasks = structural[0]["tasks"]
+          assert all(not any(key in task for key in (
+              "ansible.builtin.shell", "ansible.builtin.raw",
+              "ansible.builtin.script", "ansible.builtin.copy",
+              "ansible.builtin.file", "ansible.builtin.template",
+              "ansible.builtin.apt", "ansible.builtin.dnf",
+              "ansible.builtin.systemd", "ansible.builtin.service",
+          )) for task in struct_tasks)
+          assert all("ansible.builtin.command" not in task or
+                     task.get("changed_when") is False for task in struct_tasks)
+          structural_code = Path("ansible/files/nextcloud/audit_rocky_lxc_rootfs.py").read_text()
+          assert "tarfile.open(fileobj=handle, mode=\"r|xz\")" in structural_code
+          assert "O_NOFOLLOW" in structural_code
+          assert "ARCHIVE_SHA256_MISMATCH" in structural_code
+          assert "ROCKY_LXC_ROOTFS_STRUCTURAL_AUDIT_PASS" in structural_code
+          assert "archive_extracted\": False" in structural_code
+          assert "ct701_changed\": False" in structural_code
+          print("ROCKY_9_8_ROOTFS_OFFLINE_AUDIT_BOUNDARIES=PASS")
+          print("CONTROLLER_SIGNATURE_PACKAGE_BASELINE=PASS")
+          print("NEXTCLOUD_701_OFFLINE_STATIC_BOUNDARIES=PASS")
+          PY
