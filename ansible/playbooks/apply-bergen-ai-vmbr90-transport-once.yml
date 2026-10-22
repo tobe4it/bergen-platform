@@ -1,0 +1,354 @@
+---
+# Explicitly approved, single-purpose Proxmox bridge + two secondary NICs.
+# DOES NOT change net0, default gateways, Ollama, Paperless or firewalls.
+# Requires complete operator IPAM and independently verified host console.
+# On uncertain result: fail closed; never restart a CT or the Proxmox host.
+- import_playbook: audit-bergen-ai-private-bridge-external-gates-readonly.yml
+- import_playbook: audit-bergen-ai-private-bridge-readonly.yml
+- import_playbook: audit-bergen-ai-private-bridge-extended-readonly.yml
+- import_playbook: audit-bergen-ai-private-bridge-wg-readonly.yml
+
+- name: Provision only the approved vmbr90 and CT110 CT126 secondary transport
+  hosts: venombox
+  become: true
+  gather_facts: false
+  serial: 1
+  vars:
+    bergen_ai_vmbr90_oneoff_approval: ""
+    bergen_ai_vmbr90_oob_attestation: ""
+  tasks:
+    - name: Require exact host, operator approval, external IPAM and live negative collision audits
+      ansible.builtin.assert:
+        that:
+          - "inventory_hostname == 'venombox'"
+          - "bergen_ai_vmbr90_oneoff_approval == 'APPROVE_SCOPED_VMBR90_CT110_CT126'"
+          - "bergen_ai_vmbr90_oob_attestation == 'CONSOLE_VERIFIED_AND_ROLLBACK_AVAILABLE'"
+          - "hostvars['localhost'].ipam_gate.STATUS == 'NO_OVERLAP_IN_DECLARED_RANGES'"
+          - "hostvars['localhost'].ipam_gate.SCOPE_COVERAGE == 'OPERATOR_DECLARED_COMPLETE'"
+          - "bp_ai_bridge_audit.STATUS == 'CANDIDATE_LOCALLY_UNCONFLICTED'"
+          - "bp_ai_bridge_audit.BRIDGE_KERNEL == 'ABSENT'"
+          - "bp_ai_bridge_audit.BRIDGE_CONFIG == 'ABSENT'"
+          - "bp_ai_bridge_audit.BRIDGE_GUEST_REFERENCES == 'NOT_REFERENCED_IN_SCANNED_GUESTS'"
+          - "bp_ai_bridge_audit.CT110_NICS == 1"
+          - "bp_ai_bridge_audit.CT126_NICS == 1"
+          - "bp_ai_bridge_audit.CT120_NICS == 1"
+          - "extended_report.STATUS == 'NO_OVERLAP_IN_SCANNED_DOMAINS'"
+          - "extended_report.PAPERLESS_PODMAN == 'NO_OVERLAP_IN_SCANNED_NETWORKS'"
+          - "extended_report.AI_PODMAN == 'NO_OVERLAP_IN_SCANNED_NETWORKS'"
+          - "ai_bridge_wg.STATUS == 'NO_OVERLAP_IN_INSPECTED_LIVE_WG_PEERS'"
+          - "rollback_gate.HOST_NETWORK_CONFIG == 'READABLE_SOURCE_ONLY'"
+          - "rollback_gate.CT110_CONFIG == 'READABLE_SOURCE_ONLY'"
+          - "rollback_gate.CT126_CONFIG == 'READABLE_SOURCE_ONLY'"
+          - "rollback_gate.BACKUP_MOUNT == 'NFS_MOUNT_PRESENT_ONLY'"
+          - "rollback_gate.CT110_BACKUP == 'RECENT_FILE_METADATA_ONLY'"
+          - "rollback_gate.CT126_BACKUP == 'RECENT_FILE_METADATA_ONLY'"
+        fail_msg: VMBR90_IPAM_OOB_BACKUP_OR_LIVE_AUDIT_GATES_NOT_SATISFIED
+      no_log: true
+
+    - name: Run stricter no-write host configuration and guest topology preflight
+      ansible.builtin.command:
+        argv:
+          - python3
+          - -c
+          - "{{ lookup('ansible.builtin.file', playbook_dir ~ '/../files/bergen_ai/preflight_vmbr90_scoped_apply_readonly.py', rstrip=False) }}"
+      register: scoped_vmbr90_pre_raw
+      changed_when: false
+      failed_when: false
+      no_log: true
+
+    - name: Require exactly one successful bounded preflight record
+      ansible.builtin.set_fact:
+        scoped_vmbr90_frames: >-
+          {{ scoped_vmbr90_pre_raw.stdout_lines | default([]) |
+             select('match', '^BERGEN_AI_VMBR90_APPLY_PREFLIGHT_V1:') | list }}
+      no_log: true
+
+    - name: Refuse missing duplicate oversized or failed preflight
+      ansible.builtin.assert:
+        that:
+          - "scoped_vmbr90_pre_raw.rc == 0"
+          - "scoped_vmbr90_frames | length == 1"
+          - "scoped_vmbr90_frames[0] | length < 1200"
+      no_log: true
+
+    - name: Parse restricted preflight result
+      ansible.builtin.set_fact:
+        scoped_vmbr90_pre: >-
+          {{ (scoped_vmbr90_frames[0] |
+             regex_replace('^BERGEN_AI_VMBR90_APPLY_PREFLIGHT_V1:', '')) | from_json }}
+      no_log: true
+
+    - name: Assert no pending host edit or preexisting guest secondary NIC
+      ansible.builtin.assert:
+        that:
+          - "scoped_vmbr90_pre.STATUS == 'SCOPED_HOST_PREFLIGHT_PASSED'"
+          - "scoped_vmbr90_pre.HOST_NETWORK_SOURCE == 'EXPLICIT_SOURCE_NO_PENDING_EDIT'"
+          - "scoped_vmbr90_pre.CT110_NETWORK_LAYOUT == 'RUNNING_NET0_ONLY'"
+          - "scoped_vmbr90_pre.CT126_NETWORK_LAYOUT == 'RUNNING_NET0_ONLY'"
+          - "not scoped_vmbr90_pre.CHANGED"
+          - "not scoped_vmbr90_pre.APPLY_AUTHORIZED"
+        fail_msg: VMBR90_SCOPED_HOST_PREFLIGHT_NOT_PASSED
+      no_log: true
+
+    - name: Capture original production CT110 configuration without publishing it
+      ansible.builtin.command:
+        argv: [pct, config, '110']
+      register: scoped_ct110_before
+      changed_when: false
+      no_log: true
+
+    - name: Capture original production CT126 configuration without publishing it
+      ansible.builtin.command:
+        argv: [pct, config, '126']
+      register: scoped_ct126_before
+      changed_when: false
+      no_log: true
+
+    - name: Capture original management network file checksum
+      ansible.builtin.stat:
+        path: /etc/network/interfaces
+        checksum_algorithm: sha256
+      register: scoped_interfaces_before
+      no_log: true
+
+    - name: Extract exact net0 baselines for both guests
+      ansible.builtin.set_fact:
+        scoped_ct110_net0_before: >-
+          {{ scoped_ct110_before.stdout_lines | select('match', '^net0: ') | list }}
+        scoped_ct126_net0_before: >-
+          {{ scoped_ct126_before.stdout_lines | select('match', '^net0: ') | list }}
+      no_log: true
+
+    - name: Require unambiguous net0 baselines before making any change
+      ansible.builtin.assert:
+        that:
+          - "scoped_ct110_net0_before | length == 1"
+          - "scoped_ct126_net0_before | length == 1"
+          - "scoped_interfaces_before.stat.isreg | default(false)"
+        fail_msg: PRODUCTION_NET0_BASELINE_UNVERIFIED
+      no_log: true
+
+    - name: Create isolated private rollback evidence directory without changing networks
+      ansible.builtin.file:
+        path: /root/bergen-ai-vmbr90-prechange
+        state: directory
+        owner: root
+        group: root
+        mode: '0700'
+
+    - name: Save one immutable copy of original host network source
+      ansible.builtin.copy:
+        remote_src: true
+        src: /etc/network/interfaces
+        dest: /root/bergen-ai-vmbr90-prechange/interfaces.before
+        owner: root
+        group: root
+        mode: '0600'
+        force: false
+      no_log: true
+
+    - name: Save original CT110 config privately
+      ansible.builtin.copy:
+        remote_src: true
+        src: /etc/pve/lxc/110.conf
+        dest: /root/bergen-ai-vmbr90-prechange/110.conf.before
+        owner: root
+        group: root
+        mode: '0600'
+        force: false
+      no_log: true
+
+    - name: Save original CT126 config privately
+      ansible.builtin.copy:
+        remote_src: true
+        src: /etc/pve/lxc/126.conf
+        dest: /root/bergen-ai-vmbr90-prechange/126.conf.before
+        owner: root
+        group: root
+        mode: '0600'
+        force: false
+      no_log: true
+
+    - name: Run only isolated new bridge and secondary NIC changes
+      block:
+        - name: Add standalone persistent bridge definition without uplink or host IP
+          ansible.builtin.copy:
+            dest: /etc/network/interfaces.d/bergen-ai-vmbr90
+            owner: root
+            group: root
+            mode: '0644'
+            content: |
+              # Bergen-AI / Paperless private L2 only. No host IP, gateway or uplink.
+              auto vmbr90
+              iface vmbr90 inet manual
+                  bridge-ports none
+                  bridge-stp off
+                  bridge-fd 0
+                  # Prevent even link-local IPv6 on the PVE host-facing bridge.
+                  post-up echo 1 > /proc/sys/net/ipv6/conf/vmbr90/disable_ipv6
+          register: scoped_dropin_written
+
+        - name: Bring up only the new vmbr90 interface without global network reload
+          ansible.builtin.command:
+            argv: [ifup, vmbr90]
+          register: scoped_bridge_ifup
+          changed_when: true
+          no_log: true
+
+        - name: Verify bridge-host IPv6 has been disabled before attaching any guest
+          ansible.builtin.command:
+            argv: [cat, /proc/sys/net/ipv6/conf/vmbr90/disable_ipv6]
+          register: scoped_bridge_ipv6
+          changed_when: false
+          no_log: true
+
+        - name: Verify no physical or other bridge ports are attached
+          ansible.builtin.command:
+            argv: [bridge, -j, link, show, master, vmbr90]
+          register: scoped_bridge_ports
+          changed_when: false
+          no_log: true
+
+        - name: Refuse any Proxmox-host IPv6 or foreign bridge port before guest connection
+          ansible.builtin.assert:
+            that:
+              - "scoped_bridge_ipv6.stdout | trim == '1'"
+              - "scoped_bridge_ports.stdout | from_json | length == 0"
+          no_log: true
+
+        - name: Connect CT110 private net1 without modifying production net0 or gateway
+          ansible.builtin.command:
+            argv: [pct, set, '110', --net1, 'name=eth1,bridge=vmbr90,ip=172.30.110.2/28,ip6=manual,firewall=1']
+          changed_when: true
+          no_log: true
+
+        - name: Connect CT126 private net1 without modifying production net0 or gateway
+          ansible.builtin.command:
+            argv: [pct, set, '126', --net1, 'name=eth1,bridge=vmbr90,ip=172.30.110.3/28,ip6=manual,firewall=1']
+          changed_when: true
+          no_log: true
+
+        - name: Read both CT configurations after applying only the scoped change
+          ansible.builtin.command:
+            argv: [pct, config, '{{ item }}']
+          loop: ['110', '126']
+          register: scoped_ct_after
+          changed_when: false
+          no_log: true
+
+        - name: Require net0 unchanged and only known extra vmbr90 net1 configurations
+          ansible.builtin.assert:
+            that:
+              - "scoped_ct_after.results[0].stdout_lines | select('match', '^net0: ') | list == scoped_ct110_net0_before"
+              - "scoped_ct_after.results[1].stdout_lines | select('match', '^net0: ') | list == scoped_ct126_net0_before"
+              - "scoped_ct_after.results[0].stdout_lines | select('match', '^net1: ') | length == 1"
+              - "scoped_ct_after.results[1].stdout_lines | select('match', '^net1: ') | length == 1"
+              - "'bridge=vmbr90' in scoped_ct_after.results[0].stdout"
+              - "'bridge=vmbr90' in scoped_ct_after.results[1].stdout"
+              - "'172.30.110.2/28' in scoped_ct_after.results[0].stdout"
+              - "'172.30.110.3/28' in scoped_ct_after.results[1].stdout"
+              - "'gw=' not in (scoped_ct_after.results[0].stdout_lines | select('match', '^net1: ') | join(' '))"
+              - "'gw=' not in (scoped_ct_after.results[1].stdout_lines | select('match', '^net1: ') | join(' '))"
+            fail_msg: SCOPED_PRIVATE_NETWORK_POSTCHECK_FAILED
+          no_log: true
+
+        - name: Require both original guests still running
+          ansible.builtin.command:
+            argv: [pct, status, '{{ item }}']
+          loop: ['110', '126']
+          register: scoped_ct_state
+          changed_when: false
+          no_log: true
+
+        - name: Require both LXC states unchanged
+          ansible.builtin.assert:
+            that:
+              - "scoped_ct_state.results[0].stdout | trim == 'status: running'"
+              - "scoped_ct_state.results[1].stdout | trim == 'status: running'"
+          no_log: true
+
+        - name: Check host management network source remained byte-identical
+          ansible.builtin.stat:
+            path: /etc/network/interfaces
+            checksum_algorithm: sha256
+          register: scoped_interfaces_after
+          no_log: true
+
+        - name: Require no mutation of host management interfaces file
+          ansible.builtin.assert:
+            that:
+              - "scoped_interfaces_before.stat.checksum == scoped_interfaces_after.stat.checksum"
+          no_log: true
+
+        - name: Report scoped transport configuration without claiming service reachability
+          ansible.builtin.debug:
+            msg:
+              - STATUS=VMBR90_PERSISTENT_DEFINITION_AND_CT_NET1_CONFIGURED
+              - BRIDGE=vmbr90
+              - CT110_NET1=172.30.110.2/28
+              - CT126_NET1=172.30.110.3/28
+              - PRIMARY_NET0=UNCHANGED
+              - HOST_NETWORK_INTERFACES_FILE=UNCHANGED
+              - CT_STATES=RUNNING
+              - DEFAULT_GATEWAY_CHANGED=NO
+              - OLLAMA_BINDING_CHANGED=NO
+              - PAPERLESS_AI_ENDPOINT_CHANGED=NO
+              - PAPERLESS_TO_OLLAMA_CONNECTIVITY=NOT_YET_TESTED
+              - NETWORK_ACCESS_CONTROL=NOT_YET_ATTESTED
+              - CT120_CHANGED=NO
+              - RESTARTS=NONE
+
+      rescue:
+        - name: Inspect CT126 configuration for our precise net1 before scoped rollback
+          ansible.builtin.command:
+            argv: [pct, config, '126']
+          register: scoped_rollback_126
+          changed_when: false
+          failed_when: false
+          no_log: true
+
+        - name: Remove only our private net1 from CT126 if present
+          ansible.builtin.command:
+            argv: [pct, set, '126', --delete, net1]
+          when:
+            - "scoped_rollback_126.rc == 0"
+            - "'net1:' in scoped_rollback_126.stdout"
+            - "'bridge=vmbr90' in scoped_rollback_126.stdout"
+            - "'172.30.110.3/28' in scoped_rollback_126.stdout"
+          failed_when: false
+          no_log: true
+
+        - name: Inspect CT110 configuration for our precise net1 before scoped rollback
+          ansible.builtin.command:
+            argv: [pct, config, '110']
+          register: scoped_rollback_110
+          changed_when: false
+          failed_when: false
+          no_log: true
+
+        - name: Remove only our private net1 from CT110 if present
+          ansible.builtin.command:
+            argv: [pct, set, '110', --delete, net1]
+          when:
+            - "scoped_rollback_110.rc == 0"
+            - "'net1:' in scoped_rollback_110.stdout"
+            - "'bridge=vmbr90' in scoped_rollback_110.stdout"
+            - "'172.30.110.2/28' in scoped_rollback_110.stdout"
+          failed_when: false
+          no_log: true
+
+        - name: Take down only newly created vmbr90 without touching existing bridges
+          ansible.builtin.command:
+            argv: [ifdown, vmbr90]
+          failed_when: false
+          changed_when: false
+          no_log: true
+
+        - name: Remove only our known vmbr90 drop-in
+          ansible.builtin.file:
+            path: /etc/network/interfaces.d/bergen-ai-vmbr90
+            state: absent
+
+        - name: Fail closed because scoped apply or rollback needs operator review
+          ansible.builtin.fail:
+            msg: VMBR90_SCOPED_APPLY_FAILED_REVIEW_CT_NET1_BRIDGE_AND_ROLLBACK_EVIDENCE

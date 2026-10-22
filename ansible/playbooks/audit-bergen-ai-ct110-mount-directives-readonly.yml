@@ -1,0 +1,84 @@
+---
+# Read-only diagnosis of why one-off CT110 preflight found LXC mount directives.
+- name: Diagnose CT110 LXC mount directives without unblocking backup
+  hosts: venombox
+  become: true
+  gather_facts: false
+  tasks:
+    - name: Require expected host
+      ansible.builtin.assert:
+        that:
+          - inventory_hostname == 'venombox'
+
+    - name: Classify CT110 mount directives and known WebUI data location
+      ansible.builtin.command:
+        argv:
+          - python3
+          - -c
+          - "{{ lookup('ansible.builtin.file', playbook_dir ~ '/../files/bergen_ai/audit_ct110_mount_directives_readonly.py', rstrip=False) }}"
+      register: mount_diag_raw
+      changed_when: false
+      failed_when: false
+      check_mode: false
+      no_log: true
+
+    - name: Extract exactly one sanitized mount diagnosis
+      ansible.builtin.set_fact:
+        mount_diag_frames: >-
+          {{ mount_diag_raw.stdout_lines | default([]) |
+             select('match', '^BERGEN_AI_CT110_MOUNT_DIAG_V1:') | list }}
+      no_log: true
+
+    - name: Reject incomplete or duplicate diagnosis frames
+      ansible.builtin.assert:
+        that:
+          - mount_diag_raw.rc == 0
+          - mount_diag_frames | length == 1
+          - mount_diag_frames[0] | length < 2000
+      no_log: true
+
+    - name: Parse only classified CT110 mount evidence
+      ansible.builtin.set_fact:
+        mount_diag: >-
+          {{ (mount_diag_frames[0] | regex_replace('^BERGEN_AI_CT110_MOUNT_DIAG_V1:', '')) | from_json }}
+      no_log: true
+
+    - name: Refuse any implication of production change approval
+      ansible.builtin.assert:
+        that:
+          - mount_diag.AUDIT == 'READ_ONLY'
+          - not mount_diag.CHANGED
+          - not mount_diag.BACKUP_EXECUTED
+          - not mount_diag.BACKUP_AUTHORIZED
+          - not mount_diag.APPLY_AUTHORIZED
+          - mount_diag.STATUS == 'REVIEW_REQUIRED'
+          - mount_diag.ROLLBACK_CLEARANCE == 'NOT_PROVEN'
+          - mount_diag.NETWORK_CHANGES == 'NONE'
+          - mount_diag.BIND_SOURCE_CONTENT == 'NOT_READ'
+          - mount_diag.CT110_CONFIG_IDENTITY in ['VERIFIED', 'UNVERIFIED']
+          - mount_diag.LXC_MOUNT_AUTO in ['ABSENT', 'STANDARD_PSEUDO_DIRECTIVES_PRESENT', 'NONSTANDARD_OR_UNKNOWN', 'UNVERIFIED']
+          - mount_diag.LXC_MOUNT_ENTRY in ['ABSENT', 'DEVICE_OR_PSEUDO_TARGETS_PRESENT', 'OTHER_OR_PERSISTENT_TARGETS_PRESENT', 'UNVERIFIED']
+          - mount_diag.LXC_MOUNT_ENTRY_DEVICE_ORIGIN | default('UNVERIFIED') in ['ABSENT', 'MULTIPLE_ENTRIES_REVIEW', 'UNVERIFIED', 'SOURCE_OR_OPTIONS_REVIEW', 'EXACT_FUSE_DEVICE_BIND', 'EXACT_TUN_DEVICE_BIND', 'EXACT_DRI_DEVICE_BIND']
+          - mount_diag.LXC_MOUNT_ENTRY_FORMAT | default('UNVERIFIED') in ['ABSENT', 'MULTIPLE_ENTRIES_REVIEW', 'UNVERIFIED', 'FOUR_FIELD_FORM', 'SIX_FIELD_FORM', 'OTHER_FIELD_COUNT']
+          - mount_diag.WEBUI_DATA_MOUNT in ['GUEST_ROOTFS', 'OTHER_GUEST_MOUNT', 'UNVERIFIED']
+      no_log: true
+
+    - name: Report only sanitized classification
+      ansible.builtin.debug:
+        msg:
+          - AUDIT=READ_ONLY
+          - "CT110_CONFIG_IDENTITY={{ mount_diag.CT110_CONFIG_IDENTITY }}"
+          - "PVE_MP_DIRECTIVES={{ mount_diag.PVE_MP_DIRECTIVES }}"
+          - "PVE_MP_COUNT={{ mount_diag.PVE_MP_COUNT | default('UNVERIFIED') }}"
+          - "LXC_MOUNT_AUTO={{ mount_diag.LXC_MOUNT_AUTO }}"
+          - "LXC_MOUNT_AUTO_COUNT={{ mount_diag.LXC_MOUNT_AUTO_COUNT | default('UNVERIFIED') }}"
+          - "LXC_MOUNT_ENTRY={{ mount_diag.LXC_MOUNT_ENTRY }}"
+          - "LXC_MOUNT_ENTRY_COUNT={{ mount_diag.LXC_MOUNT_ENTRY_COUNT | default('UNVERIFIED') }}"
+          - "LXC_MOUNT_ENTRY_DEVICE_ORIGIN={{ mount_diag.LXC_MOUNT_ENTRY_DEVICE_ORIGIN | default('UNVERIFIED') }}"
+          - "LXC_MOUNT_ENTRY_FORMAT={{ mount_diag.LXC_MOUNT_ENTRY_FORMAT | default('UNVERIFIED') }}"
+          - "OTHER_MOUNT_OR_EXCLUDE_DIRECTIVES={{ mount_diag.OTHER_MOUNT_OR_EXCLUDE_DIRECTIVES | default('UNVERIFIED') }}"
+          - "WEBUI_DATA_MOUNT={{ mount_diag.WEBUI_DATA_MOUNT }}"
+          - BACKUP_EXECUTED=False
+          - BACKUP_AUTHORIZED=False
+          - ROLLBACK_CLEARANCE=NOT_PROVEN
+          - APPLY_AUTHORIZED=False

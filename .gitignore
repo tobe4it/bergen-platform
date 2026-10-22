@@ -14,6 +14,8 @@ ansible/group_vars/all/bergen-mq-lab.yml
 ansible/vars/bergen-mq-*.local.yml
 ansible/vars/mq-topology/
 ansible/inventory.local.yml
+# Operator-maintained external UniFi/VPN/off-host ranges; never version
+ansible/vars/bergen-ai-bridge-ipam.local.json
 # Site-local inventory editor backups may contain credentials or host addresses.
 ansible/inventory.local.yml~
 ansible/inventory.local.yml.*~

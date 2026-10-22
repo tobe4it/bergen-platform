@@ -1,0 +1,150 @@
+---
+# External network scope is operator-supplied, no live UniFi/API access.
+# All execution is read-only. No bridge, backup, VPN or service changes.
+- name: Validate operator supplied UniFi VPN and off-host CIDR inventory
+  hosts: localhost
+  connection: local
+  become: false
+  gather_facts: false
+  vars:
+    private_bridge_ipam_path: "{{ playbook_dir }}/../vars/bergen-ai-bridge-ipam.local.json"
+  tasks:
+    - name: Read and classify restricted local manifest without network access
+      ansible.builtin.command:
+        argv:
+          - python3
+          - -c
+          - "{{ lookup('ansible.builtin.file', playbook_dir ~ '/../files/bergen_ai/audit_private_bridge_external_gates.py', rstrip=False) }}"
+          - ipam
+          - "{{ private_bridge_ipam_path }}"
+      register: ipam_raw
+      changed_when: false
+      failed_when: false
+      check_mode: false
+      no_log: true
+
+    - name: Parse exactly one sanitized IPAM frame
+      ansible.builtin.set_fact:
+        ipam_frames: >-
+          {{ ipam_raw.stdout_lines | default([]) |
+             select('match', '^BERGEN_AI_PRIVATE_BRIDGE_GATES_V1:') | list }}
+      no_log: true
+
+    - name: Reject missing duplicate or oversized IPAM results
+      ansible.builtin.assert:
+        that:
+          - ipam_raw.rc == 0
+          - ipam_frames | length == 1
+          - ipam_frames[0] | length < 1600
+      no_log: true
+
+    - name: Decode bounded IPAM categories
+      ansible.builtin.set_fact:
+        ipam_gate: >-
+          {{ (ipam_frames[0] | regex_replace('^BERGEN_AI_PRIVATE_BRIDGE_GATES_V1:', '')) | from_json }}
+      no_log: true
+
+    - name: Require perpetual no-apply safety gates
+      ansible.builtin.assert:
+        that:
+          - ipam_gate.AUDIT == 'READ_ONLY'
+          - ipam_gate.MODE == 'IPAM'
+          - not ipam_gate.CHANGED
+          - not ipam_gate.APPLY_AUTHORIZED
+          - ipam_gate.FULL_NETWORK_CLEARANCE == 'NOT_PROVEN'
+          - ipam_gate.ROLLBACK_CLEARANCE == 'NOT_PROVEN'
+          - ipam_gate.NETWORK_CHANGES == 'NONE'
+          - ipam_gate.STATUS in ['UNVERIFIED', 'OVERLAP_FOUND', 'VPN_CATCHALL_REVIEW', 'NO_OVERLAP_IN_DECLARED_RANGES']
+          - ipam_gate.SCOPE_COVERAGE in ['UNVERIFIED', 'OPERATOR_DECLARED_COMPLETE', 'OPERATOR_DECLARED_INCOMPLETE']
+      no_log: true
+
+    - name: Display sanitized external scope assessment
+      ansible.builtin.debug:
+        msg:
+          - AUDIT=READ_ONLY
+          - "IPAM_STATUS={{ ipam_gate.STATUS }}"
+          - "IPAM_SCOPE_COVERAGE={{ ipam_gate.SCOPE_COVERAGE }}"
+          - "IPAM_SOURCE_QUALITY={{ ipam_gate.SOURCE_QUALITY }}"
+          - UNIFI_DIRECT_QUERY=NOT_PERFORMED
+          - VPN_REMOTE_QUERY=NOT_PERFORMED
+          - FULL_NETWORK_CLEARANCE=NOT_PROVEN
+          - APPLY_AUTHORIZED=False
+
+- name: Audit host-side WireGuard and recoverability evidence without changes
+  hosts: venombox
+  become: true
+  gather_facts: false
+  tasks:
+    - name: Require expected hypervisor target
+      ansible.builtin.assert:
+        that:
+          - inventory_hostname == 'venombox'
+
+    - name: Inspect only network config presence local WG and backup metadata
+      ansible.builtin.command:
+        argv:
+          - python3
+          - -c
+          - "{{ lookup('ansible.builtin.file', playbook_dir ~ '/../files/bergen_ai/audit_private_bridge_external_gates.py', rstrip=False) }}"
+          - host
+      register: rollback_raw
+      changed_when: false
+      failed_when: false
+      check_mode: false
+      no_log: true
+
+    - name: Parse exactly one sanitized host frame
+      ansible.builtin.set_fact:
+        rollback_frames: >-
+          {{ rollback_raw.stdout_lines | default([]) |
+             select('match', '^BERGEN_AI_PRIVATE_BRIDGE_GATES_V1:') | list }}
+      no_log: true
+
+    - name: Reject failed malformed duplicate or oversized host report
+      ansible.builtin.assert:
+        that:
+          - rollback_raw.rc == 0
+          - rollback_frames | length == 1
+          - rollback_frames[0] | length < 1800
+      no_log: true
+
+    - name: Decode bounded host evidence
+      ansible.builtin.set_fact:
+        rollback_gate: >-
+          {{ (rollback_frames[0] | regex_replace('^BERGEN_AI_PRIVATE_BRIDGE_GATES_V1:', '')) | from_json }}
+      no_log: true
+
+    - name: Require no mutating actions or approval
+      ansible.builtin.assert:
+        that:
+          - rollback_gate.AUDIT == 'READ_ONLY'
+          - rollback_gate.MODE == 'HOST'
+          - not rollback_gate.CHANGED
+          - not rollback_gate.APPLY_AUTHORIZED
+          - rollback_gate.FULL_NETWORK_CLEARANCE == 'NOT_PROVEN'
+          - rollback_gate.ROLLBACK_CLEARANCE == 'NOT_PROVEN'
+          - rollback_gate.CONFIG_BACKUP == 'NOT_ATTESTED'
+          - rollback_gate.RESTORE_TEST == 'NOT_ATTESTED'
+          - rollback_gate.OOB_CONSOLE == 'NOT_ATTESTED'
+          - rollback_gate.STATUS in ['REVIEW_INCOMPLETE', 'EVIDENCE_PARTIAL']
+      no_log: true
+
+    - name: Display only classified safety evidence
+      ansible.builtin.debug:
+        msg:
+          - AUDIT=READ_ONLY
+          - "HOST_STATUS={{ rollback_gate.STATUS }}"
+          - "HOST_NETWORK_CONFIG={{ rollback_gate.HOST_NETWORK_CONFIG }}"
+          - "CT110_CONFIG={{ rollback_gate.CT110_CONFIG }}"
+          - "CT126_CONFIG={{ rollback_gate.CT126_CONFIG }}"
+          - "BACKUP_MOUNT={{ rollback_gate.BACKUP_MOUNT }}"
+          - "CT110_BACKUP={{ rollback_gate.CT110_BACKUP }}"
+          - "CT126_BACKUP={{ rollback_gate.CT126_BACKUP }}"
+          - "PVE_LOCAL_WG={{ rollback_gate.PVE_LOCAL_WG }}"
+          - CONFIG_BACKUP=NOT_ATTESTED
+          - OLLAMA_WEBUI_CONFIG_BACKUP=NOT_ATTESTED
+          - RESTORE_TEST=NOT_ATTESTED
+          - OOB_CONSOLE=NOT_ATTESTED
+          - ROLLBACK_CLEARANCE=NOT_PROVEN
+          - APPLY_AUTHORIZED=False
+          - NEXT_ACTION=MANUAL_IPAM_BACKUP_RESTORE_AND_CONSOLE_REVIEW

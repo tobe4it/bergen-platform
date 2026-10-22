@@ -1,0 +1,172 @@
+name: Bergen-AI private Proxmox bridge preflight
+
+on:
+  pull_request:
+    paths:
+      - 'ansible/files/bergen_ai/audit_private_bridge_preflight.py'
+      - 'ansible/files/bergen_ai/audit_private_bridge_extended_networks.py'
+      - 'ansible/files/bergen_ai/audit_private_bridge_external_gates.py'
+      - 'ansible/files/bergen_ai/audit_private_bridge_backup_inventory.py'
+      - 'ansible/files/bergen_ai/audit_ct110_backup_policy_readonly.py'
+      - 'ansible/files/bergen_ai/preflight_ct110_oneoff_backup.py'
+      - 'ansible/files/bergen_ai/audit_ct110_mount_directives_readonly.py'
+      - 'ansible/files/bergen_ai/audit_ct110_persistent_data_scope_readonly.py'
+      - 'ansible/files/bergen_ai/audit_ct110_guest_mount_blockers_readonly.py'
+      - 'ansible/files/bergen_ai/audit_ct110_runtime_mount_relationships_readonly.py'
+      - 'ansible/files/bergen_ai/audit_ct110_postbackup_archive_readonly.py'
+      - 'ansible/files/bergen_ai/verify_ct110_archive_stream_readonly.py'
+      - 'ansible/files/bergen_ai/audit_ct110_isolated_restore_feasibility_readonly.py'
+      - 'ansible/files/bergen_ai/audit_ct110_archived_restore_config_readonly.py'
+      - 'ansible/files/bergen_ai/preflight_vmbr90_scoped_apply_readonly.py'
+      - 'ansible/playbooks/audit-bergen-ai-private-bridge-readonly.yml'
+      - 'ansible/playbooks/audit-bergen-ai-private-bridge-extended-readonly.yml'
+      - 'ansible/playbooks/audit-bergen-ai-private-bridge-external-gates-readonly.yml'
+      - 'ansible/playbooks/audit-bergen-ai-private-bridge-backups-readonly.yml'
+      - 'ansible/playbooks/audit-bergen-ai-ct110-backup-policy-readonly.yml'
+      - 'ansible/playbooks/preflight-bergen-ai-ct110-oneoff-backup-readonly.yml'
+      - 'ansible/playbooks/backup-bergen-ai-ct110-once.yml'
+      - 'ansible/playbooks/audit-bergen-ai-ct110-mount-directives-readonly.yml'
+      - 'ansible/playbooks/audit-bergen-ai-ct110-persistent-data-readonly.yml'
+      - 'ansible/playbooks/audit-bergen-ai-ct110-guest-mount-blockers-readonly.yml'
+      - 'ansible/playbooks/audit-bergen-ai-ct110-runtime-mount-relationships-readonly.yml'
+      - 'ansible/playbooks/audit-bergen-ai-ct110-postbackup-archive-readonly.yml'
+      - 'ansible/playbooks/verify-bergen-ai-ct110-archive-stream-readonly.yml'
+      - 'ansible/playbooks/audit-bergen-ai-ct110-isolated-restore-feasibility-readonly.yml'
+      - 'ansible/playbooks/audit-bergen-ai-ct110-archived-restore-config-readonly.yml'
+      - 'ansible/playbooks/apply-bergen-ai-vmbr90-transport-once.yml'
+      - 'ansible/playbooks/audit-bergen-ai-vmbr90-apply-gates-readonly.yml'
+      - 'docs/BERGEN-AI-PRIVATE-PROXMOX-BRIDGE.md'
+      - 'tests/test_bergen_ai_private_bridge_preflight.py'
+      - 'tests/test_bergen_ai_private_bridge_external_gates.py'
+      - 'tests/test_bergen_ai_private_bridge_backup_inventory.py'
+      - 'tests/test_bergen_ai_ct110_backup_policy_readonly.py'
+      - 'tests/test_bergen_ai_ct110_oneoff_backup.py'
+      - 'tests/test_bergen_ai_ct110_mount_directives_readonly.py'
+      - 'tests/test_bergen_ai_ct110_persistent_data_readonly.py'
+      - 'tests/test_bergen_ai_ct110_guest_mount_blockers_readonly.py'
+      - 'tests/test_bergen_ai_ct110_runtime_mount_relationships_readonly.py'
+      - 'tests/test_bergen_ai_ct110_postbackup_archive_readonly.py'
+      - 'tests/test_bergen_ai_ct110_archive_stream_readonly.py'
+      - 'tests/test_bergen_ai_ct110_isolated_restore_feasibility_readonly.py'
+      - 'tests/test_bergen_ai_ct110_archived_restore_config_readonly.py'
+      - 'tests/test_bergen_ai_vmbr90_scoped_apply.py'
+      - 'tests/test_bergen_ai_vmbr90_apply_gates_readonly.py'
+      - 'docs/examples/bergen-ai-bridge-ipam.local.json.example'
+      - '.github/workflows/bergen-ai-private-bridge.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'ansible/files/bergen_ai/audit_private_bridge_preflight.py'
+      - 'ansible/files/bergen_ai/audit_private_bridge_extended_networks.py'
+      - 'ansible/files/bergen_ai/audit_private_bridge_external_gates.py'
+      - 'ansible/files/bergen_ai/audit_private_bridge_backup_inventory.py'
+      - 'ansible/files/bergen_ai/audit_ct110_backup_policy_readonly.py'
+      - 'ansible/files/bergen_ai/preflight_ct110_oneoff_backup.py'
+      - 'ansible/files/bergen_ai/audit_ct110_mount_directives_readonly.py'
+      - 'ansible/files/bergen_ai/audit_ct110_persistent_data_scope_readonly.py'
+      - 'ansible/files/bergen_ai/audit_ct110_guest_mount_blockers_readonly.py'
+      - 'ansible/files/bergen_ai/audit_ct110_runtime_mount_relationships_readonly.py'
+      - 'ansible/files/bergen_ai/audit_ct110_postbackup_archive_readonly.py'
+      - 'ansible/files/bergen_ai/verify_ct110_archive_stream_readonly.py'
+      - 'ansible/files/bergen_ai/audit_ct110_isolated_restore_feasibility_readonly.py'
+      - 'ansible/files/bergen_ai/audit_ct110_archived_restore_config_readonly.py'
+      - 'ansible/files/bergen_ai/preflight_vmbr90_scoped_apply_readonly.py'
+      - 'ansible/playbooks/audit-bergen-ai-private-bridge-readonly.yml'
+      - 'ansible/playbooks/audit-bergen-ai-private-bridge-extended-readonly.yml'
+      - 'ansible/playbooks/audit-bergen-ai-private-bridge-external-gates-readonly.yml'
+      - 'ansible/playbooks/audit-bergen-ai-private-bridge-backups-readonly.yml'
+      - 'ansible/playbooks/audit-bergen-ai-ct110-backup-policy-readonly.yml'
+      - 'ansible/playbooks/preflight-bergen-ai-ct110-oneoff-backup-readonly.yml'
+      - 'ansible/playbooks/backup-bergen-ai-ct110-once.yml'
+      - 'ansible/playbooks/audit-bergen-ai-ct110-mount-directives-readonly.yml'
+      - 'ansible/playbooks/audit-bergen-ai-ct110-persistent-data-readonly.yml'
+      - 'ansible/playbooks/audit-bergen-ai-ct110-guest-mount-blockers-readonly.yml'
+      - 'ansible/playbooks/audit-bergen-ai-ct110-runtime-mount-relationships-readonly.yml'
+      - 'ansible/playbooks/audit-bergen-ai-ct110-postbackup-archive-readonly.yml'
+      - 'ansible/playbooks/verify-bergen-ai-ct110-archive-stream-readonly.yml'
+      - 'ansible/playbooks/audit-bergen-ai-ct110-isolated-restore-feasibility-readonly.yml'
+      - 'ansible/playbooks/audit-bergen-ai-ct110-archived-restore-config-readonly.yml'
+      - 'ansible/playbooks/apply-bergen-ai-vmbr90-transport-once.yml'
+      - 'ansible/playbooks/audit-bergen-ai-vmbr90-apply-gates-readonly.yml'
+      - 'tests/test_bergen_ai_private_bridge_preflight.py'
+      - 'tests/test_bergen_ai_private_bridge_external_gates.py'
+      - 'tests/test_bergen_ai_private_bridge_backup_inventory.py'
+      - 'tests/test_bergen_ai_ct110_backup_policy_readonly.py'
+      - 'tests/test_bergen_ai_ct110_oneoff_backup.py'
+      - 'tests/test_bergen_ai_ct110_mount_directives_readonly.py'
+      - 'tests/test_bergen_ai_ct110_persistent_data_readonly.py'
+      - 'tests/test_bergen_ai_ct110_guest_mount_blockers_readonly.py'
+      - 'tests/test_bergen_ai_ct110_runtime_mount_relationships_readonly.py'
+      - 'tests/test_bergen_ai_ct110_postbackup_archive_readonly.py'
+      - 'tests/test_bergen_ai_ct110_archive_stream_readonly.py'
+      - 'tests/test_bergen_ai_ct110_isolated_restore_feasibility_readonly.py'
+      - 'tests/test_bergen_ai_ct110_archived_restore_config_readonly.py'
+      - 'tests/test_bergen_ai_vmbr90_scoped_apply.py'
+      - 'tests/test_bergen_ai_vmbr90_apply_gates_readonly.py'
+      - 'docs/examples/bergen-ai-bridge-ipam.local.json.example'
+
+jobs:
+  readonly-policy-and-syntax:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install offline testing dependencies
+        run: python -m pip install 'ansible-core>=2.16,<2.18' 'PyYAML>=6,<7'
+      - name: Test no-mutation and CIDR guard invariants
+        run: |
+          python -m unittest discover -s tests -p 'test_bergen_ai_private_bridge_preflight.py' -v
+          python -m unittest discover -s tests -p 'test_bergen_ai_private_bridge_external_gates.py' -v
+          python -m unittest discover -s tests -p 'test_bergen_ai_private_bridge_backup_inventory.py' -v
+          python -m unittest discover -s tests -p 'test_bergen_ai_ct110_backup_policy_readonly.py' -v
+          python -m unittest discover -s tests -p 'test_bergen_ai_ct110_oneoff_backup.py' -v
+          python -m unittest discover -s tests -p 'test_bergen_ai_ct110_mount_directives_readonly.py' -v
+          python -m unittest discover -s tests -p 'test_bergen_ai_ct110_persistent_data_readonly.py' -v
+          python -m unittest discover -s tests -p 'test_bergen_ai_ct110_guest_mount_blockers_readonly.py' -v
+          python -m unittest discover -s tests -p 'test_bergen_ai_ct110_runtime_mount_relationships_readonly.py' -v
+          python -m unittest discover -s tests -p 'test_bergen_ai_ct110_postbackup_archive_readonly.py' -v
+          python -m unittest discover -s tests -p 'test_bergen_ai_ct110_archive_stream_readonly.py' -v
+          python -m unittest discover -s tests -p 'test_bergen_ai_ct110_isolated_restore_feasibility_readonly.py' -v
+          python -m unittest discover -s tests -p 'test_bergen_ai_ct110_archived_restore_config_readonly.py' -v
+          python -m unittest discover -s tests -p 'test_bergen_ai_vmbr90_scoped_apply.py' -v
+          python -m unittest discover -s tests -p 'test_bergen_ai_vmbr90_apply_gates_readonly.py' -v
+      - name: Validate read-only Proxmox inventory playbook syntax
+        run: |
+          ansible-playbook -i ansible/inventory.yml \
+            ansible/playbooks/audit-bergen-ai-private-bridge-readonly.yml --syntax-check
+          ansible-playbook -i ansible/inventory.yml \
+            ansible/playbooks/audit-bergen-ai-private-bridge-extended-readonly.yml --syntax-check
+          ansible-playbook -i ansible/inventory.yml \
+            ansible/playbooks/audit-bergen-ai-private-bridge-external-gates-readonly.yml --syntax-check
+          ansible-playbook -i ansible/inventory.yml \
+            ansible/playbooks/audit-bergen-ai-private-bridge-backups-readonly.yml --syntax-check
+          ansible-playbook -i ansible/inventory.yml \
+            ansible/playbooks/audit-bergen-ai-ct110-backup-policy-readonly.yml --syntax-check
+          ansible-playbook -i ansible/inventory.yml \
+            ansible/playbooks/preflight-bergen-ai-ct110-oneoff-backup-readonly.yml --syntax-check
+          ansible-playbook -i ansible/inventory.yml \
+            ansible/playbooks/backup-bergen-ai-ct110-once.yml --syntax-check
+          ansible-playbook -i ansible/inventory.yml \
+            ansible/playbooks/audit-bergen-ai-ct110-mount-directives-readonly.yml --syntax-check
+          ansible-playbook -i ansible/inventory.yml \
+            ansible/playbooks/audit-bergen-ai-ct110-persistent-data-readonly.yml --syntax-check
+          ansible-playbook -i ansible/inventory.yml \
+            ansible/playbooks/audit-bergen-ai-ct110-guest-mount-blockers-readonly.yml --syntax-check
+          ansible-playbook -i ansible/inventory.yml \
+            ansible/playbooks/audit-bergen-ai-ct110-runtime-mount-relationships-readonly.yml --syntax-check
+          ansible-playbook -i ansible/inventory.yml \
+            ansible/playbooks/audit-bergen-ai-ct110-postbackup-archive-readonly.yml --syntax-check
+          ansible-playbook -i ansible/inventory.yml \
+            ansible/playbooks/verify-bergen-ai-ct110-archive-stream-readonly.yml --syntax-check
+          ansible-playbook -i ansible/inventory.yml \
+            ansible/playbooks/audit-bergen-ai-ct110-isolated-restore-feasibility-readonly.yml --syntax-check
+          ansible-playbook -i ansible/inventory.yml \
+            ansible/playbooks/audit-bergen-ai-ct110-archived-restore-config-readonly.yml --syntax-check
+          ansible-playbook -i ansible/inventory.yml \
+            ansible/playbooks/apply-bergen-ai-vmbr90-transport-once.yml --syntax-check
+          ansible-playbook -i ansible/inventory.yml \
+            ansible/playbooks/audit-bergen-ai-vmbr90-apply-gates-readonly.yml --syntax-check

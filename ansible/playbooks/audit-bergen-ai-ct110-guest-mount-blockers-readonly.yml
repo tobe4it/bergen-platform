@@ -1,0 +1,82 @@
+---
+# Read-only; no mount source/target leaks, no backup authorization.
+- name: Diagnose CT110 guest filesystem preflight blocker without modification
+  hosts: venombox
+  become: true
+  gather_facts: false
+  tasks:
+    - name: Require exact hypervisor
+      ansible.builtin.assert:
+        that:
+          - inventory_hostname == 'venombox'
+
+    - name: Classify bounded CT110 mounts without returning sources or targets
+      ansible.builtin.command:
+        argv:
+          - python3
+          - -c
+          - "{{ lookup('ansible.builtin.file', playbook_dir ~ '/../files/bergen_ai/audit_ct110_guest_mount_blockers_readonly.py', rstrip=False) }}"
+      register: guest_mount_raw
+      changed_when: false
+      failed_when: false
+      check_mode: false
+      no_log: true
+
+    - name: Extract exactly one sanitized guest mount frame
+      ansible.builtin.set_fact:
+        guest_mount_frames: >-
+          {{ guest_mount_raw.stdout_lines | default([]) |
+             select('match', '^BERGEN_AI_CT110_GUEST_MOUNT_DIAG_V1:') | list }}
+      no_log: true
+
+    - name: Refuse missing oversized or duplicate guest mount frames
+      ansible.builtin.assert:
+        that:
+          - guest_mount_raw.rc == 0
+          - guest_mount_frames | length == 1
+          - guest_mount_frames[0] | length < 3000
+      no_log: true
+
+    - name: Decode only fixed classes of mounted filesystems
+      ansible.builtin.set_fact:
+        guest_mount_audit: >-
+          {{ (guest_mount_frames[0] |
+             regex_replace('^BERGEN_AI_CT110_GUEST_MOUNT_DIAG_V1:', '')) | from_json }}
+      no_log: true
+
+    - name: Require read-only behavior and no implicit backup approval
+      ansible.builtin.assert:
+        that:
+          - guest_mount_audit.AUDIT == 'READ_ONLY'
+          - not guest_mount_audit.CHANGED
+          - not guest_mount_audit.BACKUP_STARTED
+          - not guest_mount_audit.BACKUP_AUTHORIZED
+          - not guest_mount_audit.APPLY_AUTHORIZED
+          - guest_mount_audit.ROLLBACK_CLEARANCE == 'NOT_PROVEN'
+          - guest_mount_audit.NETWORK_CHANGES == 'NONE'
+          - guest_mount_audit.STATUS in ['CLASSIFIED_FOR_REVIEW', 'UNVERIFIED']
+          - guest_mount_audit.UNRESOLVED_PROFILES | type_debug == 'list'
+          - guest_mount_audit.UNRESOLVED_PROFILES | length <= 16
+          - guest_mount_audit.BLOCKER_CLASSES | type_debug == 'list'
+          - guest_mount_audit.BLOCKER_CLASSES | length <= 12
+          - guest_mount_audit.BLOCKER_CLASSES | difference(['LXCFS_SYSTEM_TARGET', 'ETC_IDENTITY_TARGET', 'OTHER_PROC_OR_SYS', 'OTHER_DEV', 'OTHER_RUN', 'OTHER_AI_DATA', 'OTHER_CONTAINER_STORAGE', 'OTHER_MOUNTED_STORAGE', 'OTHER_NONPSEUDO_TARGET', 'UNVERIFIED', 'TOO_MANY_CLASSES']) | length == 0
+      no_log: true
+
+    - name: Report only type classes and counts without actual mount paths
+      ansible.builtin.debug:
+        msg:
+          - AUDIT=READ_ONLY
+          - "STATUS={{ guest_mount_audit.STATUS }}"
+          - "TOTAL_MOUNTS={{ guest_mount_audit.TOTAL_MOUNTS }}"
+          - "PREVIOUS_PREFLIGHT_BLOCKER_COUNT={{ guest_mount_audit.PREVIOUS_PREFLIGHT_BLOCKER_COUNT }}"
+          - "BLOCKER_CLASSES={{ guest_mount_audit.BLOCKER_CLASSES | join(',') }}"
+          - "LXCFS_SYSTEM_COUNT={{ guest_mount_audit.LXCFS_SYSTEM_COUNT }}"
+          - "ETC_IDENTITY_COUNT={{ guest_mount_audit.ETC_IDENTITY_COUNT }}"
+          - "OTHER_NONPSEUDO_COUNT={{ guest_mount_audit.OTHER_NONPSEUDO_COUNT }}"
+          - "PSEUDO_OR_OVERLAY_COUNT={{ guest_mount_audit.PSEUDO_OR_OVERLAY_COUNT }}"
+          - "OVERLAY_MOUNT_COUNT={{ guest_mount_audit.OVERLAY_MOUNT_COUNT }}"
+          - "UNRESOLVED_PROFILES={{ guest_mount_audit.UNRESOLVED_PROFILES | join(',') }}"
+          - BACKUP_STARTED=False
+          - BACKUP_AUTHORIZED=False
+          - ROLLBACK_CLEARANCE=NOT_PROVEN
+          - APPLY_AUTHORIZED=False

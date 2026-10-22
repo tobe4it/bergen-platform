@@ -1,0 +1,118 @@
+---
+# Read-only diagnosis of the exact live safety gates that blocked the one-off
+# vmbr90 transport apply. Does not accept apply authorization/attestation.
+- import_playbook: audit-bergen-ai-private-bridge-external-gates-readonly.yml
+- import_playbook: audit-bergen-ai-private-bridge-readonly.yml
+- import_playbook: audit-bergen-ai-private-bridge-extended-readonly.yml
+- import_playbook: audit-bergen-ai-private-bridge-wg-readonly.yml
+
+- name: Explain blocked vmbr90 transport conditions without any writes
+  hosts: venombox
+  become: true
+  gather_facts: false
+  tasks:
+    - name: Require only the expected PVE target
+      ansible.builtin.assert:
+        that:
+          - "inventory_hostname == 'venombox'"
+
+    - name: Recheck strict host and LXC eligibility without modification
+      ansible.builtin.command:
+        argv:
+          - python3
+          - -c
+          - "{{ lookup('ansible.builtin.file', playbook_dir ~ '/../files/bergen_ai/preflight_vmbr90_scoped_apply_readonly.py', rstrip=False) }}"
+      register: scoped_vmbr90_gate_raw
+      changed_when: false
+      failed_when: false
+      check_mode: false
+      no_log: true
+
+    - name: Extract exactly one bounded host preflight classification
+      ansible.builtin.set_fact:
+        scoped_vmbr90_gate_frames: >-
+          {{ scoped_vmbr90_gate_raw.stdout_lines | default([]) |
+             select('match', '^BERGEN_AI_VMBR90_APPLY_PREFLIGHT_V1:') | list }}
+      no_log: true
+
+    - name: Refuse failed ambiguous or oversized result frames
+      ansible.builtin.assert:
+        that:
+          - "scoped_vmbr90_gate_raw.rc == 0"
+          - "scoped_vmbr90_gate_frames | length == 1"
+          - "scoped_vmbr90_gate_frames[0] | length < 1200"
+      no_log: true
+
+    - name: Parse protected same-run host and NIC categories
+      ansible.builtin.set_fact:
+        scoped_vmbr90_gate: >-
+          {{ (scoped_vmbr90_gate_frames[0] |
+             regex_replace('^BERGEN_AI_VMBR90_APPLY_PREFLIGHT_V1:', '')) | from_json }}
+      no_log: true
+
+    - name: Refuse incorrect read-only preflight identity
+      ansible.builtin.assert:
+        that:
+          - "scoped_vmbr90_gate.AUDIT == 'READ_ONLY'"
+          - "not scoped_vmbr90_gate.CHANGED"
+          - "not scoped_vmbr90_gate.APPLY_AUTHORIZED"
+          - "scoped_vmbr90_gate.NETWORK_CHANGES == 'NONE'"
+          - "not scoped_vmbr90_gate.OLLAMA_CHANGED"
+          - "not scoped_vmbr90_gate.PAPERLESS_CHANGED"
+      no_log: true
+
+    - name: Calculate independent gate classifications without leaking network values
+      ansible.builtin.set_fact:
+        vmbr90_gate_ipam_ranges: >-
+          {{ 'PASS' if hostvars['localhost'].ipam_gate.STATUS == 'NO_OVERLAP_IN_DECLARED_RANGES' else 'BLOCKED' }}
+        vmbr90_gate_ipam_scope: >-
+          {{ 'PASS' if hostvars['localhost'].ipam_gate.SCOPE_COVERAGE == 'OPERATOR_DECLARED_COMPLETE' else 'BLOCKED' }}
+        vmbr90_gate_bridge_unused: >-
+          {{ 'PASS' if (bp_ai_bridge_audit.STATUS == 'CANDIDATE_LOCALLY_UNCONFLICTED' and bp_ai_bridge_audit.BRIDGE_KERNEL == 'ABSENT' and bp_ai_bridge_audit.BRIDGE_CONFIG == 'ABSENT' and bp_ai_bridge_audit.BRIDGE_GUEST_REFERENCES == 'NOT_REFERENCED_IN_SCANNED_GUESTS') else 'BLOCKED' }}
+        vmbr90_gate_scoped_nics: >-
+          {{ 'PASS' if (bp_ai_bridge_audit.CT110_NICS == 1 and bp_ai_bridge_audit.CT126_NICS == 1 and bp_ai_bridge_audit.CT120_NICS == 1) else 'BLOCKED' }}
+        vmbr90_gate_extended: >-
+          {{ 'PASS' if (extended_report.STATUS == 'NO_OVERLAP_IN_SCANNED_DOMAINS' and extended_report.PAPERLESS_PODMAN == 'NO_OVERLAP_IN_SCANNED_NETWORKS' and extended_report.AI_PODMAN == 'NO_OVERLAP_IN_SCANNED_NETWORKS') else 'BLOCKED' }}
+        vmbr90_gate_wireguard: >-
+          {{ 'PASS' if ai_bridge_wg.STATUS == 'NO_OVERLAP_IN_INSPECTED_LIVE_WG_PEERS' else 'BLOCKED' }}
+        vmbr90_gate_host_sources: >-
+          {{ 'PASS' if (rollback_gate.HOST_NETWORK_CONFIG == 'READABLE_SOURCE_ONLY' and rollback_gate.CT110_CONFIG == 'READABLE_SOURCE_ONLY' and rollback_gate.CT126_CONFIG == 'READABLE_SOURCE_ONLY') else 'BLOCKED' }}
+        vmbr90_gate_nfs: >-
+          {{ 'PASS' if rollback_gate.BACKUP_MOUNT == 'NFS_MOUNT_PRESENT_ONLY' else 'BLOCKED' }}
+        vmbr90_gate_ct110_backup: >-
+          {{ 'PASS' if rollback_gate.CT110_BACKUP == 'RECENT_FILE_METADATA_ONLY' else 'BLOCKED' }}
+        vmbr90_gate_ct126_backup: >-
+          {{ 'PASS' if rollback_gate.CT126_BACKUP == 'RECENT_FILE_METADATA_ONLY' else 'BLOCKED' }}
+        vmbr90_gate_local_bridge: >-
+          {{ 'PASS' if scoped_vmbr90_gate.HOST_NETWORK_SOURCE == 'EXPLICIT_SOURCE_NO_PENDING_EDIT' else 'BLOCKED' }}
+        vmbr90_gate_local_nics: >-
+          {{ 'PASS' if (scoped_vmbr90_gate.CT110_NETWORK_LAYOUT == 'RUNNING_NET0_ONLY' and scoped_vmbr90_gate.CT126_NETWORK_LAYOUT == 'RUNNING_NET0_ONLY') else 'BLOCKED' }}
+      no_log: true
+
+    - name: Emit no-write operator-review status for each required gate
+      ansible.builtin.debug:
+        msg:
+          - AUDIT=READ_ONLY
+          - CHANGED=False
+          - "IPAM_DECLARED_RANGES={{ vmbr90_gate_ipam_ranges }}"
+          - "IPAM_SCOPE_COMPLETE={{ vmbr90_gate_ipam_scope }}"
+          - "BRIDGE_UNUSED={{ vmbr90_gate_bridge_unused }}"
+          - "CT110_CT126_CT120_NIC_BASELINE={{ vmbr90_gate_scoped_nics }}"
+          - "LXC_PODMAN_NETWORK_RANGES={{ vmbr90_gate_extended }}"
+          - "LIVE_WIREGUARD_RANGES={{ vmbr90_gate_wireguard }}"
+          - "HOST_AND_CT_CONFIG_READABLE={{ vmbr90_gate_host_sources }}"
+          - "BACKUP_NFS={{ vmbr90_gate_nfs }}"
+          - "CT110_RECENT_BACKUP_METADATA={{ vmbr90_gate_ct110_backup }}"
+          - "CT126_RECENT_BACKUP_METADATA={{ vmbr90_gate_ct126_backup }}"
+          - "HOST_IFUPDOWN2_DROPIN_PRECHECK={{ vmbr90_gate_local_bridge }}"
+          - "CT110_CT126_RUNNING_NET0_ONLY={{ vmbr90_gate_local_nics }}"
+          - "HOST_SOURCE_DIAGNOSTIC={{ scoped_vmbr90_gate.HOST_NETWORK_SOURCE }}"
+          - "CT110_LAYOUT_DIAGNOSTIC={{ scoped_vmbr90_gate.CT110_NETWORK_LAYOUT }}"
+          - "CT126_LAYOUT_DIAGNOSTIC={{ scoped_vmbr90_gate.CT126_NETWORK_LAYOUT }}"
+          - OPERATOR_APPROVAL=NOT_REQUESTED_IN_READ_ONLY_AUDIT
+          - INDEPENDENT_CONSOLE_ACCESS=NOT_ATTESTED_BY_THIS_AUDIT
+          - FULL_NETWORK_CLEARANCE=NOT_PROVEN
+          - NETWORK_CHANGES=NONE
+          - OLLAMA_CHANGED=NO
+          - PAPERLESS_CHANGED=NO
+          - APPLY_AUTHORIZED=False

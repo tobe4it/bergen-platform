@@ -1,0 +1,86 @@
+---
+# Read-only CT110 persistent-data scope audit. Does not permit backup or change.
+- name: Inspect Bergen AI persistent data sources without modification
+  hosts: venombox
+  become: true
+  gather_facts: false
+  tasks:
+    - name: Require selected hypervisor
+      ansible.builtin.assert:
+        that:
+          - inventory_hostname == 'venombox'
+
+    - name: Read Ollama model location and Podman mount evidence inside CT110
+      ansible.builtin.command:
+        argv:
+          - python3
+          - -c
+          - "{{ lookup('ansible.builtin.file', playbook_dir ~ '/../files/bergen_ai/audit_ct110_persistent_data_scope_readonly.py', rstrip=False) }}"
+      register: data_raw
+      changed_when: false
+      failed_when: false
+      check_mode: false
+      no_log: true
+
+    - name: Extract one sanitized data inventory
+      ansible.builtin.set_fact:
+        data_frames: >-
+          {{ data_raw.stdout_lines | default([]) |
+             select('match', '^BERGEN_AI_CT110_DATA_SCOPE_V1:') | list }}
+      no_log: true
+
+    - name: Reject ambiguous oversized or failed evidence
+      ansible.builtin.assert:
+        that:
+          - data_raw.rc == 0
+          - data_frames | length == 1
+          - data_frames[0] | length < 2000
+      no_log: true
+
+    - name: Parse classified CT110 data sources only
+      ansible.builtin.set_fact:
+        data_scope: >-
+          {{ (data_frames[0] |
+             regex_replace('^BERGEN_AI_CT110_DATA_SCOPE_V1:', '')) | from_json }}
+      no_log: true
+
+    - name: Require fail-closed inventory and no implicit backup authorization
+      ansible.builtin.assert:
+        that:
+          - data_scope.AUDIT == 'READ_ONLY'
+          - not data_scope.CHANGED
+          - not data_scope.BACKUP_STARTED
+          - not data_scope.BACKUP_AUTHORIZED
+          - not data_scope.APPLY_AUTHORIZED
+          - not data_scope.ALL_PERSISTENT_DATA_PROVEN
+          - data_scope.ROLLBACK_CLEARANCE == 'NOT_PROVEN'
+          - data_scope.RESTORE_TEST == 'NOT_ATTESTED'
+          - data_scope.NETWORK_CHANGES == 'NONE'
+          - data_scope.STATUS in ['KNOWN_DATA_PATHS_IN_ROOTFS', 'REVIEW_REQUIRED', 'UNVERIFIED']
+          - data_scope.OLLAMA_CONFIG in ['EXPECTED_MODELS_LOCATION', 'MODELS_LOCATION_UNVERIFIED', 'OTHER_MODELS_LOCATION', 'UNVERIFIED']
+          - data_scope.OLLAMA_MODELS_MOUNT in ['GUEST_ROOTFS', 'OTHER_GUEST_MOUNT', 'UNVERIFIED']
+          - data_scope.WEBUI_PODMAN_BIND in ['EXACT_WEBUI_DATA_BIND', 'DATA_MOUNT_NOT_UNIQUE', 'DATA_SOURCE_NOT_EXPECTED', 'OTHER_PODMAN_MOUNTS_REVIEW', 'UNVERIFIED']
+          - data_scope.WEBUI_DATA_MOUNT in ['GUEST_ROOTFS', 'OTHER_GUEST_MOUNT', 'UNVERIFIED']
+          - data_scope.PODMAN_GRAPH_MOUNT in ['GUEST_ROOTFS', 'OTHER_GUEST_MOUNT', 'UNVERIFIED']
+          - data_scope.PODMAN_CONTAINERS in ['ONLY_OPEN_WEBUI', 'OTHER_OR_MISSING_CONTAINERS', 'UNVERIFIED']
+          - data_scope.PODMAN_NAMED_VOLUMES in ['NONE', 'ADDITIONAL_VOLUMES_REVIEW', 'UNVERIFIED']
+      no_log: true
+
+    - name: Report classified data scope without paths or secrets
+      ansible.builtin.debug:
+        msg:
+          - AUDIT=READ_ONLY
+          - "STATUS={{ data_scope.STATUS }}"
+          - "OLLAMA_CONFIG={{ data_scope.OLLAMA_CONFIG }}"
+          - "OLLAMA_MODELS_MOUNT={{ data_scope.OLLAMA_MODELS_MOUNT }}"
+          - "WEBUI_PODMAN_BIND={{ data_scope.WEBUI_PODMAN_BIND }}"
+          - "WEBUI_DATA_MOUNT={{ data_scope.WEBUI_DATA_MOUNT }}"
+          - "PODMAN_GRAPH_MOUNT={{ data_scope.PODMAN_GRAPH_MOUNT }}"
+          - "PODMAN_CONTAINERS={{ data_scope.PODMAN_CONTAINERS }}"
+          - "PODMAN_NAMED_VOLUMES={{ data_scope.PODMAN_NAMED_VOLUMES }}"
+          - ALL_PERSISTENT_DATA_PROVEN=False
+          - BACKUP_STARTED=False
+          - BACKUP_AUTHORIZED=False
+          - RESTORE_TEST=NOT_ATTESTED
+          - ROLLBACK_CLEARANCE=NOT_PROVEN
+          - APPLY_AUTHORIZED=False

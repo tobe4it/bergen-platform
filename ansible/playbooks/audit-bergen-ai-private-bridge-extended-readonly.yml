@@ -1,0 +1,73 @@
+---
+- name: Read-only extended network collision inventory for Bergen-AI bridge
+  hosts: venombox
+  become: true
+  gather_facts: false
+  tasks:
+    - name: Require expected node
+      ansible.builtin.assert:
+        that:
+          - inventory_hostname == 'venombox'
+
+    - name: Inspect existing network ranges without changes
+      ansible.builtin.command:
+        argv:
+          - python3
+          - -c
+          - "{{ lookup('ansible.builtin.file', playbook_dir ~ '/../files/bergen_ai/audit_private_bridge_extended_networks.py', rstrip=False) }}"
+      register: extended_raw
+      changed_when: false
+      failed_when: false
+      check_mode: false
+      no_log: true
+
+    - name: Obtain sanitized frames
+      ansible.builtin.set_fact:
+        extended_frames: >-
+          {{ extended_raw.stdout_lines | default([]) |
+             select('match','^BERGEN_AI_PRIVATE_BRIDGE_EXTENDED_V1:') | list }}
+      no_log: true
+
+    - name: Reject missing or duplicate frames
+      ansible.builtin.assert:
+        that:
+          - extended_raw.rc == 0
+          - extended_frames | length == 1
+          - extended_frames[0] | length < 1800
+      no_log: true
+
+    - name: Parse sanitized summary
+      ansible.builtin.set_fact:
+        extended_report: >-
+          {{ (extended_frames[0] | regex_replace('^BERGEN_AI_PRIVATE_BRIDGE_EXTENDED_V1:', '')) | from_json }}
+      no_log: true
+
+    - name: Require no mutation and no apply permission
+      ansible.builtin.assert:
+        that:
+          - extended_report.AUDIT == 'READ_ONLY'
+          - not extended_report.CHANGED
+          - not extended_report.APPLY_AUTHORIZED
+          - extended_report.FULL_NETWORK_CLEARANCE == 'NOT_PROVEN'
+          - extended_report.STATUS in ['OVERLAP_FOUND', 'SCOPED_AUDIT_INCOMPLETE', 'NO_OVERLAP_IN_SCANNED_DOMAINS', 'KNOWN_GUEST_IDENTITY_UNVERIFIED', 'UNVERIFIED']
+          - extended_report.PAPERLESS_PODMAN in ['NO_OVERLAP_IN_SCANNED_NETWORKS', 'OVERLAP_FOUND', 'UNVERIFIED']
+          - extended_report.AI_PODMAN in ['NO_OVERLAP_IN_SCANNED_NETWORKS', 'OVERLAP_FOUND', 'UNVERIFIED']
+      no_log: true
+
+    - name: Display categories only
+      ansible.builtin.debug:
+        msg:
+          - AUDIT=READ_ONLY
+          - CHANGED=False
+          - "STATUS={{ extended_report.STATUS }}"
+          - "BRIDGE_CANDIDATE={{ extended_report.BRIDGE_CANDIDATE }}"
+          - "SUBNET_CANDIDATE={{ extended_report.SUBNET_CANDIDATE }}"
+          - "ALL_LXC_NETWORKS={{ extended_report.ALL_LXC }}"
+          - "LXC_TOTAL={{ extended_report.LXC_TOTAL }}"
+          - "LXC_RUNNING={{ extended_report.LXC_RUNNING }}"
+          - "LXC_STOPPED={{ extended_report.LXC_STOPPED }}"
+          - "PAPERLESS_PODMAN={{ extended_report.PAPERLESS_PODMAN }}"
+          - "BERGEN_AI_PODMAN={{ extended_report.AI_PODMAN }}"
+          - "PVE_HOST_DOCKER={{ extended_report.PVE_HOST_DOCKER }}"
+          - FULL_NETWORK_CLEARANCE=NOT_PROVEN
+          - NEXT_ACTION=CHECK_UNIFI_VPN_AND_REVIEW_BACKUPS_BEFORE_APPLY

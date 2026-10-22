@@ -1,0 +1,78 @@
+---
+# Phase 0d: local Proxmox API inventory. No backup or restore is performed.
+- name: Read only Proxmox backup archive metadata for Bergen AI and Paperless
+  hosts: venombox
+  become: true
+  gather_facts: false
+  tasks:
+    - name: Ensure verified hypervisor target
+      ansible.builtin.assert:
+        that:
+          - inventory_hostname == 'venombox'
+
+    - name: Read scoped PVE-visible archive metadata without mutations
+      ansible.builtin.command:
+        argv:
+          - python3
+          - -c
+          - "{{ lookup('ansible.builtin.file', playbook_dir ~ '/../files/bergen_ai/audit_private_bridge_backup_inventory.py', rstrip=False) }}"
+      register: inventory_raw
+      changed_when: false
+      failed_when: false
+      check_mode: false
+      no_log: true
+
+    - name: Select one bounded, sanitized PVE metadata result
+      ansible.builtin.set_fact:
+        inventory_frames: >-
+          {{ inventory_raw.stdout_lines | default([]) |
+             select('match', '^BERGEN_AI_BRIDGE_BACKUP_INVENTORY_V1:') | list }}
+      no_log: true
+
+    - name: Reject absent duplicated or oversized metadata
+      ansible.builtin.assert:
+        that:
+          - inventory_raw.rc == 0
+          - inventory_frames | length == 1
+          - inventory_frames[0] | length < 1600
+      no_log: true
+
+    - name: Parse classified backup result only
+      ansible.builtin.set_fact:
+        inventory_gate: >-
+          {{ (inventory_frames[0] | regex_replace('^BERGEN_AI_BRIDGE_BACKUP_INVENTORY_V1:', '')) | from_json }}
+      no_log: true
+
+    - name: Confirm that backup metadata never grants rollback authorization
+      ansible.builtin.assert:
+        that:
+          - inventory_gate.AUDIT == 'READ_ONLY'
+          - not inventory_gate.CHANGED
+          - not inventory_gate.APPLY_AUTHORIZED
+          - inventory_gate.NETWORK_CHANGES == 'NONE'
+          - inventory_gate.BACKUP_OPERATIONS == 'NONE'
+          - inventory_gate.FULL_NETWORK_CLEARANCE == 'NOT_PROVEN'
+          - inventory_gate.ROLLBACK_CLEARANCE == 'NOT_PROVEN'
+          - inventory_gate.BACKUP_INTEGRITY == 'NOT_TESTED'
+          - inventory_gate.RESTORE_TEST == 'NOT_ATTESTED'
+          - inventory_gate.MOUNT_COVERAGE == 'NOT_ATTESTED'
+          - inventory_gate.STATUS in ['VISIBLE_STORAGES_SCANNED', 'INVENTORY_PARTIAL', 'INVENTORY_UNVERIFIED']
+          - inventory_gate.STORAGE_COVERAGE in ['VISIBLE_ONLY', 'INCOMPLETE']
+          - inventory_gate.CT110_BACKUPS in ['RECENT_METADATA_ONLY', 'OLDER_METADATA_ONLY', 'PRESENT_METADATA_UNVERIFIED', 'NONE_IN_SCANNED_STORAGES', 'UNVERIFIED']
+          - inventory_gate.CT126_BACKUPS in ['RECENT_METADATA_ONLY', 'OLDER_METADATA_ONLY', 'PRESENT_METADATA_UNVERIFIED', 'NONE_IN_SCANNED_STORAGES', 'UNVERIFIED']
+      no_log: true
+
+    - name: Report only classified PVE backup inventory
+      ansible.builtin.debug:
+        msg:
+          - AUDIT=READ_ONLY
+          - "STATUS={{ inventory_gate.STATUS }}"
+          - "STORAGE_COVERAGE={{ inventory_gate.STORAGE_COVERAGE }}"
+          - "ACTIVE_BACKUP_STORAGES={{ inventory_gate.ACTIVE_BACKUP_STORAGES }}"
+          - "CT110_BACKUPS={{ inventory_gate.CT110_BACKUPS }}"
+          - "CT126_BACKUPS={{ inventory_gate.CT126_BACKUPS }}"
+          - BACKUP_INTEGRITY=NOT_TESTED
+          - MOUNT_COVERAGE=NOT_ATTESTED
+          - RESTORE_TEST=NOT_ATTESTED
+          - ROLLBACK_CLEARANCE=NOT_PROVEN
+          - APPLY_AUTHORIZED=False

@@ -1,0 +1,81 @@
+---
+# Read-only: CT110 mount backup flags and PVE visible backup job definitions.
+- name: Inspect Bergen AI backup policy without starting jobs or modifying LXC
+  hosts: venombox
+  become: true
+  gather_facts: false
+  tasks:
+    - name: Require expected Proxmox host identity
+      ansible.builtin.assert:
+        that:
+          - inventory_hostname == 'venombox'
+
+    - name: Read scoped CT110 config and PVE backup job definitions
+      ansible.builtin.command:
+        argv:
+          - python3
+          - -c
+          - "{{ lookup('ansible.builtin.file', playbook_dir ~ '/../files/bergen_ai/audit_ct110_backup_policy_readonly.py', rstrip=False) }}"
+      register: policy_raw
+      changed_when: false
+      failed_when: false
+      check_mode: false
+      no_log: true
+
+    - name: Extract only sanitized CT110 policy frame
+      ansible.builtin.set_fact:
+        policy_frames: >-
+          {{ policy_raw.stdout_lines | default([]) |
+             select('match', '^BERGEN_AI_CT110_BACKUP_POLICY_V1:') | list }}
+      no_log: true
+
+    - name: Reject missing duplicate or oversized policy results
+      ansible.builtin.assert:
+        that:
+          - policy_raw.rc == 0
+          - policy_frames | length == 1
+          - policy_frames[0] | length < 1600
+      no_log: true
+
+    - name: Decode bounded policy evidence
+      ansible.builtin.set_fact:
+        policy_gate: >-
+          {{ (policy_frames[0] | regex_replace('^BERGEN_AI_CT110_BACKUP_POLICY_V1:', '')) | from_json }}
+      no_log: true
+
+    - name: Assert no writes and no backup or network change authorization
+      ansible.builtin.assert:
+        that:
+          - policy_gate.AUDIT == 'READ_ONLY'
+          - not policy_gate.CHANGED
+          - not policy_gate.APPLY_AUTHORIZED
+          - not policy_gate.CT110_BACKUP_VALIDATED
+          - not policy_gate.CT110_RESTORE_VALIDATED
+          - policy_gate.CT110_BACKUP_SCHEDULE_EFFECTIVE == 'NOT_PROVEN'
+          - policy_gate.MOUNT_CONTENT_BACKUP == 'NOT_PROVEN'
+          - policy_gate.ROLLBACK_CLEARANCE == 'NOT_PROVEN'
+          - policy_gate.FULL_NETWORK_CLEARANCE == 'NOT_PROVEN'
+          - policy_gate.BACKUP_OPERATIONS == 'NONE'
+          - policy_gate.NETWORK_CHANGES == 'NONE'
+          - policy_gate.STATUS in ['POLICY_INVENTORY_ONLY', 'REVIEW_INCOMPLETE']
+          - policy_gate.CT110_ROOTFS in ['CONFIGURED', 'UNVERIFIED']
+          - policy_gate.CT110_EXTRA_MOUNTS in ['NONE', 'BIND_PRESENT', 'VOLUME_MOUNTS_ONLY', 'UNVERIFIED']
+          - policy_gate.CT110_EXTRA_MOUNT_BACKUP_FLAGS in ['NO_EXTRA_MOUNTS', 'ALL_EXPLICIT_BACKUP_1', 'ONE_OR_MORE_UNSET_OR_DISABLED', 'UNVERIFIED']
+          - policy_gate.PVE_BACKUP_JOB_SELECTION in ['EXPLICIT_VMID_SELECTION', 'ALL_GUESTS_SELECTION', 'SELECTION_UNRESOLVED', 'NO_MATCH_IN_VISIBLE_PVE_JOBS', 'UNVERIFIED']
+      no_log: true
+
+    - name: Display classified CT110 backup policy and open gates
+      ansible.builtin.debug:
+        msg:
+          - AUDIT=READ_ONLY
+          - "STATUS={{ policy_gate.STATUS }}"
+          - "CT110_ROOTFS={{ policy_gate.CT110_ROOTFS }}"
+          - "CT110_EXTRA_MOUNTS={{ policy_gate.CT110_EXTRA_MOUNTS }}"
+          - "CT110_EXTRA_MOUNT_BACKUP_FLAGS={{ policy_gate.CT110_EXTRA_MOUNT_BACKUP_FLAGS }}"
+          - "PVE_BACKUP_JOB_SELECTION={{ policy_gate.PVE_BACKUP_JOB_SELECTION }}"
+          - "VISIBLE_PVE_BACKUP_JOB_COUNT={{ policy_gate.VISIBLE_PVE_BACKUP_JOB_COUNT }}"
+          - OTHER_BACKUP_SYSTEMS=NOT_INSPECTED
+          - MOUNT_CONTENT_BACKUP=NOT_PROVEN
+          - CT110_BACKUP_SCHEDULE_EFFECTIVE=NOT_PROVEN
+          - ROLLBACK_CLEARANCE=NOT_PROVEN
+          - APPLY_AUTHORIZED=False

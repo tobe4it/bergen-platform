@@ -1,0 +1,93 @@
+---
+# Validate current Ollama/Podman state in the same run before deciding readiness.
+- import_playbook: audit-bergen-ai-ct110-persistent-data-readonly.yml
+
+- name: Preflight one-off Bergen-AI CT110 backup without modifications
+  hosts: venombox
+  become: true
+  gather_facts: false
+  tasks:
+    - name: Require the correct Proxmox host
+      ansible.builtin.assert:
+        that:
+          - inventory_hostname == 'venombox'
+
+    - name: Inspect guest rootfs data mounts storage and existing archives read-only
+      ansible.builtin.command:
+        argv:
+          - python3
+          - -c
+          - "{{ lookup('ansible.builtin.file', playbook_dir ~ '/../files/bergen_ai/preflight_ct110_oneoff_backup.py', rstrip=False) }}"
+      register: ct110_preflight_raw
+      changed_when: false
+      failed_when: false
+      check_mode: false
+      no_log: true
+
+    - name: Extract one bounded preflight result
+      ansible.builtin.set_fact:
+        ct110_preflight_frames: >-
+          {{ ct110_preflight_raw.stdout_lines | default([]) |
+             select('match', '^BERGEN_AI_CT110_ONEOFF_PREFLIGHT_V1:') | list }}
+      no_log: true
+
+    - name: Reject failed missing repeated or oversized preflight frame
+      ansible.builtin.assert:
+        that:
+          - ct110_preflight_raw.rc == 0
+          - ct110_preflight_frames | length == 1
+          - ct110_preflight_frames[0] | length < 1700
+      no_log: true
+
+    - name: Parse classified evidence only
+      ansible.builtin.set_fact:
+        ct110_preflight: >-
+          {{ (ct110_preflight_frames[0] |
+              regex_replace('^BERGEN_AI_CT110_ONEOFF_PREFLIGHT_V1:', '')) | from_json }}
+      no_log: true
+
+    - name: Require no writes and refuse misleading approval
+      ansible.builtin.assert:
+        that:
+          - ct110_preflight.AUDIT == 'READ_ONLY'
+          - not ct110_preflight.CHANGED
+          - not ct110_preflight.BACKUP_EXECUTED
+          - not ct110_preflight.APPLY_AUTHORIZED
+          - ct110_preflight.FULL_NETWORK_CLEARANCE == 'NOT_PROVEN'
+          - ct110_preflight.ROLLBACK_CLEARANCE == 'NOT_PROVEN'
+          - ct110_preflight.STATUS in ['PRECHECK_PASSED', 'REVIEW_REQUIRED', 'UNVERIFIED']
+      no_log: true
+
+    - name: Combine independent host and application evidence fail closed
+      ansible.builtin.set_fact:
+        ct110_backup_ready: >-
+          {{ (ct110_preflight.STATUS == 'PRECHECK_PASSED')
+             and (ct110_preflight.SAFE_TO_ATTEMPT_SINGLE_BACKUP | bool)
+             and (data_scope.STATUS == 'KNOWN_DATA_PATHS_IN_ROOTFS')
+             and (data_scope.OLLAMA_CONFIG == 'EXPECTED_MODELS_LOCATION')
+             and (data_scope.OLLAMA_MODELS_MOUNT == 'GUEST_ROOTFS')
+             and (data_scope.WEBUI_PODMAN_BIND == 'EXACT_WEBUI_DATA_BIND')
+             and (data_scope.WEBUI_DATA_MOUNT == 'GUEST_ROOTFS')
+             and (data_scope.PODMAN_GRAPH_MOUNT == 'GUEST_ROOTFS')
+             and (data_scope.PODMAN_CONTAINERS == 'ONLY_OPEN_WEBUI')
+             and (data_scope.PODMAN_NAMED_VOLUMES == 'NONE')
+             and (not (data_scope.BACKUP_AUTHORIZED | bool))
+             and (not (data_scope.ALL_PERSISTENT_DATA_PROVEN | bool)) }}
+      no_log: true
+
+    - name: Display sanitized readiness report
+      ansible.builtin.debug:
+        msg:
+          - AUDIT=READ_ONLY
+          - "STATUS={{ 'PRECHECK_PASSED' if ct110_backup_ready | bool else 'REVIEW_REQUIRED' }}"
+          - "CT110_IDENTITY={{ ct110_preflight.CT110_IDENTITY | default('UNVERIFIED') }}"
+          - "WEBUI_DATA={{ ct110_preflight.WEBUI_DATA | default('UNVERIFIED') }}"
+          - "GUEST_MOUNTS={{ ct110_preflight.GUEST_MOUNTS | default('UNVERIFIED') }}"
+          - "BACKUP_TARGET={{ ct110_preflight.BACKUP_TARGET | default('UNVERIFIED') }}"
+          - "TEMP_SPACE={{ ct110_preflight.TEMP_SPACE | default('UNVERIFIED') }}"
+          - "ARCHIVE_STATE={{ ct110_preflight.ARCHIVE_STATE | default('UNVERIFIED') }}"
+          - "DATA_SCOPE_STATUS={{ data_scope.STATUS }}"
+          - "SAFE_TO_ATTEMPT_SINGLE_BACKUP={{ ct110_backup_ready }}"
+          - BACKUP_EXECUTED=False
+          - ROLLBACK_CLEARANCE=NOT_PROVEN
+          - APPLY_AUTHORIZED=False
