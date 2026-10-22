@@ -130,6 +130,9 @@ def main():
         nadja_allowed = set(permitted_document_ids(nadja))
         private = thomas_own - nadja_allowed
         require(private, "THOMAS_PRIVATE_BOUNDARY_NOT_PROVEN")
+        for child_user in kids:
+            require(not (private & set(permitted_document_ids(child_user))),
+                    "CHILD_SEES_THOMAS_PRIVATE")
 
         emit(STATUS="INSPECTED", USERS=len(users), CHILD_USERS=len(kids),
              DOCUMENTS=len(docs), DOCUMENT_TYPES=len(types),
@@ -147,7 +150,8 @@ def main():
              MIN_VISIBLE_DOCS=min(x["DOCUMENTS"] for x in user_counts),
              MAX_VISIBLE_DOCS=max(x["DOCUMENTS"] for x in user_counts),
              THOMAS_PRIVATE_DENIED_TO_NADJA=len(private),
-             CHILD_SEES_ELTERN_DOCUMENTS=0)
+             CHILD_SEES_ELTERN_DOCUMENTS=0,
+             CHILD_SEES_THOMAS_PRIVATE_DOCUMENTS=0)
     except Blocked as ex:
         emit(STATUS="BLOCKED", REASON=str(ex))
     except Exception:
