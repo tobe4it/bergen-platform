@@ -2243,3 +2243,81 @@ approvals.
 
 Official Proxmox `pct shutdown` flags:
 https://github.com/proxmox/pve-docs/blob/master/generated/pct.1-synopsis.adoc
+
+
+## CT790 shutdown default plan blocked by degraded systemd, read-only diagnosis
+
+On 2026-10-22 06:10 (operator terminal), the no-apply
+`ansible/playbooks/shutdown-rocky-9-8-ct790-offline.yml`
+failed safely at its independent same-run health gate,
+**before** any shutdown proposal or mutation:
+
+- The nested `audit-rocky-9-8-ct790-running-readonly.yml`
+  reported `ROCKY_9_8_CT790_RUNNING_READ_ONLY_INVENTORY_RECORDED`,
+  `container_status=RUNNING`, `systemd_pid1_verified=true`,
+  `systemd_state=degraded`,
+  `failed_unit_output_lines=1`,
+  `systemd_health=REQUIRES_SEPARATE_REVIEW`.
+- Still `actual_nonloopback_network_interfaces=0`,
+  `user_namespace_nonidentity=true`,
+  `ct701_offline_protection_verified=true`.
+- The shutdown plan's exact check
+  `rocky_running_systemd.stdout | trim == 'running'`
+  correctly failed: `venombox ok=17 changed=0 failed=1`.
+  All mutation gates remain closed.
+- No `pct shutdown`, `pct stop`, service reset, restart,
+  guest reconfiguration, backup change or template conversion
+  was performed. CT790 was still running and networkless.
+
+The previous live healthy audit on 2026-10-21 was `running`
+with zero failed-unit output lines. The new `degraded` status
+requires investigation; **one diagnostic output line is not by
+itself proof of any particular failed unit or root cause.**
+Do not assume that the degraded state can be ignored merely
+because CT790 is an offline base container. Do not weaken
+the shutdown health check or reset failed units automatically.
+
+A separate strictly read-only diagnostic now exists:
+`ansible/playbooks/diagnose-rocky-9-8-ct790-failed-unit-readonly.yml`.
+It imports **only** the already-running container audit,
+requiring the same-run CT790 isolation proof, `systemd=degraded`,
+and exactly one bounded failed-unit output line. The captured
+line is parsed without disclosing its free-text description,
+accepting only a strictly whitelisted unit name. It then issues
+one `pct exec 790 -- systemctl --no-pager show` to retrieve
+only `Id`, `LoadState`, `ActiveState`, `SubState`,
+`Result`, `ExecMainCode`, `ExecMainStatus`,
+`StateChangeTimestamp`. Raw unit descriptions and journal
+content are not copied into the report. Results are capped,
+validated, and report only nonsecret diagnostic properties.
+No guest files are written or modified, and no systemd
+commands to restart, reset-failed, or repair units exist.
+
+Run on bp-controller with **NO apply variables**, using
+the verified reviewed feature-branch commit in a clean worktree:
+
+    BASE="$HOME/bergen-platform"
+    WT="$HOME/bergen-platform-nextcloud-restore"
+    BRANCH="feat/nextcloud-isolated-restore-701-20261019"
+    SSH_ARGS="-C -o ControlMaster=no -o ControlPath=none -o ConnectTimeout=10 -o ServerAliveInterval=10 -o ServerAliveCountMax=2"
+    if [ -n "$(git -C "$WT" status --porcelain)" ]; then
+      echo "STOP: dirty worktree"
+    else
+      git -C "$WT" fetch origin "$BRANCH" &&
+      git -C "$WT" switch --detach "origin/$BRANCH" &&
+      ANSIBLE_SSH_ARGS="$SSH_ARGS" "$BASE/.venv/bin/ansible-playbook" \
+        -i "$BASE/ansible/inventory.yml" \
+        -i "$BASE/ansible/inventory.local.yml" \
+        "$WT/ansible/playbooks/diagnose-rocky-9-8-ct790-failed-unit-readonly.yml" \
+        --limit venombox --vault-id infra@prompt
+    fi
+
+Only when validation succeeds:
+`ROCKY_9_8_CT790_FAILED_UNIT_DIAG_READ_ONLY_RECORDED`,
+`changed=0`, `failed=0`. If the number or identity
+of failed units changes, or a command returns an
+unexpected format, the diagnosis stops without writes.
+
+Any later service repair, graceful shutdown with
+`--forceStop 0`, restart, rootfs sanitation or template
+conversion remains separately permission-gated.
