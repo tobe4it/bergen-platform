@@ -46,7 +46,7 @@ def command(argv, timeout=35):
         raise Blocked("READ_RESULT_TOO_LARGE")
     return result if result.returncode == 0 else None
 
-def nginx_inventory():
+def nginx_inventory(with_certificate_tokens=False):
     result = command(["nginx", "-T"])
     if result is None:
         return {"state": "NGINX_CONFIG_UNAVAILABLE", "exclusive": False}
@@ -67,6 +67,8 @@ def nginx_inventory():
     allowlisted = [n for n in cloud_files if ALLOWED_CONFIG.fullmatch(n)]
     unknown_count = len(cloud_files) - len(allowlisted)
     clouds = {n for n in cloud_files}
+    hostname_files = {n for n, chunks in sections.items()
+                      if any(CLOUD_REFERENCE.search(s) for s in chunks)}
     cert_refs = set()
     all_certs = {}
     for n, chunks in sections.items():
@@ -78,9 +80,9 @@ def nginx_inventory():
             cert_refs.update(found)
     other_users = {n for n in all_certs if n not in clouds and
                    cert_refs.intersection(all_certs[n])}
-    root_other = [n for n, chunks in sections.items() if n not in clouds and
+    root_other = [n for n, chunks in sections.items() if n not in hostname_files and
                   any(ROOT in s for s in chunks)]
-    return {
+    report = {
         "state": "EFFECTIVE_NGINX_SYNTAX_OK",
         "scanned_config_count": len(sections),
         "legacy_reference_file_count": len(cloud_files),
@@ -100,8 +102,9 @@ def nginx_inventory():
         "certificate_consumers_fully_proven": False,
         "exclusive": False,
     }
+    return (report, cert_refs) if with_certificate_tokens else report
 
-def cert_source_classification():
+def cert_source_classification(cloud_certificates=()):
     """Only compare internal paths; never emit any TLS path or material."""
     commands = [
         ["postconf", "-h", "smtpd_tls_cert_file"],
@@ -111,15 +114,21 @@ def cert_source_classification():
     ]
     observed = 0
     unresolved = 0
+    literal_matches = 0
     for cmd in commands:
         p = command(cmd, timeout=15)
         if p is None:
             unresolved += 1
         elif p.stdout.strip():
             observed += 1
+            literal_matches += int(any(
+                cert and cert in p.stdout for cert in cloud_certificates
+            ))
     return {
         "mail_tls_consumer_settings_seen": observed,
         "mail_tls_consumer_settings_unavailable": unresolved,
+        "mail_literal_cert_path_matches": literal_matches,
+        "symlink_or_indirect_cert_sharing_ruled_out": False,
         "shared_certificate_deletion_authorized": False,
     }
 
@@ -180,11 +189,12 @@ def run(expected):
     require(expected != "mx.thebergens.net", "PRODUCTION_MX2_IS_FORBIDDEN")
     require(os.geteuid() == 0, "ROOT_AUDIT_REQUIRED")
     require(socket.gethostname() != "", "HOSTNAME_UNAVAILABLE")
+    nginx, cloud_certificates = nginx_inventory(with_certificate_tokens=True)
     return {
         "result": "MX1_NEXTCLOUD_DEPENDENCIES_READ_ONLY_RECORDED",
         "host_identity": "VERIFIED_MX1",
-        "nginx": nginx_inventory(),
-        "mail_certificate_settings": cert_source_classification(),
+        "nginx": nginx,
+        "mail_certificate_settings": cert_source_classification(cloud_certificates),
         "old_tree": old_tree(),
         "database": database_scope(),
         "scheduling": scheduling_scope(),
