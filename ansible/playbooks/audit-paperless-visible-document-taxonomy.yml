@@ -1,0 +1,130 @@
+---
+# Default and only mode: READ_ONLY. No metadata or document grants are changed.
+- name: Audit Paperless document-linked correspondent and document type visibility
+  hosts: venombox
+  become: true
+  gather_facts: false
+  vars:
+    bp_visible_taxonomy_script: "{{ lookup('ansible.builtin.file', playbook_dir ~ '/../files/paperless/audit_visible_document_taxonomy_readonly.py', rstrip=False) }}"
+  tasks:
+    - name: Require exact target and reject all write approvals
+      ansible.builtin.assert:
+        that:
+          - inventory_hostname == 'venombox'
+          - not ansible_check_mode
+          - not (paperless_visible_taxonomy_apply_approved | default(false) | bool)
+          - not (paperless_family_tags_apply_approved | default(false) | bool)
+          - not (paperless_chat_proxy_apply_approved | default(false) | bool)
+        fail_msg: VISIBLE_TAXONOMY_REQUIRES_READ_ONLY
+
+    - name: Inspect existing CT126 without changes
+      ansible.builtin.command:
+        argv: [pct, config, '126']
+      register: bp_visible_taxonomy_ct
+      changed_when: false
+      no_log: true
+
+    - name: Require expected unprivileged Paperless guest
+      ansible.builtin.assert:
+        that:
+          - bp_visible_taxonomy_ct.rc == 0
+          - "'hostname: bergen-paperless' in bp_visible_taxonomy_ct.stdout_lines"
+          - "'unprivileged: 1' in bp_visible_taxonomy_ct.stdout_lines"
+          - "'lxc.apparmor.profile: unconfined' not in bp_visible_taxonomy_ct.stdout"
+        fail_msg: VISIBLE_TAXONOMY_WRONG_GUEST
+      no_log: true
+
+    - name: Execute bounded read-only Django document-linked metadata audit
+      ansible.builtin.command:
+        argv:
+          - pct
+          - exec
+          - '126'
+          - --
+          - podman
+          - exec
+          - bergen-paperless
+          - python
+          - /usr/src/paperless/src/manage.py
+          - shell
+          - --verbosity=0
+          - -c
+          - "{{ bp_visible_taxonomy_script }}"
+      register: bp_visible_taxonomy_raw
+      changed_when: false
+      failed_when: false
+      no_log: true
+
+    - name: Extract only one bounded status frame
+      ansible.builtin.set_fact:
+        bp_visible_taxonomy_frames: >-
+          {{ bp_visible_taxonomy_raw.stdout_lines | default([]) |
+             select('match', '^BERGEN_PAPERLESS_VISIBLE_DOCUMENT_TAXONOMY_V1:') | list }}
+      no_log: true
+
+    - name: Refuse failed or ambiguous audit output
+      ansible.builtin.assert:
+        that:
+          - bp_visible_taxonomy_raw.rc == 0
+          - bp_visible_taxonomy_frames | length == 1
+          - bp_visible_taxonomy_frames[0] | length < 1800
+        fail_msg: VISIBLE_TAXONOMY_FRAME_MISSING
+      no_log: true
+
+    - name: Parse only aggregate counters
+      ansible.builtin.set_fact:
+        bp_visible_taxonomy: >-
+          {{ bp_visible_taxonomy_frames[0] |
+             regex_replace('^BERGEN_PAPERLESS_VISIBLE_DOCUMENT_TAXONOMY_V1:', '') | from_json }}
+      no_log: true
+
+    - name: Diagnose only allowlisted refusal reasons
+      ansible.builtin.debug:
+        msg:
+          - "STATUS={{ bp_visible_taxonomy.STATUS if bp_visible_taxonomy.STATUS in ['INSPECTED','BLOCKED'] else 'UNCLASSIFIED' }}"
+          - "REASON={{ bp_visible_taxonomy.REASON | default('NONE') if
+                bp_visible_taxonomy.REASON | default('NONE') in [
+                  'NONE','VERSION_UNREVIEWED','FAMILY_MEMBERSHIP_UNREVIEWED',
+                  'PARENT_MEMBERSHIP_UNREVIEWED','CHILD_MEMBERSHIP_UNREVIEWED',
+                  'TECHNICAL_ACCOUNT_IN_FAMILY','DOCUMENT_POPULATION_UNREVIEWED',
+                  'DOCUMENT_ID_MISMATCH','METADATA_POPULATION_UNREVIEWED',
+                  'PARENT_DOCUMENT_BOUNDARY_UNREVIEWED',
+                  'DOCUMENT_METADATA_REFERENCES_UNRESOLVED',
+                  'CHILD_SEES_ELTERN_DOCUMENT',
+                  'THOMAS_PRIVATE_BOUNDARY_NOT_PROVEN','UNCLASSIFIED'
+                ] else 'UNCLASSIFIED' }}"
+
+    - name: Require valid privacy boundaries before reporting metadata differences
+      ansible.builtin.assert:
+        that:
+          - bp_visible_taxonomy.STATUS == 'INSPECTED'
+          - bp_visible_taxonomy.AUDIT == 'READ_ONLY'
+          - bp_visible_taxonomy.CHANGED == false
+          - bp_visible_taxonomy.USERS | int >= 3
+          - bp_visible_taxonomy.CHILD_USERS | int >= 1
+          - bp_visible_taxonomy.THOMAS_PRIVATE_DENIED_TO_NADJA | int >= 1
+          - bp_visible_taxonomy.CHILD_SEES_ELTERN_DOCUMENTS | int == 0
+          - bp_visible_taxonomy.DOCUMENT_ACLS_CHANGED == 'NO'
+          - bp_visible_taxonomy.METADATA_ACLS_CHANGED == 'NO'
+        fail_msg: VISIBLE_TAXONOMY_AUDIT_BLOCKED
+      no_log: true
+
+    - name: Report document-linked metadata view gaps only
+      ansible.builtin.debug:
+        msg:
+          - AUDIT=READ_ONLY
+          - "DOCUMENTS={{ bp_visible_taxonomy.DOCUMENTS }}"
+          - "FAMILY_USERS={{ bp_visible_taxonomy.USERS }}"
+          - "DOCUMENT_TYPES={{ bp_visible_taxonomy.DOCUMENT_TYPES }}"
+          - "CORRESPONDENTS={{ bp_visible_taxonomy.CORRESPONDENTS }}"
+          - "REQUIRED_TYPE_VIEWS={{ bp_visible_taxonomy.REQUIRED_TYPE_VIEWS }}"
+          - "REQUIRED_CORRESPONDENT_VIEWS={{ bp_visible_taxonomy.REQUIRED_CORRESPONDENT_VIEWS }}"
+          - "TYPE_VIEW_GAPS={{ bp_visible_taxonomy.TYPE_VIEW_GAPS }}"
+          - "CORRESPONDENT_VIEW_GAPS={{ bp_visible_taxonomy.CORRESPONDENT_VIEW_GAPS }}"
+          - "TYPE_MODEL_RIGHT_MISSING_USERS={{ bp_visible_taxonomy.TYPE_MODEL_RIGHT_MISSING_USERS }}"
+          - "CORRESPONDENT_MODEL_RIGHT_MISSING_USERS={{ bp_visible_taxonomy.CORRESPONDENT_MODEL_RIGHT_MISSING_USERS }}"
+          - "THOMAS_PRIVATE_DENIED_TO_NADJA={{ bp_visible_taxonomy.THOMAS_PRIVATE_DENIED_TO_NADJA }}"
+          - CHILD_SEES_ELTERN_DOCUMENTS=0
+          - DOCUMENT_ACLS_CHANGED=NO
+          - METADATA_ACLS_CHANGED=NO
+          - CHANGED=False
