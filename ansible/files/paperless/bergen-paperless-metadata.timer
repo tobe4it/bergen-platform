@@ -1,0 +1,12 @@
+[Unit]
+Description=Hourly audit and provenance-owned Paperless metadata updates
+
+[Timer]
+OnCalendar=hourly
+RandomizedDelaySec=10m
+AccuracySec=1m
+Persistent=true
+Unit=bergen-paperless-metadata.service
+
+[Install]
+WantedBy=timers.target
