@@ -100,7 +100,8 @@ def main():
         require(req["mode"] in ("audit", "apply") and
                 req["approved"] is (req["mode"] == "apply") and
                 type(req["expected_tag_count"]) is int and
-                1 <= req["expected_tag_count"] <= MAX_TAGS,
+                0 <= req["expected_tag_count"] <= MAX_TAGS and
+                (req["mode"] != "apply" or req["expected_tag_count"] > 0),
                 "APPROVAL_UNREVIEWED")
         mode = req["mode"].upper()
         require(__full_version_str__ == "3.3.0", "VERSION_UNREVIEWED")
@@ -124,8 +125,10 @@ def main():
                 "SERVICE_ACCOUNT_IN_FAMILY")
 
         tags = list(Tag.objects.order_by("pk").values_list("pk", "owner_id"))
-        require(len(tags) == req["expected_tag_count"] and
-                len(tags) <= MAX_TAGS, "TAG_COUNT_DRIFT")
+        require(0 < len(tags) <= MAX_TAGS and
+                (req["expected_tag_count"] == 0 or
+                 len(tags) == req["expected_tag_count"]),
+                "TAG_COUNT_DRIFT")
         tag_ids = {pk for pk, _ in tags}
         require(len(tag_ids) == len(tags), "TAG_SCOPE_INVALID")
         before = snapshot_documents(users)
