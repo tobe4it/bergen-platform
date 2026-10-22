@@ -27,7 +27,11 @@ MP0 = re.compile(
 
 
 class Refuse(Exception):
-    pass
+    def __init__(self, reason, *, lxc_classes=(), lxc_count=0):
+        super().__init__(reason)
+        # Categories are fixed vocabulary, never config keys or values.
+        self.lxc_classes = tuple(lxc_classes)
+        self.lxc_count = lxc_count
 
 
 def require(ok, code):
@@ -102,8 +106,36 @@ def sanitized_config(raw):
             "ARCHIVED_HOSTNAME_UNREVIEWED")
     require(rows.get("unprivileged") == "1",
             "ARCHIVED_UNPRIVILEGED_UNREVIEWED")
-    require(not any(x.startswith("lxc.") for x in rows),
-            "ARCHIVED_LXC_OVERRIDE_PRESENT")
+    lxc_keys = [key for key in rows if key.startswith("lxc.")]
+    if lxc_keys:
+        require(len(lxc_keys) <= 32, "ARCHIVED_LXC_OVERRIDE_SCOPE_UNREVIEWED")
+        categories = set()
+        for key in lxc_keys:
+            if key.startswith("lxc.apparmor."):
+                categories.add("APPARMOR_OVERRIDE")
+            elif key.startswith(("lxc.cgroup.", "lxc.cgroup2.",
+                                 "lxc.devices.")):
+                categories.add("CGROUP_DEVICE_OVERRIDE")
+            elif key.startswith("lxc.mount."):
+                categories.add("MOUNT_OVERRIDE")
+            elif key.startswith("lxc.cap."):
+                categories.add("CAPABILITY_OVERRIDE")
+            elif key.startswith("lxc.seccomp."):
+                categories.add("SECCOMP_OVERRIDE")
+            elif key.startswith("lxc.idmap"):
+                categories.add("IDMAP_OVERRIDE")
+            elif key.startswith("lxc.net."):
+                categories.add("NETWORK_OVERRIDE")
+            elif key.startswith("lxc.hook."):
+                categories.add("HOST_HOOK_OVERRIDE")
+            elif key.startswith("lxc.environment"):
+                categories.add("ENVIRONMENT_OVERRIDE")
+            else:
+                categories.add("OTHER_LXC_OVERRIDE")
+        # Remain blocked: this is only a safe bounded diagnosis.
+        raise Refuse("ARCHIVED_LXC_OVERRIDE_PRESENT",
+                     lxc_classes=sorted(categories),
+                     lxc_count=len(lxc_keys))
     require(rows.get("onboot", "0") in ("0","1"),
             "ARCHIVED_ONBOOT_UNREVIEWED")
     require(ROOTFS.search(rows.get("rootfs","")) is not None and
@@ -161,7 +193,9 @@ def main():
                NO_NETWORK_RESTORE_CONFIG_REQUIRED="YES",
                **sanitized)
     except Refuse as e:
-        result("BLOCKED",REASON=str(e))
+        result("BLOCKED", REASON=str(e),
+               LXC_OVERRIDE_CLASSES=list(e.lxc_classes),
+               LXC_OVERRIDE_COUNT=e.lxc_count)
     except Exception:
         result("BLOCKED",REASON="UNCLASSIFIED")
 
