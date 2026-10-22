@@ -1,0 +1,112 @@
+---
+# READ-ONLY final archived CT config review. Existing archive must match the
+# previously externally attested whole-file SHA256. No pct restore/start/set.
+- name: Inspect pinned Paperless backup configuration for isolated CT826 restore planning
+  hosts: venombox
+  become: true
+  gather_facts: false
+  vars:
+    bp_pinned_config_script: "{{ lookup('ansible.builtin.file', playbook_dir ~ '/../files/paperless/audit_pinned_archive_restore_config.py', rstrip=False) }}"
+    bp_pinned_archive_sha: "7f0ad64c2c7bc3bdca53be5766fbabc62feadd74025e811e52712e78b8bee24f"
+  tasks:
+    - name: Restrict archived configuration inspection to read only
+      ansible.builtin.assert:
+        that:
+          - inventory_hostname == 'venombox'
+          - not ansible_check_mode
+          - not (paperless_metadata_clone_restore_approved | default(false) | bool)
+          - not (paperless_taxonomy_apply_approved | default(false) | bool)
+          - not (paperless_metadata_timer_activate | default(false) | bool)
+          - not (paperless_linked_metadata_apply_approved | default(false) | bool)
+        fail_msg: PINNED_ARCHIVE_CONFIG_REQUIRES_READ_ONLY
+      no_log: true
+
+    - name: Rehash exact archive and inspect embedded Proxmox configuration without output
+      ansible.builtin.command:
+        argv: [python3, -c, "{{ bp_pinned_config_script }}"]
+      changed_when: false
+      failed_when: false
+      register: bp_pinned_config_raw
+      no_log: true
+
+    - name: Extract exactly one sanitized bounded archive configuration report
+      ansible.builtin.set_fact:
+        bp_pinned_config_frames: >-
+          {{ bp_pinned_config_raw.stdout_lines | default([]) |
+             select('match', '^BERGEN_PAPERLESS_METADATA_RESTORE_CONFIG_V1:') | list }}
+      no_log: true
+
+    - name: Reject an absent duplicate or unbounded archive report
+      ansible.builtin.assert:
+        that:
+          - bp_pinned_config_raw.rc == 0
+          - bp_pinned_config_frames | length == 1
+          - bp_pinned_config_frames[0] | length < 1400
+        fail_msg: PINNED_ARCHIVE_CONFIG_REPORT_MISSING
+      no_log: true
+
+    - name: Parse only explicitly sanitized archived configuration categories
+      ansible.builtin.set_fact:
+        bp_pinned_config: >-
+          {{ bp_pinned_config_frames[0] |
+             regex_replace('^BERGEN_PAPERLESS_METADATA_RESTORE_CONFIG_V1:', '') | from_json }}
+      no_log: true
+
+    - name: Expose only allowlisted refusal codes
+      ansible.builtin.debug:
+        msg:
+          - "STATUS={{ bp_pinned_config.STATUS if bp_pinned_config.STATUS in ['BLOCKED','PINNED_ARCHIVE_CONFIG_REVIEWED'] else 'UNCLASSIFIED' }}"
+          - "REASON={{ bp_pinned_config.REASON | default('NONE') if
+              bp_pinned_config.REASON | default('NONE') in [
+                'NONE','ROOT_REQUIRED','WRONG_PROXMOX_NODE',
+                'PVE_READ_ONLY_INSPECTION_FAILED','BACKUP_NFS_NOT_ACTIVE',
+                'BACKUP_DIRECTORY_UNREVIEWED','NO_RECENT_BACKUP',
+                'BACKUP_ARCHIVE_AMBIGUOUS','BACKUP_OBJECT_NOT_FILE',
+                'BACKUP_CHANGED_DURING_SHA','ARCHIVE_FINGERPRINT_DRIFT',
+                'STORAGE_VOLUME_PATH_MISMATCH','ARCHIVED_CONFIG_UNREVIEWED',
+                'ARCHIVED_CONFIG_DUPLICATE_KEY','ARCHIVED_SOURCE_IDENTITY_UNREVIEWED',
+                'ARCHIVED_VOLUME_LAYOUT_UNREVIEWED','EXTRA_ARCHIVED_MOUNTS_UNREVIEWED',
+                'ARCHIVED_SPECIAL_FEATURES_UNREVIEWED',
+                'ARCHIVED_NETWORK_LAYOUT_UNREVIEWED',
+                'BACKUP_CHANGED_DURING_CONFIG_READ','UNCLASSIFIED'
+              ] else 'UNCLASSIFIED' }}"
+
+    - name: Reject untrusted archive and any interpretation as approved isolation
+      ansible.builtin.assert:
+        that:
+          - bp_pinned_config.STATUS == 'PINNED_ARCHIVE_CONFIG_REVIEWED'
+          - bp_pinned_config.AUDIT == 'READ_ONLY'
+          - bp_pinned_config.CHANGED == false
+          - bp_pinned_config.ARCHIVE_SHA256 == bp_pinned_archive_sha
+          - bp_pinned_config.ARCHIVE_SIZE_MIB | int > 0
+          - bp_pinned_config.ARCHIVED_UNPRIVILEGED == 'YES'
+          - bp_pinned_config.ARCHIVED_ROOTFS_LOCAL_ZFS == 'YES'
+          - bp_pinned_config.ARCHIVED_DATA_MP0_LOCAL_ZFS_BACKED_UP == 'YES'
+          - bp_pinned_config.ARCHIVED_EXTRA_MOUNTS | int == 0
+          - bp_pinned_config.ARCHIVED_NET_INTERFACE_COUNT | int <= 1
+          - bp_pinned_config.NO_NETWORK_RESTORE_CONFIG_REQUIRED == 'YES'
+          - bp_pinned_config.NETWORK_ISOLATION_PROVEN == 'NO'
+          - bp_pinned_config.CLONE_CREATED == 'NO'
+          - bp_pinned_config.RESTORE_PERFORMED == 'NO'
+          - bp_pinned_config.DATABASE_RECOVERY_PROVEN == 'NO'
+        fail_msg: PINNED_ARCHIVE_CONFIG_NOT_ACCEPTED
+      no_log: true
+
+    - name: Display reviewed archive configuration constraints without secrets
+      ansible.builtin.debug:
+        msg:
+          - AUDIT=READ_ONLY
+          - STATUS=PINNED_ARCHIVE_CONFIG_REVIEWED
+          - "ARCHIVE_SHA256={{ bp_pinned_config.ARCHIVE_SHA256 }}"
+          - "ARCHIVE_SIZE_MIB={{ bp_pinned_config.ARCHIVE_SIZE_MIB }}"
+          - "ARCHIVED_NETWORK_INTERFACE_COUNT={{ bp_pinned_config.ARCHIVED_NET_INTERFACE_COUNT }}"
+          - "ARCHIVED_ONBOOT_ENABLED={{ bp_pinned_config.ARCHIVED_ONBOOT_ENABLED }}"
+          - ARCHIVED_UNPRIVILEGED=YES
+          - ARCHIVED_EXTRA_MOUNTS=0
+          - RESTORE_NETWORK_REMOVAL_REQUIRED=YES
+          - NETWORK_ISOLATION_PROVEN=NO
+          - RESTORE_PERFORMED=NO
+          - CLONE_CREATED=NO
+          - DATABASE_RECOVERY_PROVEN=NO
+          - NEXT_GATE=SEPARATELY_APPROVED_OFFLINE_RESTORE_WITH_BEFORE_BOOT_CONFIG_AUDIT
+          - CHANGED=False
