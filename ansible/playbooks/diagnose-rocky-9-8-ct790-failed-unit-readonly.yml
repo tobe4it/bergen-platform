@@ -1,0 +1,143 @@
+---
+# Diagnostic only for already RUNNING CT790 with systemd=degraded and exactly
+# one failed-unit output line. NO start, stop, shutdown, restart, reset-failed,
+# daemon-reload, file copy, mount, Proxmox template conversion or network changes.
+- import_playbook: audit-rocky-9-8-ct790-running-readonly.yml
+
+- name: Independently classify the single failed systemd unit in isolated CT790
+  hosts: venombox
+  become: true
+  gather_facts: false
+  any_errors_fatal: true
+  tasks:
+    - name: Require same-run confirmed protected running networkless CT790
+      ansible.builtin.assert:
+        that:
+          - inventory_hostname == 'venombox'
+          - rocky_running_host.stdout == 'venombox'
+          - "'status: running' in rocky_running_final_status.stdout_lines"
+          - "'hostname: rocky9-base-790' in rocky_running_config.stdout_lines"
+          - "'unprivileged: 1' in rocky_running_config.stdout_lines"
+          - "'protection: 1' in rocky_running_config.stdout_lines"
+          - "'onboot: 0' in rocky_running_config.stdout_lines"
+          - "'NON_LOOPBACK_DEVICES=0' in rocky_running_guest.stdout_lines"
+          - "'GUEST_IDMAP_NONIDENTITY=YES' in rocky_running_guest.stdout_lines"
+          - "'hostname: nextcloud-restore-701' in rocky_running_ct701.stdout_lines"
+          - rocky_running_systemd.stdout | trim == 'degraded'
+          - rocky_running_failed_units.rc == 0
+          - rocky_running_failed_units.stdout_lines | length == 1
+          - rocky_running_failed_units.stdout | length <= 8192
+        fail_msg: "Stop diagnostics: isolated CT790 must be running with exactly one failed systemd-unit record."
+
+    - name: Validate exact failed-unit record in memory without logging original output
+      ansible.builtin.command:
+        argv:
+          - python3
+          - -c
+          - "{{ lookup('ansible.builtin.file', playbook_dir ~ '/../files/nextcloud/parse_ct790_failed_unit.py') }}"
+        stdin: "{{ rocky_running_failed_units.stdout }}"
+        stdin_add_newline: false
+      changed_when: false
+      failed_when: false
+      no_log: true
+      register: rocky_failed_unit_parsed
+
+    - name: Require a single strictly sanitized failed systemd unit name
+      ansible.builtin.assert:
+        that:
+          - rocky_failed_unit_parsed.rc == 0
+          - (rocky_failed_unit_parsed.stdout | from_json).result == 'ROCKY_9_8_CT790_SINGLE_FAILED_UNIT_PARSED'
+          - (rocky_failed_unit_parsed.stdout | from_json).failed_unit_count == 1
+          - (rocky_failed_unit_parsed.stdout | from_json).writes == 0
+          - >-
+            (rocky_failed_unit_parsed.stdout | from_json).unit is
+            match('^[A-Za-z0-9_.@:-]{1,160}[.](?:service|socket|timer|target|mount|automount|swap|path|device|scope|slice)$')
+        fail_msg: "Unrecognized systemd failure format; inspect separately, do not perform remediation."
+
+    - name: Set one verified unit selector without mutating guest or host
+      ansible.builtin.set_fact:
+        rocky_failed_unit_name: "{{ (rocky_failed_unit_parsed.stdout | from_json).unit }}"
+      changed_when: false
+
+    - name: Inspect only nonsecret failure state properties for selected CT790 unit
+      ansible.builtin.command:
+        argv:
+          - pct
+          - exec
+          - '790'
+          - --
+          - systemctl
+          - --no-pager
+          - show
+          - --property=Id,LoadState,ActiveState,SubState,Result,ExecMainCode,ExecMainStatus,StateChangeTimestamp
+          - "{{ rocky_failed_unit_name }}"
+      changed_when: false
+      no_log: true
+      register: rocky_failed_unit_show
+
+    - name: Require bounded recognized systemd property output before exposing any fields
+      ansible.builtin.assert:
+        that:
+          - rocky_failed_unit_show.rc == 0
+          - rocky_failed_unit_show.stdout | length <= 2048
+          - rocky_failed_unit_show.stdout_lines | length == 8
+          - >-
+            (rocky_failed_unit_show.stdout_lines
+             | select('match', '^(?:Id|LoadState|ActiveState|SubState|Result|ExecMainCode|ExecMainStatus|StateChangeTimestamp)=')
+             | list | length) == 8
+        fail_msg: "Unexpected systemd properties; stop diagnosis without leaking raw unit output."
+
+    - name: Parse only approved systemd fields in controller memory
+      ansible.builtin.set_fact:
+        rocky_failed_unit_fields: "{{ dict(rocky_failed_unit_show.stdout_lines | map('split', '=', 1)) }}"
+      changed_when: false
+      no_log: true
+
+    - name: Verify exact unit identity and current failed state
+      ansible.builtin.assert:
+        that:
+          - rocky_failed_unit_fields | length == 8
+          - rocky_failed_unit_fields.Id == rocky_failed_unit_name
+          - rocky_failed_unit_fields.ActiveState == 'failed'
+          - rocky_failed_unit_fields.SubState | length <= 32
+          - rocky_failed_unit_fields.LoadState | length <= 32
+          - rocky_failed_unit_fields.Result | length <= 64
+          - rocky_failed_unit_fields.ExecMainCode | length <= 16
+          - rocky_failed_unit_fields.ExecMainStatus | length <= 16
+          - rocky_failed_unit_fields.StateChangeTimestamp | length <= 100
+        fail_msg: "Unit no longer in failed state or metadata invalid; do not change any service."
+
+    - name: Confirm CT790 still running after bounded failed-unit diagnosis
+      ansible.builtin.command:
+        argv: [pct, status, '790']
+      changed_when: false
+      register: rocky_failed_unit_final_status
+
+    - name: Require no unexpected guest shutdown
+      ansible.builtin.assert:
+        that:
+          - "'status: running' in rocky_failed_unit_final_status.stdout_lines"
+
+    - name: Report only validated unit, state and nonsecret exit metadata
+      ansible.builtin.debug:
+        msg:
+          result: ROCKY_9_8_CT790_FAILED_UNIT_DIAG_READ_ONLY_RECORDED
+          vmid: 790
+          systemd_state_observed: degraded
+          failed_unit_count: 1
+          failed_unit_name: "{{ rocky_failed_unit_name }}"
+          load_state: "{{ rocky_failed_unit_fields.LoadState }}"
+          active_state: "{{ rocky_failed_unit_fields.ActiveState }}"
+          sub_state: "{{ rocky_failed_unit_fields.SubState }}"
+          unit_result: "{{ rocky_failed_unit_fields.Result }}"
+          exec_main_code: "{{ rocky_failed_unit_fields.ExecMainCode }}"
+          exec_main_status: "{{ rocky_failed_unit_fields.ExecMainStatus }}"
+          state_change_timestamp: "{{ rocky_failed_unit_fields.StateChangeTimestamp }}"
+          nonloopback_network_interfaces: 0
+          ct790_status: RUNNING
+          ct701_unchanged: true
+          file_writes_by_diagnostic: 0
+          pct_shutdown_authorized: false
+          pct_stop_authorized: false
+          pct_template_authorized: false
+          next_gate: Review failed unit cause; any service fix or graceful shutdown requires a separate exact approval.
