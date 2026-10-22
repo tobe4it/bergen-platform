@@ -2699,3 +2699,51 @@ It must recheck all relevant state immediately beforehand
 and must not force stop or retry on failure. Image sanitation,
 template conversion, CT701, production and networking
 remain out of scope.
+
+
+## CT790 explicitly approved sole-DNF exception shutdown completed (2026-10-22)
+
+The operator explicitly authorized the one-time exception to the
+healthy-only shutdown condition, covering only an independently
+verified sole failed `dnf-makecache.service` with
+`Result=exit-code`, `ExecMainStatus=1`, protected networkless
+CT790, and one graceful `pct shutdown 790 --timeout 90 --forceStop 0`.
+The operator executed the commit-pinned, separately gated
+`ansible/playbooks/shutdown-rocky-9-8-ct790-dnf-exception-offline.yml`.
+
+Observed verified receipt, terminal time 2026-10-22 09:25:
+
+- `ROCKY_9_8_CT790_DNF_EXCEPTION_GRACEFUL_SHUTDOWN_STOPPED_VERIFIED`
+- `venombox ok=44 changed=1 unreachable=0 failed=0 skipped=1`.
+- Same-run isolated CT790 was `RUNNING`, Rocky 9.8,
+  `systemd=degraded` from the sole confirmed DNF cache unit;
+  the bounded DNF failure metadata was rechecked immediately
+  before shutdown and had not drifted.
+- **Exactly one** `pct shutdown 790 --timeout 90 --forceStop 0`
+  was executed. `forced_stop=false`,
+  `shutdown_attempts=1`; no forced stop, restart, retry,
+  rollback, or template conversion.
+- `container_status=STOPPED`, confirmed by
+  `pct status 790` after shutdown.
+- `ct790_config_unchanged=true`,
+  `ct701_config_unchanged=true`; both original
+  protected networkless Proxmox configs remained intact.
+- The one reported Ansible change corresponds to the
+  **separately operator-approved graceful shutdown** only.
+- `pct_template_authorized=false`.
+
+**State transition is complete:** do not rerun the shutdown
+playbook or any running-guest audit requiring CT790 to be
+`RUNNING`. The one-time shutdown authorization is consumed
+and never covers starting CT790 or further changes.
+
+Next mandatory gate: independently check the **stopped**
+CT790 PVE/ZFS ownership and mount state with no guest
+start, pct mount, zfs mount, file modification or network
+attachment. Only if its rootfs is *already* mounted with
+a verified exact ZFS mount is a separate bounded, no-atime
+sanitization inventory permitted. Machine-id, SSH host
+identities, journal, persistent random seed and package
+cache must be inventoried without disclosing secrets.
+No cleanup is implicit. Template conversion remains a
+distinct separately authorized action following policy review.
