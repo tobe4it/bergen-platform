@@ -1,0 +1,207 @@
+---
+# ONLY a separately approved activation. Run the one-shot metadata provenance
+# bootstrap + repeated audit first; this never creates that ledger itself.
+- name: Separately activate hourly Paperless metadata view-only reconciliation
+  hosts: venombox
+  become: true
+  gather_facts: false
+  vars:
+    bp_tax_auto_dir: /etc/bergen-platform/paperless-metadata
+    bp_tax_auto_policy_src: "{{ lookup('ansible.builtin.file', playbook_dir ~ '/../files/paperless/reconcile_metadata_with_provenance.py', rstrip=False) }}"
+    bp_tax_auto_policy_sha: "{{ bp_tax_auto_policy_src | hash('sha256') }}"
+    bp_tax_auto_runner_src: "{{ lookup('ansible.builtin.file', playbook_dir ~ '/../files/paperless/bergen_metadata_auto_runner.py', rstrip=False) }}"
+  tasks:
+    - name: Demand separate timer approval backed-up ledger and fixed change budget
+      ansible.builtin.assert:
+        that:
+          - inventory_hostname == 'venombox'
+          - not ansible_check_mode
+          - paperless_metadata_timer_activate | default(false) | bool
+          - paperless_metadata_timer_approved | default(false) | bool
+          - paperless_metadata_provenance_bootstrap_verified | default(false) | bool
+          - paperless_ai_catalog_verified_backup | default(false) | bool
+          - not (paperless_family_tags_apply_approved | default(false) | bool)
+          - not (paperless_linked_metadata_apply_approved | default(false) | bool)
+          - not (paperless_taxonomy_apply_approved | default(false) | bool)
+        fail_msg: PAPERLESS_METADATA_TIMER_REQUIRES_SEPARATE_APPROVAL
+      no_log: true
+
+    - name: Check exact unprivileged existing CT126
+      ansible.builtin.command:
+        argv: [pct, config, '126']
+      register: bp_tax_auto_ct
+      changed_when: false
+      no_log: true
+
+    - name: Refuse changing proxy or unreviewed guest
+      ansible.builtin.assert:
+        that:
+          - "'hostname: bergen-paperless' in bp_tax_auto_ct.stdout_lines"
+          - "'unprivileged: 1' in bp_tax_auto_ct.stdout_lines"
+          - "'lxc.apparmor.profile: unconfined' not in bp_tax_auto_ct.stdout"
+          - "bp_tax_auto_ct.stdout_lines | select('match', '^rootfs: local-zfs:') | list | length == 1"
+          - "bp_tax_auto_ct.stdout_lines | select('match', '^mp0: local-zfs:.*mp=/srv/bergen-paperless,backup=1(,|$)') | list | length == 1"
+        fail_msg: PAPERLESS_METADATA_TIMER_TARGET_UNREVIEWED
+      no_log: true
+
+    - name: Require recent NFS backup before timer deployment
+      ansible.builtin.command:
+        argv:
+          - bash
+          - -euo
+          - pipefail
+          - -c
+          - |
+            target=/mnt/pve/bergen-synology-backup
+            fs="$(findmnt --mountpoint "$target" -n -o FSTYPE)"
+            [[ "$fs" = nfs || "$fs" = nfs4 ]]
+            find "$target/dump" -maxdepth 1 -type f \
+              -name 'vzdump-lxc-126-*.tar.zst' -mmin -2880 \
+              -size +1M -print -quit | grep -q .
+      changed_when: false
+      no_log: true
+
+    - name: Independently audit bootstrapped ledger and zero pending changes
+      ansible.builtin.command:
+        argv:
+          - pct
+          - exec
+          - '126'
+          - --
+          - podman
+          - exec
+          - -i
+          - bergen-paperless
+          - python
+          - /usr/src/paperless/src/manage.py
+          - shell
+          - --verbosity=0
+          - -c
+          - "{{ bp_tax_auto_policy_src }}"
+        stdin: "{{ {'protocol':'bergen-paperless-metadata-reconciler-v1','mode':'audit','approved':false} | to_json }}"
+        stdin_add_newline: true
+      register: bp_tax_auto_audit_raw
+      changed_when: false
+      failed_when: false
+      no_log: true
+
+    - name: Extract exactly one bounded privacy-safe timer readiness report
+      ansible.builtin.set_fact:
+        bp_tax_auto_audit_frames: >-
+          {{ bp_tax_auto_audit_raw.stdout_lines | default([]) |
+             select('match', '^BERGEN_PAPERLESS_METADATA_RECONCILER_V1:') | list }}
+      no_log: true
+
+    - name: Refuse incomplete ledger and untested live changes
+      ansible.builtin.assert:
+        that:
+          - bp_tax_auto_audit_raw.rc == 0
+          - bp_tax_auto_audit_frames | length == 1
+          - bp_tax_auto_audit_frames[0] | length < 1800
+          - (bp_tax_auto_audit_frames[0] | regex_replace('^BERGEN_PAPERLESS_METADATA_RECONCILER_V1:', '') | from_json).STATUS == 'INSPECTED'
+          - (bp_tax_auto_audit_frames[0] | regex_replace('^BERGEN_PAPERLESS_METADATA_RECONCILER_V1:', '') | from_json).LEDGER == 'VALID'
+          - (bp_tax_auto_audit_frames[0] | regex_replace('^BERGEN_PAPERLESS_METADATA_RECONCILER_V1:', '') | from_json).TAG_GAPS | int == 0
+          - (bp_tax_auto_audit_frames[0] | regex_replace('^BERGEN_PAPERLESS_METADATA_RECONCILER_V1:', '') | from_json).TYPE_GAPS | int == 0
+          - (bp_tax_auto_audit_frames[0] | regex_replace('^BERGEN_PAPERLESS_METADATA_RECONCILER_V1:', '') | from_json).CORR_GAPS | int == 0
+          - (bp_tax_auto_audit_frames[0] | regex_replace('^BERGEN_PAPERLESS_METADATA_RECONCILER_V1:', '') | from_json).MANAGED_REVOCATIONS | int == 0
+          - (bp_tax_auto_audit_frames[0] | regex_replace('^BERGEN_PAPERLESS_METADATA_RECONCILER_V1:', '') | from_json).THOMAS_PRIVATE | int >= 1
+        fail_msg: PAPERLESS_METADATA_TIMER_LEDGER_OR_POLICY_NOT_ACCEPTED
+      no_log: true
+
+    - name: Reject existing enabled timer without independent upgrade approval
+      ansible.builtin.command:
+        argv: [systemctl, is-enabled, bergen-paperless-metadata.timer]
+      register: bp_tax_auto_previous
+      changed_when: false
+      failed_when: false
+      no_log: true
+
+    - name: Refuse unexpectedly replacing an enabled automatic metadata worker
+      ansible.builtin.assert:
+        that:
+          - bp_tax_auto_previous.stdout | trim != 'enabled' or
+            (paperless_metadata_timer_upgrade_approved | default(false) | bool)
+        fail_msg: PAPERLESS_METADATA_TIMER_UPGRADE_REQUIRES_SEPARATE_APPROVAL
+      no_log: true
+
+    - name: Create private host-side policy directory
+      ansible.builtin.file:
+        path: "{{ bp_tax_auto_dir }}"
+        state: directory
+        owner: root
+        group: root
+        mode: '0700'
+
+    - name: Stage only reviewed Django reconciliation source
+      ansible.builtin.copy:
+        content: "{{ bp_tax_auto_policy_src }}"
+        dest: "{{ bp_tax_auto_dir }}/reconcile_metadata_with_provenance.py"
+        owner: root
+        group: root
+        mode: '0600'
+      no_log: true
+
+    - name: Install root-only pinning configuration for ongoing bounded updates
+      ansible.builtin.copy:
+        content: >-
+          {{ {'protocol':'bergen-paperless-metadata-auto-v1',
+              'approved':true,
+              'policy_sha256':bp_tax_auto_policy_sha,
+              'max_additions':25,
+              'max_revocations':25} | to_json }}
+        dest: "{{ bp_tax_auto_dir }}/policy.json"
+        owner: root
+        group: root
+        mode: '0600'
+      no_log: true
+
+    - name: Install bounded Proxmox-local worker without credentials
+      ansible.builtin.copy:
+        content: "{{ bp_tax_auto_runner_src }}"
+        dest: /usr/local/libexec/bergen-paperless-metadata-auto.py
+        owner: root
+        group: root
+        mode: '0700'
+      no_log: true
+
+    - name: Install independent metadata service and hourly timer
+      ansible.builtin.copy:
+        src: "{{ playbook_dir }}/../files/paperless/{{ item }}"
+        dest: "/etc/systemd/system/{{ item }}"
+        owner: root
+        group: root
+        mode: '0644'
+      loop:
+        - bergen-paperless-metadata.service
+        - bergen-paperless-metadata.timer
+
+    - name: Enable only separately approved metadata timer
+      ansible.builtin.systemd_service:
+        name: bergen-paperless-metadata.timer
+        daemon_reload: true
+        enabled: true
+        state: started
+
+    - name: Independently require timer is enabled
+      ansible.builtin.command:
+        argv: [systemctl, is-enabled, bergen-paperless-metadata.timer]
+      register: bp_tax_auto_enabled
+      changed_when: false
+
+    - name: Refuse incomplete timer activation
+      ansible.builtin.assert:
+        that:
+          - bp_tax_auto_enabled.stdout | trim == 'enabled'
+        fail_msg: PAPERLESS_METADATA_TIMER_NOT_ENABLED
+
+    - name: Report only bounded enabled metadata worker scope
+      ansible.builtin.debug:
+        msg:
+          - METADATA_TIMER=ENABLED
+          - CADENCE=HOURLY_WITH_RANDOM_10_MINUTES
+          - AUTO_ADD_LIMIT=25_PER_RUN
+          - AUTO_REVOKE_LIMIT=25_PER_RUN
+          - REVOCATION=ENGINE_PROVENANCE_ONLY
+          - NFS_BACKUP_MAX_AGE=48_HOURS
+          - DOCUMENT_PERMISSIONS=NEVER_CHANGED
+          - OTHER_SERVICES=UNCHANGED
