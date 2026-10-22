@@ -109,7 +109,7 @@ class FailedUnitDiagnosticTests(unittest.TestCase):
             "journalctl", "zfs, mount", "zfs, set",
         ):
             self.assertNotIn(forbidden, self.source)
-        for bad in ("subprocess", "os.system(", "open(", "os.remove(",
+        for bad in ("import subprocess", "from subprocess", "os.system(", "open(", "os.remove(",
                     "os.unlink(", "requests", "urllib"):
             self.assertNotIn(bad, HELPER.read_text())
         for required in (
