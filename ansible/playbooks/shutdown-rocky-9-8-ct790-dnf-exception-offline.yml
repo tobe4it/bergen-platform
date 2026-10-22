@@ -1,0 +1,318 @@
+---
+# Distinct human approval required for a narrow exception to the healthy-only
+# shutdown gate: permit either healthy systemd or *exactly* one proven failed
+# dnf-makecache.service (exit-code 1). Default READ ONLY. Never mask/repair
+# the unit, reset failed state, enable networking or convert a template.
+# Never force stop, retry, restart or rollback if shutdown fails or times out.
+- import_playbook: audit-rocky-9-8-ct790-running-readonly.yml
+
+- name: Review optional sole failed-DNF exception for one CT790 graceful shutdown
+  hosts: venombox
+  become: true
+  gather_facts: false
+  any_errors_fatal: true
+  vars:
+    rocky_dnf_shutdown_apply: "{{ rocky_ct790_dnf_shutdown_apply | default(false) | bool }}"
+    rocky_dnf_shutdown_exact_confirm: SHUTDOWN_ONLY_CT790_HEALTHY_OR_SOLE_FAILED_DNF_MAKECACHE
+    rocky_dnf_shutdown_timeout_seconds: 90
+  tasks:
+    - name: Require same-run unprivileged networkless protected running CT790
+      ansible.builtin.assert:
+        that:
+          - inventory_hostname == 'venombox'
+          - rocky_running_host.stdout == 'venombox'
+          - "'status: running' in rocky_running_status.stdout_lines"
+          - "'status: running' in rocky_running_final_status.stdout_lines"
+          - "'hostname: rocky9-base-790' in rocky_running_config.stdout_lines"
+          - "'protection: 1' in rocky_running_config.stdout_lines"
+          - "'unprivileged: 1' in rocky_running_config.stdout_lines"
+          - "'onboot: 0' in rocky_running_config.stdout_lines"
+          - "'ROCKY_9_8_CT790_RUNTIME_IDENTITY=VERIFIED' in rocky_running_guest.stdout_lines"
+          - "'NON_LOOPBACK_DEVICES=0' in rocky_running_guest.stdout_lines"
+          - "'GUEST_IDMAP_NONIDENTITY=YES' in rocky_running_guest.stdout_lines"
+          - "'hostname: nextcloud-restore-701' in rocky_running_ct701.stdout_lines"
+          - rocky_running_failed_units.rc == 0
+          - >-
+            (rocky_running_systemd.stdout | trim == 'running'
+             and rocky_running_failed_units.stdout_lines | length == 0)
+            or
+            (rocky_running_systemd.stdout | trim == 'degraded'
+             and rocky_running_failed_units.stdout_lines | length == 1)
+          - rocky_dnf_shutdown_timeout_seconds == 90
+          - not ansible_check_mode
+        fail_msg: Unexpected systemd, service, namespace or container isolation; never request shutdown.
+
+    - name: Parse exactly one current degraded unit in memory, with no log disclosure
+      ansible.builtin.command:
+        argv:
+          - python3
+          - -c
+          - "{{ lookup('ansible.builtin.file', playbook_dir ~ '/../files/nextcloud/parse_ct790_failed_unit.py') }}"
+        stdin: "{{ rocky_running_failed_units.stdout }}"
+        stdin_add_newline: false
+      changed_when: false
+      failed_when: false
+      no_log: true
+      register: rocky_dnf_shutdown_unit_parse
+      when: rocky_running_systemd.stdout | trim == 'degraded'
+
+    - name: Allow degraded state only with strictly parsed sole dnf-makecache.service
+      ansible.builtin.assert:
+        that:
+          - rocky_dnf_shutdown_unit_parse.rc == 0
+          - (rocky_dnf_shutdown_unit_parse.stdout | from_json).result == 'ROCKY_9_8_CT790_SINGLE_FAILED_UNIT_PARSED'
+          - (rocky_dnf_shutdown_unit_parse.stdout | from_json).failed_unit_count == 1
+          - (rocky_dnf_shutdown_unit_parse.stdout | from_json).unit == 'dnf-makecache.service'
+          - (rocky_dnf_shutdown_unit_parse.stdout | from_json).writes == 0
+        fail_msg: Systemd degraded for something other than one validated DNF metadata-cache failure.
+      when: rocky_running_systemd.stdout | trim == 'degraded'
+
+    - name: Read bounded failure properties of only verified DNF unit
+      ansible.builtin.command:
+        argv:
+          - pct
+          - exec
+          - '790'
+          - --
+          - systemctl
+          - --no-pager
+          - show
+          - --property=Id,LoadState,ActiveState,SubState,Result,ExecMainCode,ExecMainStatus,StateChangeTimestamp
+          - dnf-makecache.service
+      changed_when: false
+      no_log: true
+      register: rocky_dnf_shutdown_unit_show
+      when: rocky_running_systemd.stdout | trim == 'degraded'
+
+    - name: Require bounded exact DNF service metadata before permitting a degraded exception
+      ansible.builtin.assert:
+        that:
+          - rocky_dnf_shutdown_unit_show.rc == 0
+          - rocky_dnf_shutdown_unit_show.stdout | length <= 2048
+          - rocky_dnf_shutdown_unit_show.stdout_lines | length == 8
+          - >-
+            (rocky_dnf_shutdown_unit_show.stdout_lines
+             | select('match', '^(?:Id|LoadState|ActiveState|SubState|Result|ExecMainCode|ExecMainStatus|StateChangeTimestamp)=')
+             | list | length) == 8
+        fail_msg: DNF failure state not safely inspectable; no shutdown permitted.
+      when: rocky_running_systemd.stdout | trim == 'degraded'
+
+    - name: Decode exactly approved DNF status properties in memory
+      ansible.builtin.set_fact:
+        rocky_dnf_shutdown_unit_fields: "{{ dict(rocky_dnf_shutdown_unit_show.stdout_lines | map('split', '=', 1)) }}"
+      changed_when: false
+      no_log: true
+      when: rocky_running_systemd.stdout | trim == 'degraded'
+
+    - name: Refuse degraded state without exactly one DNF exit status 1
+      ansible.builtin.assert:
+        that:
+          - rocky_dnf_shutdown_unit_fields | length == 8
+          - rocky_dnf_shutdown_unit_fields.Id == 'dnf-makecache.service'
+          - rocky_dnf_shutdown_unit_fields.LoadState == 'loaded'
+          - rocky_dnf_shutdown_unit_fields.ActiveState == 'failed'
+          - rocky_dnf_shutdown_unit_fields.SubState == 'failed'
+          - rocky_dnf_shutdown_unit_fields.Result == 'exit-code'
+          - rocky_dnf_shutdown_unit_fields.ExecMainCode == '1'
+          - rocky_dnf_shutdown_unit_fields.ExecMainStatus == '1'
+        fail_msg: DNF metadata-cache service failure must exactly match already observed exit-code 1.
+      when: rocky_running_systemd.stdout | trim == 'degraded'
+
+    - name: Read installed Proxmox shutdown help without mutation
+      ansible.builtin.command:
+        argv: [pct, help, shutdown]
+      changed_when: false
+      register: rocky_dnf_shutdown_help
+
+    - name: Require explicit no-force fallback and supported 90-second timeout
+      ansible.builtin.assert:
+        that:
+          - rocky_dnf_shutdown_help.rc == 0
+          - rocky_dnf_shutdown_help.stdout is search('(?i)pct shutdown')
+          - rocky_dnf_shutdown_help.stdout is search('--timeout')
+          - rocky_dnf_shutdown_help.stdout is search('--forceStop')
+        fail_msg: Host pct shutdown syntax differs from reviewed command; never guess shutdown flags.
+
+    - name: Report only read-only proposed shutdown scope without executing it
+      ansible.builtin.debug:
+        msg:
+          result: ROCKY_9_8_CT790_DNF_EXCEPTION_SHUTDOWN_PLAN_READ_ONLY_READY
+          vmid: 790
+          container_status: RUNNING
+          systemd_state: "{{ rocky_running_systemd.stdout | trim }}"
+          failed_unit_count: "{{ rocky_running_failed_units.stdout_lines | length }}"
+          degraded_exception_if_any: >-
+            {{ 'SOLE_DNF_MAKECACHE_EXIT_1_CONFIRMED'
+               if rocky_running_systemd.stdout | trim == 'degraded'
+               else 'NO_EXCEPTION_NEEDED_SYSTEMD_HEALTHY' }}
+          network_interfaces_beyond_loopback: 0
+          ct701_unchanged: true
+          proposed_command: pct shutdown 790 --timeout 90 --forceStop 0
+          shutdown_executed: false
+          forced_stop_authorized: false
+          service_changes_authorized: false
+          pct_template_authorized: false
+          changed: false
+          next_gate: New exact CT790-only human approval expressly including sole failed-DNF exception and CT790 shutdown writes.
+      when: not rocky_dnf_shutdown_apply | bool
+
+    - name: Demand separate exact approval including the failed DNF exception
+      ansible.builtin.assert:
+        that:
+          - rocky_ct790_dnf_shutdown_apply is defined
+          - rocky_ct790_dnf_shutdown_apply | bool
+          - rocky_ct790_dnf_shutdown_confirm is defined
+          - rocky_ct790_dnf_shutdown_confirm == rocky_dnf_shutdown_exact_confirm
+        fail_msg: Previous healthy-only approval does not cover failed-DNF shutdown exception.
+      when: rocky_dnf_shutdown_apply | bool
+
+    - name: Check CT790 config immediately before any authorized shutdown
+      ansible.builtin.command:
+        argv: [pct, config, '790']
+      changed_when: false
+      no_log: true
+      register: rocky_dnf_shutdown_last_config
+      when: rocky_dnf_shutdown_apply | bool
+
+    - name: Refuse any CT790 config drift since audited guest isolation
+      ansible.builtin.assert:
+        that:
+          - rocky_dnf_shutdown_last_config.stdout == rocky_running_config.stdout
+      when: rocky_dnf_shutdown_apply | bool
+
+    - name: Reconfirm CT790 actually running before any authorized shutdown
+      ansible.builtin.command:
+        argv: [pct, status, '790']
+      changed_when: false
+      register: rocky_dnf_shutdown_last_status
+      when: rocky_dnf_shutdown_apply | bool
+
+    - name: Refuse already stopped or unexpectedly restarted container
+      ansible.builtin.assert:
+        that:
+          - "'status: running' in rocky_dnf_shutdown_last_status.stdout_lines"
+      when: rocky_dnf_shutdown_apply | bool
+
+    - name: Recheck systemd state immediately before the single authorized shutdown
+      ansible.builtin.command:
+        argv: [pct, exec, '790', --, systemctl, --no-pager, is-system-running]
+      changed_when: false
+      failed_when: false
+      no_log: true
+      register: rocky_dnf_shutdown_last_systemd
+      when: rocky_dnf_shutdown_apply | bool
+
+    - name: Recheck complete failed-unit listing immediately before shutdown
+      ansible.builtin.command:
+        argv: [pct, exec, '790', --, systemctl, --no-pager, --plain, --no-legend, list-units, --state=failed]
+      changed_when: false
+      failed_when: false
+      no_log: true
+      register: rocky_dnf_shutdown_last_failed
+      when: rocky_dnf_shutdown_apply | bool
+
+    - name: Refuse live systemd or failed-unit drift since same-run preflight
+      ansible.builtin.assert:
+        that:
+          - rocky_dnf_shutdown_last_systemd.rc == rocky_running_systemd.rc
+          - rocky_dnf_shutdown_last_systemd.stdout == rocky_running_systemd.stdout
+          - rocky_dnf_shutdown_last_failed.rc == rocky_running_failed_units.rc
+          - rocky_dnf_shutdown_last_failed.stdout == rocky_running_failed_units.stdout
+        fail_msg: Live systemd state changed while preparing shutdown; never retry or relax conditions.
+      when: rocky_dnf_shutdown_apply | bool
+
+    - name: Reinspect sole failed DNF metadata immediately before shutdown if degraded
+      ansible.builtin.command:
+        argv:
+          - pct
+          - exec
+          - '790'
+          - --
+          - systemctl
+          - --no-pager
+          - show
+          - --property=Id,LoadState,ActiveState,SubState,Result,ExecMainCode,ExecMainStatus,StateChangeTimestamp
+          - dnf-makecache.service
+      changed_when: false
+      no_log: true
+      register: rocky_dnf_shutdown_last_unit_show
+      when:
+        - rocky_dnf_shutdown_apply | bool
+        - rocky_running_systemd.stdout | trim == 'degraded'
+
+    - name: Refuse DNF failure state drift before executing approved shutdown
+      ansible.builtin.assert:
+        that:
+          - rocky_dnf_shutdown_last_unit_show.rc == 0
+          - rocky_dnf_shutdown_last_unit_show.stdout == rocky_dnf_shutdown_unit_show.stdout
+        fail_msg: Failed DNF unit changed after preview; do not request a shutdown.
+      when:
+        - rocky_dnf_shutdown_apply | bool
+        - rocky_running_systemd.stdout | trim == 'degraded'
+
+    - name: Execute exactly one separately approved graceful offline CT790 shutdown
+      ansible.builtin.command:
+        argv: [pct, shutdown, '790', --timeout, '90', --forceStop, '0']
+      changed_when: true
+      no_log: true
+      register: rocky_dnf_shutdown_result
+      when: rocky_dnf_shutdown_apply | bool
+
+    - name: Read CT790 state after exactly one graceful shutdown request
+      ansible.builtin.command:
+        argv: [pct, status, '790']
+      changed_when: false
+      register: rocky_dnf_shutdown_after_status
+      when: rocky_dnf_shutdown_apply | bool
+
+    - name: Confirm shutdown completed without any hard stop or retry
+      ansible.builtin.assert:
+        that:
+          - "'status: stopped' in rocky_dnf_shutdown_after_status.stdout_lines"
+        fail_msg: Unexpected state after one graceful shutdown; never force stop, retry, restart or roll back.
+      when: rocky_dnf_shutdown_apply | bool
+
+    - name: Read original CT790 configuration after shutdown without modifications
+      ansible.builtin.command:
+        argv: [pct, config, '790']
+      changed_when: false
+      no_log: true
+      register: rocky_dnf_shutdown_after_config
+      when: rocky_dnf_shutdown_apply | bool
+
+    - name: Reject CT790 Proxmox config drift after graceful shutdown
+      ansible.builtin.assert:
+        that:
+          - rocky_dnf_shutdown_after_config.stdout == rocky_running_config.stdout
+      when: rocky_dnf_shutdown_apply | bool
+
+    - name: Read protected CT701 config after CT790 shutdown
+      ansible.builtin.command:
+        argv: [pct, config, '701']
+      changed_when: false
+      no_log: true
+      register: rocky_dnf_shutdown_ct701_after
+      when: rocky_dnf_shutdown_apply | bool
+
+    - name: Require exact protected CT701 config unchanged
+      ansible.builtin.assert:
+        that:
+          - rocky_dnf_shutdown_ct701_after.stdout == rocky_running_ct701.stdout
+      when: rocky_dnf_shutdown_apply | bool
+
+    - name: Report completed graceful shutdown without template conversion
+      ansible.builtin.debug:
+        msg:
+          result: ROCKY_9_8_CT790_DNF_EXCEPTION_GRACEFUL_SHUTDOWN_STOPPED_VERIFIED
+          vmid: 790
+          container_status: STOPPED
+          forced_stop: false
+          shutdown_attempts: 1
+          systemd_state_before_shutdown: "{{ rocky_running_systemd.stdout | trim }}"
+          only_possible_exception: dnf-makecache.service
+          ct790_config_unchanged: true
+          ct701_config_unchanged: true
+          pct_template_authorized: false
+          no_automatic_restart_or_rollback: true
+          next_gate: Independently inspect stopped Rocky rootfs and sanitation policy before separately approved Proxmox template conversion.
+      when: rocky_dnf_shutdown_apply | bool
