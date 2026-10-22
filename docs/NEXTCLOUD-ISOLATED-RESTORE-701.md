@@ -3141,3 +3141,123 @@ set machine ID and nonempty systemd random seed are
 **still present** in CT790. Their deletion/reset and any
 clone creation, start, network provisioning or
 `pct template` remain unapproved.
+
+
+## CT790 exact no-write per-instance sanitation target inventory (2026-10-22)
+
+After retrieving the complete **65-task** CT790 firstboot unit
+audit email, we confirmed that all eight reviewed SSH
+activation links were absent, `/usr/sbin/sshd` and
+`/usr/libexec/openssh/sshd-keygen` were absent, and
+`/usr/bin/ssh-keygen` existed and was executable. The
+default Rocky base must **not** assume operational
+OpenSSH or automatic key regeneration. Later clones
+requiring SSH need separately approved per-clone
+`openssh-server` provisioning with **unique new host
+keys** before exposure to a network.
+
+### Correct noninteractive machine-ID policy
+
+The earlier read-only proposed action that preferred
+the literal `uninitialized` marker has been superseded
+after checking upstream `machine-id(5)`.
+For a noninteractive generic image, **prefer resetting
+`/etc/machine-id` to a zero-length regular file**, subject
+to a separately approved disposable clone test. This
+causes systemd to generate/commit a new ID but does
+**not** trigger `ConditionFirstBoot=yes`. Marking it
+`uninitialized` or removing it changes the first-boot
+semantics and may trigger service presets or other
+first-boot initialization. This choice must be tested
+under the actual Proxmox LXC environment to prove
+unique IDs between independent clones; it is not yet
+authorized to write any file.
+
+Authoritative documentation:
+https://www.freedesktop.org/software/systemd/man/259/machine-id.html
+
+### Additional inspection, not cleanup
+
+New read-only playbook:
+`ansible/playbooks/audit-rocky-9-8-ct790-sanitization-targets-readonly.yml`.
+
+It imports the already-tested independently verified
+**stopped-only** CT790 PVE/ZFS/firstboot audit and
+refuses a changed target, guest start, unmounted dataset
+or CT701 config drift. The exact identity metadata
+helper inspects only **nine fixed regular-file paths**
+and five bounded directories. It does **not** read any
+machine ID, SSH host-key data or random seed contents.
+These specific candidate files are included:
+
+- `/etc/machine-id` (metadata only; value categorization
+  already provided by the preceding independent audit)
+- `/var/lib/systemd/random-seed`
+- `/var/lib/systemd/timers/stamp-dnf-makecache.timer`
+- Exact private/public RSA, ECDSA and Ed25519
+  SSH host-key filenames under `/etc/ssh/` (six total)
+
+The additional directories are `/etc/ssh`,
+`/var/lib/systemd/timers`, `/var/cache/dnf`,
+`/var/lib/dnf`, and `/var/lib/NetworkManager`.
+The helper only returns known static labels and
+bounded aggregate counts, not untrusted names.
+It reports type, whether size is nonzero,
+hardlink count equal to one, rootfs-owner match
+and private-permission status; a missing file or
+symlink is surfaced without following it.
+All reads use descriptor-relative paths and
+`O_NOFOLLOW`, `O_NOATIME`.
+A separate yes/no classification reports whether
+the six expected host-key files exist as regular
+pairs, while unknown extra host-key patterns are
+counted but not disclosed.
+
+**No-apply design:** The playbook includes only
+`assert`, `command` with a strict no-write
+allowlist, and `debug`. It does not mount anything,
+boot CT790, run `pct exec`, change the guest,
+delete identities or mark the CT as a PVE template.
+Its expected receipt is
+`ROCKY_9_8_CT790_EXACT_SANITATION_TARGETS_READ_ONLY_RECORDED`,
+`changed=0`, `failed=0`.
+If an artifact is absent, symlinked, hardlinked or
+unexpected, review its metadata and **do not**
+automatically authorize deletion.
+
+**Unchanged hold gates:**
+`sanitation_authorized=false`,
+`sanitation_complete=false`,
+`pct_template_authorized=false`.
+Leave `/var/lib/dnf`, `/var/lib/NetworkManager` and
+the DNF timer unit intact pending separate inspection
+and approval. The unexpected offline DNS failure
+from `dnf-makecache.service` was a narrow shutdown
+exception, not a reason to disable DNF timers
+globally.
+
+On bp-controller, use a clean commit-pinned worktree
+and no apply flags. Do not rerun the shutdown playbook:
+
+    BASE="$HOME/bergen-platform"
+    WT="$HOME/bergen-platform-nextcloud-restore"
+    BRANCH="feat/nextcloud-isolated-restore-701-20261019"
+    SSH_ARGS="-C -o ControlMaster=no -o ControlPath=none -o ConnectTimeout=10 -o ServerAliveInterval=10 -o ServerAliveCountMax=2"
+    if [ -n "$(git -C "$WT" status --porcelain)" ]; then
+      echo "STOP: dirty worktree"
+    else
+      git -C "$WT" fetch origin "$BRANCH" &&
+      git -C "$WT" switch --detach "origin/$BRANCH" &&
+      ANSIBLE_SSH_ARGS="$SSH_ARGS" "$BASE/.venv/bin/ansible-playbook" \
+        -i "$BASE/ansible/inventory.yml" \
+        -i "$BASE/ansible/inventory.local.yml" \
+        "$WT/ansible/playbooks/audit-rocky-9-8-ct790-sanitization-targets-readonly.yml" \
+        --limit venombox --vault-id infra@prompt
+    fi
+
+After the metadata proof, prepare a separately reviewed
+and explicitly approved **idempotent** sanitation
+routine, with a recent backup and post-write
+verification before any `pct template`. No clone
+creation, startup, network attachment or rootfs
+write is implicitly authorized by this design.
