@@ -95,9 +95,11 @@ operator can run the exact same playbook with all three approvals:
 `paperless_native_chat_e2e_mode=live`,
 `paperless_native_chat_e2e_approved=true`, and
 `paperless_native_chat_model_inference_approved=true`.
-The site-local `paperless_ai_catalog_verified_backup` must also be true.
-The playbook independently verifies an NFS backup archive from the past
-48 hours. These are genuine LLM calls over existing private documents,
+The site-local `paperless_ai_catalog_verified_backup` must also be true;
+it defaults to false in the example configuration. Set this flag to true
+**only after personally confirming the backup evidence**. The playbook
+independently verifies an NFS backup archive from the past 48 hours; merely
+having an archive does not prove a successful restore. These are genuine LLM calls over existing private documents,
 not mocks. Tests use bounded output but may have model latency and may
 create local inference logs. No password or API key is needed.
 
@@ -110,7 +112,8 @@ create local inference logs. No password or API key is needed.
   -e "@$HOME/bergen-platform/ansible/vars/paperless-ai-catalog.local.yml" \
   -e paperless_native_chat_e2e_mode=live \
   -e paperless_native_chat_e2e_approved=true \
-  -e paperless_native_chat_model_inference_approved=true
+  -e paperless_native_chat_model_inference_approved=true \
+  -e paperless_ai_catalog_verified_backup=true
 ```
 
 Expected: `PARENT_DIRECT_DENIED=CHILD_IDENTITIES`,
