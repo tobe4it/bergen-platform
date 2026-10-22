@@ -205,7 +205,6 @@ def main():
               "NON_CHAT_CONTENT_CHANGED")
         # A strict fail-closed patch: write and validate Nginx before reload.
         write_atomic(new_bytes, old_stat)
-        applied = False
         try:
             check(command_ok(["nginx", "-t"]), "NGINX_NEW_SYNTAX_BAD")
             check(command_ok(["systemctl", "reload", "nginx"]),
@@ -214,19 +213,18 @@ def main():
             check(actual == new_bytes and candidate(text)[1],
                   "VHOST_POST_VERIFY_FAILED")
             check(command_ok(["nginx", "-t"]), "NGINX_POST_SYNTAX_BAD")
-            applied = True
-        finally:
-            if not applied:
-                # Roll back only the named Paperless vhost; no other service.
+        except Exception:
+            # Restore only the named Paperless vhost, and reload restored Nginx.
+            try:
                 write_atomic(old_bytes, old_stat)
                 restored, _content, _st = read_config()
-                if restored != old_bytes or not command_ok(["nginx", "-t"]):
-                    status = "ROLLBACK_UNVERIFIED"
-                elif not command_ok(["systemctl", "reload", "nginx"]):
-                    status = "ROLLBACK_RELOAD_FAILED"
-                else:
-                    status = "ROLLED_BACK"
-        check(applied, status)
+                check(restored == old_bytes and command_ok(["nginx", "-t"]),
+                      "ROLLBACK_UNVERIFIED")
+                check(command_ok(["systemctl", "reload", "nginx"]),
+                      "ROLLBACK_RELOAD_FAILED")
+            except Exception:
+                raise Refusal("ROLLBACK_UNVERIFIED")
+            raise Refusal("APPLY_FAILED_ROLLED_BACK")
         emit("APPLIED", MODE="APPLY", CURRENT_SHA256=sha(new_bytes),
              SERVER_ALLOWLIST_UNCHANGED="YES",
              DEDICATED_CHAT_LOCATION="YES",
@@ -238,4 +236,5 @@ def main():
         emit("BLOCKED", MODE=mode, REASON="UNCLASSIFIED", CHANGED=False)
 
 
-main()
+if __name__ == "__main__":
+    main()
