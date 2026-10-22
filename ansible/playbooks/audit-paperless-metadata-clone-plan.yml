@@ -1,0 +1,104 @@
+---
+# READ ONLY: no networking, guest start, restore, storage or db mutations.
+- name: Plan fully offline restored Paperless metadata integration guest
+  hosts: venombox
+  become: true
+  gather_facts: false
+  vars:
+    bp_clone_plan_script: "{{ lookup('ansible.builtin.file', playbook_dir ~ '/../files/paperless/audit_isolated_metadata_clone_plan.py', rstrip=False) }}"
+  tasks:
+    - name: Require exact Proxmox target and reject all write approvals
+      ansible.builtin.assert:
+        that:
+          - inventory_hostname == 'venombox'
+          - not ansible_check_mode
+          - not (paperless_metadata_timer_activate | default(false) | bool)
+          - not (paperless_taxonomy_apply_approved | default(false) | bool)
+          - not (paperless_metadata_clone_restore_approved | default(false) | bool)
+        fail_msg: PAPERLESS_CLONE_PLAN_READ_ONLY_ONLY
+      no_log: true
+
+    - name: Compute one bounded local storage and VMID plan without changes
+      ansible.builtin.command:
+        argv: [python3, -c, "{{ bp_clone_plan_script }}"]
+      changed_when: false
+      failed_when: false
+      register: bp_clone_plan_raw
+      no_log: true
+
+    - name: Extract exactly one bounded sanitized clone planning result
+      ansible.builtin.set_fact:
+        bp_clone_plan_frames: >-
+          {{ bp_clone_plan_raw.stdout_lines | default([]) |
+             select('match', '^BERGEN_PAPERLESS_METADATA_CLONE_PLAN_V1:') | list }}
+      no_log: true
+
+    - name: Refuse nonzero or ambiguous planning output
+      ansible.builtin.assert:
+        that:
+          - bp_clone_plan_raw.rc == 0
+          - bp_clone_plan_frames | length == 1
+          - bp_clone_plan_frames[0] | length < 1500
+        fail_msg: PAPERLESS_CLONE_PLAN_FRAME_INVALID
+      no_log: true
+
+    - name: Decode only bounded candidate and capacity counters
+      ansible.builtin.set_fact:
+        bp_clone_plan: >-
+          {{ bp_clone_plan_frames[0] |
+             regex_replace('^BERGEN_PAPERLESS_METADATA_CLONE_PLAN_V1:', '') | from_json }}
+      no_log: true
+
+    - name: Expose only allowed refusal reason
+      ansible.builtin.debug:
+        msg:
+          - "STATUS={{ bp_clone_plan.STATUS if bp_clone_plan.STATUS in ['BLOCKED', 'READY_FOR_NO_NETWORK_RESTORE_DESIGN'] else 'UNCLASSIFIED' }}"
+          - "REASON={{ bp_clone_plan.REASON | default('NONE') if
+              bp_clone_plan.REASON | default('NONE') in [
+                'NONE','ROOT_REQUIRED','HOST_IDENTITY_UNREVIEWED',
+                'READ_ONLY_HOST_COMMAND_FAILED','SOURCE_VOLUME_SIZE_UNKNOWN',
+                'SOURCE_VOLUME_SIZE_UNREVIEWED','SOURCE_CT_IDENTITY_UNREVIEWED',
+                'SOURCE_VOLUME_LAYOUT_UNREVIEWED','SOURCE_GUEST_SPECIAL_MOUNTS_UNREVIEWED',
+                'STORAGE_ENTRY_MISSING','STORAGE_NOT_ACTIVE_ZFS',
+                'STORAGE_AVAILABLE_SIZE_UNREVIEWED','CLUSTER_INVENTORY_UNREVIEWED',
+                'CLUSTER_VMID_UNREVIEWED','CLUSTER_VMIDS_AMBIGUOUS',
+                'SOURCE_NOT_PRESENT_IN_CLUSTER','NO_FREE_ID_IN_REVIEWED_POOL',
+                'INSUFFICIENT_PLANNING_STORAGE','UNCLASSIFIED'
+              ] else 'UNCLASSIFIED' }}"
+
+    - name: Reject unproven candidate or insufficient ZFS planning capacity
+      ansible.builtin.assert:
+        that:
+          - bp_clone_plan.STATUS == 'READY_FOR_NO_NETWORK_RESTORE_DESIGN'
+          - bp_clone_plan.CANDIDATE_VMID | int >= 820
+          - bp_clone_plan.CANDIDATE_VMID | int <= 829
+          - bp_clone_plan.VMID_STATE == 'FREE_AT_AUDIT_NOT_RESERVED'
+          - bp_clone_plan.STORAGE == 'local-zfs'
+          - bp_clone_plan.STORAGE_FREE_GIB | int >= bp_clone_plan.PLANNING_MINIMUM_FREE_GIB | int
+          - bp_clone_plan.TEST_NET_INTERFACES == 'NONE_PROPOSED'
+          - bp_clone_plan.NETWORK_ISOLATION_PROVEN == 'NO'
+          - bp_clone_plan.ARCHIVE_INTEGRITY_VERIFIED == 'NO'
+          - bp_clone_plan.CLONE_CREATED == 'NO'
+          - bp_clone_plan.CHANGED == false
+        fail_msg: PAPERLESS_CLONE_PLAN_NOT_APPROVED
+      no_log: true
+
+    - name: Report candidate not reserved and no production modifications
+      ansible.builtin.debug:
+        msg:
+          - AUDIT=READ_ONLY
+          - "STATUS={{ bp_clone_plan.STATUS }}"
+          - "VMID_CANDIDATE={{ bp_clone_plan.CANDIDATE_VMID }}"
+          - VMID_STATE=FREE_AT_AUDIT_NOT_RESERVED
+          - STORAGE=local-zfs
+          - "STORAGE_FREE_GIB={{ bp_clone_plan.STORAGE_FREE_GIB }}"
+          - "SOURCE_ROOTFS_CONFIGURED_GIB={{ bp_clone_plan.SOURCE_ROOTFS_CONFIGURED_GIB }}"
+          - "SOURCE_DATA_MOUNT_CONFIGURED_GIB={{ bp_clone_plan.SOURCE_DATA_MOUNT_CONFIGURED_GIB }}"
+          - "PLANNING_MINIMUM_FREE_GIB={{ bp_clone_plan.PLANNING_MINIMUM_FREE_GIB }}"
+          - TEST_NET_INTERFACES=NONE_PROPOSED
+          - NETWORK_ISOLATION_PROVEN=NO
+          - ARCHIVE_INTEGRITY_VERIFIED=NO
+          - RESTORE_PERFORMED=NO
+          - CLONE_CREATED=NO
+          - NEXT_GATE=EXPLICIT_RESTORE_AND_NO_NETWORK_CONFIGURATION_REVIEW
+          - CHANGED=False
