@@ -1,0 +1,182 @@
+---
+# Default read-only. Only the dedicated Paperless native-chat location may be
+# changed in existing Nginx CT125. No modifications to generic location /,
+# TLS, allowlist, SSO, SSH forwarding, Paperless, tags, or document ACLs.
+- name: Diagnose and optionally repair Paperless native chat Nginx streaming
+  hosts: venombox
+  become: true
+  gather_facts: false
+  vars:
+    bp_chat_proxy_mode: "{{ paperless_chat_proxy_mode | default('audit') }}"
+    bp_chat_proxy_apply: "{{ bp_chat_proxy_mode == 'apply' }}"
+    bp_chat_proxy_expected_sha: "{{ paperless_chat_proxy_expected_sha256 | default('NONE') }}"
+    bp_chat_proxy_script: "{{ lookup('ansible.builtin.file', playbook_dir ~ '/../files/paperless/repair_native_chat_nginx.py', rstrip=False) }}"
+    bp_chat_proxy_frame: "BERGEN_PAPERLESS_CHAT_NGINX_V1:"
+  tasks:
+    - name: Require exact host, mode and independent approved fingerprint
+      ansible.builtin.assert:
+        that:
+          - inventory_hostname == 'venombox'
+          - not ansible_check_mode
+          - bp_chat_proxy_mode in ['audit', 'apply']
+          - not bp_chat_proxy_apply or (paperless_chat_proxy_apply_approved | default(false) | bool)
+          - not bp_chat_proxy_apply or (bp_chat_proxy_expected_sha is match('^[a-f0-9]{64}$'))
+          - bp_chat_proxy_apply or bp_chat_proxy_expected_sha == 'NONE'
+        fail_msg: PAPERLESS_CHAT_PROXY_APPLY_NOT_AUTHORIZED
+      no_log: true
+
+    - name: Verify existing proxy CT125 is still the reviewed unprivileged guest
+      ansible.builtin.command:
+        argv: [pct, config, '125']
+      register: bp_chat_proxy_ct_config
+      changed_when: false
+      no_log: true
+
+    - name: Refuse unexpected proxy guest or unsafe isolation
+      ansible.builtin.assert:
+        that:
+          - bp_chat_proxy_ct_config.rc == 0
+          - "'hostname: bergen-proxy' in bp_chat_proxy_ct_config.stdout_lines"
+          - "'unprivileged: 1' in bp_chat_proxy_ct_config.stdout_lines"
+          - "'lxc.apparmor.profile: unconfined' not in bp_chat_proxy_ct_config.stdout"
+        fail_msg: PAPERLESS_CHAT_PROXY_TARGET_UNREVIEWED
+      no_log: true
+
+    - name: Read live proxy vhost in place and validate current Nginx baseline
+      ansible.builtin.command:
+        argv:
+          - pct
+          - exec
+          - '125'
+          - --
+          - python3
+          - -c
+          - "{{ bp_chat_proxy_script }}"
+          - audit
+          - NONE
+          - '0'
+      register: bp_chat_proxy_audit_raw
+      changed_when: false
+      failed_when: false
+      no_log: true
+
+    - name: Extract one bounded sanitized live preview frame
+      ansible.builtin.set_fact:
+        bp_chat_proxy_audit_frames: >-
+          {{ bp_chat_proxy_audit_raw.stdout_lines | default([]) |
+             select('match', '^BERGEN_PAPERLESS_CHAT_NGINX_V1:') | list }}
+      no_log: true
+
+    - name: Refuse nonzero result or ambiguous preview
+      ansible.builtin.assert:
+        that:
+          - bp_chat_proxy_audit_raw.rc == 0
+          - bp_chat_proxy_audit_frames | length == 1
+          - bp_chat_proxy_audit_frames[0] | length < 1600
+        fail_msg: PAPERLESS_CHAT_PROXY_AUDIT_FRAME_MISSING
+      no_log: true
+
+    - name: Parse only bounded live configuration status and fingerprint
+      ansible.builtin.set_fact:
+        bp_chat_proxy_audit: >-
+          {{ bp_chat_proxy_audit_frames[0] |
+             regex_replace('^BERGEN_PAPERLESS_CHAT_NGINX_V1:', '') | from_json }}
+      no_log: true
+
+    - name: Report only allowlisted diagnostic error codes before fail closed
+      ansible.builtin.debug:
+        msg:
+          - "AUDIT_STATUS={{ bp_chat_proxy_audit.STATUS if bp_chat_proxy_audit.STATUS in ['READY_FOR_APPLY','ALREADY_APPLIED','BLOCKED'] else 'UNCLASSIFIED' }}"
+          - "AUDIT_REASON={{ bp_chat_proxy_audit.REASON | default('NONE') if
+              bp_chat_proxy_audit.REASON | default('NONE') in [
+                'NONE','ARGUMENTS_UNREVIEWED','MODE_APPROVAL_UNREVIEWED',
+                'EXPECTED_SHA_UNREVIEWED','AUDIT_EXPECTED_SHA_UNREVIEWED',
+                'WRONG_PROXY_GUEST','VHOST_PATH_UNREVIEWED',
+                'VHOST_TARGET_UNREVIEWED','VHOST_OWNER_MODE_UNREVIEWED',
+                'VHOST_TOO_LARGE','VHOST_SIZE_DRIFT','VHOST_ENCODING_UNREVIEWED',
+                'VHOST_TEMPLATE_UNREVIEWED','VHOST_SCOPE_UNREVIEWED',
+                'VHOST_BASELINE_UNREVIEWED','VHOST_TLS_OR_ALLOWLIST_UNREVIEWED',
+                'VHOST_ALLOWLIST_UNSAFE','ROOT_LOCATION_UNREVIEWED',
+                'PAPERLESS_UPSTREAM_UNREVIEWED','ROOT_HEADERS_UNREVIEWED',
+                'EXTRA_LOCATION_UNREVIEWED','CONFLICTING_CHAT_LOCATION',
+                'DUPLICATE_CHAT_LOCATION','NGINX_BASELINE_BAD','NGINX_NOT_ACTIVE',
+                'UNCLASSIFIED'
+              ] else 'UNCLASSIFIED' }}"
+      when: not bp_chat_proxy_apply
+
+    - name: Require current safe exact Paperless location and valid Nginx
+      ansible.builtin.assert:
+        that:
+          - bp_chat_proxy_audit.STATUS in ['READY_FOR_APPLY','ALREADY_APPLIED']
+          - bp_chat_proxy_audit.MODE == 'AUDIT'
+          - bp_chat_proxy_audit.SERVER_ALLOWLIST_UNCHANGED == 'YES'
+          - bp_chat_proxy_audit.CURRENT_SHA256 is match('^[a-f0-9]{64}$')
+          - not bp_chat_proxy_apply or bp_chat_proxy_audit.CURRENT_SHA256 == bp_chat_proxy_expected_sha
+        fail_msg: PAPERLESS_CHAT_PROXY_BASELINE_NOT_ACCEPTED
+      no_log: true
+
+    - name: Report read-only native chat proxy fix readiness
+      ansible.builtin.debug:
+        msg:
+          - "AUDIT={{ bp_chat_proxy_audit.STATUS }}"
+          - "CURRENT_VHOST_SHA256={{ bp_chat_proxy_audit.CURRENT_SHA256 }}"
+          - "DEDICATED_CHAT_LOCATION={{ bp_chat_proxy_audit.DEDICATED_CHAT_LOCATION }}"
+          - "CHAT_READ_TIMEOUT={{ bp_chat_proxy_audit.CHAT_READ_TIMEOUT }}"
+          - "CHAT_BUFFERING_OFF={{ bp_chat_proxy_audit.CHAT_BUFFERING_OFF }}"
+          - "NEXT_GATE=EXPLICIT_SHA_PINNED_APPLY_AND_BROWSER_TEST"
+          - CHANGED=False
+      when: not bp_chat_proxy_apply
+
+    - name: Perform separately authorized atomic vhost patch and Nginx reload
+      ansible.builtin.command:
+        argv:
+          - pct
+          - exec
+          - '125'
+          - --
+          - python3
+          - -c
+          - "{{ bp_chat_proxy_script }}"
+          - apply
+          - "{{ bp_chat_proxy_expected_sha }}"
+          - '1'
+      register: bp_chat_proxy_apply_raw
+      changed_when: >-
+        (bp_chat_proxy_apply_raw.stdout | default('')) is
+        search('"STATUS":"APPLIED"')
+      failed_when: false
+      no_log: true
+      when: bp_chat_proxy_apply
+
+    - name: Require one complete bounded apply result
+      ansible.builtin.set_fact:
+        bp_chat_proxy_apply_frames: >-
+          {{ bp_chat_proxy_apply_raw.stdout_lines | default([]) |
+             select('match', '^BERGEN_PAPERLESS_CHAT_NGINX_V1:') | list }}
+      no_log: true
+      when: bp_chat_proxy_apply
+
+    - name: Refuse missing or ambiguous post-reload verification
+      ansible.builtin.assert:
+        that:
+          - bp_chat_proxy_apply_raw.rc == 0
+          - bp_chat_proxy_apply_frames | length == 1
+          - bp_chat_proxy_apply_frames[0] | length < 1600
+          - (bp_chat_proxy_apply_frames[0] | regex_replace('^BERGEN_PAPERLESS_CHAT_NGINX_V1:', '') | from_json).STATUS in ['APPLIED','ALREADY_APPLIED']
+          - (bp_chat_proxy_apply_frames[0] | regex_replace('^BERGEN_PAPERLESS_CHAT_NGINX_V1:', '') | from_json).CHAT_BUFFERING_OFF == 'YES'
+          - (bp_chat_proxy_apply_frames[0] | regex_replace('^BERGEN_PAPERLESS_CHAT_NGINX_V1:', '') | from_json).CHAT_READ_TIMEOUT == '300s'
+          - (bp_chat_proxy_apply_frames[0] | regex_replace('^BERGEN_PAPERLESS_CHAT_NGINX_V1:', '') | from_json).SERVER_ALLOWLIST_UNCHANGED == 'YES'
+        fail_msg: PAPERLESS_CHAT_PROXY_APPLY_UNVERIFIED
+      no_log: true
+      when: bp_chat_proxy_apply
+
+    - name: Report approved Paperless-only chat proxy state
+      ansible.builtin.debug:
+        msg:
+          - PAPERLESS_NATIVE_CHAT_NGINX=PATCHED_AND_VERIFIED
+          - CHAT_READ_TIMEOUT=300s
+          - CHAT_BUFFERING=OFF
+          - OTHER_VHOSTS_MODIFIED=NO
+          - PAPERLESS_DOCUMENTS_MODIFIED=NO
+          - RELEASE_GATE=BROWSER_CHAT_SMOKE_TEST_REQUIRED
+      when: bp_chat_proxy_apply
