@@ -3351,3 +3351,72 @@ perform it. Before any modifications, verify a recoverable CT790
 backup or approved rollback point and plan isolated clone
 identity testing. CT790 stays stopped; CT701 stays unchanged;
 `pct template 790` is not authorized.
+
+
+## CT790 backup and rollback gate: existing artifacts read-only audit
+
+Repository review on 2026-10-22 found **no completed,
+CT790-specific, independently recoverable backup or
+ZFS rollback receipt**. Existing 75-task identity and
+sanitation audits check CT790's stopped state,
+read-only rootfs details and CT701 protection, **not**
+the availability or integrity of a pre-sanitation
+recovery point.
+
+New explicit, no-write gate:
+`ansible/playbooks/audit-rocky-9-8-ct790-backup-candidates-readonly.yml`.
+
+This imports the existing same-run CT790 stopped/rootfs
+and CT701 isolation checks. A bounded root-only
+host helper inspects only:
+
+- Snapshot metadata from the *exact verified* CT790
+  dataset using `zfs list` (never snapshot, rollback,
+  destroy, send or mount). Snapshot names are not
+  emitted and count/freshest creation timestamp are
+  reported, not restore viability.
+- Only an *already mounted* NFS filesystem at
+  `/mnt/pve/bergen-synology-backup`, checked with
+  `findmnt --mountpoint`. The helper never triggers
+  `pvesm status` or storage activation, mounts,
+  remote login or file writes.
+- Only bounded metadata of filenames matching exact
+  `vzdump-lxc-790-*.tar.zst`, `.tar.gz` or
+  `.tar.lzo` under that mount's `dump` directory.
+  Other guests are not inspected.
+  No archive content is read or hashed and no
+  archive is extracted.
+
+The report gives candidate counts, aggregate bytes
+and last timestamps but keeps the critical booleans
+`snapshot_recovery_proven=false`,
+`archive_integrity_proven=false`,
+`restore_test_proven=false`,
+`backup_recoverability_proven=false`.
+A discovered artifact is **not** a verified full
+container recovery. Other backup targets, including
+possible PBS repositories or alternate NFS exports,
+are outside this intentionally narrow audit; a zero
+candidate count is not proof no backup exists anywhere.
+
+The permitted result is
+`ROCKY_9_8_CT790_BACKUP_CANDIDATES_READ_ONLY_RECORDED`
+with `changed=0`, `failed=0`.
+Without the real execution and separate restore proof,
+**block sanitization, clone start and `pct template 790`**.
+
+For local `bp-controller`, fetch and checkout an
+explicitly reviewed commit SHA and use:
+
+    BASE="$HOME/bergen-platform"
+    WT="$HOME/bergen-platform-nextcloud-restore"
+    ANSIBLE_SSH_ARGS="-C -o ControlMaster=no -o ControlPath=none -o ConnectTimeout=10 -o ServerAliveInterval=10 -o ServerAliveCountMax=2" \
+      "$BASE/.venv/bin/ansible-playbook" \
+        -i "$BASE/ansible/inventory.yml" \
+        -i "$BASE/ansible/inventory.local.yml" \
+        "$WT/ansible/playbooks/audit-rocky-9-8-ct790-backup-candidates-readonly.yml" \
+        --limit venombox --vault-id infra@prompt
+
+Only conduct this inventory after passing the
+corresponding GitHub CI and verifying an exact reviewed
+commit. No apply flags.
