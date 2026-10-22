@@ -116,6 +116,32 @@ class TestChildChatE2E(unittest.TestCase):
         self.assertIn("'mode':'live'", command["stdin"])
         self.assertIn("'approved':true", command["stdin"])
 
+    def test_live_gate_diagnostic_is_allowlisted_and_gate_stays_fail_closed(self):
+        play = yaml.safe_load(PLAY.read_text())[0]
+        tasks = play["tasks"]
+        diagnostic = next(task for task in tasks if task["name"].startswith(
+            "Report sanitized live authorization gate state"
+        ))
+        report = "\\n".join(diagnostic["ansible.builtin.debug"]["msg"])
+        self.assertEqual(diagnostic["when"], "bp_child_e2e_live")
+        for field in (
+            "SESSION_APPROVED=", "MODEL_INFERENCE_APPROVED=",
+            "BACKUP_VERIFIED_DECLARED=", "UNRELATED_ACL_APPLY_APPROVED=",
+            "UNRELATED_INDEX_BUILD_APPROVED=",
+            "UNRELATED_NATIVE_CONFIG_APPLY_APPROVED=",
+        ):
+            self.assertIn(field, report)
+        self.assertNotIn("password", report.lower())
+        self.assertNotIn("stdout", report)
+        assertion = next(task for task in tasks if task["name"].startswith(
+            "Require exact target and refuse unrelated production approvals"
+        ))
+        self.assertTrue(assertion["no_log"])
+        checks = " ".join(assertion["ansible.builtin.assert"]["that"])
+        self.assertIn("paperless_ai_catalog_verified_backup", checks)
+        self.assertIn("paperless_native_chat_e2e_approved", checks)
+        self.assertIn("paperless_native_chat_model_inference_approved", checks)
+
     def test_docs_disclose_session_mutation_and_oidc_limit(self):
         docs = DOCS.read_text()
         self.assertIn("force_login", docs)
