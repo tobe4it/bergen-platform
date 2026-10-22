@@ -32,7 +32,15 @@ class PinnedRestoreConfigSafety(unittest.TestCase):
         cls.source = SCRIPT.read_text()
         cls.tree = ast.parse(cls.source)
         selected = []
+        # Execute only the production regex constants needed by the extracted
+        # sanitizer. The previous fixture omitted them, causing NameError
+        # rather than testing valid/invalid archived configurations.
         for n in cls.tree.body:
+            if isinstance(n, ast.Assign) and any(
+                isinstance(target, ast.Name) and target.id in {"ROOTFS", "MP0"}
+                for target in n.targets
+            ):
+                selected.append(n)
             if isinstance(n, ast.ClassDef) and n.name == "Refuse":
                 selected.append(n)
             if isinstance(n, ast.FunctionDef) and n.name in (
