@@ -77,8 +77,8 @@
           observed_dnf_cache_entries: 8
           observed_dnf_state_entries: 4
           observed_networkmanager_state_entries: 4
-          machine_id_future_action: REPLACE_WITH_FIRST_BOOT_SAFE_UNINITIALIZED_MARKER_ONLY_AFTER_SYSTEMD_POLICY_REVIEW
-          ssh_host_keys_future_action: REMOVE_EXACT_VERIFIED_HOST_KEY_PAIRS_ONLY_AFTER_FIRST_BOOT_REGENERATION_PROOF
+          machine_id_future_action: PREFER_EMPTY_MACHINE_ID_FOR_UNIQUE_CLONE_ID_WITHOUT_FIRSTBOOT_AFTER_CLONE_TEST
+          ssh_host_keys_future_action: REMOVE_EXACT_VERIFIED_HOST_KEY_PAIRS_ONLY_AFTER_CONFIRMING_NO_SSHD_AND_OPTIONAL_CLONE_PROVISIONING
           random_seed_future_action: REMOVE_ONLY_EXACT_OLD_SEED_WITH_STAGED_FIRST_BOOT_REGENERATION
           systemd_timer_state_future_action: REVIEW_EXACT_ENTRY_AND_CLEAR_CLONE_SPECIFIC_STAMP_IF_CONFIRMED
           dnf_cache_future_action: ENUMERATE_EXACT_CACHE_SCOPE_BEFORE_SEPARATELY_APPROVED_REMOVAL
@@ -95,4 +95,4 @@
           new_mount_created: false
           pct_template_authorized: false
           apply_authorized: false
-          next_gate: Independently prove clone first-boot identity and SSH host-key regeneration semantics, then separately approve scoped idempotent sanitation; no cleanup yet.
+          next_gate: Review exact per-file metadata and prove unique clone machine ID; SSH disabled in base and optional per-clone key provisioning; then separately approve scoped idempotent sanitation.
