@@ -1,0 +1,72 @@
+---
+# A second, STRICT read-only scope audit. Never removes Nextcloud or changes mail.
+# Reuses the independent mx1 hostname verification and existing prior audit.
+- import_playbook: audit-mx1-nextcloud-retirement-readonly.yml
+
+- name: Inspect exact old Cloud consumers on mx1 before any cleanup design
+  hosts: selected_mx1_nextcloud_retirement
+  become: true
+  gather_facts: false
+  any_errors_fatal: true
+  tasks:
+    - name: Require same-run verified legacy mx1 and previous non-mutating inventory
+      ansible.builtin.assert:
+        that:
+          - mx1_retire_identity.stdout == mx1_retire_expected_fqdn
+          - mx1_retire_expected_fqdn != 'mx.thebergens.net'
+          - mx1_retire_nextcloud_root == '/usr/share/nginx/de.tbergen.cloud/html'
+          - mx1_retire_report.rc == 0
+          - mx1_retire_report.stdout_lines[1] == 'MX1_NEXTCLOUD_RETIREMENT_READ_ONLY=COMPLETE'
+          - (mx1_retire_report.stdout_lines[0] | from_json)['mx1-nextcloud-retirement-audit'].identity == 'VERIFIED'
+          - not ansible_check_mode
+        fail_msg: Source hostname and prior inventory must be verified before checking scope.
+      no_log: true
+
+    - name: Read only bounded effective configuration and consumers on verified mx1
+      ansible.builtin.command:
+        argv:
+          - python3
+          - -c
+          - "{{ lookup('ansible.builtin.file', playbook_dir ~ '/../files/mail/audit_mx1_nextcloud_dependencies_readonly.py') }}"
+          - "{{ mx1_retire_expected_fqdn }}"
+      register: mx1_dependency_probe
+      changed_when: false
+      failed_when: false
+      no_log: true
+
+    - name: Refuse unknown or unbounded dependency report
+      ansible.builtin.assert:
+        that:
+          - mx1_dependency_probe.rc == 0
+          - mx1_dependency_probe.stdout_lines | length == 1
+          - mx1_dependency_probe.stdout | length <= 8192
+          - (mx1_dependency_probe.stdout | from_json).result == 'MX1_NEXTCLOUD_DEPENDENCIES_READ_ONLY_RECORDED'
+          - (mx1_dependency_probe.stdout | from_json).host_identity == 'VERIFIED_MX1'
+          - (mx1_dependency_probe.stdout | from_json).files_written == 0
+          - (mx1_dependency_probe.stdout | from_json).services_changed == 0
+          - (mx1_dependency_probe.stdout | from_json).mail_changed == false
+          - (mx1_dependency_probe.stdout | from_json).mx2_changed == false
+          - (mx1_dependency_probe.stdout | from_json).deletion_authorized == false
+          - (mx1_dependency_probe.stdout | from_json).dependency_exclusivity_proven == false
+          - (mx1_dependency_probe.stdout | from_json).nginx.exclusive == false
+          - (mx1_dependency_probe.stdout | from_json).database.database_drop_authorized == false
+          - (mx1_dependency_probe.stdout | from_json).old_tree.tree_deletion_authorized == false
+          - (mx1_dependency_probe.stdout | from_json).mail_certificate_settings.shared_certificate_deletion_authorized == false
+        fail_msg: Dependency metadata incomplete, invalid or unexpectedly permissive. No delete.
+      no_log: true
+
+    - name: Show scoped read-only dependency inventory without secret data
+      ansible.builtin.debug:
+        msg: "{{ mx1_dependency_probe.stdout | from_json }}"
+
+    - name: Explicitly close every deletion gate
+      ansible.builtin.debug:
+        msg:
+          result: MX1_NEXTCLOUD_DEPENDENCIES_READ_ONLY_COMPLETE
+          files_deleted: 0
+          database_dropped: false
+          nginx_reloaded: false
+          postfix_dovecot_unchanged: true
+          production_mx2_untouched: true
+          deletion_authorized: false
+          next_gate: Review specific vhost file ownership, TLS consumers and schema isolation before drafting any removal.
