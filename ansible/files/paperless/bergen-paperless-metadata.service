@@ -1,0 +1,18 @@
+[Unit]
+Description=Bergen Paperless native metadata ACL reconciliation (provenance-only)
+After=network-online.target
+Wants=network-online.target
+ConditionPathExists=/etc/bergen-platform/paperless-metadata/policy.json
+ConditionPathExists=/etc/bergen-platform/paperless-metadata/reconcile_metadata_with_provenance.py
+
+[Service]
+Type=oneshot
+User=root
+Group=root
+UMask=0077
+ExecStart=/usr/bin/python3 /usr/local/libexec/bergen-paperless-metadata-auto.py
+TimeoutStartSec=240
+WorkingDirectory=/
+StandardInput=null
+StandardOutput=journal
+StandardError=journal
