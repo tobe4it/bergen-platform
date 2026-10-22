@@ -114,6 +114,23 @@
              regex_replace('^BERGEN_PAPERLESS_SHARED_TAG_VISIBILITY_V1:', '') | from_json }}
       no_log: true
 
+    - name: Diagnose only allowlisted shared taxonomy preflight blocker
+      ansible.builtin.debug:
+        msg:
+          - "TAG_AUDIT_STATUS={{ bp_family_tag_audit.STATUS if bp_family_tag_audit.STATUS in ['INSPECTED','BLOCKED'] else 'UNCLASSIFIED' }}"
+          - "TAG_AUDIT_REASON={{ bp_family_tag_audit.REASON if bp_family_tag_audit.REASON in [
+                'NONE','REQUEST_TOO_LARGE','REQUEST_UNREVIEWED',
+                'APPROVAL_UNREVIEWED','VERSION_UNREVIEWED',
+                'FAMILY_MEMBERSHIP_UNREVIEWED','PARENTS_NOT_IN_FAMILY',
+                'CHILD_SCOPE_UNREVIEWED','SERVICE_ACCOUNT_IN_FAMILY',
+                'TAG_COUNT_DRIFT','TAG_SCOPE_INVALID','DOCUMENT_SCOPE_UNREVIEWED',
+                'THOMAS_PRIVATE_SCOPE_NOT_PROVEN','TAG_OBJECT_GRANTS_UNREVIEWED',
+                'UNCLASSIFIED'
+              ] else 'UNCLASSIFIED' }}"
+          - "OBSERVED_TAGS={{ bp_family_tag_audit.TAGS | default('NOT_PROVEN') if bp_family_tag_audit.STATUS == 'INSPECTED' else 'NOT_PROVEN' }}"
+          - DOCUMENT_ACLS_CHANGED=NO_FOR_READ_ONLY_AUDIT
+      when: bp_family_tag_mode == 'audit'
+
     - name: Require verified current shared taxonomy and private-doc boundary
       ansible.builtin.assert:
         that:
