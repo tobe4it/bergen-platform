@@ -2822,3 +2822,95 @@ When mounted and all guards pass, expected receipt:
 the audit must fail closed; do not mount it as a workaround
 without a separate scope review and authorization.
 Cleanup and `pct template` remain separate approval gates.
+
+
+## CT790 stopped rootfs sanitation inventory PASS and no-write cleanup proposal (2026-10-22)
+
+At 2026-10-22 09:46 in the operator terminal the independent
+stopped-rootfs no-atime audit
+`ansible/playbooks/audit-rocky-9-8-ct790-postshutdown-sanitization-readonly.yml`
+completed successfully:
+
+- `ROCKY_9_8_CT790_POSTSHUTDOWN_SANITATION_READ_ONLY_INVENTORIED`.
+- `venombox ok=55 changed=0 unreachable=0 failed=0 skipped=0`.
+- CT790 `STOPPED`, protected, networkless and unprivileged.
+  Rocky Linux 9.8 release independently verified within the
+  existing precisely mapped ZFS rootfs.
+- The ZFS dataset was **already mounted**; no mount operation,
+  guest startup, rootfs write, atime update or template conversion.
+- CT701 config unchanged.
+- Twelve fixed per-instance artifact categories were inspected
+  without machine IDs, private key material, URLs or arbitrary
+  filenames appearing in the output.
+
+Sanitized observed artifacts:
+
+| Item | Observed | Review |
+| --- | --- | --- |
+| `/etc/machine-id` | `SET_32HEX` | Clone-specific machine identity must be reset safely under first-boot policy |
+| `/var/lib/dbus/machine-id` | `ABSENT` | No immediate cleanup |
+| SSH host keys in `/etc/ssh` | 3 private and 3 public names | Remove exact host-key pairs only after first-boot regeneration is independently proven |
+| `/var/lib/systemd/random-seed` | Nonempty regular file | Remove old seed under separately approved sanitation |
+| `/var/log/journal` | `ABSENT` | No immediate cleanup |
+| `/var/cache/dnf` | Directory, 8 top-level entries | Need exact scoped cache enumeration, no blanket deletion |
+| `/var/lib/dnf` | Directory, 4 top-level entries | **Do not wipe**: inspect contents and preserve package state |
+| `/var/lib/NetworkManager` | Directory, 4 top-level entries | **Do not wipe**: inspect which entries are host-specific |
+| `/etc/NetworkManager/system-connections` | Empty directory | No immediate cleanup |
+| `/var/lib/dhcp` | `ABSENT` | No immediate cleanup |
+| `/var/lib/systemd/timers` | Directory, 1 top-level entry | Determine exact timestamp/state semantics before removal |
+| `/var/lib/cloud` | Included in full audit | Specific category not visible in supplied excerpt; review independently before deciding |
+
+The state is **not template-ready**:
+`template_sanitation=REVIEW_REQUIRED_NO_CHANGES_AUTHORIZED`.
+
+A new **review-only** no-write orchestration playbook now exists:
+`ansible/playbooks/plan-rocky-9-8-ct790-template-sanitization-readonly.yml`.
+
+It imports the same stopped-rootfs provenance and inventory
+in the **same run**, rejects unexpected state drift relative
+to the observed fixed identity/cache counts, and publishes
+precise future action classifications. It does **not**
+contain an apply path, even if arbitrary apply variables
+are supplied: its own tasks are only `assert` and `debug`.
+No cleanup, service change, mount, rootfs write, guest start,
+template conversion or overwrite is authorized.
+
+Important for image lifecycle: setting `/etc/machine-id`
+to empty versus marking first-boot uninitialized has
+different systemd semantics. Review actual distro/systemd
+first-boot and machine-id handling, and prove that SSH
+host-key regeneration occurs on new clones **before**
+removing the original keys. Do not confuse accepted
+`dnf-makecache.service` failure during the isolated
+runtime test with a requirement to disable the timer
+in all cloned, potentially networked systems.
+
+Future idempotent cleanup must be separately designed,
+reviewed, tested and **explicitly approved**; the no-write
+proposal is not that approval. Proxmox `pct template 790`
+requires another independent approval after completed
+post-sanitation verification. Preserve CT701 untouched.
+
+To run this new review plan on bp-controller at the
+reviewed SHA, with no write flags:
+
+    BASE="$HOME/bergen-platform"
+    WT="$HOME/bergen-platform-nextcloud-restore"
+    BRANCH="feat/nextcloud-isolated-restore-701-20261019"
+    SSH_ARGS="-C -o ControlMaster=no -o ControlPath=none -o ConnectTimeout=10 -o ServerAliveInterval=10 -o ServerAliveCountMax=2"
+    if [ -n "$(git -C "$WT" status --porcelain)" ]; then
+      echo "STOP: dirty worktree"
+    else
+      git -C "$WT" fetch origin "$BRANCH" &&
+      git -C "$WT" switch --detach "origin/$BRANCH" &&
+      ANSIBLE_SSH_ARGS="$SSH_ARGS" "$BASE/.venv/bin/ansible-playbook" \
+        -i "$BASE/ansible/inventory.yml" \
+        -i "$BASE/ansible/inventory.local.yml" \
+        "$WT/ansible/playbooks/plan-rocky-9-8-ct790-template-sanitization-readonly.yml" \
+        --limit venombox --vault-id infra@prompt
+    fi
+
+Expected successful report:
+`ROCKY_9_8_CT790_TEMPLATE_SANITATION_PLAN_READ_ONLY_READY`
+with `changed=0`, `failed=0`. If state or mountpoint
+changes, the plan stops without writing anything.
