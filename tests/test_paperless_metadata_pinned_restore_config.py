@@ -65,6 +65,38 @@ class PinnedRestoreConfigSafety(unittest.TestCase):
             self.sanitize(SAMPLE.replace("unprivileged: 1",
                                          "unprivileged: 0"))
 
+    def test_identity_refusals_identify_only_fixed_policy_categories(self):
+        # No raw hostname, archived override key or value is included.
+        cases = (
+            (SAMPLE.replace("hostname: bergen-paperless",
+                            "hostname: opaque-another-guest"),
+             "ARCHIVED_HOSTNAME_UNREVIEWED"),
+            (SAMPLE.replace("unprivileged: 1", "unprivileged: 0"),
+             "ARCHIVED_UNPRIVILEGED_UNREVIEWED"),
+            (SAMPLE + "lxc.cgroup2.devices.allow: a\n",
+             "ARCHIVED_LXC_OVERRIDE_PRESENT"),
+            (SAMPLE.replace("onboot: 1", "onboot: unexpected"),
+             "ARCHIVED_ONBOOT_UNREVIEWED"),
+        )
+        for candidate, expected_code in cases:
+            with self.subTest(reason=expected_code):
+                with self.assertRaises(self.blocked) as caught:
+                    self.sanitize(candidate)
+                self.assertEqual(str(caught.exception), expected_code)
+                self.assertNotIn("opaque-another-guest", str(caught.exception))
+                self.assertNotIn("lxc.cgroup2", str(caught.exception))
+
+    def test_identity_refusal_allowlist_stays_explicit_and_private(self):
+        content = PLAY.read_text()
+        for code in (
+            "ARCHIVED_HOSTNAME_UNREVIEWED",
+            "ARCHIVED_UNPRIVILEGED_UNREVIEWED",
+            "ARCHIVED_LXC_OVERRIDE_PRESENT",
+            "ARCHIVED_ONBOOT_UNREVIEWED",
+        ):
+            self.assertIn(code, content)
+        self.assertNotIn("bp_pinned_config_raw.stdout |", content)
+
     def test_unreviewed_additional_mount_is_rejected(self):
         with self.assertRaises(self.blocked):
             self.sanitize(SAMPLE + "mp1: /mnt/backup,mp=/data\n")
