@@ -3261,3 +3261,65 @@ routine, with a recent backup and post-write
 verification before any `pct template`. No clone
 creation, startup, network attachment or rootfs
 write is implicitly authorized by this design.
+
+
+## CT790 exact stopped-rootfs sanitation-target no-write PASS (2026-10-22 17:41)
+
+The operator executed the pinned no-write
+`ansible/playbooks/audit-rocky-9-8-ct790-sanitization-targets-readonly.yml`
+at local terminal time 2026-10-22 17:41. The complete
+Ansible recap in the supplied output states:
+
+- `ROCKY_9_8_CT790_EXACT_SANITATION_TARGETS_READ_ONLY_RECORDED`
+- `venombox: ok=75 changed=0 unreachable=0 failed=0 skipped=0 rescued=0 ignored=0`
+- The same-run preflight independently verified `STOPPED`,
+  Rocky Linux 9.8 in the pre-existing exact ZFS mount,
+  protected networkless unprivileged CT790, and protected
+  unchanged CT701.
+- Six exactly expected SSH host-key files were confirmed,
+  in RSA, ECDSA and Ed25519 private/public pairs:
+  `ssh_host_key_pairs_exact=true`.
+- Each of the **six** expected files is a **regular,
+  nonempty file**, has exactly one hard link,
+  and is owned by the rootfs root UID.
+- The three **private** key files passed
+  `private_permissions_ok=true`.
+- The three corresponding `.pub` files reported
+  `private_permissions_ok=false`, which is expected
+  and is **not evidence of insecure private-key
+  permissions**; public keys do not need private-key
+  permission restrictions.
+- `/var/lib/systemd/random-seed`: present, regular,
+  nonempty, single hard link, matching rootfs owner and
+  private permissions accepted.
+- `sanitation_authorized=false`,
+  `sanitation_complete=false`,
+  `pct_template_authorized=false`,
+  no rootfs files written or new mounts created.
+
+This excerpt does **not** include the new report's
+`machine_id`, `dnf_timer_stamp` or
+`directory_metadata` subobjects. Their precise
+file-type, hardlink, ownership and unknown-name
+values **must not be assumed** from the end of the log.
+The prior full sanitation inventory did establish
+`/etc/machine-id=SET_32HEX`, but it did not
+supply the newer metadata audit's per-file fields.
+
+The bounded report is successful evidence for the
+**observed SSH key pair set and random seed** only,
+not authorization to delete them, a safe cleanup or
+successful clone regeneration. Missing standard
+`sshd.service`, `sshd-keygen@` units, `sshd`
+daemon and host key generation helper remain
+the established First-Boot audit findings.
+
+Next lifecycle gate: review exact machine-id, timer
+stamp and directory metadata together with an
+independently verified recent recoverable CT790 backup
+(or separately approved scoped ZFS rollback plan).
+Draft an idempotent, exact-path-only, no-symlink,
+no-hardlink, stopped-only sanitation playbook with
+explicit approval and independent post-write audit.
+No `pct template` command until another approval
+after sanitation and disposable clone policy review.
