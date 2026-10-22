@@ -93,6 +93,14 @@
           - bp_pinned_config.LXC_OVERRIDE_CLASSES | default([]) | length >= 1
           - bp_pinned_config.LXC_OVERRIDE_CLASSES | length <= 10
           - bp_pinned_config.LXC_OVERRIDE_CLASSES | difference(bp_pinned_allowed_lxc_classes) | length == 0
+          - bp_pinned_config.CGROUP_DEVICE_PROFILE in ['EXACT_FUSE_DEVICE_10_229','OTHER_OR_MISSING_CGROUP_RULE']
+          - bp_pinned_config.MOUNT_ENTRY_PROFILE in ['EXACT_FUSE_DEVICE_BIND','OTHER_OR_MISSING_MOUNT_RULE']
+          - bp_pinned_config.FUSE_PAIR_PROFILE in ['MATCHES_KNOWN_FUSE_PATTERN','NOT_PROVEN']
+          - (bp_pinned_config.FUSE_PAIR_PROFILE != 'MATCHES_KNOWN_FUSE_PATTERN') or (
+              bp_pinned_config.CGROUP_DEVICE_PROFILE == 'EXACT_FUSE_DEVICE_10_229'
+              and bp_pinned_config.MOUNT_ENTRY_PROFILE == 'EXACT_FUSE_DEVICE_BIND'
+              and bp_pinned_config.LXC_OVERRIDE_COUNT | int == 2
+            )
         fail_msg: ARCHIVED_LXC_OVERRIDE_CLASSIFICATION_INVALID
       no_log: true
       when: bp_pinned_config.STATUS == 'BLOCKED' and
@@ -103,6 +111,9 @@
         msg:
           - "LXC_OVERRIDE_COUNT={{ bp_pinned_config.LXC_OVERRIDE_COUNT }}"
           - "LXC_OVERRIDE_CLASSES={{ bp_pinned_config.LXC_OVERRIDE_CLASSES | sort | join(',') }}"
+          - "CGROUP_DEVICE_PROFILE={{ bp_pinned_config.CGROUP_DEVICE_PROFILE }}"
+          - "MOUNT_ENTRY_PROFILE={{ bp_pinned_config.MOUNT_ENTRY_PROFILE }}"
+          - "FUSE_PAIR_PROFILE={{ bp_pinned_config.FUSE_PAIR_PROFILE }}"
           - ARCHIVED_LXC_OVERRIDE_REMAINS_BLOCKED=YES
           - CHANGED=False
       when: bp_pinned_config.STATUS == 'BLOCKED' and
