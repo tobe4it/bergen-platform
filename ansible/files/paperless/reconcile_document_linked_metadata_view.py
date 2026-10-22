@@ -52,6 +52,12 @@ def report(status, **details):
     ), sort_keys=True, separators=(",", ":")), flush=True)
 
 
+def plan_user_grants(user_id, permission_id, required_ids, visible_ids):
+    """Grant only read-metadata objects already linked to viewable documents."""
+    missing = set(required_ids) - set(visible_ids)
+    return {(user_id, permission_id, str(pk)) for pk in missing}
+
+
 def get_request():
     raw = sys.stdin.read(MAX_INPUT_BYTES + 1)
     require(len(raw) <= MAX_INPUT_BYTES, "REQUEST_TOO_LARGE")
@@ -178,12 +184,10 @@ def main():
                     fresh, DocumentType, "view_documenttype"))
                 corr_visible = set(permitted_object_ids(
                     fresh, Correspondent, "view_correspondent"))
-                required_grants |= {
-                    (fresh.pk, type_perm.pk, str(x)) for x in dtypes - type_visible
-                }
-                required_grants |= {
-                    (fresh.pk, corr_perm.pk, str(x)) for x in dcorrs - corr_visible
-                }
+                required_grants |= plan_user_grants(
+                    fresh.pk, type_perm.pk, dtypes, type_visible)
+                required_grants |= plan_user_grants(
+                    fresh.pk, corr_perm.pk, dcorrs, corr_visible)
             thomas, nadja = named_parents
             private = set(
                 Document.objects.filter(owner=thomas)
