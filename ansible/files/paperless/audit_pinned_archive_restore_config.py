@@ -27,11 +27,16 @@ MP0 = re.compile(
 
 
 class Refuse(Exception):
-    def __init__(self, reason, *, lxc_classes=(), lxc_count=0):
+    def __init__(self, reason, *, lxc_classes=(), lxc_count=0,
+                 cgroup_profile="NOT_INSPECTED", mount_profile="NOT_INSPECTED",
+                 fuse_pair="NOT_PROVEN"):
         super().__init__(reason)
-        # Categories are fixed vocabulary, never config keys or values.
+        # Only fixed categories; never print archived values, keys or paths.
         self.lxc_classes = tuple(lxc_classes)
         self.lxc_count = lxc_count
+        self.cgroup_profile = cgroup_profile
+        self.mount_profile = mount_profile
+        self.fuse_pair = fuse_pair
 
 
 def require(ok, code):
@@ -132,10 +137,30 @@ def sanitized_config(raw):
                 categories.add("ENVIRONMENT_OVERRIDE")
             else:
                 categories.add("OTHER_LXC_OVERRIDE")
-        # Remain blocked: this is only a safe bounded diagnosis.
-        raise Refuse("ARCHIVED_LXC_OVERRIDE_PRESENT",
-                     lxc_classes=sorted(categories),
-                     lxc_count=len(lxc_keys))
+        # In-memory, exact-match recognition of the conventional FUSE
+        # device pair. Never include arbitrary raw values in the result.
+        fuse_cgroup = (rows.get("lxc.cgroup2.devices.allow", "").strip()
+                       == "c 10:229 rwm")
+        fuse_mount = re.fullmatch(
+            r"/dev/fuse dev/fuse none bind,(?:create=file(?:,optional)?|"
+            r"optional,create=file)(?: 0 0)?",
+            rows.get("lxc.mount.entry", "").strip()) is not None
+        pair_matches = (len(lxc_keys) == 2 and fuse_cgroup and fuse_mount)
+        # Remain blocked even for a well-known FUSE pattern: the isolated
+        # restored guest must be designed without inheriting host devices.
+        raise Refuse(
+            "ARCHIVED_LXC_OVERRIDE_PRESENT",
+            lxc_classes=sorted(categories),
+            lxc_count=len(lxc_keys),
+            cgroup_profile=(
+                "EXACT_FUSE_DEVICE_10_229" if fuse_cgroup
+                else "OTHER_OR_MISSING_CGROUP_RULE"),
+            mount_profile=(
+                "EXACT_FUSE_DEVICE_BIND" if fuse_mount
+                else "OTHER_OR_MISSING_MOUNT_RULE"),
+            fuse_pair=(
+                "MATCHES_KNOWN_FUSE_PATTERN" if pair_matches
+                else "NOT_PROVEN"))
     require(rows.get("onboot", "0") in ("0","1"),
             "ARCHIVED_ONBOOT_UNREVIEWED")
     require(ROOTFS.search(rows.get("rootfs","")) is not None and
@@ -195,7 +220,10 @@ def main():
     except Refuse as e:
         result("BLOCKED", REASON=str(e),
                LXC_OVERRIDE_CLASSES=list(e.lxc_classes),
-               LXC_OVERRIDE_COUNT=e.lxc_count)
+               LXC_OVERRIDE_COUNT=e.lxc_count,
+               CGROUP_DEVICE_PROFILE=e.cgroup_profile,
+               MOUNT_ENTRY_PROFILE=e.mount_profile,
+               FUSE_PAIR_PROFILE=e.fuse_pair)
     except Exception:
         result("BLOCKED",REASON="UNCLASSIFIED")
 
