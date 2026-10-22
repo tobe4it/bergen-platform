@@ -113,3 +113,50 @@ isolation is yet proven.** A VMID reported as free can be taken after
 the audit. There is deliberately no restore command in this phase.
 The isolated guest must be off-network from its first possible boot
 and have no reachable LDAP/MX/Ollama/Synology connection.
+
+
+## Phase D.2: Exact archive fingerprint and read-only format validation
+
+Proxmox restores a backed-up LXC configuration by default, including
+interfaces and mounts unless options are explicitly overridden.
+Therefore, a successful storage/VMID survey must **not** be treated as
+permission to boot the restored Paperless guest. Official Proxmox pct
+documentation explicitly distinguishes "simple" restore (which
+restores backed up mount configuration) and "advanced" restore
+(which discards/overrides it). Review both the source archive config
+and the target no-NIC configuration before any boot.
+
+The new \`audit-paperless-metadata-archive-integrity.yml\` scans only
+the **most recent** valid NFS \`vzdump-lxc-126-*.tar.zst\` file,
+never enumerates archive member filenames to the Ansible output,
+streams a full SHA256 and performs Zstd decompression and tar header
+listing checks without extraction.
+
+\`\`\`bash
+(
+  set -euo pipefail
+  BASE="$HOME/bergen-platform"
+  WT="$HOME/bergen-platform-metadata-auto"
+  cd "$WT"
+  test -z "$(git status --porcelain)"
+
+  "$BASE/.venv/bin/python" -m unittest discover \\
+    -s tests -p 'test_paperless_metadata_archive_integrity.py' -v
+
+  "$BASE/.venv/bin/ansible-playbook" \\
+    -i ansible/inventory.yml \\
+    -i "$BASE/ansible/inventory.local.yml" \\
+    ansible/playbooks/audit-paperless-metadata-archive-integrity.yml \\
+    --vault-id ai@prompt
+)
+\`\`\`
+
+A validated run yields \`ARCHIVE_SHA256\` and the archived size.
+Pin both during any later restore approval; never substitute the
+filename or a newer backup silently. This is a **multi-pass NFS
+read** and may generate noticeable IO. It causes no guest, database,
+network or backup writes.
+
+Even if Zstd/tar checks pass, restore compatibility, required metadata
+or PostgreSQL startup/recovery remain unproven. At present, there is
+no automatic restore or boot operation prepared/approved.
