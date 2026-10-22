@@ -12,6 +12,20 @@
     bp_child_e2e_live: "{{ bp_child_e2e_mode == 'live' }}"
     bp_child_e2e_code: "{{ lookup('ansible.builtin.file', playbook_dir ~ '/../files/paperless/verify_native_chat_child_e2e.py', rstrip=False) }}"
   tasks:
+    - name: Report sanitized live authorization gate state before fail-closed assertion
+      ansible.builtin.debug:
+        msg:
+          - "LIVE_TEST_MODE={{ 'VALID' if bp_child_e2e_mode == 'live' else 'INVALID' }}"
+          - "SESSION_APPROVED={{ 'YES' if (paperless_native_chat_e2e_approved | default(false) | bool) else 'NO' }}"
+          - "MODEL_INFERENCE_APPROVED={{ 'YES' if (paperless_native_chat_model_inference_approved | default(false) | bool) else 'NO' }}"
+          - "BACKUP_VERIFIED_DECLARED={{ 'YES' if (paperless_ai_catalog_verified_backup | default(false) | bool) else 'NO' }}"
+          - "UNRELATED_ACL_APPLY_APPROVED={{ 'YES' if (paperless_native_chat_acl_modify_approved | default(false) | bool) else 'NO' }}"
+          - "UNRELATED_INDEX_BUILD_APPROVED={{ 'YES' if (paperless_native_chat_index_build_approved | default(false) | bool) else 'NO' }}"
+          - "UNRELATED_NATIVE_CONFIG_APPLY_APPROVED={{ 'YES' if (paperless_native_de_chat_approved | default(false) | bool) else 'NO' }}"
+          - "EXPECTED_TARGET={{ 'YES' if inventory_hostname == 'venombox' else 'NO' }}"
+          - CHAT_RELEASE_GATE=BLOCKED_PENDING_LIVE_ASSERTIONS
+      when: bp_child_e2e_live
+
     - name: Require exact target and refuse unrelated production approvals
       ansible.builtin.assert:
         that:
