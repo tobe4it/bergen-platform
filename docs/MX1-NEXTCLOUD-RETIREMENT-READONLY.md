@@ -133,3 +133,60 @@ already verified successful production migration to `mx2`.
 
 No commands in this document authorize deletion on `mx1`
 or deployment changes on `mx2`.
+
+
+## Follow-up: classified effective consumers before exact deletion proposal
+
+New audit: `ansible/playbooks/audit-mx1-nextcloud-dependencies-readonly.yml`.
+It imports the original hostname-locked mx1 audit and then
+evaluates only the same already-reviewed legacy server:
+
+- Effective Nginx `nginx -T` is read into memory and **not**
+  copied into logs. Config-file markers are classified to
+  identify all files referencing the historic Cloud hostname
+  or install root, with only allowlisted config paths printed.
+  Nonallowlisted configuration files block deletion planning.
+- A purely literal comparison of Nginx certificate settings with
+  other effective Nginx includes and named Postfix/Dovecot
+  settings detects obvious sharing. **Indirect links, symlink
+  equivalence, Certbot hooks and all certificate consumers
+  remain unproven**. Never delete TLS key material or renewal
+  hooks based on a zero literal-match count.
+- Verifies none of the components of the historic fixed
+  Cloud-root path is a symlink; identifies nested mount counts.
+- Inspects only the presence of MariaDB schema `nextcloud`,
+  never data, users, grants or other schemas. Ownership and
+  safe deletion of the schema remain unproven.
+- Lists systemd timers via read-only output, counting
+  Nextcloud-named entries without modifying a timer.
+- **No remove, reconfigure, restart, reload, rootfs writes,
+  database updates, certbot, DNS, email send, or network
+  calls.** Secret values are never included in the report.
+
+Expected status:
+`MX1_NEXTCLOUD_DEPENDENCIES_READ_ONLY_COMPLETE`,
+`changed=0`, `failed=0`. It always sets
+`deletion_authorized=false`,
+`dependency_exclusivity_proven=false`,
+`certificate_consumers_fully_proven=false`.
+The output is a narrower live inventory, **not** a complete
+safe-to-delete manifest.
+
+Use the existing protected Git-ignored config from the first
+mx1 audit; do **not** replace or print it. Work from an
+explicitly reviewed/CI-tested pinned branch commit.
+On `bp-controller`:
+
+    BASE="$HOME/bergen-platform"
+    WT="$HOME/bergen-platform-mx1-audit"
+    ANSIBLE_SSH_ARGS="-C -o ControlMaster=no -o ControlPath=none -o ConnectTimeout=10 -o ServerAliveInterval=10 -o ServerAliveCountMax=2" \
+      "$BASE/.venv/bin/ansible-playbook" \
+        -i "$BASE/ansible/inventory.yml" \
+        -i "$BASE/ansible/inventory.local.yml" \
+        "$WT/ansible/playbooks/audit-mx1-nextcloud-dependencies-readonly.yml" \
+        -e "@$WT/ansible/vars/mx1-nextcloud-retirement.local.yml" \
+        --vault-id infra@prompt
+
+Do **not** add an apply flag. No repeated CT701/CT790 tests
+are needed for this mx1-only workstream. No deletion of
+historic Cloud components is authorized by this audit.
