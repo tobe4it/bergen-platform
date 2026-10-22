@@ -158,5 +158,6 @@ def main():
         emit(STATUS="BLOCKED", REASON="UNCLASSIFIED")
 
 
-if __name__ == "__main__":
-    main()
+# Django manage.py shell -c exec() uses the shell command module namespace.
+# Call main unconditionally; otherwise no bounded audit frame is emitted.
+main()
