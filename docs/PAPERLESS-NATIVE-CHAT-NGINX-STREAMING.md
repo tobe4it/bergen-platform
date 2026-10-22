@@ -72,12 +72,13 @@ regressions before invoking any live audit:
   BRANCH=fix/paperless-native-chat-nginx-streaming-20261022
 
   git -C "$BASE" fetch origin "$BRANCH"
+  PIN="$(git -C "$BASE" rev-parse FETCH_HEAD)"
   if ! test -d "$WT"; then
-    git -C "$BASE" worktree add --detach "$WT" FETCH_HEAD
+    git -C "$BASE" worktree add --detach "$WT" "$PIN"
   fi
   cd "$WT"
   test -z "$(git status --porcelain)"
-  git switch --detach FETCH_HEAD
+  git switch --detach "$PIN"
 
   "$BASE/.venv/bin/python" -m unittest discover -s tests \
     -p 'test_paperless_native_chat_nginx_streaming.py' -v
