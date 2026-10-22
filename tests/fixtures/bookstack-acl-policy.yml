@@ -1,0 +1,83 @@
+# BookStack ACL policy fixture (design-only; not an Ansible variable file)
+# All identities and identifiers are synthetic. No production groups/secrets.
+# Intended as reference data for future read-only audit and live acceptance tests.
+schema_version: 1
+status: design_only
+default_access: deny
+anonymous_access: deny
+public_registration: false
+bookstack_administrator_bypass: true
+external_role_source: oidc_groups
+oidc:
+  unique_subject_claim: sub
+  groups_claim: groups
+  remove_roles_not_in_groups_on_login: true
+  group_domain_configured_per_environment: true
+  personal_role_claim_required: true
+roles:
+  family: wiki-family
+  children: wiki-children
+  parents: wiki-parents
+  personal:
+    child_a: wiki-personal-child-a
+    child_b: wiki-personal-child-b
+    adult_p: wiki-personal-adult-p
+    adult_q: wiki-personal-adult-q
+identities:
+  child_a: [family, children, child_a]
+  child_b: [family, children, child_b]
+  adult_p: [family, parents, adult_p]
+  adult_q: [family, parents, adult_q]
+  visitor: []
+books:
+  house_readonly:
+    allow:
+      family: [read]
+      parents: [create, update, delete]
+  shared_projects:
+    allow:
+      family: [read]
+      children: [create, update]
+      parents: [create, update, delete]
+  kids_shared:
+    allow:
+      children: [read, create, update]
+      parents: [read, create, update, delete]
+  parent_shared:
+    allow:
+      parents: [read, create, update, delete]
+  child_a_private:
+    allow:
+      child_a: [read, create, update]
+      parents: [read]
+  child_b_private:
+    allow:
+      child_b: [read, create, update]
+      parents: [read]
+  adult_p_private:
+    allow:
+      adult_p: [read, create, update]
+  adult_q_private:
+    allow:
+      adult_q: [read, create, update]
+tests:
+  - {id: ACL-01, actor: child_a, book: child_a_private, action: update, allowed: true}
+  - {id: ACL-02, actor: child_a, book: child_b_private, action: read, allowed: false}
+  - {id: ACL-03, actor: child_b, book: child_a_private, action: read, allowed: false}
+  - {id: ACL-04, actor: child_a, book: parent_shared, action: read, allowed: false}
+  - {id: ACL-05, actor: child_a, book: kids_shared, action: read, allowed: true}
+  - {id: ACL-06, actor: adult_p, book: child_a_private, action: read, allowed: true}
+  - {id: ACL-07, actor: adult_p, book: child_a_private, action: update, allowed: false}
+  - {id: ACL-08, actor: adult_p, book: adult_p_private, action: update, allowed: true}
+  - {id: ACL-09, actor: adult_p, book: adult_q_private, action: read, allowed: false}
+  - {id: ACL-10, actor: adult_q, book: adult_p_private, action: read, allowed: false}
+  - {id: ACL-11, actor: child_b, book: child_a_private, action: read_image, allowed: false}
+  - {id: ACL-12, actor: visitor, book: child_a_private, action: read, allowed: false}
+  - {id: ACL-13, actor: child_a, book: parent_shared, action: create, allowed: false}
+  - {id: ACL-14, actor: child_a, book: adult_p_private, action: api_read, allowed: false}
+  - {id: ACL-15, actor: adult_p, book: adult_p_private, action: read_attachment, allowed: true}
+  - {id: ACL-16, actor: visitor, book: house_readonly, action: read, allowed: false}
+  - {id: ACL-17, actor: child_a, state: revoked, book: child_a_private, action: api_read, allowed: false}
+  - {id: ACL-18, actor: child_b, book: child_a_private, action: search, allowed: false}
+  - {id: ACL-19, actor: adult_q, book: adult_p_private, action: included_content_read, allowed: false}
+  - {id: ACL-20, actor: child_a, book: kids_shared, action: manage_permissions, allowed: false}
