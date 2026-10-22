@@ -110,8 +110,11 @@ class TestChildChatE2E(unittest.TestCase):
         self.assertIn("bp_child_e2e_live", live["when"])
         self.assertTrue(live["no_log"])
         self.assertFalse(live["failed_when"])
-        self.assertIn("'mode':'live'", live["stdin"])
-        self.assertIn("'approved':true", live["stdin"])
+        command = live["ansible.builtin.command"]
+        self.assertIn("stdin", command)
+        self.assertTrue(command["stdin_add_newline"])
+        self.assertIn("'mode':'live'", command["stdin"])
+        self.assertIn("'approved':true", command["stdin"])
 
     def test_docs_disclose_session_mutation_and_oidc_limit(self):
         docs = DOCS.read_text()
