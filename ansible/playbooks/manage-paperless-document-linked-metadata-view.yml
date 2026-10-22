@@ -1,0 +1,261 @@
+---
+# Read-only by default. Approved apply can add ONLY per-user view_documenttype
+# and view_correspondent for metadata on documents already permitted to user.
+# No group-wide metadata rights; no edits to document ACL, owners, tags,
+# saved searches, paperless auth backends or other metadata permissions.
+- name: Reconcile current document-linked metadata read grants without sharing documents
+  hosts: venombox
+  become: true
+  gather_facts: false
+  vars:
+    bp_linked_meta_mode: "{{ paperless_linked_metadata_mode | default('audit') }}"
+    bp_linked_meta_apply: "{{ bp_linked_meta_mode == 'apply' }}"
+    bp_linked_meta_docs: "{{ paperless_linked_metadata_expected_docs | default(0) | int }}"
+    bp_linked_meta_family: "{{ paperless_linked_metadata_expected_family_users | default(0) | int }}"
+    bp_linked_meta_types: "{{ paperless_linked_metadata_expected_type_gaps | default(-1) | int }}"
+    bp_linked_meta_corrs: "{{ paperless_linked_metadata_expected_correspondent_gaps | default(-1) | int }}"
+    bp_linked_meta_private: "{{ paperless_linked_metadata_expected_thomas_private | default(0) | int }}"
+    bp_linked_meta_script: "{{ lookup('ansible.builtin.file', playbook_dir ~ '/../files/paperless/reconcile_document_linked_metadata_view.py', rstrip=False) }}"
+    bp_linked_meta_frame: "BERGEN_PAPERLESS_DOCUMENT_LINKED_METADATA_GRANTS_V1:"
+  tasks:
+    - name: Require exact host single approved metadata-only operation
+      ansible.builtin.assert:
+        that:
+          - inventory_hostname == 'venombox'
+          - not ansible_check_mode
+          - bp_linked_meta_mode in ['audit', 'apply']
+          - not (paperless_family_tags_apply_approved | default(false) | bool)
+          - not (paperless_chat_proxy_apply_approved | default(false) | bool)
+          - not bp_linked_meta_apply or (paperless_linked_metadata_apply_approved | default(false) | bool)
+          - not bp_linked_meta_apply or (paperless_ai_catalog_verified_backup | default(false) | bool)
+          - not bp_linked_meta_apply or (bp_linked_meta_docs >= 1 and bp_linked_meta_docs <= 5000)
+          - not bp_linked_meta_apply or (bp_linked_meta_family >= 3 and bp_linked_meta_family <= 8)
+          - not bp_linked_meta_apply or (bp_linked_meta_types >= 0 and bp_linked_meta_types <= 500)
+          - not bp_linked_meta_apply or (bp_linked_meta_corrs >= 0 and bp_linked_meta_corrs <= 1000)
+          - not bp_linked_meta_apply or bp_linked_meta_private >= 1
+        fail_msg: DOCUMENT_LINKED_METADATA_APPLY_NOT_AUTHORIZED
+      no_log: true
+
+    - name: Verify actual CT126 configuration
+      ansible.builtin.command:
+        argv: [pct, config, '126']
+      register: bp_linked_meta_ct
+      changed_when: false
+      no_log: true
+
+    - name: Refuse wrong or unconfined guest
+      ansible.builtin.assert:
+        that:
+          - bp_linked_meta_ct.rc == 0
+          - "'hostname: bergen-paperless' in bp_linked_meta_ct.stdout_lines"
+          - "'unprivileged: 1' in bp_linked_meta_ct.stdout_lines"
+          - "'lxc.apparmor.profile: unconfined' not in bp_linked_meta_ct.stdout"
+          - "bp_linked_meta_ct.stdout_lines | select('match', '^rootfs: local-zfs:') | list | length == 1"
+          - "bp_linked_meta_ct.stdout_lines | select('match', '^mp0: local-zfs:.*mp=/srv/bergen-paperless,backup=1(,|$)') | list | length == 1"
+        fail_msg: DOCUMENT_LINKED_METADATA_GUEST_NOT_REVIEWED
+      no_log: true
+
+    - name: Independently verify recent NFS backup of CT126 before any apply
+      ansible.builtin.command:
+        argv:
+          - bash
+          - -euo
+          - pipefail
+          - -c
+          - |
+            target=/mnt/pve/bergen-synology-backup
+            fs="$(findmnt --mountpoint "$target" -n -o FSTYPE)"
+            [[ "$fs" = nfs || "$fs" = nfs4 ]]
+            find "$target/dump" -maxdepth 1 -type f \
+              -name 'vzdump-lxc-126-*.tar.zst' -mmin -2880 \
+              -size +1M -print -quit | grep -q .
+      changed_when: false
+      no_log: true
+      when: bp_linked_meta_apply
+
+    - name: Run bounded no-write metadata reconciliation preview
+      ansible.builtin.command:
+        argv:
+          - pct
+          - exec
+          - '126'
+          - --
+          - podman
+          - exec
+          - -i
+          - bergen-paperless
+          - python
+          - /usr/src/paperless/src/manage.py
+          - shell
+          - --verbosity=0
+          - -c
+          - "{{ bp_linked_meta_script }}"
+        stdin: "{{ {'protocol':'paperless-document-linked-metadata-grants-v1','mode':'audit','approved':false} | to_json }}"
+        stdin_add_newline: true
+      changed_when: false
+      failed_when: false
+      register: bp_linked_meta_preview_raw
+      no_log: true
+
+    - name: Extract exactly one sanitized read-only frame
+      ansible.builtin.set_fact:
+        bp_linked_meta_preview_frames: >-
+          {{ bp_linked_meta_preview_raw.stdout_lines | default([]) |
+             select('match', '^BERGEN_PAPERLESS_DOCUMENT_LINKED_METADATA_GRANTS_V1:') | list }}
+      no_log: true
+
+    - name: Require bounded response and successful guest call
+      ansible.builtin.assert:
+        that:
+          - bp_linked_meta_preview_raw.rc == 0
+          - bp_linked_meta_preview_frames | length == 1
+          - bp_linked_meta_preview_frames[0] | length < 1500
+        fail_msg: DOCUMENT_LINKED_METADATA_FRAME_MISSING
+      no_log: true
+
+    - name: Decode exclusively sanitized aggregate counters
+      ansible.builtin.set_fact:
+        bp_linked_meta_preview: >-
+          {{ bp_linked_meta_preview_frames[0] |
+             regex_replace('^BERGEN_PAPERLESS_DOCUMENT_LINKED_METADATA_GRANTS_V1:', '') | from_json }}
+      no_log: true
+
+    - name: Show only enumerated audit refusal codes
+      ansible.builtin.debug:
+        msg:
+          - "STATUS={{ bp_linked_meta_preview.STATUS if bp_linked_meta_preview.STATUS in ['INSPECTED','BLOCKED'] else 'UNCLASSIFIED' }}"
+          - "REASON={{ bp_linked_meta_preview.REASON | default('NONE') if
+                bp_linked_meta_preview.REASON | default('NONE') in [
+                  'NONE','REQUEST_TOO_LARGE','INPUT_UNREVIEWED',
+                  'AUDIT_APPROVAL_UNREVIEWED','APPLY_APPROVAL_UNREVIEWED',
+                  'VERSION_UNREVIEWED','DOCUMENT_SCOPE_UNREVIEWED',
+                  'DOCUMENT_SCOPE_UNVERIFIED','METADATA_SCOPE_UNREVIEWED',
+                  'FAMILY_USERS_UNREVIEWED','PARENT_USERS_UNREVIEWED',
+                  'CHILD_USERS_UNREVIEWED','SERVICE_ACCOUNT_IN_FAMILY',
+                  'PARENT_DOC_SCOPE_UNREVIEWED','TAXONOMY_MODEL_READ_MISSING',
+                  'CHILD_PARENT_DOC_VISIBLE','DOCUMENT_METADATA_REFERENCES_MISSING',
+                  'THOMAS_PRIVATE_SCOPE_NOT_PROVEN','CHILD_THOMAS_PRIVATE_VISIBLE',
+                  'UNCLASSIFIED'
+                ] else 'UNCLASSIFIED' }}"
+      when: not bp_linked_meta_apply
+
+    - name: Require fully proven metadata-only audit and privacy restrictions
+      ansible.builtin.assert:
+        that:
+          - bp_linked_meta_preview.STATUS == 'INSPECTED'
+          - bp_linked_meta_preview.MODE == 'AUDIT'
+          - bp_linked_meta_preview.AUDIT == 'READ_ONLY'
+          - bp_linked_meta_preview.CHANGED == false
+          - bp_linked_meta_preview.DOCUMENTS | int > 0
+          - bp_linked_meta_preview.FAMILY_USERS | int >= 3
+          - bp_linked_meta_preview.CHILD_USERS | int >= 1
+          - bp_linked_meta_preview.TYPE_VIEW_GAPS | int >= 0
+          - bp_linked_meta_preview.CORRESPONDENT_VIEW_GAPS | int >= 0
+          - bp_linked_meta_preview.THOMAS_PRIVATE_DENIED_TO_NADJA | int >= 1
+          - bp_linked_meta_preview.CHILD_SEES_ELTERN_DOCUMENTS | int == 0
+          - bp_linked_meta_preview.CHILD_SEES_THOMAS_PRIVATE_DOCUMENTS | int == 0
+          - bp_linked_meta_preview.DOCUMENT_ACLS_CHANGED == 'NO'
+          - bp_linked_meta_preview.GROUP_PERMISSIONS_CHANGED == 'NO'
+        fail_msg: DOCUMENT_LINKED_METADATA_PRIVACY_GATE_BLOCKED
+      no_log: true
+
+    - name: Show current exact document-derived gaps without identities or names
+      ansible.builtin.debug:
+        msg:
+          - AUDIT=READ_ONLY
+          - "DOCUMENTS={{ bp_linked_meta_preview.DOCUMENTS }}"
+          - "FAMILY_USERS={{ bp_linked_meta_preview.FAMILY_USERS }}"
+          - "TYPE_VIEW_GAPS={{ bp_linked_meta_preview.TYPE_VIEW_GAPS }}"
+          - "CORRESPONDENT_VIEW_GAPS={{ bp_linked_meta_preview.CORRESPONDENT_VIEW_GAPS }}"
+          - "THOMAS_PRIVATE_DENIED_TO_NADJA={{ bp_linked_meta_preview.THOMAS_PRIVATE_DENIED_TO_NADJA }}"
+          - DOCUMENT_ACLS_CHANGED=NO
+          - CHANGED=False
+      when: not bp_linked_meta_apply
+
+    - name: Pin all actual preflight counters against independently approved values
+      ansible.builtin.assert:
+        that:
+          - bp_linked_meta_preview.DOCUMENTS | int == bp_linked_meta_docs
+          - bp_linked_meta_preview.FAMILY_USERS | int == bp_linked_meta_family
+          - bp_linked_meta_preview.TYPE_VIEW_GAPS | int == bp_linked_meta_types
+          - bp_linked_meta_preview.CORRESPONDENT_VIEW_GAPS | int == bp_linked_meta_corrs
+          - bp_linked_meta_preview.THOMAS_PRIVATE_DENIED_TO_NADJA | int == bp_linked_meta_private
+        fail_msg: DOCUMENT_LINKED_METADATA_REVIEWED_COUNTERS_DRIFTED
+      no_log: true
+      when: bp_linked_meta_apply
+
+    - name: Apply only direct metadata view rights to readers of their documents
+      ansible.builtin.command:
+        argv:
+          - pct
+          - exec
+          - '126'
+          - --
+          - podman
+          - exec
+          - -i
+          - bergen-paperless
+          - python
+          - /usr/src/paperless/src/manage.py
+          - shell
+          - --verbosity=0
+          - -c
+          - "{{ bp_linked_meta_script }}"
+        stdin: >-
+          {{ {'protocol':'paperless-document-linked-metadata-grants-v1',
+              'mode':'apply','approved':true,
+              'expected':{
+                'documents':bp_linked_meta_docs,
+                'family_users':bp_linked_meta_family,
+                'type_gaps':bp_linked_meta_types,
+                'correspondent_gaps':bp_linked_meta_corrs,
+                'thomas_private':bp_linked_meta_private
+              }} | to_json }}
+        stdin_add_newline: true
+      register: bp_linked_meta_apply_raw
+      failed_when: false
+      changed_when: >-
+        (bp_linked_meta_preview.TYPE_VIEW_GAPS | int > 0) or
+        (bp_linked_meta_preview.CORRESPONDENT_VIEW_GAPS | int > 0)
+      no_log: true
+      when: bp_linked_meta_apply
+
+    - name: Extract exactly one bounded apply result
+      ansible.builtin.set_fact:
+        bp_linked_meta_apply_frames: >-
+          {{ bp_linked_meta_apply_raw.stdout_lines | default([]) |
+             select('match', '^BERGEN_PAPERLESS_DOCUMENT_LINKED_METADATA_GRANTS_V1:') | list }}
+      no_log: true
+      when: bp_linked_meta_apply
+
+    - name: Reject unproven successful and privacy-safe metadata apply
+      ansible.builtin.assert:
+        that:
+          - bp_linked_meta_apply_raw.rc == 0
+          - bp_linked_meta_apply_frames | length == 1
+          - bp_linked_meta_apply_frames[0] | length < 1500
+          - (bp_linked_meta_apply_frames[0] | regex_replace('^BERGEN_PAPERLESS_DOCUMENT_LINKED_METADATA_GRANTS_V1:', '') | from_json).STATUS == 'APPLIED'
+          - (bp_linked_meta_apply_frames[0] | regex_replace('^BERGEN_PAPERLESS_DOCUMENT_LINKED_METADATA_GRANTS_V1:', '') | from_json).TYPE_VIEW_GAPS_AFTER | int == 0
+          - (bp_linked_meta_apply_frames[0] | regex_replace('^BERGEN_PAPERLESS_DOCUMENT_LINKED_METADATA_GRANTS_V1:', '') | from_json).CORRESPONDENT_VIEW_GAPS_AFTER | int == 0
+          - (bp_linked_meta_apply_frames[0] | regex_replace('^BERGEN_PAPERLESS_DOCUMENT_LINKED_METADATA_GRANTS_V1:', '') | from_json).THOMAS_PRIVATE_DENIED_TO_NADJA | int == bp_linked_meta_private
+          - (bp_linked_meta_apply_frames[0] | regex_replace('^BERGEN_PAPERLESS_DOCUMENT_LINKED_METADATA_GRANTS_V1:', '') | from_json).DOCUMENT_ACLS_CHANGED == 'NO'
+          - (bp_linked_meta_apply_frames[0] | regex_replace('^BERGEN_PAPERLESS_DOCUMENT_LINKED_METADATA_GRANTS_V1:', '') | from_json).DOCUMENT_TAGS_CHANGED == 'NO'
+          - (bp_linked_meta_apply_frames[0] | regex_replace('^BERGEN_PAPERLESS_DOCUMENT_LINKED_METADATA_GRANTS_V1:', '') | from_json).GROUP_PERMISSIONS_CHANGED == 'NO'
+        fail_msg: DOCUMENT_LINKED_METADATA_APPLY_OR_POSTCHECK_FAILED
+      no_log: true
+      when: bp_linked_meta_apply
+
+    - name: Report only approved metadata grant counts and unchanged document security
+      ansible.builtin.debug:
+        msg:
+          - "TYPE_VIEW_GRANTS_CREATED={{ bp_linked_meta_types }}"
+          - "CORRESPONDENT_VIEW_GRANTS_CREATED={{ bp_linked_meta_corrs }}"
+          - TYPE_VIEW_GAPS_AFTER=0
+          - CORRESPONDENT_VIEW_GAPS_AFTER=0
+          - "THOMAS_PRIVATE_DENIED_TO_NADJA={{ bp_linked_meta_private }}"
+          - DOCUMENT_ACLS_CHANGED=NO
+          - DOCUMENT_TAGS_CHANGED=NO
+          - GROUP_PERMISSIONS_CHANGED=NO
+          - FUTURE_RECONCILIATION=NOT_ENABLED
+          - REVOCATION_POLICY=NOT_ENABLED
+      when: bp_linked_meta_apply
