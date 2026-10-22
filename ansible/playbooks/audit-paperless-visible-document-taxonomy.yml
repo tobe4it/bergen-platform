@@ -91,6 +91,7 @@
                   'PARENT_DOCUMENT_BOUNDARY_UNREVIEWED',
                   'DOCUMENT_METADATA_REFERENCES_UNRESOLVED',
                   'CHILD_SEES_ELTERN_DOCUMENT',
+                  'CHILD_SEES_THOMAS_PRIVATE',
                   'THOMAS_PRIVATE_BOUNDARY_NOT_PROVEN','UNCLASSIFIED'
                 ] else 'UNCLASSIFIED' }}"
 
@@ -104,6 +105,7 @@
           - bp_visible_taxonomy.CHILD_USERS | int >= 1
           - bp_visible_taxonomy.THOMAS_PRIVATE_DENIED_TO_NADJA | int >= 1
           - bp_visible_taxonomy.CHILD_SEES_ELTERN_DOCUMENTS | int == 0
+          - bp_visible_taxonomy.CHILD_SEES_THOMAS_PRIVATE_DOCUMENTS | int == 0
           - bp_visible_taxonomy.DOCUMENT_ACLS_CHANGED == 'NO'
           - bp_visible_taxonomy.METADATA_ACLS_CHANGED == 'NO'
         fail_msg: VISIBLE_TAXONOMY_AUDIT_BLOCKED
@@ -125,6 +127,7 @@
           - "CORRESPONDENT_MODEL_RIGHT_MISSING_USERS={{ bp_visible_taxonomy.CORRESPONDENT_MODEL_RIGHT_MISSING_USERS }}"
           - "THOMAS_PRIVATE_DENIED_TO_NADJA={{ bp_visible_taxonomy.THOMAS_PRIVATE_DENIED_TO_NADJA }}"
           - CHILD_SEES_ELTERN_DOCUMENTS=0
+          - CHILD_SEES_THOMAS_PRIVATE_DOCUMENTS=0
           - DOCUMENT_ACLS_CHANGED=NO
           - METADATA_ACLS_CHANGED=NO
           - CHANGED=False
