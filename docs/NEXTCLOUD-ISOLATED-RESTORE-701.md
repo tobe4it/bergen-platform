@@ -3420,3 +3420,51 @@ explicitly reviewed commit SHA and use:
 Only conduct this inventory after passing the
 corresponding GitHub CI and verifying an exact reviewed
 commit. No apply flags.
+
+
+## CT790 backup-candidate inventory completed: no matching rollback assets (2026-10-22 20:42)
+
+Operator executed the pinned read-only playbook
+`audit-rocky-9-8-ct790-backup-candidates-readonly.yml`
+on `venombox` at 2026-10-22 20:42 (terminal clock).
+
+Verified receipt:
+`ROCKY_9_8_CT790_BACKUP_CANDIDATES_READ_ONLY_RECORDED`.
+Recap: `ok=85 changed=0 unreachable=0 failed=0 skipped=0 rescued=0 ignored=0`.
+
+- CT790 remains `STOPPED`. CT701 config unchanged.
+- `snapshot_candidates.snapshot_count=0`; no ZFS snapshot
+  of the exact CT790 rootfs dataset was found.
+- The scoped backup target was an *already mounted* NFS
+  filesystem: `mount=PREEXISTING_NFS_VERIFIED`.
+  Within its checked `dump` path,
+  `candidate_count=0`, `candidate_bytes_total=0`,
+  `latest_candidate_mtime_epoch=null`.
+- `archive_integrity_proven=false`,
+  `snapshot_recovery_proven=false`,
+  `restore_test_proven=false`,
+  `backup_recoverability_proven=false`.
+- `files_written=0`, `mount_operations=0`;
+  `sanitation_authorized=false`,
+  `pct_template_authorized=false`.
+
+**Interpretation:** Neither an existing CT790 ZFS snapshot nor
+a matching CT790 `vzdump` archive exists in the **two
+scoped places checked**. This is not a comprehensive
+inventory of other potential backup targets (including
+PBS, local storage or alternative shares), and it does
+not certify the absence of any other backup.
+
+**Next gate:** separately review exact Proxmox backup storage
+configuration, free capacity and whether a stopped CT790
+can be safely backed up without starting it or touching
+CT701. Prefer an explicitly authorized complete CT790
+container backup to the approved backup destination,
+with immutable archive integrity checks and ideally a
+disposable isolated restore test. A same-dataset snapshot
+alone is not a durable independent complete recovery
+copy if the underlying dataset/storage fails.
+
+No backup is created by this review. No backup operation,
+restore, snapshot, guest boot, rootfs sanitation, template
+conversion or merge to `main` is authorized.
