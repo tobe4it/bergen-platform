@@ -2470,3 +2470,60 @@ The separately gated orderly shutdown proposal
 plan inspection now that healthy systemd is observed,
 but any actual shutdown still requires a separate explicit
 CT790-only approval.
+
+
+## CT790 historical DNF DNS-resolution failure classified, running guest healthy (2026-10-22)
+
+At 2026-10-22 08:23 in the operator's terminal, the user
+executed the corrected
+`ansible/playbooks/diagnose-rocky-9-8-ct790-dnf-journal-readonly.yml`
+against the **already-running, protected and networkless** CT790.
+The run completed with the bounded receipt:
+
+- `ROCKY_9_8_CT790_DNF_JOURNAL_CLASSIFIED_READ_ONLY`
+- `venombox ok=25 changed=0 unreachable=0 failed=0 skipped=0`
+- `historical_failed_unit=dnf-makecache.service`,
+  `historical_failure_time_utc=2026-10-22 05:32:41`.
+- Nine bounded historical journal lines were classified.
+  `category=DNS_RESOLUTION_ERROR_OBSERVED`,
+  `dns_error_observed=true`,
+  `repo_metadata_error_observed=true`,
+  `network_error_observed=false`,
+  `repo_config_error_observed=false`.
+- No repository URL, raw log text or other sensitive source
+  contents were disclosed. `files_written=0`.
+- `current_systemd_state=running`,
+  `currently_failed_units=0`,
+  `ct790_status=RUNNING`,
+  `network_interfaces_beyond_loopback=0`,
+  `ct701_unchanged=true`.
+- Shutdown, forced stop, DNF timer/service changes and
+  Proxmox template conversion remained unauthorized.
+
+**Confirmed observation:** a DNS resolution problem and repository
+metadata download failure were logged for the failed
+`dnf-makecache.service` in its historic failure window.
+That is consistent with a deliberately networkless LXC but
+does **not** establish the complete causal chain, nor explain
+how its failed systemd state later cleared. The recovered
+`systemd=running` and zero currently failed units are
+independently verified. This was an isolated DNF incident, not
+evidence of a currently degraded CT790.
+
+**Template policy recommendation:** Do not mask, disable,
+reconfigure or reset `dnf-makecache.timer` simply to make the
+networkless CT790 test quiet. The potential future clones may
+have internet or internal repository access and benefit from
+regular metadata refreshes. Keep the DNF policy unchanged
+pending an explicit clone connectivity and image-sanitation
+decision. No automated RPM/repodata updates are authorized.
+
+**Next allowed no-write action:** run the already CI-reviewed
+`ansible/playbooks/shutdown-rocky-9-8-ct790-offline.yml`
+*without either apply/confirm variable*. It reaudits currently
+healthy, running, isolated CT790 and only prints
+`ROCKY_9_8_CT790_SHUTDOWN_PLAN_READ_ONLY_READY`.
+The graceful shutdown itself remains prohibited until a
+separate explicit one-time operator approval. If systemd
+degrades again, the plan must fail closed, never weaken
+the precondition to get to a shutdown.
