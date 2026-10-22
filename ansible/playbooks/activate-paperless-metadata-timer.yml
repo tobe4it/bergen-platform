@@ -10,6 +10,18 @@
     bp_tax_auto_policy_src: "{{ lookup('ansible.builtin.file', playbook_dir ~ '/../files/paperless/reconcile_metadata_with_provenance.py', rstrip=False) }}"
     bp_tax_auto_policy_sha: "{{ bp_tax_auto_policy_src | hash('sha256') }}"
     bp_tax_auto_runner_src: "{{ lookup('ansible.builtin.file', playbook_dir ~ '/../files/paperless/bergen_metadata_auto_runner.py', rstrip=False) }}"
+    bp_tax_auto_config: "{{ {'protocol':'bergen-paperless-metadata-auto-v1','approved':true,'policy_sha256':bp_tax_auto_policy_sha,'max_additions':25,'max_revocations':25} | to_json }}"
+    bp_tax_auto_installed_files:
+      - path: "{{ bp_tax_auto_dir }}/reconcile_metadata_with_provenance.py"
+        sha: "{{ bp_tax_auto_policy_sha }}"
+      - path: "{{ bp_tax_auto_dir }}/policy.json"
+        sha: "{{ bp_tax_auto_config | hash('sha256') }}"
+      - path: /usr/local/libexec/bergen-paperless-metadata-auto.py
+        sha: "{{ bp_tax_auto_runner_src | hash('sha256') }}"
+      - path: /etc/systemd/system/bergen-paperless-metadata.service
+        sha: "{{ lookup('ansible.builtin.file', playbook_dir ~ '/../files/paperless/bergen-paperless-metadata.service', rstrip=False) | hash('sha256') }}"
+      - path: /etc/systemd/system/bergen-paperless-metadata.timer
+        sha: "{{ lookup('ansible.builtin.file', playbook_dir ~ '/../files/paperless/bergen-paperless-metadata.timer', rstrip=False) | hash('sha256') }}"
   tasks:
     - name: Demand separate timer approval backed-up ledger and fixed change budget
       ansible.builtin.assert:
@@ -124,6 +136,36 @@
         fail_msg: PAPERLESS_METADATA_TIMER_UPGRADE_REQUIRES_SEPARATE_APPROVAL
       no_log: true
 
+    - name: Independently inspect any installed worker/config/unit files
+      ansible.builtin.stat:
+        path: "{{ item.path }}"
+        checksum_algorithm: sha256
+        follow: false
+      loop: "{{ bp_tax_auto_installed_files }}"
+      register: bp_tax_auto_installed
+      no_log: true
+
+    - name: Refuse replacing unreviewed existing file or unsafe symlink
+      ansible.builtin.assert:
+        that:
+          - not item.stat.islnk | default(false)
+          - not item.stat.exists or (
+              (item.stat.isreg | default(false)) and
+              ((item.stat.checksum | default('')) == item.item.sha or
+                paperless_metadata_timer_upgrade_approved | default(false) | bool)
+            )
+        fail_msg: PAPERLESS_METADATA_TIMER_FILE_DRIFT_REQUIRES_UPGRADE_APPROVAL
+      loop: "{{ bp_tax_auto_installed.results }}"
+      no_log: true
+
+    - name: Require private worker executable directory exists
+      ansible.builtin.file:
+        path: /usr/local/libexec
+        state: directory
+        owner: root
+        group: root
+        mode: '0755'
+
     - name: Create private host-side policy directory
       ansible.builtin.file:
         path: "{{ bp_tax_auto_dir }}"
@@ -143,12 +185,7 @@
 
     - name: Install root-only pinning configuration for ongoing bounded updates
       ansible.builtin.copy:
-        content: >-
-          {{ {'protocol':'bergen-paperless-metadata-auto-v1',
-              'approved':true,
-              'policy_sha256':bp_tax_auto_policy_sha,
-              'max_additions':25,
-              'max_revocations':25} | to_json }}
+        content: "{{ bp_tax_auto_config }}"
         dest: "{{ bp_tax_auto_dir }}/policy.json"
         owner: root
         group: root
