@@ -70,7 +70,7 @@ class TestPaperlessChatProxy(unittest.TestCase):
             SAMPLE.replace("    deny all;", "    allow all;"),
             SAMPLE.replace("    proxy_read_timeout 120s;", "    proxy_read_timeout 900s;"),
             SAMPLE + "\nlocation /admin/ { }\n",
-            SAMPLE.replace("ssl_certificate_key ", "#ssl_certificate_key "),
+            SAMPLE.replace("ssl_certificate_key ", "unrecognized_key "),
         ]
         for bad in invalid:
             with self.subTest(bad=bad[-65:]):
