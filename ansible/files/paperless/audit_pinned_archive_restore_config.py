@@ -95,11 +95,17 @@ def sanitized_config(raw):
         require(re.fullmatch(r"[a-zA-Z][a-zA-Z0-9_.-]*",key) and
                 key not in rows, "ARCHIVED_CONFIG_DUPLICATE_KEY")
         rows[key]=value
-    require(rows.get("hostname") == "bergen-paperless" and
-            rows.get("unprivileged") == "1" and
-            not any(x.startswith("lxc.") for x in rows) and
-            rows.get("onboot", "0") in ("0","1"),
-            "ARCHIVED_SOURCE_IDENTITY_UNREVIEWED")
+    # Distinguish four refusal causes without logging any archived
+    # identity, setting value or LXC override content. No allowlisting,
+    # normalization or relaxation of the previously enforced predicates.
+    require(rows.get("hostname") == "bergen-paperless",
+            "ARCHIVED_HOSTNAME_UNREVIEWED")
+    require(rows.get("unprivileged") == "1",
+            "ARCHIVED_UNPRIVILEGED_UNREVIEWED")
+    require(not any(x.startswith("lxc.") for x in rows),
+            "ARCHIVED_LXC_OVERRIDE_PRESENT")
+    require(rows.get("onboot", "0") in ("0","1"),
+            "ARCHIVED_ONBOOT_UNREVIEWED")
     require(ROOTFS.search(rows.get("rootfs","")) is not None and
             MP0.search(rows.get("mp0","")) is not None,
             "ARCHIVED_VOLUME_LAYOUT_UNREVIEWED")
