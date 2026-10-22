@@ -10,6 +10,19 @@ PLAY = ROOT / "ansible/playbooks/audit-paperless-visible-document-taxonomy.yml"
 
 
 class VisibleDocumentTaxonomyAuditContracts(unittest.TestCase):
+    def test_django_shell_c_exec_invokes_main_unconditionally(self):
+        # Django shell -c executes the supplied code in its management command
+        # namespace, not as a __main__ Python file. A guarded entrypoint does
+        # not run and cannot emit the required bounded audit frame.
+        module = ast.parse(AUDIT.read_text())
+        self.assertIsInstance(module.body[-1], ast.Expr)
+        call = module.body[-1].value
+        self.assertIsInstance(call, ast.Call)
+        self.assertIsInstance(call.func, ast.Name)
+        self.assertEqual(call.func.id, "main")
+        self.assertEqual(call.args, [])
+        self.assertEqual(call.keywords, [])
+
     def test_script_read_only_and_version_pinned(self):
         src = AUDIT.read_text()
         ast.parse(src)
