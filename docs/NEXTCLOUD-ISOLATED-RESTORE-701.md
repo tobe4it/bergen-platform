@@ -2914,3 +2914,106 @@ Expected successful report:
 `ROCKY_9_8_CT790_TEMPLATE_SANITATION_PLAN_READ_ONLY_READY`
 with `changed=0`, `failed=0`. If state or mountpoint
 changes, the plan stops without writing anything.
+
+
+## CT790 template sanitation no-write proposal PASS and SSH first-boot evidence gate (2026-10-22)
+
+The user's same-run no-write sanitation proposal audit on
+2026-10-22 at 10:08 (operator terminal) completed:
+
+- `ROCKY_9_8_CT790_TEMPLATE_SANITATION_PLAN_READ_ONLY_READY`.
+- `venombox ok=58 changed=0 unreachable=0 failed=0 skipped=0`.
+- Protected unprivileged networkless CT790 was verified
+  `STOPPED`, with its original verified ZFS rootfs
+  pre-mounted in exactly the expected location, and unchanged
+  protected CT701.
+- Exactly the previously reported 12 categories of clone-
+  specific state were observed, including one set machine-id,
+  three SSH host-key pairs, one nonempty random seed,
+  eight DNF cache top-level entries, four DNF state entries,
+  four NetworkManager state entries, and one systemd timer
+  state entry.
+- `files_written=0`, `cleanup_executed=false`,
+  `guest_started=false`, `new_mount_created=false`,
+  `apply_authorized=false`, and
+  `pct_template_authorized=false`.
+- The proposal intentionally contains **no** mutable action,
+  even if the caller tries to pass an apply variable.
+  **CT790 remains STOPPED and not template-ready.**
+
+### First-boot identity and SSH host-key verification
+
+Systemd's `machine-id(5)` specifies that an **empty**
+`/etc/machine-id` causes machine ID generation but is *not*
+equivalent to a `ConditionFirstBoot=yes` boot. The literal
+`uninitialized` state or a missing file is considered a
+first boot. These semantics must be explicitly reviewed
+before changing CT790's machine-id. Source:
+https://www.freedesktop.org/software/systemd/man/262/machine-id.html
+
+RHEL 9's OpenSSH guidance describes automatic generation of
+missing SSH host keys by `sshd-keygen@.service`; units
+can be disabled if cloud-init is active, so the actual image
+must be inspected, not assumed equivalent to standard RHEL 9.
+Source: https://docs.redhat.com/en/documentation/red_hat_enterprise_linux/9/htmlsingle/securing_networks/
+
+New independent read-only playbook:
+`ansible/playbooks/audit-rocky-9-8-ct790-firstboot-identity-units-readonly.yml`.
+
+It imports the same already-tested stopped-rootfs sanitation
+preflight and checks exactly 22 bounded, fixed paths:
+
+- Eight vendor/local systemd OpenSSH, machine-id commit,
+  firstboot and cloud-init unit candidates.
+- Eight explicit, never-followed enablement/mask link
+  candidates for `sshd.service` and RSA, ECDSA and
+  Ed25519 `sshd-keygen@` service instances.
+- Three local/vendor override/drop-in directories, bounded
+  to 128 entries each and reported only as counts.
+- Three OpenSSH helper/binary candidates, examined
+  only for file type and executable bit.
+
+It checks vendor `ExecStart`, key-absence condition,
+`sshd-keygen.target` relationship, and cloud-init/firstboot
+markers without disclosing raw unit contents. It uses
+`O_NOFOLLOW`, `O_NOATIME`, bounded 16 KiB unit-file
+reads, descriptor-relative path traversal, no symlink
+target reads, and `no_log` for the complete helper output
+until it passes strict JSON schema checks. A symlink
+presence is **not** proof of its target or effective
+systemd enablement; uninspected drop-ins can override
+vendor units. It is deliberately a configuration inventory,
+not proof that a new clone will regenerate identities.
+
+The expected report is
+`ROCKY_9_8_CT790_FIRSTBOOT_IDENTITY_UNITS_READ_ONLY_RECORDED`,
+`changed=0`, `failed=0`,
+`authoritative_firstboot_generation_proven=false`.
+If the preexisting ZFS rootdir is unmounted or CT790 is
+running, no mount/start/cleanup fallback is allowed.
+
+On `bp-controller`, use the approved Git SHA and a
+clean worktree; **no apply flags**:
+
+    BASE="$HOME/bergen-platform"
+    WT="$HOME/bergen-platform-nextcloud-restore"
+    BRANCH="feat/nextcloud-isolated-restore-701-20261019"
+    SSH_ARGS="-C -o ControlMaster=no -o ControlPath=none -o ConnectTimeout=10 -o ServerAliveInterval=10 -o ServerAliveCountMax=2"
+    if [ -n "$(git -C "$WT" status --porcelain)" ]; then
+      echo "STOP: dirty worktree"
+    else
+      git -C "$WT" fetch origin "$BRANCH" &&
+      git -C "$WT" switch --detach "origin/$BRANCH" &&
+      ANSIBLE_SSH_ARGS="$SSH_ARGS" "$BASE/.venv/bin/ansible-playbook" \
+        -i "$BASE/ansible/inventory.yml" \
+        -i "$BASE/ansible/inventory.local.yml" \
+        "$WT/ansible/playbooks/audit-rocky-9-8-ct790-firstboot-identity-units-readonly.yml" \
+        --limit venombox --vault-id infra@prompt
+    fi
+
+A subsequent precise sanitation implementation and clone
+first-boot verification require independent evidence,
+an explicitly reviewed disposable clone lifecycle, and
+separate human approvals; no changes to CT790,
+CT701, ZFS mount state, networks or Proxmox template
+status are currently authorized.
