@@ -213,3 +213,28 @@ explicitly approve a new fingerprint instead.
 A later restore must not occur solely because this audit passed.
 Proxmox restores stored CT properties by default; the network
 inheritance issue must be handled before any guest startup.
+
+
+## Phase D.4: Archived LXC override triage – still NO RESTORE
+
+The 22.10.2026 read-only pinned archive audit reached
+\`REASON=ARCHIVED_LXC_OVERRIDE_PRESENT\`. This is a refusal, not
+evidence that the archive or its extra LXC configuration is safe.
+
+Run the same pinned audit with the updated fixed-category diagnostic
+only. It now emits \`LXC_OVERRIDE_COUNT\` and
+\`LXC_OVERRIDE_CLASSES\` exclusively from a fixed list:
+\`APPARMOR_OVERRIDE\`, \`CGROUP_DEVICE_OVERRIDE\`,
+\`MOUNT_OVERRIDE\`, \`CAPABILITY_OVERRIDE\`,
+\`SECCOMP_OVERRIDE\`, \`IDMAP_OVERRIDE\`,
+\`NETWORK_OVERRIDE\`, \`HOST_HOOK_OVERRIDE\`,
+\`ENVIRONMENT_OVERRIDE\`, \`OTHER_LXC_OVERRIDE\`.
+
+Never output raw \`pct.conf\`, override keys or values, device rules,
+paths, secret environment strings, network endpoints or bind mounts.
+The audit must continue failing with \`STATUS=BLOCKED\` even when it
+successfully classifies the existing override types. This intentional
+failure prevents a premature restore or timer activation. Do not
+allowlist any override for CT826 merely based on its category.
+Review actual required LXC runtime functionality **privately** and
+design a stripped no-network test configuration with a separate approval.
