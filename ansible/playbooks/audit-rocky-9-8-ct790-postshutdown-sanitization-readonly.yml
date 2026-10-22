@@ -1,0 +1,151 @@
+---
+# STRICTLY READ ONLY after separately approved CT790 graceful shutdown.
+# Import existing stopped PVE/ZFS and already-mounted Rocky 9.8 OS release proof.
+# No pct start/exec/mount/stop/shutdown/template/set, no zfs mount,
+# no file edits, no cache operations and no symlink following.
+- import_playbook: audit-rocky-9-8-ct790-rootfs-release-readonly.yml
+
+- name: Independently inventory stopped CT790 rootfs identities with no mutations
+  hosts: venombox
+  become: true
+  gather_facts: false
+  any_errors_fatal: true
+  tasks:
+    - name: Require same-run stopped protected networkless CT790 and verified mounted ZFS rootfs
+      ansible.builtin.assert:
+        that:
+          - inventory_hostname == 'venombox'
+          - rocky_post_host.stdout == 'venombox'
+          - "'status: stopped' in rocky_post_state.stdout_lines"
+          - "'status: stopped' in rocky_release_post_status.stdout_lines"
+          - "'hostname: rocky9-base-790' in rocky_post_config.stdout_lines"
+          - "'unprivileged: 1' in rocky_post_config.stdout_lines"
+          - "'protection: 1' in rocky_post_config.stdout_lines"
+          - "'onboot: 0' in rocky_post_config.stdout_lines"
+          - "'template: 1' not in rocky_post_config.stdout_lines"
+          - rocky_post_rootfs_volid is match('^local-zfs:subvol-790-disk-[0-9]+$')
+          - rocky_post_dataset is match('^rpool/data/subvol-790-disk-[0-9]+$')
+          - rocky_post_rootfs_path.stdout | trim is match('^/rpool/data/subvol-790-disk-[0-9]+$')
+          - rocky_release_zfs_mounted.stdout | trim == 'yes'
+          - rocky_release_findmnt.stdout_lines | length == 1
+          - (rocky_release_inspected.stdout | from_json).result == 'ROCKY_9_8_CT790_ROOTFS_RELEASE_READ_ONLY_VERIFIED'
+          - "'hostname: nextcloud-restore-701' in rocky_post_ct701.stdout_lines"
+          - "'protection: 1' in rocky_post_ct701.stdout_lines"
+        fail_msg: Do not inspect unknown, running, unmounted or reconfigured CT790 rootfs.
+
+    - name: Reconfirm CT790 still stopped before fixed rootfs identity and state inventory
+      ansible.builtin.command:
+        argv: [pct, status, '790']
+      changed_when: false
+      register: rocky_sanitation_before_status
+
+    - name: Refuse any unexpected CT790 startup
+      ansible.builtin.assert:
+        that:
+          - "'status: stopped' in rocky_sanitation_before_status.stdout_lines"
+
+    - name: Recheck CT790 dataset still mounted without mounting it
+      ansible.builtin.command:
+        argv: [zfs, get, -H, -o, value, mounted, "{{ rocky_post_dataset }}"]
+      changed_when: false
+      register: rocky_sanitation_mounted
+
+    - name: Refuse nonpreexisting or unmounted ZFS filesystem
+      ansible.builtin.assert:
+        that:
+          - rocky_sanitation_mounted.stdout | trim == 'yes'
+
+    - name: Verify exact ZFS mount before no-atime inspection
+      ansible.builtin.command:
+        argv:
+          - findmnt
+          - -rn
+          - --mountpoint
+          - "{{ rocky_post_rootfs_path.stdout | trim }}"
+          - -o
+          - SOURCE,FSTYPE,TARGET
+      changed_when: false
+      register: rocky_sanitation_findmnt
+
+    - name: Require same exact mounted ZFS rootdir, not a path through symlinks
+      ansible.builtin.assert:
+        that:
+          - rocky_sanitation_findmnt.stdout == rocky_release_findmnt.stdout
+          - rocky_sanitation_findmnt.stdout.split() | length == 3
+          - rocky_sanitation_findmnt.stdout.split()[0] == rocky_post_dataset
+          - rocky_sanitation_findmnt.stdout.split()[1] == 'zfs'
+          - rocky_sanitation_findmnt.stdout.split()[2] == rocky_post_rootfs_path.stdout | trim
+
+    - name: Inventory fixed CT790 per-instance artifacts without content disclosure or atime updates
+      ansible.builtin.command:
+        argv:
+          - python3
+          - -c
+          - "{{ lookup('ansible.builtin.file', playbook_dir ~ '/../files/nextcloud/inventory_ct790_stopped_rootfs_sanitation.py') }}"
+          - "{{ rocky_post_rootfs_path.stdout | trim }}"
+      changed_when: false
+      failed_when: false
+      no_log: true
+      register: rocky_sanitation_survey
+
+    - name: Require bounded sanitized no-write inventory of exact CT790 rootfs
+      ansible.builtin.assert:
+        that:
+          - rocky_sanitation_survey.rc == 0
+          - rocky_sanitation_survey.stdout | length <= 8192
+          - (rocky_sanitation_survey.stdout | from_json).result == 'ROCKY_9_8_CT790_STOPPED_ROOTFS_SANITATION_READ_ONLY_INVENTORIED'
+          - (rocky_sanitation_survey.stdout | from_json).vmid == 790
+          - (rocky_sanitation_survey.stdout | from_json).inspected_fixed_paths == 12
+          - (rocky_sanitation_survey.stdout | from_json).categories | length == 12
+          - (rocky_sanitation_survey.stdout | from_json).template_sanitation == 'REVIEW_REQUIRED_NO_CHANGES_AUTHORIZED'
+          - not (rocky_sanitation_survey.stdout | from_json).raw_machine_ids_disclosed
+          - not (rocky_sanitation_survey.stdout | from_json).raw_host_key_material_disclosed
+          - (rocky_sanitation_survey.stdout | from_json).files_written == 0
+          - (rocky_sanitation_survey.stdout | from_json).mount_operations == 0
+          - not (rocky_sanitation_survey.stdout | from_json).atime_updates_requested
+          - not (rocky_sanitation_survey.stdout | from_json).pct_start_authorized
+          - not (rocky_sanitation_survey.stdout | from_json).pct_template_authorized
+        fail_msg: Rootfs sanitation survey failed or disclosed unexpected information; do not mutate guest, host or dataset.
+
+    - name: Read CT790 status again after no-atime inventory
+      ansible.builtin.command:
+        argv: [pct, status, '790']
+      changed_when: false
+      register: rocky_sanitation_after_status
+
+    - name: Require CT790 still stopped after all reads
+      ansible.builtin.assert:
+        that:
+          - "'status: stopped' in rocky_sanitation_after_status.stdout_lines"
+
+    - name: Independently recheck protected CT701 state and unchanged configuration
+      ansible.builtin.command:
+        argv: [pct, config, '701']
+      changed_when: false
+      no_log: true
+      register: rocky_sanitation_ct701_config_after
+
+    - name: Demand CT701 original config unchanged after stopped-rootfs inventory
+      ansible.builtin.assert:
+        that:
+          - rocky_sanitation_ct701_config_after.stdout == rocky_post_ct701.stdout
+
+    - name: Report only sanitized CT790 rootfs states, never machine-id or keys
+      ansible.builtin.debug:
+        msg:
+          result: ROCKY_9_8_CT790_POSTSHUTDOWN_SANITATION_READ_ONLY_INVENTORIED
+          vmid: 790
+          guest_state: STOPPED
+          rootfs_exact_preexisting_zfs_mount_verified: true
+          rocky_version: '9.8'
+          inspected_fixed_paths: 12
+          categories: "{{ (rocky_sanitation_survey.stdout | from_json).categories }}"
+          template_sanitation: REVIEW_REQUIRED_NO_CHANGES_AUTHORIZED
+          raw_machine_id_or_ssh_key_disclosed: false
+          file_writes: 0
+          atime_updates_requested: false
+          new_mount_created: false
+          guest_restarted: false
+          ct701_config_unchanged: true
+          pct_template_authorized: false
+          next_gate: Review sanitized per-instance artifacts and prepare separate idempotent sanitation plan; any cleanup or template conversion needs its own explicit approval.
