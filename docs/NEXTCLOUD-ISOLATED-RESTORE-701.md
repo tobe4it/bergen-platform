@@ -2527,3 +2527,39 @@ The graceful shutdown itself remains prohibited until a
 separate explicit one-time operator approval. If systemd
 degrades again, the plan must fail closed, never weaken
 the precondition to get to a shutdown.
+
+
+## CT790 healthy graceful-shutdown proposal read-only PASS (2026-10-22)
+
+The operator completed the default (NO apply approval) invocation of
+`ansible/playbooks/shutdown-rocky-9-8-ct790-offline.yml` at
+2026-10-22 08:29 (operator terminal). Evidence:
+
+- `ROCKY_9_8_CT790_SHUTDOWN_PLAN_READ_ONLY_READY`
+- `venombox: ok=21 changed=0 unreachable=0 failed=0 skipped=13`
+- CT790 `RUNNING`; systemd `running` with zero failed-unit
+  inventory lines. No network interfaces beyond loopback.
+- CT701 unchanged and protected. CT790 guest and host
+  configurations not changed by the audit.
+- The 13 tasks for actual shutdown and post-shutdown checks
+  were correctly skipped.
+- `shutdown_requested=false`, `force_stop_authorized=false`,
+  `pct_stop_authorized=false`, `pct_template_authorized=false`.
+
+This is readiness evidence **only**, not authorization.
+The proposed and already CI-reviewed exact command for a future
+separately operator-approved graceful stop is
+`pct shutdown 790 --timeout 90 --forceStop 0`.
+`--forceStop 0` expressly prohibits hard-stop escalation at
+the 90-second timeout. Booted systemd may make orderly
+shutdown state changes in only CT790's own rootfs; there is
+no forced stop, automatic retry, restart, rollback, cleanup or
+Proxmox template conversion. A post-shutdown no-write audit
+and template sanitation review must be separate lifecycle
+gates.
+
+Any future single shutdown approval must be limited to CT790,
+its exact tested on-host command, and read-only confirmation
+that CT790 is stopped and its PVE config/CT701 are unchanged.
+If systemd becomes degraded again before invocation, the
+same-run healthy guest gate will fail closed.
