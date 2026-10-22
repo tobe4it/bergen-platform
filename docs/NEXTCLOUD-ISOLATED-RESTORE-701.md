@@ -2653,3 +2653,49 @@ variables.
 
 Do not convert CT790 into a template until separately approved
 post-shutdown rootfs sanitation and VMID policy reviews.
+
+
+## CT790 sole-DNF-exception shutdown proposal read-only PASS (2026-10-22)
+
+At 2026-10-22 09:19 (operator terminal), the user completed the
+**no-apply/default** run of
+`ansible/playbooks/shutdown-rocky-9-8-ct790-dnf-exception-offline.yml`
+on `venombox`, after the originally approved healthy-only
+shutdown had correctly failed closed due to renewed degraded
+systemd status.
+
+- `venombox: ok=27 changed=0 unreachable=0 failed=0 skipped=18`.
+- Same-run independent guest audit confirmed `RUNNING`,
+  `systemd=degraded`, exactly one failed-unit output line,
+  Rocky Linux 9.8, unprivileged UID namespace, zero non-loopback
+  network interfaces, and unchanged protected CT701.
+- The new gate `Allow degraded state only with strictly parsed
+  sole dnf-makecache.service` **passed**.
+- The bounded `systemctl show` validation and all subsequent
+  read-only checks completed successfully before the proposed
+  shutdown tasks were skipped. The reviewed gate only accepts
+  `dnf-makecache.service` with `LoadState=loaded`,
+  `ActiveState=failed`, `SubState=failed`,
+  `Result=exit-code`, `ExecMainCode=1`,
+  `ExecMainStatus=1`. The provided excerpt's beginning does
+  not include the full proposal receipt, but `PLAY RECAP`
+  confirms no errors or changes.
+- All 18 approval, pre-shutdown reread, exactly-one
+  `pct shutdown`, and post-shutdown verification tasks were
+  correctly skipped because **no apply flags were provided**.
+- CT790 remains running, as last independently observed.
+  No shutdown, hard-stop, reboot, network or service change,
+  DNF reset, template conversion or CT701 modification occurred.
+
+This establishes **read-only plan readiness**, not authorization
+to shut down a degraded guest. The prior healthy-only approval
+does not extend to the distinct DNF-exception workflow.
+The existing draft playbook requires a newly explicit,
+CT790-only human approval authorizing exactly one graceful
+`pct shutdown 790 --timeout 90 --forceStop 0` when the only
+failed service is independently confirmed to be
+`dnf-makecache.service` with exact exit-code 1.
+It must recheck all relevant state immediately beforehand
+and must not force stop or retry on failure. Image sanitation,
+template conversion, CT701, production and networking
+remain out of scope.
