@@ -1,0 +1,11 @@
+- hosts: localhost
+  gather_facts: false
+  roles:
+    - role: system_updates
+      when: false
+  post_tasks:
+    - name: Verify role filter loads through actual Ansible loader
+      ansible.builtin.assert:
+        that:
+          - ({} | system_update_delta({})) == []
+          - ({'php':[{'version':'1'}]} | system_update_delta({'php':[{'version':'2'}]})) | length == 1

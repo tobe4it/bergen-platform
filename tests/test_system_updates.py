@@ -18,7 +18,7 @@ def load(name, path):
 
 u = load('system_updates', 'scripts/system_updates.py')
 a = load('bergen_apt_security', 'ansible/library/bergen_apt_security.py')
-f = load('update_filter', 'ansible/filter_plugins/system_update_report.py')
+f = load('update_filter', 'ansible/roles/system_updates/filter_plugins/system_update_report.py')
 
 
 def version(number, origin='Debian', trusted=True, archive='trixie-security'):

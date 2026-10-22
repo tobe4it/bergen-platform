@@ -9,6 +9,7 @@ on:
       - 'ansible/roles/system_update_scheduler/**'
       - 'ansible/library/bergen_apt_security.py'
       - 'tests/test_system_updates.py'
+      - 'tests/fixtures/system-update-filter.yml'
       - '.github/workflows/system-updates.yml'
   push:
     branches: [main]
@@ -19,6 +20,7 @@ on:
       - 'ansible/roles/system_update_scheduler/**'
       - 'ansible/library/bergen_apt_security.py'
       - 'tests/test_system_updates.py'
+      - 'tests/fixtures/system-update-filter.yml'
 permissions:
   contents: read
 jobs:
@@ -33,3 +35,4 @@ jobs:
       - run: python -m unittest discover -s tests -p test_system_updates.py -v
       - run: ansible-playbook --syntax-check ansible/playbooks/system-updates.yml
       - run: ansible-playbook --syntax-check ansible/playbooks/install-system-update-scheduler.yml
+      - run: ansible-playbook -i localhost, -c local tests/fixtures/system-update-filter.yml
