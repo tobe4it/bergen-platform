@@ -3099,3 +3099,45 @@ assessment and a per-clone provisioning design. The
 eventual approved cleanup should remove only exact verified
 per-instance material and leave DNF database and
 NetworkManager state untouched pending more evidence.
+
+
+### Full SSH enablement and executable proof recovered from exact 65-task log
+
+The operator's original successful same-run first-boot audit was
+preserved as an exact 16,197-byte log and its previously
+omitted `enablement_link_states` and `executable_states`
+sections were independently inspected. Audit status remained
+`ok=65 changed=0 failed=0`. The recovered facts are:
+
+- Every one of the eight checked activation-link candidates
+  is `ABSENT`, including
+  `etc/systemd/system/multi-user.target.wants/sshd.service`,
+  the three checked vendor keygen-target instance links,
+  the three checked local keygen-target instance links,
+  and the checked local keygen template mask path.
+- `/usr/sbin/sshd` is `ABSENT` at the reviewed exact path.
+- `/usr/libexec/openssh/sshd-keygen` helper is `ABSENT`.
+- `/usr/bin/ssh-keygen` is a present regular file with
+  an executable permission bit.
+
+In conjunction with the previously inspected absent
+`sshd.service`, `sshd-keygen.target` and
+`sshd-keygen@.service` vendor units, **no operational
+OpenSSH server or automatic host-key regeneration pathway
+has been demonstrated in this container**. The available
+`ssh-keygen` binary alone is insufficient evidence of
+automatic regeneration.
+
+Recommendation: keep the reusable Rocky base independent
+of SSH. If SSH is required for a particular new clone,
+manage `openssh-server`, unique per-clone host-key generation,
+service enablement and network/firewall access through
+separate approved per-clone provisioning. First-boot behavior
+must be independently verified in a disposable clone
+rather than assumed from Red Hat's documented defaults.
+
+The old three SSH private/public host-key pairs, the
+set machine ID and nonempty systemd random seed are
+**still present** in CT790. Their deletion/reset and any
+clone creation, start, network provisioning or
+`pct template` remain unapproved.
