@@ -2321,3 +2321,44 @@ unexpected format, the diagnosis stops without writes.
 Any later service repair, graceful shutdown with
 `--forceStop 0`, restart, rootfs sanitation or template
 conversion remains separately permission-gated.
+
+
+## CT790 degraded cause isolated to dnf-makecache.service (2026-10-22)
+
+The operator ran
+`ansible/playbooks/diagnose-rocky-9-8-ct790-failed-unit-readonly.yml`
+on the live, protected, networkless CT790:
+
+- `ROCKY_9_8_CT790_FAILED_UNIT_DIAG_READ_ONLY_RECORDED`
+- `venombox ok=28 changed=0 unreachable=0 failed=0 skipped=0`.
+- One failed unit: `dnf-makecache.service`, `LoadState=loaded`,
+  `ActiveState=failed`, `SubState=failed`,
+  `Result=exit-code`, `ExecMainCode=1`, `ExecMainStatus=1`.
+- `StateChangeTimestamp=Thu 2026-10-22 05:32:41 UTC`.
+- `systemd_state_observed=degraded`; CT790 remained `RUNNING`
+  with zero non-loopback interfaces. CT701 remained unchanged.
+- `file_writes_by_diagnostic=0`.
+  Shutdown, forced stop, timer changes, systemctl reset-failed,
+  network attachment, RPM changes and template conversion remained
+  **unauthorized**.
+
+**Interpretation:** DNF `makecache` downloads metadata from enabled
+repositories; when invoked as a systemd timer on a completely offline
+LXC, an unreachable repository or failed DNS is plausible. However,
+`ExecMainStatus=1` **does not prove** repository or DNS errors.
+Do not infer a successful yum/dnf subsystem or ignore unrelated
+unseen errors. This single failure does not invalidate the
+independently verified live Rocky 9.8 LXC / systemd PID1 / network
+isolation / user namespace checks.
+
+Official references:
+https://dnf.readthedocs.io/en/latest/command_ref.html
+https://docs.oracle.com/en/operating-systems/oracle-linux/9/systemd/WorkingWithTimers.html
+
+**Next evidence gate:** inspect the bounded journal for only
+`dnf-makecache.service` around the exact observed failure time,
+classify error categories in memory without disclosing raw logs,
+repository URLs, secrets or internal hostnames. No service restart
+or cache write. Any later proposed change to the timer, the
+shutdown gate, or the guest rootfs must be explicitly reviewed
+and separately authorized; this diagnosis does not permit it.
