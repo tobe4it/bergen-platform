@@ -3017,3 +3017,85 @@ an explicitly reviewed disposable clone lifecycle, and
 separate human approvals; no changes to CT790,
 CT701, ZFS mount state, networks or Proxmox template
 status are currently authorized.
+
+
+## CT790 first-boot identity unit survey PASS: OpenSSH key regeneration is not installed at reviewed paths (2026-10-22)
+
+The operator completed the read-only first-boot identity/SSH unit
+inventory at 2026-10-22 11:15 (terminal time):
+
+- `ROCKY_9_8_CT790_FIRSTBOOT_IDENTITY_UNITS_READ_ONLY_RECORDED`
+- `venombox ok=65 changed=0 unreachable=0 failed=0 skipped=0`.
+- CT790 remains `STOPPED`, with no guest restart, rootfs write or
+  new filesystem mount; CT701 unchanged and protected.
+- The checked **standard vendor paths** for
+  `sshd.service`, `sshd-keygen.target`,
+  `sshd-keygen@.service` were **ABSENT**. No local
+  `sshd.service` override or keygen template override was
+  found at the audited fixed paths.
+- `cloud-init.service` was **ABSENT** at the checked
+  vendor path. The three checked local/vendor OpenSSH
+  drop-in directories were **ABSENT**.
+- `systemd-firstboot.service` was present and contained
+  `ConditionFirstBoot=yes`.
+- `systemd-machine-id-commit.service` was present but
+  did **not** specify `ConditionFirstBoot=yes`.
+- Earlier same-run sanitation inventory confirmed
+  `/etc/machine-id=SET_32HEX`, three old SSH private key
+  names and three public key names, and a nonempty
+  persistent systemd random seed.
+
+**Critical interpretation:** the surveyed rootfs does **not**
+contain the standard RHEL 9 OpenSSH host-key regeneration
+units at their expected vendor paths. Therefore it would
+be incorrect to claim that deletion of the inherited SSH
+host keys is automatically repaired at first boot or that
+`openssh-server` is definitely installed/absent without
+more package-level evidence. The supplied excerpt omitted
+`enablement_link_states` and `executable_states`;
+neither may be inferred from the shown `installed_unit_states`.
+A separate later clone provisioning process may install
+`openssh-server` and generate keys, but this requires a
+deliberate plan and independent verification.
+
+**Recommended image contract:** a minimal Rocky 9.8 LXC
+base should have **no presumption of running SSH**.
+Use PVE-native console/guest lifecycle management for the
+minimal base. Only a separately designed per-clone
+`openssh-server` installation and SSH activation may
+permit SSH, after proving unique per-clone host keys and
+network/firewall policy. Do not retain private SSH host
+keys merely because `sshd.service` appears absent.
+
+**Machine-ID contract:** systemd documents that a missing
+or literal `uninitialized` `/etc/machine-id` is treated as
+a first boot (with `ConditionFirstBoot=yes` units eligible
+to run), while a zero-length file causes ID generation but
+is **not** considered first boot. For a reusable image,
+`/etc/machine-id` must not stay at `SET_32HEX`.
+Verify the exact Rocky/systemd first-boot policy in a
+disposable test clone before choosing the final
+sanitation operation.
+Reference:
+https://www.freedesktop.org/software/systemd/man/258/machine-id.html
+
+Red Hat documents automatic missing SSH host-key generation
+using the `sshd-keygen@.service` units when provided.
+That behavior must never be attributed to this particular
+CT790 image until unit or post-install evidence proves it.
+Reference:
+https://docs.redhat.com/en/documentation/red_hat_enterprise_linux/9/htmlsingle/securing_networks/
+
+**Current gates remain CLOSED**:
+`authoritative_firstboot_generation_proven=false`,
+`cleanup_authorized=false`,
+`pct_template_authorized=false`. No service install,
+network enablement, key deletion, machine-ID reset, image
+cleanup, clone boot or Proxmox template conversion is
+covered by the user's read-only audit.
+
+Next recommended review: no-write package/activation
+assessment and a per-clone provisioning design. The
+eventual approved cleanup should remove only exact verified
+per-instance material and leave DNF database and
+NetworkManager state untouched pending more evidence.
