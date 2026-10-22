@@ -305,8 +305,11 @@ def main():
                         "permission_id bigint NOT NULL CHECK (permission_id > 0), "
                         "object_pk varchar(40) NOT NULL, "
                         "PRIMARY KEY(subject_kind, subject_id, permission_id, object_pk))")
+                    # PostgreSQL utility COMMENT statements do not accept
+                    # a prepared data parameter. Both values are fixed constants.
                     cursor.execute(
-                        "COMMENT ON TABLE " + LEDGER + " IS %s", [COMMENT])
+                        "COMMENT ON TABLE " + LEDGER +
+                        " IS 'bergen-platform-paperless-managed-metadata-view-v1'")
                 require(ledger_available(cursor), "LEDGER_VERIFY_FAILED")
                 require(ledger_rows(cursor, True) == managed,
                         "MANAGED_LEDGER_CONCURRENT_DRIFT")
