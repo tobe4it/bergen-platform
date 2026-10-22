@@ -1,0 +1,98 @@
+---
+# Read-only; checks whether a recent full CT126 archive exists for a possible
+# separate no-network restored test instance. Never restores or starts a guest.
+- name: Audit feasibility of an isolated Paperless metadata integration environment
+  hosts: venombox
+  become: true
+  gather_facts: false
+  vars:
+    bp_isolated_test_script: "{{ lookup('ansible.builtin.file', playbook_dir ~ '/../files/paperless/audit_isolated_metadata_clone_readiness.py', rstrip=False) }}"
+  tasks:
+    - name: Require reviewed host and reject all write approvals
+      ansible.builtin.assert:
+        that:
+          - inventory_hostname == 'venombox'
+          - not ansible_check_mode
+          - not (paperless_taxonomy_apply_approved | default(false) | bool)
+          - not (paperless_metadata_timer_activate | default(false) | bool)
+          - not (paperless_metadata_timer_approved | default(false) | bool)
+          - not (paperless_linked_metadata_apply_approved | default(false) | bool)
+        fail_msg: ISOLATED_METADATA_TEST_REQUIRES_READ_ONLY
+      no_log: true
+
+    - name: Inspect only Proxmox, CT126 and backup feasibility
+      ansible.builtin.command:
+        argv:
+          - python3
+          - -c
+          - "{{ bp_isolated_test_script }}"
+      register: bp_isolated_test_raw
+      changed_when: false
+      failed_when: false
+      no_log: true
+
+    - name: Extract exactly one sanitized status frame
+      ansible.builtin.set_fact:
+        bp_isolated_test_frames: >-
+          {{ bp_isolated_test_raw.stdout_lines | default([]) |
+             select('match', '^BERGEN_PAPERLESS_ISOLATED_TEST_READINESS_V1:') | list }}
+      no_log: true
+
+    - name: Refuse failed or ambiguous status frame
+      ansible.builtin.assert:
+        that:
+          - bp_isolated_test_raw.rc == 0
+          - bp_isolated_test_frames | length == 1
+          - bp_isolated_test_frames[0] | length < 1100
+        fail_msg: ISOLATED_METADATA_TEST_AUDIT_RESULT_MISSING
+      no_log: true
+
+    - name: Parse only bounded no-write source status
+      ansible.builtin.set_fact:
+        bp_isolated_test: >-
+          {{ bp_isolated_test_frames[0] |
+             regex_replace('^BERGEN_PAPERLESS_ISOLATED_TEST_READINESS_V1:', '') | from_json }}
+      no_log: true
+
+    - name: Show only allowlisted refusal status
+      ansible.builtin.debug:
+        msg:
+          - "STATUS={{ bp_isolated_test.STATUS if bp_isolated_test.STATUS in ['BLOCKED','BACKUP_READY_FOR_ISOLATED_RESTORE_REVIEW'] else 'UNCLASSIFIED' }}"
+          - "REASON={{ bp_isolated_test.REASON | default('NONE') if
+                bp_isolated_test.REASON | default('NONE') in [
+                  'NONE','ROOT_REQUIRED','WRONG_PROXMOX_NODE',
+                  'READ_ONLY_HOST_COMMAND_FAILED','SOURCE_GUEST_NOT_REVIEWED',
+                  'BACKUP_FS_NOT_NFS','BACKUP_DIRECTORY_NOT_REVIEWED',
+                  'RECENT_CT126_BACKUP_NOT_FOUND','UNCLASSIFIED'
+                ] else 'UNCLASSIFIED' }}"
+
+    - name: Require source backup verified without creating or modifying guests
+      ansible.builtin.assert:
+        that:
+          - bp_isolated_test.STATUS == 'BACKUP_READY_FOR_ISOLATED_RESTORE_REVIEW'
+          - bp_isolated_test.AUDIT == 'READ_ONLY'
+          - bp_isolated_test.CHANGED == false
+          - bp_isolated_test.SOURCE_GUEST == 'CT126_UNPRIVILEGED'
+          - bp_isolated_test.BACKUP_RECENT == 'YES'
+          - bp_isolated_test.BACKUP_INCLUDED_DATA_MOUNT == 'YES'
+          - bp_isolated_test.CLONE_CREATED == 'NO'
+          - bp_isolated_test.RESTORE_TESTED == 'NO'
+          - bp_isolated_test.NETWORK_ISOLATION_PROVEN == 'NO'
+          - bp_isolated_test.POSTGRES_INTEGRATION_TESTED == 'NO'
+        fail_msg: ISOLATED_METADATA_TEST_PREREQUISITES_BLOCKED
+      no_log: true
+
+    - name: Report bounded restore-planning readiness
+      ansible.builtin.debug:
+        msg:
+          - AUDIT=READ_ONLY
+          - "STATUS={{ bp_isolated_test.STATUS }}"
+          - "BACKUP_ARCHIVES_RECENT={{ bp_isolated_test.BACKUP_ARCHIVES_RECENT }}"
+          - "MOST_RECENT_BACKUP_SIZE_MIB={{ bp_isolated_test.MOST_RECENT_BACKUP_SIZE_MIB }}"
+          - SOURCE_GUEST=CT126_UNPRIVILEGED
+          - CLONE_CREATED=NO
+          - RESTORE_TESTED=NO
+          - NETWORK_ISOLATION_PROVEN=NO
+          - POSTGRES_INTEGRATION_TESTED=NO
+          - NEXT_GATE=REVIEW_CLONE_ID_STORAGE_NETWORK_AND_RESTORE
+          - CHANGED=False
