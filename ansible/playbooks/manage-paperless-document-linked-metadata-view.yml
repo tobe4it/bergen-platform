@@ -228,6 +228,25 @@
       no_log: true
       when: bp_linked_meta_apply
 
+    - name: Diagnose approved apply with only allowlisted refusal codes
+      ansible.builtin.debug:
+        msg:
+          - "APPLY_STATUS={{ (bp_linked_meta_apply_frames[0] | regex_replace('^BERGEN_PAPERLESS_DOCUMENT_LINKED_METADATA_GRANTS_V1:', '') | from_json).STATUS if bp_linked_meta_apply_frames | length == 1 else 'FRAME_MISSING' }}"
+          - "APPLY_REASON={{ (bp_linked_meta_apply_frames[0] | regex_replace('^BERGEN_PAPERLESS_DOCUMENT_LINKED_METADATA_GRANTS_V1:', '') | from_json).REASON | default('NONE') if
+                bp_linked_meta_apply_frames | length == 1 and
+                (bp_linked_meta_apply_frames[0] | regex_replace('^BERGEN_PAPERLESS_DOCUMENT_LINKED_METADATA_GRANTS_V1:', '') | from_json).REASON | default('NONE') in [
+                  'NONE','EXPECTED_LIVE_COUNTS_DRIFT','DOCUMENT_SCOPE_CHANGED_BEFORE_APPLY',
+                  'DOCUMENT_VISIBLE_METADATA_DRIFT','SENSITIVE_STATE_CHANGED',
+                  'METADATA_GRANTS_CHANGED_BEFORE_APPLY',
+                  'UNEXPECTED_PERMISSION_TARGET','UNRELATED_STATE_MUTATED',
+                  'METADATA_PERMISSION_DELTA_UNEXPECTED',
+                  'METADATA_OR_DOCUMENT_POSTCHECK_FAILED',
+                  'UNCLASSIFIED'
+                ] else 'UNCLASSIFIED' }}"
+      when:
+        - bp_linked_meta_apply
+        - bp_linked_meta_apply_frames | length == 1
+
     - name: Reject unproven successful and privacy-safe metadata apply
       ansible.builtin.assert:
         that:
