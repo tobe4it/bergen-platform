@@ -2362,3 +2362,64 @@ repository URLs, secrets or internal hostnames. No service restart
 or cache write. Any later proposed change to the timer, the
 shutdown gate, or the guest rootfs must be explicitly reviewed
 and separately authorized; this diagnosis does not permit it.
+
+
+## CT790 bounded dnf-makecache journal error classification
+
+A separate default read-only journal classification step has been
+added at
+`ansible/playbooks/diagnose-rocky-9-8-ct790-dnf-journal-readonly.yml`.
+It imports the previously verified read-only running-guest and
+single-failed-unit gates before accessing the journal. It requires:
+
+- Exactly `dnf-makecache.service` failed, with `Result=exit-code`
+  and `ExecMainStatus=1`; current `systemd=degraded`.
+- Protected unprivileged running CT790 with zero non-loopback
+  interfaces and unchanged protected CT701.
+- Guest journal strictly limited to unit
+  `dnf-makecache.service`, from `2026-10-22 05:00:00`
+  to `05:40:00` UTC, at most 80 lines and 32768 bytes.
+- Raw journal always handled as `no_log`. The Python parser
+  emits only validated category names, line count, boolean
+  evidence flags, and explicit zero-write status. Repository
+  names, URLs, credentials, hostnames, raw journal lines and
+  service descriptions are **not printed**.
+
+Possible sanitized results:
+`DNS_RESOLUTION_ERROR_OBSERVED`,
+`NETWORK_CONNECTION_ERROR_OBSERVED`,
+`REPOSITORY_CONFIG_ERROR_OBSERVED`,
+`REPOSITORY_METADATA_ERROR_OBSERVED_CAUSE_UNDETERMINED`,
+or `NO_RECOGNIZED_CAUSE_IN_BOUNDED_JOURNAL`. A category is not
+proof of exhaustive root cause. If journal output changes,
+is unreadable, grows beyond bounds, or the failed unit is no
+longer the sole failure, the diagnosis fails closed with no
+service modification or shutdown.
+
+No `dnf` command, service restart, `reset-failed`, DNF
+timer modification, network attachment, shutdown or Proxmox
+template conversion is allowed by this audit. An offline-only
+timer policy for reusable templates must be reviewed later.
+
+Run on bp-controller with a clean verified branch worktree
+and **no apply variables**:
+
+    BASE="$HOME/bergen-platform"
+    WT="$HOME/bergen-platform-nextcloud-restore"
+    BRANCH="feat/nextcloud-isolated-restore-701-20261019"
+    SSH_ARGS="-C -o ControlMaster=no -o ControlPath=none -o ConnectTimeout=10 -o ServerAliveInterval=10 -o ServerAliveCountMax=2"
+    if [ -n "$(git -C "$WT" status --porcelain)" ]; then
+      echo "STOP: dirty worktree"
+    else
+      git -C "$WT" fetch origin "$BRANCH" &&
+      git -C "$WT" switch --detach "origin/$BRANCH" &&
+      ANSIBLE_SSH_ARGS="$SSH_ARGS" "$BASE/.venv/bin/ansible-playbook" \
+        -i "$BASE/ansible/inventory.yml" \
+        -i "$BASE/ansible/inventory.local.yml" \
+        "$WT/ansible/playbooks/diagnose-rocky-9-8-ct790-dnf-journal-readonly.yml" \
+        --limit venombox --vault-id infra@prompt
+    fi
+
+Expected: `ROCKY_9_8_CT790_DNF_JOURNAL_CLASSIFIED_READ_ONLY`,
+`changed=0`, `failed=0`. Any shutdown and future image
+change remain separately gated.
