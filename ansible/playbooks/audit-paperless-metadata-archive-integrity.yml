@@ -1,0 +1,103 @@
+---
+# Read-only *long running* NFS integrity scan of exactly the latest CT126
+# archive: SHA256 + complete zstd stream check + tar directory scan.
+# No extraction, restore, guest start, network or database modification.
+- name: Verify newest CT126 backup archive before isolated metadata DB tests
+  hosts: venombox
+  become: true
+  gather_facts: false
+  vars:
+    bp_archive_integrity_src: "{{ lookup('ansible.builtin.file', playbook_dir ~ '/../files/paperless/audit_metadata_archive_integrity_readonly.py', rstrip=False) }}"
+  tasks:
+    - name: Refuse any write approval and incorrect Proxmox target
+      ansible.builtin.assert:
+        that:
+          - inventory_hostname == 'venombox'
+          - not ansible_check_mode
+          - not (paperless_metadata_clone_restore_approved | default(false) | bool)
+          - not (paperless_taxonomy_apply_approved | default(false) | bool)
+          - not (paperless_metadata_timer_activate | default(false) | bool)
+          - not (paperless_linked_metadata_apply_approved | default(false) | bool)
+        fail_msg: PAPERLESS_ARCHIVE_INTEGRITY_REQUIRES_READ_ONLY
+      no_log: true
+
+    - name: Scan exactly one archive without exposing member filenames
+      ansible.builtin.command:
+        argv: [python3, -c, "{{ bp_archive_integrity_src }}"]
+      changed_when: false
+      failed_when: false
+      register: bp_archive_integrity_raw
+      no_log: true
+
+    - name: Require single bounded sanitized integrity status frame
+      ansible.builtin.set_fact:
+        bp_archive_integrity_frames: >-
+          {{ bp_archive_integrity_raw.stdout_lines | default([]) |
+             select('match', '^BERGEN_PAPERLESS_METADATA_ARCHIVE_INTEGRITY_V1:') | list }}
+      no_log: true
+
+    - name: Block missing duplicate failed or unbounded status result
+      ansible.builtin.assert:
+        that:
+          - bp_archive_integrity_raw.rc == 0
+          - bp_archive_integrity_frames | length == 1
+          - bp_archive_integrity_frames[0] | length < 1100
+        fail_msg: PAPERLESS_ARCHIVE_INTEGRITY_FRAME_INVALID
+      no_log: true
+
+    - name: Decode sanitized status only
+      ansible.builtin.set_fact:
+        bp_archive_integrity: >-
+          {{ bp_archive_integrity_frames[0] |
+             regex_replace('^BERGEN_PAPERLESS_METADATA_ARCHIVE_INTEGRITY_V1:', '') |
+             from_json }}
+      no_log: true
+
+    - name: Show allowlisted refusal only
+      ansible.builtin.debug:
+        msg:
+          - "STATUS={{ bp_archive_integrity.STATUS if bp_archive_integrity.STATUS in ['ARCHIVE_STREAM_AND_TAR_OK','BLOCKED'] else 'UNCLASSIFIED' }}"
+          - "REASON={{ bp_archive_integrity.REASON | default('NONE') if
+            bp_archive_integrity.REASON | default('NONE') in [
+              'NONE','ROOT_REQUIRED','HOST_NOT_REVIEWED','NFS_MOUNT_NOT_PROVEN',
+              'DUMP_DIRECTORY_NOT_REVIEWED','FRESH_CT126_ARCHIVE_NOT_FOUND',
+              'NEWEST_ARCHIVE_AMBIGUOUS','ARCHIVE_SYMLINK_REJECTED',
+              'ARCHIVE_FILE_UNREVIEWED','ARCHIVE_CHANGED_DURING_READ',
+              'ARCHIVE_CHANGED_DURING_CHECK','ARCHIVE_FORMAT_CHECK_FAILED',
+              'INTEGRITY_CHECK_TIMEOUT','UNCLASSIFIED'
+            ] else 'UNCLASSIFIED' }}"
+
+    - name: Require full archive integrity scan and no write operations
+      ansible.builtin.assert:
+        that:
+          - bp_archive_integrity.STATUS == 'ARCHIVE_STREAM_AND_TAR_OK'
+          - bp_archive_integrity.AUDIT == 'READ_ONLY'
+          - bp_archive_integrity.CHANGED == false
+          - bp_archive_integrity.CT126_STATE_CHANGED == 'NO'
+          - bp_archive_integrity.CLONE_CREATED == 'NO'
+          - bp_archive_integrity.RESTORE_PERFORMED == 'NO'
+          - bp_archive_integrity.NETWORK_ISOLATION_PROVEN == 'NO'
+          - bp_archive_integrity.DATABASE_RECOVERY_PROVEN == 'NO'
+          - bp_archive_integrity.ZSTD_STREAM == 'PASSED'
+          - bp_archive_integrity.TAR_DIRECTORY_SCAN == 'PASSED'
+          - bp_archive_integrity.ARCHIVE_SHA256 is match('^[0-9a-f]{64}$')
+          - bp_archive_integrity.ARCHIVE_SIZE_MIB | int > 0
+        fail_msg: PAPERLESS_ARCHIVE_INTEGRITY_NOT_PROVEN
+      no_log: true
+
+    - name: Report only current checksum and sanitized format validity
+      ansible.builtin.debug:
+        msg:
+          - AUDIT=READ_ONLY
+          - STATUS=ARCHIVE_STREAM_AND_TAR_OK
+          - "RECENT_BACKUP_COUNT={{ bp_archive_integrity.RECENT_BACKUP_COUNT }}"
+          - "ARCHIVE_SIZE_MIB={{ bp_archive_integrity.ARCHIVE_SIZE_MIB }}"
+          - "ARCHIVE_SHA256={{ bp_archive_integrity.ARCHIVE_SHA256 }}"
+          - ZSTD_STREAM=PASSED
+          - TAR_DIRECTORY_SCAN=PASSED
+          - DATABASE_RECOVERY_PROVEN=NO
+          - NETWORK_ISOLATION_PROVEN=NO
+          - RESTORE_PERFORMED=NO
+          - CLONE_CREATED=NO
+          - NEXT_GATE=EXPLICIT_OFFLINE_RESTORE_PLAN_APPROVAL
+          - CHANGED=False
