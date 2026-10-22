@@ -72,8 +72,8 @@ class LinkedMetadataGrantPolicy(unittest.TestCase):
             '"THOMAS_PRIVATE_SCOPE_NOT_PROVEN"',
             '"CHILD_PARENT_DOC_VISIBLE"',
             '"CHILD_THOMAS_PRIVATE_VISIBLE"',
-            '"FUTURE_RECONCILIATION"',
-            '"REVOCATION_POLICY"',
+            'FUTURE_RECONCILIATION="NOT_ENABLED"',
+            'REVOCATION_POLICY="NOT_ENABLED"',
         ):
             self.assertIn(permitted, code)
         for forbidden in (
