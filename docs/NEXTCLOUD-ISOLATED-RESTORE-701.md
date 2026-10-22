@@ -2747,3 +2747,78 @@ identities, journal, persistent random seed and package
 cache must be inventoried without disclosing secrets.
 No cleanup is implicit. Template conversion remains a
 distinct separately authorized action following policy review.
+
+
+## CT790 post-shutdown zero-write rootfs sanitation survey
+
+The separately authorized CT790 graceful shutdown completed
+successfully, with `container_status=STOPPED` and one
+verified non-forced stop. CT790 must **never** be restarted by
+an old first-boot or runtime plan.
+
+New default read-only audit:
+`ansible/playbooks/audit-rocky-9-8-ct790-postshutdown-sanitization-readonly.yml`.
+
+It imports the previously tested **stopped-only** CT790
+PVE/ZFS ownership audit and Rocky 9.8 release proof; these
+require that the CT790 rootfs is **already mounted** at its
+strictly verified ZFS mountpoint. It will fail closed if
+the dataset is unmounted. It does not issue any `pct mount`,
+`zfs mount`, `pct exec`, `pct start`, stop or template
+command and does not change any file.
+
+The additional survey is constrained to root-owned on-host
+`python3 -c` code with an exact verified ZFS rootdir path.
+It uses `O_NOATIME`, `O_NOFOLLOW`, openat-style
+descriptor-relative reads, short bounded `machine-id`
+reads and bounded directory listings. It refuses symlinks
+in path components, refuses unexpected file types and
+prevents content disclosure for machine IDs and host keys.
+
+The following 12 fixed categories are inventoried without
+ever printing raw IDs, key material, URLs or arbitrary
+untrusted filenames:
+
+- `/etc/machine-id`, `/var/lib/dbus/machine-id`
+- `/var/lib/systemd/random-seed`, `/etc/ssh` host key counts
+- `/var/log/journal`, `/var/cache/dnf`, `/var/lib/dnf`
+- `/var/lib/NetworkManager`,
+  `/etc/NetworkManager/system-connections`,
+  `/var/lib/dhcp`, `/var/lib/cloud`,
+  `/var/lib/systemd/timers`.
+
+The output is a **sanitation inventory**, never a promise
+that an image is clean. `template_sanitation` remains
+`REVIEW_REQUIRED_NO_CHANGES_AUTHORIZED` regardless of
+findings. A machine-id reported as `SET_32HEX`, SSH host
+keys, retained journal/random seed or persistent DNF/network
+state must be reviewed before cloning. Files or settings
+are not erased automatically. The import also verifies
+unchanged protected CT701 and rechecks CT790 is still
+`STOPPED` after the survey.
+
+On bp-controller use only the verified commit in a clean
+worktree and **no apply flags**:
+
+    BASE="$HOME/bergen-platform"
+    WT="$HOME/bergen-platform-nextcloud-restore"
+    BRANCH="feat/nextcloud-isolated-restore-701-20261019"
+    SSH_ARGS="-C -o ControlMaster=no -o ControlPath=none -o ConnectTimeout=10 -o ServerAliveInterval=10 -o ServerAliveCountMax=2"
+    if [ -n "$(git -C "$WT" status --porcelain)" ]; then
+      echo "STOP: dirty worktree"
+    else
+      git -C "$WT" fetch origin "$BRANCH" &&
+      git -C "$WT" switch --detach "origin/$BRANCH" &&
+      ANSIBLE_SSH_ARGS="$SSH_ARGS" "$BASE/.venv/bin/ansible-playbook" \
+        -i "$BASE/ansible/inventory.yml" \
+        -i "$BASE/ansible/inventory.local.yml" \
+        "$WT/ansible/playbooks/audit-rocky-9-8-ct790-postshutdown-sanitization-readonly.yml" \
+        --limit venombox --vault-id infra@prompt
+    fi
+
+When mounted and all guards pass, expected receipt:
+`ROCKY_9_8_CT790_POSTSHUTDOWN_SANITATION_READ_ONLY_INVENTORIED`,
+`changed=0`, `failed=0`. If ZFS was already unmounted,
+the audit must fail closed; do not mount it as a workaround
+without a separate scope review and authorization.
+Cleanup and `pct template` remain separate approval gates.
