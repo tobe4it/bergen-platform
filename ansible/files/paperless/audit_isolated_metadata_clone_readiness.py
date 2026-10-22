@@ -73,11 +73,11 @@ def main():
                 continue
             st = file.stat()
             if st.st_size >= 1024 * 1024 and 0 <= now-st.st_mtime <= 48*3600:
-                candidates.append(st.st_size)
+                candidates.append((st.st_mtime, st.st_size))
         require(candidates, "RECENT_CT126_BACKUP_NOT_FOUND")
         output("BACKUP_READY_FOR_ISOLATED_RESTORE_REVIEW",
                BACKUP_RECENT="YES", BACKUP_ARCHIVES_RECENT=len(candidates),
-               MOST_RECENT_BACKUP_SIZE_MIB=round(max(candidates) / (1024*1024)),
+               MOST_RECENT_BACKUP_SIZE_MIB=round(max(candidates)[1] / (1024*1024)),
                SOURCE_GUEST="CT126_UNPRIVILEGED",
                BACKUP_INCLUDED_DATA_MOUNT="YES",
                NEXT_GATE="REVIEW_CLONE_ID_STORAGE_NETWORK_AND_RESTORE")
