@@ -51,10 +51,10 @@ class DnfJournalDiagnosticTests(unittest.TestCase):
                 with self.assertRaises(ValueError):
                     classifier.classify(raw)
 
-    def test_same_run_precise_degraded_unit_preflight_and_scope(self):
+    def test_same_run_recovered_healthy_isolated_preflight_and_historical_scope(self):
         self.assertEqual(len(self.plays), 2)
         self.assertEqual(self.plays[0], {
-            "import_playbook": "diagnose-rocky-9-8-ct790-failed-unit-readonly.yml",
+            "import_playbook": "audit-rocky-9-8-ct790-running-readonly.yml",
         })
         play = self.plays[1]
         self.assertEqual(play["hosts"], "venombox")
@@ -62,11 +62,14 @@ class DnfJournalDiagnosticTests(unittest.TestCase):
         self.assertIs(play["gather_facts"], False)
         self.assertIs(play["any_errors_fatal"], True)
         for snippet in (
-            "rocky_failed_unit_name == 'dnf-makecache.service'",
-            "rocky_failed_unit_fields.ActiveState == 'failed'",
-            "rocky_failed_unit_fields.Result == 'exit-code'",
-            "rocky_failed_unit_fields.ExecMainStatus == '1'",
-            "rocky_running_systemd.stdout | trim == 'degraded'",
+            "rocky_running_systemd.stdout | trim == 'running'",
+            "rocky_running_failed_units.rc == 0",
+            "rocky_running_failed_units.stdout_lines | length == 0",
+            "'status: running' in rocky_running_final_status.stdout_lines",
+            "'protection: 1' in rocky_running_config.stdout_lines",
+            "'unprivileged: 1' in rocky_running_config.stdout_lines",
+            "current_systemd_state:",
+            "currently_failed_units: 0",
             "NON_LOOPBACK_DEVICES=0",
             "GUEST_IDMAP_NONIDENTITY=YES",
             "2026-10-22 05:00:00",
