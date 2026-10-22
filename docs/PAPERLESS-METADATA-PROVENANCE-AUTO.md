@@ -113,6 +113,9 @@ festgestellten** Zähler angeben. Nicht aus alten Logs übernehmen.
   "$BASE/.venv/bin/python" -m unittest discover -s tests \\
     -p 'test_paperless_metadata_provenance_reconciler.py' -v
 
+  "$BASE/.venv/bin/python" -m unittest discover -s tests \\
+    -p 'test_paperless_metadata_synthetic_lifecycle.py' -v
+
   "$BASE/.venv/bin/ansible-playbook" \\
     -i ansible/inventory.yml \\
     -i "$BASE/ansible/inventory.local.yml" \\
@@ -127,6 +130,21 @@ Erwarteter unveränderter Altbestand (vor neuem Tag/Import):
 \`MANAGED_REVOCATIONS=0\`, \`THOMAS_PRIVATE=9\`,
 \`LEDGER=ABSENT\`, \`CHANGED=False\`. Diese Werte sind nur
 historische Erwartungswerte; abweichende Live-Zähler neu prüfen.
+
+## Synthetische Regressionsprüfung der Rechte-Übergänge
+
+Sieben zusätzliche rein synthetische Tests in
+`tests/test_paperless_metadata_synthetic_lifecycle.py` prüfen
+den Produktionsalgorithmus: neuer Tag, selektive Typ-/Korrespondenten-
+Freigabe je Dokumentberechtigung, Entzug nach der letzten sichtbaren
+Zuordnung, Fortbestand bei mehreren verknüpften Dokumenten, Schutz
+historischer manueller Rechte und wiederholungsfeste Läufe.
+
+Die Tests verändern keine Datenbank und greifen nicht auf CT126 zu.
+Sie sind **kein Ersatz für PostgreSQL-Integrationstests**. Ein kontrolliertes
+Anlegen/Entziehen muss vor produktiver Timerfreigabe separat in
+einer isolierten Paperless-Kopie nachgewiesen werden. Keine
+Testdaten oder Berechtigungen im produktiven System anlegen.
 
 ## Phase B: Separat genehmigte Ledger-Initialisierung
 
