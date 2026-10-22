@@ -1,0 +1,207 @@
+---
+# Paperless-ngx 3.3.0 native Tag permissions only.
+# Default audit; explicitly approved apply grants view_tag to the existing
+# Familie@bergen.intern group and every existing Tag object. NEVER modify
+# Document grants, tag assignments, owners, UI default document permissions
+# or change/delete Tag permissions. New Tags require a further reconciliation.
+- name: Audit shared tag visibility while protecting private Paperless documents
+  hosts: venombox
+  become: true
+  gather_facts: false
+  vars:
+    bp_family_tag_mode: "{{ paperless_family_tags_mode | default('audit') }}"
+    bp_family_tag_apply: "{{ bp_family_tag_mode == 'apply' }}"
+    bp_family_tag_expected_count: "{{ paperless_family_tags_expected_count | default(38) | int }}"
+    bp_family_tag_script: "{{ lookup('ansible.builtin.file', playbook_dir ~ '/../files/paperless/reconcile_family_shared_tag_visibility.py', rstrip=False) }}"
+  tasks:
+    - name: Require reviewed host exact mode and explicit apply approval
+      ansible.builtin.assert:
+        that:
+          - inventory_hostname == 'venombox'
+          - bp_family_tag_mode in ['audit','apply']
+          - not ansible_check_mode
+          - bp_family_tag_expected_count > 0
+          - bp_family_tag_expected_count <= 500
+          - not bp_family_tag_apply or (
+              (paperless_family_tags_apply_approved | default(false) | bool)
+              and (paperless_ai_catalog_verified_backup | default(false) | bool)
+            )
+        fail_msg: SHARED_TAGS_APPLY_NOT_APPROVED
+      no_log: true
+
+    - name: Read exact CT126 configuration without changing guest
+      ansible.builtin.command:
+        argv: [pct, config, '126']
+      changed_when: false
+      register: bp_family_tag_ct
+      no_log: true
+
+    - name: Reject unexpected or unconfined Paperless target
+      ansible.builtin.assert:
+        that:
+          - bp_family_tag_ct.rc == 0
+          - "'hostname: bergen-paperless' in bp_family_tag_ct.stdout_lines"
+          - "'unprivileged: 1' in bp_family_tag_ct.stdout_lines"
+          - "'lxc.apparmor.profile: unconfined' not in bp_family_tag_ct.stdout"
+          - "bp_family_tag_ct.stdout_lines | select('match', '^rootfs: local-zfs:') | list | length == 1"
+          - "bp_family_tag_ct.stdout_lines | select('match', '^mp0: local-zfs:.*mp=/srv/bergen-paperless,backup=1(,|$)') | list | length == 1"
+        fail_msg: SHARED_TAGS_GUEST_NOT_REVIEWED
+      no_log: true
+
+    - name: Check NFS CT126 backup exists recently before approved apply
+      ansible.builtin.command:
+        argv:
+          - bash
+          - -euo
+          - pipefail
+          - -c
+          - |
+            target=/mnt/pve/bergen-synology-backup
+            fs="$(findmnt --mountpoint "$target" -n -o FSTYPE)"
+            [[ "$fs" = nfs || "$fs" = nfs4 ]]
+            find "$target/dump" -maxdepth 1 -type f \
+              -name 'vzdump-lxc-126-*.tar.zst' -mmin -2880 \
+              -size +1M -print -quit | grep -q .
+      changed_when: false
+      no_log: true
+      when: bp_family_tag_apply
+
+    - name: Execute native isolated Tag-only policy preview
+      ansible.builtin.command:
+        argv:
+          - pct
+          - exec
+          - '126'
+          - --
+          - podman
+          - exec
+          - -i
+          - bergen-paperless
+          - python
+          - /usr/src/paperless/src/manage.py
+          - shell
+          - --verbosity=0
+          - -c
+          - "{{ bp_family_tag_script }}"
+        stdin: "{{ {'protocol':'paperless-shared-tag-read-v1','mode':'audit','approved':false,'expected_tag_count':bp_family_tag_expected_count} | to_json }}"
+        stdin_add_newline: true
+      changed_when: false
+      failed_when: false
+      register: bp_family_tag_audit_raw
+      no_log: true
+
+    - name: Extract exactly one bounded sanitized preview frame
+      ansible.builtin.set_fact:
+        bp_family_tag_audit_frames: >-
+          {{ bp_family_tag_audit_raw.stdout_lines | default([]) |
+             select('match', '^BERGEN_PAPERLESS_SHARED_TAG_VISIBILITY_V1:') | list }}
+      no_log: true
+
+    - name: Reject missing duplicate or unbounded policy frame
+      ansible.builtin.assert:
+        that:
+          - bp_family_tag_audit_raw.rc == 0
+          - bp_family_tag_audit_frames | length == 1
+          - bp_family_tag_audit_frames[0] | length < 1400
+        fail_msg: SHARED_TAGS_AUDIT_RESULT_MISSING
+      no_log: true
+
+    - name: Decode aggregate policy preview only
+      ansible.builtin.set_fact:
+        bp_family_tag_audit: >-
+          {{ bp_family_tag_audit_frames[0] |
+             regex_replace('^BERGEN_PAPERLESS_SHARED_TAG_VISIBILITY_V1:', '') | from_json }}
+      no_log: true
+
+    - name: Require verified current shared taxonomy and private-doc boundary
+      ansible.builtin.assert:
+        that:
+          - bp_family_tag_audit.STATUS == 'INSPECTED'
+          - bp_family_tag_audit.MODE == 'AUDIT'
+          - bp_family_tag_audit.REASON == 'NONE'
+          - bp_family_tag_audit.AUDIT == 'READ_ONLY'
+          - bp_family_tag_audit.TAGS | int == bp_family_tag_expected_count | int
+          - bp_family_tag_audit.PARENTS | int == 2
+          - bp_family_tag_audit.FAMILY_MEMBERS | int >= 3
+          - bp_family_tag_audit.CHILD_IDENTITIES | int >= 1
+          - bp_family_tag_audit.THOMAS_PRIVATE_DENIED_TO_NADJA | int >= 1
+          - bp_family_tag_audit.DOCUMENTS_CHANGED == 'NO'
+          - bp_family_tag_audit.DOCUMENT_ACLS_CHANGED == 'NO'
+        fail_msg: SHARED_TAGS_PREFLIGHT_BLOCKED
+      no_log: true
+
+    - name: Report current restricted tag visibility without exposing tag names
+      ansible.builtin.debug:
+        msg:
+          - AUDIT=READ_ONLY
+          - "TAGS={{ bp_family_tag_audit.TAGS }}"
+          - "FAMILY_MEMBERS={{ bp_family_tag_audit.FAMILY_MEMBERS }}"
+          - "CHILD_IDENTITIES={{ bp_family_tag_audit.CHILD_IDENTITIES }}"
+          - "FAMILY_MIN_VISIBLE_TAGS_BEFORE={{ bp_family_tag_audit.FAMILY_MIN_VISIBLE_TAGS_BEFORE }}"
+          - "FAMILY_MAX_VISIBLE_TAGS_BEFORE={{ bp_family_tag_audit.FAMILY_MAX_VISIBLE_TAGS_BEFORE }}"
+          - "TAG_GROUP_GRANTS_MISSING_BEFORE={{ bp_family_tag_audit.TAG_OBJECT_GRANTS_MISSING_BEFORE }}"
+          - "THOMAS_PRIVATE_DENIED_TO_NADJA={{ bp_family_tag_audit.THOMAS_PRIVATE_DENIED_TO_NADJA }}"
+          - DOCUMENTS_CHANGED=NO
+          - CHANGED=False
+      when: not bp_family_tag_apply
+
+    - name: Apply only granted tag model and object read privileges
+      ansible.builtin.command:
+        argv:
+          - pct
+          - exec
+          - '126'
+          - --
+          - podman
+          - exec
+          - -i
+          - bergen-paperless
+          - python
+          - /usr/src/paperless/src/manage.py
+          - shell
+          - --verbosity=0
+          - -c
+          - "{{ bp_family_tag_script }}"
+        stdin: "{{ {'protocol':'paperless-shared-tag-read-v1','mode':'apply','approved':true,'expected_tag_count':bp_family_tag_expected_count} | to_json }}"
+        stdin_add_newline: true
+      changed_when: >-
+        (bp_family_tag_audit.TAG_OBJECT_GRANTS_MISSING_BEFORE | int > 0) or
+        (bp_family_tag_audit.FAMILY_TAG_MODEL_GRANT_MISSING_BEFORE | bool)
+      failed_when: false
+      register: bp_family_tag_apply_raw
+      no_log: true
+      when: bp_family_tag_apply
+
+    - name: Require one complete bounded apply report
+      ansible.builtin.set_fact:
+        bp_family_tag_apply_frames: >-
+          {{ bp_family_tag_apply_raw.stdout_lines | default([]) |
+             select('match', '^BERGEN_PAPERLESS_SHARED_TAG_VISIBILITY_V1:') | list }}
+      no_log: true
+      when: bp_family_tag_apply
+
+    - name: Reject incomplete or errorful private document safety attestations
+      ansible.builtin.assert:
+        that:
+          - bp_family_tag_apply_raw.rc == 0
+          - bp_family_tag_apply_frames | length == 1
+          - bp_family_tag_apply_frames[0] | length < 1400
+          - (bp_family_tag_apply_frames[0] | regex_replace('^BERGEN_PAPERLESS_SHARED_TAG_VISIBILITY_V1:', '') | from_json).STATUS == 'APPLIED'
+          - (bp_family_tag_apply_frames[0] | regex_replace('^BERGEN_PAPERLESS_SHARED_TAG_VISIBILITY_V1:', '') | from_json).DOCUMENTS_CHANGED == 'NO'
+          - (bp_family_tag_apply_frames[0] | regex_replace('^BERGEN_PAPERLESS_SHARED_TAG_VISIBILITY_V1:', '') | from_json).DOCUMENT_ACLS_CHANGED == 'NO'
+          - (bp_family_tag_apply_frames[0] | regex_replace('^BERGEN_PAPERLESS_SHARED_TAG_VISIBILITY_V1:', '') | from_json).TAG_ASSIGNMENTS_CHANGED == 'NO'
+        fail_msg: SHARED_TAGS_POST_VERIFY_FAILED
+      no_log: true
+      when: bp_family_tag_apply
+
+    - name: Report applied native shared tag read scope only
+      ansible.builtin.debug:
+        msg:
+          - TAG_CATALOGUE=VISIBLE_TO_ALL_FAMILY_MEMBERS
+          - "TAGS={{ bp_family_tag_audit.TAGS }}"
+          - "FAMILY_MEMBERS={{ bp_family_tag_audit.FAMILY_MEMBERS }}"
+          - DOCUMENTS_CHANGED=NO
+          - DOCUMENT_ACLS_CHANGED=NO
+          - TAG_ASSIGNMENTS_CHANGED=NO
+          - NEW_TAGS=REQUIRE_RECONCILIATION
+      when: bp_family_tag_apply
