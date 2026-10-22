@@ -3297,14 +3297,9 @@ Ansible recap in the supplied output states:
   `pct_template_authorized=false`,
   no rootfs files written or new mounts created.
 
-This excerpt does **not** include the new report's
-`machine_id`, `dnf_timer_stamp` or
-`directory_metadata` subobjects. Their precise
-file-type, hardlink, ownership and unknown-name
-values **must not be assumed** from the end of the log.
-The prior full sanitation inventory did establish
-`/etc/machine-id=SET_32HEX`, but it did not
-supply the newer metadata audit's per-file fields.
+The initial terminal excerpt omitted `machine_id`, `dnf_timer_stamp` and
+`directory_metadata`. The complete original 75-task log was subsequently
+received and independently inspected; its missing fields are recorded below.
 
 The bounded report is successful evidence for the
 **observed SSH key pair set and random seed** only,
@@ -3323,3 +3318,36 @@ no-hardlink, stopped-only sanitation playbook with
 explicit approval and independent post-write audit.
 No `pct template` command until another approval
 after sanitation and disposable clone policy review.
+
+
+### Complete 75-task receipt recovered (22 October 2026)
+
+The original 21,696-byte Ansible log was received by email and
+reviewed without another guest operation. The original status remains
+`ok=75 changed=0 failed=0`.
+
+- `/etc/machine-id`: regular nonempty file, one hard link,
+  matching rootfs UID. Its independent earlier value classification
+  was `SET_32HEX`.
+- The specifically inspected `stamp-dnf-makecache.timer` is
+  `ABSENT`. The timers directory contains one as-yet
+  unidentified entry. No deletion is justified.
+- `/etc/ssh`: nine entries, six recognized host-key filenames
+  (RSA/ECDSA/Ed25519 private/public pairs), zero other host-key
+  pattern matches. Three further directory entries were not
+  classified.
+- DNF cache: eight entries; DNF state: four entries;
+  NetworkManager state: four entries. Preserve pending review.
+- The six host-key files are regular nonempty files with one
+  hard link and matching rootfs ownership. Private key permissions
+  passed; public key files are not required to have private-key
+  permissions.
+- The systemd random seed is present, nonempty, privately
+  permissioned and has one hard link.
+
+This is evidence for an eventual **separately approved**
+exact-path idempotent sanitation design, not permission to
+perform it. Before any modifications, verify a recoverable CT790
+backup or approved rollback point and plan isolated clone
+identity testing. CT790 stays stopped; CT701 stays unchanged;
+`pct template 790` is not authorized.
