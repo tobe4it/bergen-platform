@@ -1,0 +1,33 @@
+name: Bergen-AI safe family rights preflight
+
+on:
+  pull_request:
+    paths:
+      - 'ansible/files/bergen_ai/plan_family_rights_v0102.py'
+      - 'ansible/playbooks/plan-bergen-ai-family-rights-readonly.yml'
+      - 'tests/test_bergen_ai_family_rights_preflight.py'
+      - 'docs/BERGEN-AI-FAMILY-RIGHTS-PREFLIGHT.md'
+      - '.github/workflows/bergen-ai-family-rights-preflight.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'ansible/files/bergen_ai/plan_family_rights_v0102.py'
+      - 'ansible/playbooks/plan-bergen-ai-family-rights-readonly.yml'
+      - 'tests/test_bergen_ai_family_rights_preflight.py'
+
+jobs:
+  preflight-security:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install offline test dependencies
+        run: python -m pip install 'ansible-core>=2.16,<2.18' 'PyYAML>=6,<7'
+      - name: Run synthetic private-group rights tests
+        run: python -m unittest discover -s tests -p 'test_bergen_ai_family_rights_preflight.py' -v
+      - name: Assert read-only Ansible syntax
+        run: ansible-playbook -i ansible/inventory.yml ansible/playbooks/plan-bergen-ai-family-rights-readonly.yml --syntax-check
