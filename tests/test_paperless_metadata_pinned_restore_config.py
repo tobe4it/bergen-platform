@@ -86,6 +86,38 @@ class PinnedRestoreConfigSafety(unittest.TestCase):
                 self.assertNotIn("opaque-another-guest", str(caught.exception))
                 self.assertNotIn("lxc.cgroup2", str(caught.exception))
 
+    def test_archived_lxc_classification_only_emits_fixed_families(self):
+        config = (SAMPLE
+                  + "lxc.apparmor.profile: hidden-sensitive-configuration\n"
+                  + "lxc.cgroup2.devices.allow: hidden-device\n"
+                  + "lxc.mount.entry: hidden-private-path\n")
+        with self.assertRaises(self.blocked) as caught:
+            self.sanitize(config)
+        self.assertEqual(str(caught.exception),
+                         "ARCHIVED_LXC_OVERRIDE_PRESENT")
+        self.assertEqual(caught.exception.lxc_count, 3)
+        self.assertEqual(
+            caught.exception.lxc_classes,
+            ("APPARMOR_OVERRIDE", "CGROUP_DEVICE_OVERRIDE", "MOUNT_OVERRIDE"))
+        self.assertNotIn("hidden-", str(caught.exception))
+        self.assertNotIn("hidden-", repr(caught.exception.lxc_classes))
+
+    def test_unknown_lxc_override_is_classified_but_still_blocked(self):
+        with self.assertRaises(self.blocked) as caught:
+            self.sanitize(SAMPLE + "lxc.init.cmd: do-not-leak\n")
+        self.assertEqual(caught.exception.lxc_classes,
+                         ("OTHER_LXC_OVERRIDE",))
+        self.assertEqual(caught.exception.lxc_count, 1)
+        self.assertEqual(str(caught.exception),
+                         "ARCHIVED_LXC_OVERRIDE_PRESENT")
+
+    def test_lxc_diag_rejects_large_key_scope_without_values(self):
+        bulk = "".join("lxc.opaque%d: secret\n" % k for k in range(33))
+        with self.assertRaises(self.blocked) as caught:
+            self.sanitize(SAMPLE + bulk)
+        self.assertEqual(str(caught.exception),
+                         "ARCHIVED_LXC_OVERRIDE_SCOPE_UNREVIEWED")
+
     def test_identity_refusal_allowlist_stays_explicit_and_private(self):
         content = PLAY.read_text()
         for code in (
@@ -96,6 +128,9 @@ class PinnedRestoreConfigSafety(unittest.TestCase):
         ):
             self.assertIn(code, content)
         self.assertNotIn("bp_pinned_config_raw.stdout |", content)
+        self.assertIn("ARCHIVED_LXC_OVERRIDE_REMAINS_BLOCKED=YES", content)
+        self.assertIn("bp_pinned_allowed_lxc_classes", content)
+        self.assertIn("ARCHIVED_LXC_OVERRIDE_CLASSIFICATION_INVALID", content)
 
     def test_unreviewed_additional_mount_is_rejected(self):
         with self.assertRaises(self.blocked):
