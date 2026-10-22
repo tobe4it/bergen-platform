@@ -1,0 +1,119 @@
+---
+# Default and only mode: READ ONLY. Inspect exact first-boot and SSH key-generation
+# unit files on stopped CT790. No pct start/exec/mount, zfs mount, file writes,
+# machine-id changes, SSH host key deletion or template conversion.
+- import_playbook: audit-rocky-9-8-ct790-postshutdown-sanitization-readonly.yml
+
+- name: Independently assess stopped CT790 first-boot machine ID and SSH generation configuration
+  hosts: venombox
+  become: true
+  gather_facts: false
+  any_errors_fatal: true
+  tasks:
+    - name: Demand exact same-run stopped CT790 and isolated existing ZFS rootfs
+      ansible.builtin.assert:
+        that:
+          - inventory_hostname == 'venombox'
+          - rocky_post_host.stdout == 'venombox'
+          - "'status: stopped' in rocky_post_state.stdout_lines"
+          - "'status: stopped' in rocky_sanitation_after_status.stdout_lines"
+          - rocky_post_rootfs_path.stdout | trim is match('^/rpool/data/subvol-790-disk-[0-9]+$')
+          - rocky_sanitation_findmnt.stdout == rocky_release_findmnt.stdout
+          - rocky_sanitation_mounted.stdout | trim == 'yes'
+          - "'protection: 1' in rocky_post_config.stdout_lines"
+          - "'unprivileged: 1' in rocky_post_config.stdout_lines"
+          - "'onboot: 0' in rocky_post_config.stdout_lines"
+          - "'template: 1' not in rocky_post_config.stdout_lines"
+          - "'hostname: nextcloud-restore-701' in rocky_post_ct701.stdout_lines"
+          - rocky_sanitation_ct701_config_after.stdout == rocky_post_ct701.stdout
+          - (rocky_sanitation_survey.stdout | from_json).result == 'ROCKY_9_8_CT790_STOPPED_ROOTFS_SANITATION_READ_ONLY_INVENTORIED'
+          - (rocky_sanitation_survey.stdout | from_json).files_written == 0
+          - not ansible_check_mode
+        fail_msg: First-boot unit inspection requires previously proved stopped and isolated CT790 only.
+
+    - name: Reconfirm stopped CT790 immediately before unit survey
+      ansible.builtin.command:
+        argv: [pct, status, '790']
+      changed_when: false
+      register: rocky_identity_before_status
+
+    - name: Refuse stopped-state drift before reading guest units
+      ansible.builtin.assert:
+        that:
+          - "'status: stopped' in rocky_identity_before_status.stdout_lines"
+
+    - name: Read only fixed bounded identity-generation service metadata with no-atime
+      ansible.builtin.command:
+        argv:
+          - python3
+          - -c
+          - "{{ lookup('ansible.builtin.file', playbook_dir ~ '/../files/nextcloud/audit_ct790_firstboot_identity_units.py') }}"
+          - "{{ rocky_post_rootfs_path.stdout | trim }}"
+      changed_when: false
+      failed_when: false
+      no_log: true
+      register: rocky_identity_unit_audit
+
+    - name: Require bounded sanitized exact first-boot unit survey
+      ansible.builtin.assert:
+        that:
+          - rocky_identity_unit_audit.rc == 0
+          - rocky_identity_unit_audit.stdout | length <= 16384
+          - (rocky_identity_unit_audit.stdout | from_json).result == 'ROCKY_9_8_CT790_FIRSTBOOT_IDENTITY_UNITS_READ_ONLY_INVENTORIED'
+          - (rocky_identity_unit_audit.stdout | from_json).vmid == 790
+          - (rocky_identity_unit_audit.stdout | from_json).fixed_paths == 22
+          - (rocky_identity_unit_audit.stdout | from_json).units | length == 8
+          - (rocky_identity_unit_audit.stdout | from_json).activation_links | length == 8
+          - (rocky_identity_unit_audit.stdout | from_json).dropin_directories | length == 3
+          - (rocky_identity_unit_audit.stdout | from_json).executables | length == 3
+          - (rocky_identity_unit_audit.stdout | from_json).files_written == 0
+          - (rocky_identity_unit_audit.stdout | from_json).mount_operations == 0
+          - not (rocky_identity_unit_audit.stdout | from_json).guest_started
+          - not (rocky_identity_unit_audit.stdout | from_json).raw_unit_text_or_secrets_disclosed
+          - not (rocky_identity_unit_audit.stdout | from_json).firstboot_regeneration_proven
+          - not (rocky_identity_unit_audit.stdout | from_json).sanitation_permitted
+          - not (rocky_identity_unit_audit.stdout | from_json).pct_template_authorized
+        fail_msg: Unit survey unsafe, excessive or ambiguous; do not change stopped CT790.
+
+    - name: Recheck CT790 remains stopped after bounded service inspection
+      ansible.builtin.command:
+        argv: [pct, status, '790']
+      changed_when: false
+      register: rocky_identity_after_status
+
+    - name: Refuse unexpected startup or shutdown state drift
+      ansible.builtin.assert:
+        that:
+          - "'status: stopped' in rocky_identity_after_status.stdout_lines"
+
+    - name: Independently recheck protected CT701 unchanged
+      ansible.builtin.command:
+        argv: [pct, config, '701']
+      changed_when: false
+      no_log: true
+      register: rocky_identity_ct701_after
+
+    - name: Require exact CT701 configuration unchanged
+      ansible.builtin.assert:
+        that:
+          - rocky_identity_ct701_after.stdout == rocky_post_ct701.stdout
+
+    - name: Report fixed paths and flags only, never raw unit text or secrets
+      ansible.builtin.debug:
+        msg:
+          result: ROCKY_9_8_CT790_FIRSTBOOT_IDENTITY_UNITS_READ_ONLY_RECORDED
+          vmid: 790
+          guest_state: STOPPED
+          rocky_version: '9.8'
+          installed_unit_states: "{{ (rocky_identity_unit_audit.stdout | from_json).units }}"
+          enablement_link_states: "{{ (rocky_identity_unit_audit.stdout | from_json).activation_links }}"
+          override_directory_states: "{{ (rocky_identity_unit_audit.stdout | from_json).dropin_directories }}"
+          executable_states: "{{ (rocky_identity_unit_audit.stdout | from_json).executables }}"
+          authoritative_firstboot_generation_proven: false
+          files_written: 0
+          new_mount_created: false
+          guest_started: false
+          ct701_config_unchanged: true
+          cleanup_authorized: false
+          pct_template_authorized: false
+          next_gate: Review exact guest unit flags, possible overrides and local sshd activation; separately prove clone host-key and machine-id generation prior to any sanitation write.
