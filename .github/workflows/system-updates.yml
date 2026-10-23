@@ -4,11 +4,13 @@ on:
     paths:
       - 'scripts/system_updates.py'
       - 'scripts/configure_system_updates.py'
+      - 'scripts/repair_proxmox_update_sources.py'
       - 'ansible/**/system*update*'
       - 'ansible/roles/system_updates/**'
       - 'ansible/roles/system_update_scheduler/**'
       - 'ansible/library/bergen_apt_security.py'
       - 'tests/test_system_updates.py'
+      - 'tests/test_proxmox_update_sources.py'
       - 'tests/fixtures/system-update-filter.yml'
       - '.github/workflows/system-updates.yml'
   push:
@@ -16,10 +18,12 @@ on:
     paths:
       - 'scripts/system_updates.py'
       - 'scripts/configure_system_updates.py'
+      - 'scripts/repair_proxmox_update_sources.py'
       - 'ansible/roles/system_updates/**'
       - 'ansible/roles/system_update_scheduler/**'
       - 'ansible/library/bergen_apt_security.py'
       - 'tests/test_system_updates.py'
+      - 'tests/test_proxmox_update_sources.py'
       - 'tests/fixtures/system-update-filter.yml'
 permissions:
   contents: read
@@ -33,6 +37,7 @@ jobs:
           python-version: '3.12'
       - run: pip install 'ansible-core>=2.19,<2.20'
       - run: python -m unittest discover -s tests -p test_system_updates.py -v
+      - run: python -m unittest discover -s tests -p test_proxmox_update_sources.py -v
       - run: ansible-playbook --syntax-check ansible/playbooks/system-updates.yml
       - run: ansible-playbook --syntax-check ansible/playbooks/install-system-update-scheduler.yml
       - run: ansible-playbook -i localhost, -c local tests/fixtures/system-update-filter.yml

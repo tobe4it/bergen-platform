@@ -173,6 +173,38 @@ mail delivery is unavailable too; use an external monitoring channel for that.
 
 ## Validation
 
+### Repair of the observed subscription-less PVE 9 source layout
+
+`scripts/repair_proxmox_update_sources.py --config CONFIG` targets only the exact
+inventory alias `venombox`. It requires PVE 9, subscription status `notfound`, the
+reviewed single-stanza Trixie source files and the existing Proxmox archive key.
+It disables `pve-enterprise.sources`, preserves the active PVE no-subscription
+source and switches the existing Ceph Squid source to the public no-subscription
+channel **without changing Ceph release**. It refuses unexpected source options,
+signing keys, releases, duplicate fields and disabled public sources.
+
+Before writing, it backs up the changed files under
+`/var/backups/bergen-platform/update-sources-*` on the target. A failed strict
+APT metadata refresh restores those source files; the report records rollback
+failure separately. No package installation, restart, reboot or crypto-policy
+change is performed. PVE/Ceph package maintenance and Ceph release lifecycle
+review remain separate from the Debian security-only update role.
+
+The controller keeps a private Ansible log, JSON evidence and a text report under
+the configured state directory. A dedicated HTML/plaintext change email with JSON
+evidence is sent through the existing SMTP configuration even on repair failure.
+Terminal output is limited to a start line and the result/delivery status. An
+unknown remote result requires local log review before deciding on further work.
+The command returns nonzero on remote failure even if Ansible rescued the task.
+
+```sh
+python3 scripts/repair_proxmox_update_sources.py \
+  --config "$HOME/.config/bergen-updates/config.json"
+```
+
+This repairs only this observed repository failure; it does not establish a
+successful inventory-wide audit or activate daily timers.
+
 ```sh
 python -m unittest discover -s tests -p test_system_updates.py -v
 ansible-playbook --syntax-check ansible/playbooks/system-updates.yml
