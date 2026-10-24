@@ -173,6 +173,58 @@ mail delivery is unavailable too; use an external monitoring channel for that.
 
 ## Validation
 
+### Combined operating report and central syslog evidence
+
+`scripts/configure_system_operations.py --config CONFIG --syslog-host INVENTORY_ALIAS`
+enables a second read-only evidence phase after the package phase, including when
+an individual update task failed. To read a syslog LXC through an already trusted
+Proxmox connection, additionally supply `--syslog-ctid CTID --expected-hostname
+EXPECTED_GUEST_HOSTNAME`; the target host is then the Proxmox inventory alias.
+The guest hostname is verified before reading logs. This avoids inventing a
+collector IP or automatically accepting a new SSH host key. A direct collector
+alias is also supported and verifies the same expected hostname.
+
+Metrics include 1m CPU load, RAM from MemAvailable, bounded real filesystem usage,
+selected and failed systemd units, Postfix queue count (without sender/recipient),
+Rspamd availability/numeric counters when available, rootful Podman/Docker state,
+and aggregate WireGuard handshake counters (without any keys or endpoints).
+Rootless container scope is not claimed. Read-only RPM version comparison detects
+an installed kernel newer than the running installed kernel, overrides an earlier
+`NOT_REQUIRED` result and reports `REQUIRED`; no restart is performed. A filesystem
+at >=90% is critical; >=80% is a warning. Read-only probes are time/output bounded.
+
+CVE hints use existing DNF cache (`updateinfo info --security`) or an installed
+debsecan. Missing tools, failed queries and unverified cache freshness are explicit.
+No vulnerability scanner or dependency is installed. CVE absence is not proof of
+patch completion. The literal `--cve CVES` from the old report is not reused.
+
+System and application log summaries come only from the central collector's
+`/var/log/remote/*.log` and first uncompressed rotation. ISO-8601/RFC5424 timestamps
+are filtered to the most recent 24h; legacy timestamps without year/timezone are
+reported as unparsed rather than assigned a guessed date. At most 128 files,
+4 MiB per file and 15 seconds of central scanning are used. Counts are explicitly
+sampled when capped; compressed rotations and exhaustive daily event counts are
+not claimed. Association uses unique syslog header hostnames, not filename/IP
+guesses; sender authentication is not inferred. Additional exact names can be
+supplied in `operations.log_names` per inventory alias. Shared/ambiguous hostnames,
+no recent data and unreachable collectors become visible warnings.
+
+Only fixed event categories/counts and source filenames leave the collector;
+mail addresses, message content, raw log lines and WireGuard secrets are omitted.
+There is no local journal/container-log fallback hiding a missing central feed.
+Mailman and forwarded container events are covered when present in that feed;
+forwarding itself is not deployed by this change. All evidence is included in
+the existing HTML/plaintext email and JSON attachment, with separate operating
+and syslog status columns. Operations failures do not discard the package report
+or prevent an attempt to send the consolidated email.
+
+The private config helper backs up the old config and is idempotent. The old
+root cron (`0 7 * * * ansible-playbook /root/server_report.yml -i localhost,`)
+remains in place until a received combined report proves host/section/log coverage
+and the daily controller schedule is active. Its removal is a separate verified
+cutover. This report integration does not activate the update timer or resolve
+existing update/SSH/repository failures.
+
 ### Register additional SSH targets and mandatory coverage
 
 Use `scripts/register_system_update_hosts.py --config CONFIG --ssh-user USER

@@ -3,6 +3,12 @@ on:
   pull_request:
     paths:
       - 'scripts/system_updates.py'
+      - 'scripts/system_operations.py'
+      - 'scripts/configure_system_operations.py'
+      - 'ansible/library/bergen_system_report.py'
+      - 'ansible/playbooks/system-update-operations.yml'
+      - 'ansible/module_utils/bergen_operations.py'
+      - 'tests/test_system_operations.py'
       - 'scripts/register_system_update_hosts.py'
       - 'tests/test_system_update_registration.py'
       - 'scripts/configure_system_updates.py'
@@ -21,6 +27,12 @@ on:
     branches: [main]
     paths:
       - 'scripts/system_updates.py'
+      - 'scripts/system_operations.py'
+      - 'scripts/configure_system_operations.py'
+      - 'ansible/library/bergen_system_report.py'
+      - 'ansible/playbooks/system-update-operations.yml'
+      - 'ansible/module_utils/bergen_operations.py'
+      - 'tests/test_system_operations.py'
       - 'scripts/register_system_update_hosts.py'
       - 'tests/test_system_update_registration.py'
       - 'scripts/configure_system_updates.py'
@@ -45,9 +57,11 @@ jobs:
           python-version: '3.12'
       - run: pip install 'ansible-core>=2.19,<2.20'
       - run: python -m unittest discover -s tests -p test_system_updates.py -v
+      - run: python -m unittest discover -s tests -p test_system_operations.py -v
       - run: python -m unittest discover -s tests -p test_system_update_registration.py -v
       - run: python -m unittest discover -s tests -p test_system_update_diagnostic.py -v
       - run: python -m unittest discover -s tests -p test_proxmox_update_sources.py -v
       - run: ansible-playbook --syntax-check ansible/playbooks/system-updates.yml
+      - run: ansible-playbook --syntax-check ansible/playbooks/system-update-operations.yml
       - run: ansible-playbook --syntax-check ansible/playbooks/install-system-update-scheduler.yml
       - run: ansible-playbook -i localhost, -c local tests/fixtures/system-update-filter.yml

@@ -5,6 +5,7 @@ import datetime as dt
 import fcntl
 import hashlib
 import html
+import importlib.util
 import json
 import os
 from pathlib import Path
@@ -24,6 +25,13 @@ HOST_RE = re.compile(r'^[A-Za-z0-9_][A-Za-z0-9_.-]*$')
 
 def now():
     return dt.datetime.now(dt.timezone.utc).isoformat()
+
+
+def operations_module():
+    spec = importlib.util.spec_from_file_location('bergen_system_operations', ROOT / 'scripts/system_operations.py')
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
 
 
 def write_json(path, value):
@@ -81,6 +89,24 @@ def validate(config):
     required = config.get('required_hosts', [])
     if not isinstance(required, list) or any(not isinstance(h, str) or not HOST_RE.fullmatch(h) for h in required):
         raise ValueError('INVALID_REQUIRED_HOSTS')
+    operations = config.get('operations', {})
+    if not isinstance(operations, dict):
+        raise ValueError('INVALID_OPERATIONS_CONFIG')
+    if 'enabled' in operations and type(operations['enabled']) is not bool:
+        raise ValueError('INVALID_OPERATIONS_ENABLED')
+    if operations.get('enabled'):
+        if not isinstance(operations.get('syslog_host'), str) or not HOST_RE.fullmatch(operations['syslog_host']):
+            raise ValueError('EXPLICIT_SYSLOG_INVENTORY_HOST_REQUIRED')
+        ctid = operations.get('syslog_ctid', 0)
+        if type(ctid) is not int or (ctid != 0 and not 100 <= ctid <= 999999):
+            raise ValueError('INVALID_SYSLOG_CTID')
+        expected = operations.get('syslog_expected_hostname', 'bergen-syslog')
+        if not isinstance(expected, str) or not HOST_RE.fullmatch(expected):
+            raise ValueError('INVALID_SYSLOG_EXPECTED_HOSTNAME')
+        mappings = operations.get('log_names', {})
+        if not isinstance(mappings, dict) or any(not isinstance(h, str) or not HOST_RE.fullmatch(h) or not isinstance(names, list)
+            or any(not isinstance(n, str) or not HOST_RE.fullmatch(n) for n in names) for h, names in mappings.items()):
+            raise ValueError('INVALID_SYSLOG_HOST_MAPPING')
     for host, policy in config['policies'].items():
         if not HOST_RE.fullmatch(host) or policy.get('mode') not in ('security', 'audit', 'excluded'):
             raise ValueError('INVALID_HOST_POLICY')
@@ -192,6 +218,14 @@ def process_hosts(config, hosts, run_dir, audit_only=False):
 def overall(report):
     if report.get('error') or not report.get('hosts') or any(h['status'] in ('FAILED', 'UNREACHABLE') for h in report['hosts']):
         return 'FEHLER'
+    if any(h.get('operations', {}).get('status') == 'CRITICAL' for h in report.get('hosts', [])):
+        return 'FEHLER'
+    if report.get('operations_error') or report.get('central_syslog', {}).get('status') not in (None, 'OK'):
+        return 'WARNUNG'
+    if any(h.get('operations', {}).get('status') in ('WARNING', 'ERROR', 'NOT_RUN')
+           or h.get('operations', {}).get('central_logs', {}).get('status') in ('WARNING', 'NO_RECENT_DATA', 'UNKNOWN', 'AMBIGUOUS_HOSTNAME')
+           for h in report.get('hosts', [])):
+        return 'WARNUNG'
     if any(h['status'] != 'OK' or h.get('reboot', 'UNKNOWN') not in ('NOT_REQUIRED', 'NO_MARKER') or
            h.get('held') or h.get('deferred') or h.get('checks') != 'PASSED' or
            (h.get('mode') == 'AUDIT' and (h.get('candidates') or h.get('dnf_updates_available')))
@@ -221,11 +255,15 @@ def render(report):
              f"Systeme: {len(hosts)}; erfolgreich geprüft: {checked}; verändert: {changed}", '']
     if report.get('error'):
         lines += ['Lauffehler: ' + report['error'], 'Handlung: Controller-Konfiguration und Journal prüfen.', '']
+    if report.get('operations_error'):
+        lines += ['Betriebsbericht fehlgeschlagen: ' + report['operations_error'], '']
     rows = []
     for host in hosts:
         row = [host['host'], host.get('mode', host.get('policy', '')), host['status'],
                str(len(host.get('packages', []))), ', '.join(host.get('restarted', [])) or '–',
-               host.get('reboot', 'UNKNOWN'), host.get('checks', 'NOT_RUN')]
+               host.get('reboot', 'UNKNOWN'), host.get('checks', 'NOT_RUN'),
+               host.get('operations', {}).get('status', 'NOT_CONFIGURED'),
+               host.get('operations', {}).get('central_logs', {}).get('status', 'NOT_CONFIGURED')]
         rows.append('<tr>' + ''.join('<td>' + html.escape(v) + '</td>' for v in row) + '</tr>')
         lines += [' | '.join(row), '  Befund: ' + host.get('reason', 'NONE')]
         if host.get('failed_task'):
@@ -256,12 +294,13 @@ def render(report):
               'Drittanbieterpakete, Container-Images, Firmware und Anwendungsupdates benötigen separate Prüfung.',
               'Keine CVE-Schließung aus einer bloßen Paketversion abgeleitet. Details im bereinigten JSON-Anhang.',
               'SMTP-Annahme bestätigt keine Zustellung ins Postfach.']
+    lines.extend(operations_module().report_lines(report))
     plain = '\n'.join(lines)
     body = ('<!doctype html><html lang="de"><meta charset="utf-8"><body style="font-family:Arial,sans-serif;color:#183044">'
             '<h1>Bergen Platform</h1><h2>Update- und Change-Bericht · ' + status + '</h2>'
             '<p>' + html.escape(f"{checked}/{len(hosts)} Systeme erfolgreich geprüft · {changed} verändert") + '</p>'
             '<table cellpadding="8" border="1" style="border-collapse:collapse"><tr>'
-            '<th>System</th><th>Modus</th><th>Status</th><th>Pakete</th><th>Neustarts Dienste</th><th>Reboot</th><th>Prüfung</th></tr>'
+            '<th>System</th><th>Modus</th><th>Status</th><th>Pakete</th><th>Neustarts Dienste</th><th>Reboot</th><th>Prüfung</th><th>Betrieb</th><th>Syslog</th></tr>'
             + ''.join(rows) + '</table><h2>Nachweis und Folgemaßnahmen</h2><pre style="white-space:pre-wrap">'
             + html.escape(plain) + '</pre></body></html>')
     return subject, plain, body
@@ -331,6 +370,11 @@ def run(config, audit_only=False):
             report['error'] = type(exc).__name__
             if (directory / 'hosts.json').exists():
                 report['hosts'] = json.loads((directory / 'hosts.json').read_text())
+        if isinstance(config.get('operations'), dict) and config['operations'].get('enabled') and report.get('hosts'):
+            try:
+                operations_module().collect(config, report, directory)
+            except Exception as exc:
+                report['operations_error'] = type(exc).__name__
         report['finished'] = now()
         write_json(directory / 'report.json', report)
         try:
