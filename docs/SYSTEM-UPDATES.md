@@ -173,6 +173,24 @@ mail delivery is unavailable too; use an external monitoring channel for that.
 
 ## Validation
 
+### Register additional SSH targets and mandatory coverage
+
+Use `scripts/register_system_update_hosts.py --config CONFIG --ssh-user USER
+--host alias=host.example.invalid --require-host alias` to register explicitly
+identified targets. The helper writes a private inventory overlay next to the
+config, adds it to the configured inventories, and starts new host policies in
+audit mode. Existing aliases with conflicting SSH settings are refused. Existing
+policies are preserved. Configuration and any prior overlay are backed up before
+changes. Repeating the same registration makes no changes. The helper does not
+connect to or install anything on the new targets.
+
+`required_hosts` is an explicit list of inventory aliases whose coverage must be
+visible. A missing alias is a `FAILED / REQUIRED_HOST_MISSING_FROM_INVENTORY` row
+in the email and JSON report, and defers all security installations while the
+reachable inventory is still audited. Registering a target proves neither SSH
+reachability nor that the target is patched. Audit and review service/backup
+policies before promoting any new host to security mode.
+
 The runner selects the `bergen_update_diagnostic` stdout callback for each host.
 It captures fixed error categories and allowlisted task names even when a role
 rescues the original error, and includes them in the text, HTML and JSON report.

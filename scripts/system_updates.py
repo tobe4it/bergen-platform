@@ -78,6 +78,9 @@ def validate(config):
             raise ValueError('CONFIG_MISSING_' + key.upper())
     if not config['inventories'] or not isinstance(config['policies'], dict):
         raise ValueError('INVALID_INVENTORY_OR_POLICIES')
+    required = config.get('required_hosts', [])
+    if not isinstance(required, list) or any(not isinstance(h, str) or not HOST_RE.fullmatch(h) for h in required):
+        raise ValueError('INVALID_REQUIRED_HOSTS')
     for host, policy in config['policies'].items():
         if not HOST_RE.fullmatch(host) or policy.get('mode') not in ('security', 'audit', 'excluded'):
             raise ValueError('INVALID_HOST_POLICY')
@@ -155,7 +158,7 @@ def run_host(config, host, policy, apply, result_path):
 
 
 def process_hosts(config, hosts, run_dir, audit_only=False):
-    results, stopped = [], False
+    results, stopped = [], bool(missing_required_hosts(config, hosts))
     order = config.get('canaries', [])
     if not audit_only and any(p['mode'] == 'security' for p in config['policies'].values()):
         if not order or any(config['policies'].get(h, {}).get('mode') != 'security' for h in order):
@@ -176,7 +179,7 @@ def process_hosts(config, hosts, run_dir, audit_only=False):
                 report = {'status': 'FAILED', 'reason': type(exc).__name__, 'packages': []}
             report['mode'] = 'APPLY' if apply else 'AUDIT'
             if stopped and mode == 'security':
-                report['deferred'] = 'Previous host failed; installation deferred'
+                report['deferred'] = 'Host failure or missing required inventory target; installation deferred'
             if report['status'] != 'OK':
                 stopped = True
         report['host'] = host
@@ -195,6 +198,13 @@ def overall(report):
            for h in report['hosts']):
         return 'WARNUNG'
     return 'OK'
+
+
+def missing_required_hosts(config, inventory_hosts):
+    return [{'host': host, 'policy': 'audit', 'mode': 'AUDIT', 'status': 'FAILED',
+             'reason': 'REQUIRED_HOST_MISSING_FROM_INVENTORY',
+             'failure_code': 'REQUIRED_HOST_MISSING_FROM_INVENTORY', 'packages': []}
+            for host in sorted(set(config.get('required_hosts', [])) - set(inventory_hosts))]
 
 
 def render(report):
@@ -315,6 +325,7 @@ def run(config, audit_only=False):
             if unknown:
                 raise ValueError('POLICY_HOST_MISSING_FROM_INVENTORY')
             report['hosts'] = process_hosts(config, hosts, directory, audit_only)
+            report['hosts'].extend(missing_required_hosts(config, hosts))
         except Exception as exc:
             # Exception text can contain credentials/URLs: retain only category.
             report['error'] = type(exc).__name__
