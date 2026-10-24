@@ -2,6 +2,7 @@ import importlib.util
 import json
 import os
 from pathlib import Path
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -22,6 +23,30 @@ def sources():
 
 
 class RepairTests(unittest.TestCase):
+    @unittest.skipUnless(shutil.which('ansible-playbook'), 'ansible-playbook required')
+    def test_full_script_transport_and_failed_remote_evidence_through_real_ansible(self):
+        # Force a refusal before any source reads/writes, even on a real PVE host.
+        code = 'import os\nos.geteuid = lambda: 1\n' + Path(m.__file__).read_text()
+        with tempfile.TemporaryDirectory() as temporary:
+            directory = Path(temporary)
+            capture = directory / 'result.json'
+            play = m.build_play(code, capture)
+            play[0]['become'] = False
+            play[0]['vars'] = {'ansible_python_interpreter': sys.executable}
+            path = directory / 'repair.yml'
+            path.write_text(json.dumps(play))
+            result = subprocess.run([
+                shutil.which('ansible-playbook'), '-i', 'venombox,', '-c', 'local', str(path)
+            ], cwd=m.ROOT, capture_output=True, text=True, timeout=60)
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            evidence = json.loads(capture.read_text())
+            remote = json.loads(evidence['stdout'])
+            self.assertEqual(evidence['rc'], 1)
+            self.assertEqual(remote['status'], 'FAILED')
+            self.assertEqual(remote['error'], 'ROOT_REQUIRED')
+            self.assertEqual(remote['source_changes'], [])
+            self.assertEqual(capture.stat().st_mode & 0o777, 0o600)
+
     def test_change_email_uses_verified_tls_and_stops_before_login_on_failure(self):
         with tempfile.TemporaryDirectory() as temporary:
             directory = Path(temporary)

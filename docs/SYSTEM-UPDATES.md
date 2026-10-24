@@ -196,6 +196,12 @@ evidence is sent through the existing SMTP configuration even on repair failure.
 Terminal output is limited to a start line and the result/delivery status. An
 unknown remote result requires local log review before deciding on further work.
 The command returns nonzero on remote failure even if Ansible rescued the task.
+The Python payload is transported as base64 so that Ansible cannot interpret
+Jinja-looking text inside its source. A real local Ansible regression test passes
+the full script through the generated play, forces a refusal before source reads
+or writes, and verifies that failed-remote JSON evidence reaches the controller.
+Missing evidence is reported as `ANSIBLE_RESULT_MISSING` with the Ansible exit
+code rather than only a generic local `FileNotFoundError`.
 
 ```sh
 python3 scripts/repair_proxmox_update_sources.py \

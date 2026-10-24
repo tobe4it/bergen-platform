@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Repair the observed subscription-less PVE 9 source layout and email evidence."""
 import argparse
+import base64
 import datetime as dt
 from email.message import EmailMessage
 from email.utils import format_datetime, make_msgid
@@ -146,6 +147,7 @@ def send(config, evidence, directory):
              'Ziel: PVE-Enterprise deaktivieren; Ceph Squid auf no-subscription umstellen.',
              'Dateiänderungen: ' + (', '.join(detail.get('source_changes', [])) or 'keine'),
              'Sicherung: ' + detail.get('backup', 'nicht erforderlich'),
+             'Ansible RC: ' + str(evidence.get('ansible_rc', 'nicht erfasst')),
              'APT-Metadatenprüfung RC: ' + str(detail.get('apt_rc')),
              'Rollback: ' + detail.get('rollback', 'NOT_NEEDED'),
              'Fehler: ' + detail.get('error', 'NONE'),
@@ -175,6 +177,21 @@ def send(config, evidence, directory):
     (directory / 'delivery.json').write_text(json.dumps({'status': 'SMTP_ACCEPTED'}))
 
 
+def build_play(code, capture):
+    # Ansible templates command arguments. Keep Python/Jinja-looking source opaque
+    # until Python decodes it on the target, after Ansible has finalized argv.
+    encoded = base64.b64encode(code.encode('utf-8')).decode('ascii')
+    bootstrap = "import base64;exec(compile(base64.b64decode('" + encoded + "'), '<bergen-source-repair>', 'exec'))"
+    return [{'name': 'Repair reviewed PVE 9 sources only', 'hosts': 'venombox',
+             'gather_facts': False, 'become': True, 'tasks': [
+                 {'name': 'Repair exact source layout and verify APT metadata',
+                  'ansible.builtin.command': {'argv': ['/usr/bin/python3', '-c', bootstrap, '--remote']},
+                  'register': 'source_repair', 'failed_when': False, 'no_log': True},
+                 {'name': 'Keep evidence private on controller', 'ansible.builtin.copy': {
+                     'content': '{{ source_repair | to_json }}', 'dest': str(capture), 'mode': '0600'},
+                  'delegate_to': 'localhost', 'become': False, 'no_log': True}]}]
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--remote', action='store_true', help=argparse.SUPPRESS)
@@ -199,14 +216,7 @@ def main():
     evidence = {'run_id': run_id, 'commit': commit, 'started': dt.datetime.now(dt.timezone.utc).isoformat(),
                 'script_sha256': hashlib.sha256(code.encode()).hexdigest()}
     capture = directory / 'remote-result.json'
-    play = [{'name': 'Repair reviewed PVE 9 sources only', 'hosts': 'venombox',
-             'gather_facts': False, 'become': True, 'tasks': [
-                 {'name': 'Repair exact source layout and verify APT metadata',
-                  'ansible.builtin.command': {'argv': ['/usr/bin/python3', '-c', code, '--remote']},
-                  'register': 'source_repair', 'failed_when': False, 'no_log': True},
-                 {'name': 'Keep evidence private on controller', 'ansible.builtin.copy': {
-                     'content': '{{ source_repair | to_json }}', 'dest': str(capture), 'mode': '0600'},
-                  'delegate_to': 'localhost', 'become': False, 'no_log': True}]}]
+    play = build_play(code, capture)
     play_path = directory / 'repair.yml'
     play_path.write_text(json.dumps(play))
     command = [config['ansible_playbook']]
@@ -218,14 +228,18 @@ def main():
     print('VENOMBOX_SOURCE_REPAIR_RUNNING', flush=True)
     try:
         with (directory / 'ansible.log').open('w') as log:
-            subprocess.run(command, cwd=ROOT, stdin=subprocess.DEVNULL, stdout=log, stderr=log,
-                           env={**os.environ, 'ANSIBLE_HOST_KEY_CHECKING': 'True'}, timeout=360)
+            execution = subprocess.run(command, cwd=ROOT, stdin=subprocess.DEVNULL, stdout=log, stderr=log,
+                                      env={**os.environ, 'ANSIBLE_HOST_KEY_CHECKING': 'True'}, timeout=360)
+        evidence['ansible_rc'] = execution.returncode
+        if not capture.is_file():
+            raise ValueError('ANSIBLE_RESULT_MISSING')
         remote = json.loads(capture.read_text())
         evidence['result'] = json.loads(remote['stdout'])
         if remote.get('rc') != 0 and evidence['result']['status'] == 'OK':
             raise ValueError('INCONSISTENT_REMOTE_RESULT')
     except Exception as exc:
-        evidence['result'] = {'status': 'FAILED', 'error': type(exc).__name__,
+        evidence['result'] = {'status': 'FAILED', 'error': str(exc) if isinstance(exc, ValueError) and str(exc) in (
+                                  'ANSIBLE_RESULT_MISSING', 'INCONSISTENT_REMOTE_RESULT') else type(exc).__name__,
                               'rollback': 'REMOTE_RESULT_UNKNOWN_CHECK_LOCAL_LOG'}
     evidence['finished'] = dt.datetime.now(dt.timezone.utc).isoformat()
     (directory / 'report.json').write_text(json.dumps(evidence, indent=2))
