@@ -110,7 +110,14 @@ def validate(config):
     for host, policy in config['policies'].items():
         if not HOST_RE.fullmatch(host) or policy.get('mode') not in ('security', 'audit', 'excluded'):
             raise ValueError('INVALID_HOST_POLICY')
-        if policy['mode'] == 'security' and (not policy.get('restart_services') or not policy.get('health_urls')):
+        ports = policy.get('health_ports', [])
+        if not isinstance(ports, list) or any(type(p) is not int or not 1 <= p <= 65535 for p in ports):
+            raise ValueError('INVALID_HEALTH_PORTS')
+        for key in ('restart_services', 'restart_podman_containers'):
+            names = policy.get(key, [])
+            if not isinstance(names, list) or any(not isinstance(n, str) or not HOST_RE.fullmatch(n) for n in names):
+                raise ValueError('INVALID_CONSUMER_NAMES')
+        if policy['mode'] == 'security' and (not policy.get('restart_services') or not (policy.get('health_urls') or ports)):
             raise ValueError('SECURITY_POLICY_REQUIRES_RESTARTS_AND_HEALTH_URLS')
         if policy['mode'] == 'excluded' and not policy.get('reason'):
             raise ValueError('EXCLUSION_REQUIRES_REASON')
@@ -155,6 +162,8 @@ def run_host(config, host, policy, apply, result_path):
         'system_updates_result_file': str(result_path),
         'system_updates_restart_services': policy.get('restart_services', []),
         'system_updates_health_urls': policy.get('health_urls', []),
+        'system_updates_health_ports': policy.get('health_ports', []),
+        'system_updates_restart_podman_containers': policy.get('restart_podman_containers', []),
         'system_updates_dnf_metadata_verified': policy.get('dnf_metadata_verified', False),
     }
     variables_path = result_path.with_suffix('.vars.json')
@@ -185,13 +194,17 @@ def run_host(config, host, policy, apply, result_path):
 
 def process_hosts(config, hosts, run_dir, audit_only=False):
     results, stopped = [], bool(missing_required_hosts(config, hosts))
+    transaction_block = Path(config.get('state_dir', run_dir.parent)) / 'installation-blocked.json'
+    stopped = stopped or transaction_block.exists()
     order = config.get('canaries', [])
     if not audit_only and any(p['mode'] == 'security' for p in config['policies'].values()):
         if not order or any(config['policies'].get(h, {}).get('mode') != 'security' for h in order):
             raise ValueError('EXPLICIT_SECURITY_CANARY_REQUIRED')
     if any(h not in hosts for h in order):
         raise ValueError('CANARY_NOT_IN_INVENTORY')
-    hosts = list(dict.fromkeys(order + hosts))
+    # Finish the explicitly released cohort before auditing unrelated failures.
+    released = [h for h in hosts if config['policies'].get(h, {}).get('mode') == 'security']
+    hosts = list(dict.fromkeys(order + released + hosts))
     for index, host in enumerate(hosts):
         policy = config['policies'].get(host, {'mode': 'audit'})
         mode = policy['mode']
@@ -205,7 +218,9 @@ def process_hosts(config, hosts, run_dir, audit_only=False):
                 report = {'status': 'FAILED', 'reason': type(exc).__name__, 'packages': []}
             report['mode'] = 'APPLY' if apply else 'AUDIT'
             if stopped and mode == 'security':
-                report['deferred'] = 'Host failure or missing required inventory target; installation deferred'
+                report['deferred'] = 'Host failure, unresolved transaction or missing required target; installation deferred'
+            if apply and report.get('reason') == 'TIMEOUT_REMOTE_STATE_UNKNOWN':
+                write_json(transaction_block, {'host': host, 'reason': report['reason'], 'at': now()})
             if report['status'] != 'OK':
                 stopped = True
         report['host'] = host

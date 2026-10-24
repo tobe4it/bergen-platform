@@ -1,0 +1,30 @@
+---
+- name: Require configured service units active
+  ansible.builtin.command:
+    argv: [systemctl, is-active, '{{ item }}']
+  loop: '{{ system_updates_restart_services }}'
+  register: consumer_service_health
+  changed_when: false
+  retries: 3
+  delay: 5
+  until: consumer_service_health.rc == 0 and consumer_service_health.stdout | trim == 'active'
+
+- name: Require configured local TCP listeners
+  ansible.builtin.wait_for:
+    host: 127.0.0.1
+    port: '{{ item }}'
+    state: started
+    connect_timeout: 3
+    timeout: 30
+  loop: '{{ system_updates_health_ports }}'
+
+- name: Inspect explicitly configured rootful Podman consumers
+  ansible.builtin.command:
+    argv: [podman, container, inspect, '{{ item }}']
+  loop: '{{ system_updates_restart_podman_containers }}'
+  register: consumer_podman_health
+  changed_when: false
+  no_log: true
+  retries: 3
+  delay: 5
+  until: consumer_podman_health.rc == 0 and (consumer_podman_health.stdout | from_json | first).State.Running | bool

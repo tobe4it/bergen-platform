@@ -1,5 +1,47 @@
 # Daily OS security updates and change reports
 
+## Temporarily release a verified cohort for hourly installation
+
+`scripts/release_system_updates.py --config CONFIG --report REPORT_JSON
+--policies PRIVATE_POLICIES_JSON --canary HOST` explicitly releases a cohort
+and installs the controller timer for each hour at minute 15 (Europe/Berlin,
+plus up to five minutes jitter). It immediately requests the first asynchronous
+policy run. This is installation, not audit-only. The timer remains hourly until
+the scheduler calendar is explicitly restored to the daily value.
+
+The private policies object maps inventory aliases to security-mode policies.
+Each needs `restart_services` and either `health_urls` or `health_ports`.
+`health_ports` are integer TCP ports checked on guest loopback; they establish
+listener availability, not authenticated application correctness. Configured
+service units must be active before and after the transaction. Existing HTTP
+checks retain certificate verification. Optional `restart_podman_containers`
+names specific rootful Podman consumers: running state is checked before and
+after, and they are restarted only after a package change. This does not upgrade
+container images. Rootless containers need separate policies.
+
+Release requires a matching, successful audit and noncritical operations result
+for every selected host from the previous 24 hours, full required inventory
+coverage, and a clean checkout. All selected hosts then undergo another live
+audit with the new consumer checks before configuration changes or timer setup.
+Configuration is backed up. Site-specific policies are not committed.
+
+The canary runs first, then the rest of the released cohort, then unrelated
+audit hosts. A failed canary or released host defers remaining installations.
+Unrelated audit failures still appear in the same email but cannot preempt
+installations already completed in that cohort. A local runner lock prevents
+overlap; systemd will not start a second instance of its running oneshot service.
+An installation timeout creates `installation-blocked.json` in the state
+directory, deferring subsequent installations until the remote transaction is
+manually reconciled and the marker deliberately removed. Never clear this marker
+merely to retry. No automatic reboot is added.
+
+The service accepts exit status 1 (completed report with host failures) and 3
+(another runner owns the lock); mail delivery failure remains a service failure.
+Inspect the emailed per-host evidence rather than treating service success as
+all hosts patched. Existing host report cron jobs remain untouched. If scheduler
+installation fails after policy release, inspect the private scheduler log and
+timer state before retrying; the helper does not claim activation or rollback.
+
 Status: implementation; live deployment and delivery must be verified on the
 controller. Nothing in this change asserts that production PHP is patched.
 

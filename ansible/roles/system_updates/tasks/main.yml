@@ -22,7 +22,7 @@
         that:
           - ansible_facts.pkg_mgr in ['apt', 'dnf', 'dnf5']
           - not (system_updates_apply | bool) or system_updates_restart_services | length > 0
-          - not (system_updates_apply | bool) or system_updates_health_urls | length > 0
+          - not (system_updates_apply | bool) or (system_updates_health_urls | length + system_updates_health_ports | length) > 0
           - ansible_facts.pkg_mgr == 'apt' or system_updates_dnf_metadata_verified | bool
           - ansible_facts.pkg_mgr != 'apt' or ansible_facts.distribution in ['Debian', 'Ubuntu']
         fail_msg: UPDATE_POLICY_INCOMPLETE_OR_UNSUPPORTED
@@ -44,6 +44,9 @@
         timeout: 20
       loop: '{{ system_updates_health_urls }}'
       no_log: true
+
+    - name: Verify configured consumers before transaction
+      ansible.builtin.include_tasks: verify-consumers.yml
 
     - name: Refresh APT metadata strictly
       ansible.builtin.command:
@@ -81,6 +84,18 @@
         - system_updates_apply | bool
         - update_apt.changed | default(false) or update_dnf.changed | default(false)
 
+    - name: Restart explicitly configured rootful Podman consumers
+      ansible.builtin.command:
+        argv: [podman, restart, '{{ item }}']
+      loop: '{{ system_updates_restart_podman_containers }}'
+      register: update_podman_restarts
+      when:
+        - system_updates_apply | bool
+        - update_apt.changed | default(false) or update_dnf.changed | default(false)
+
+    - name: Verify configured consumers after transaction
+      ansible.builtin.include_tasks: verify-consumers.yml
+
     - name: Verify application endpoints after transaction
       ansible.builtin.uri:
         url: '{{ item }}'
@@ -97,7 +112,7 @@
 
     - name: Record successful inspection
       ansible.builtin.set_fact:
-        update_report: "{{ update_report | combine({'status': 'OK', 'reason': 'NONE', 'checks': ('PASSED' if system_updates_health_urls | length else 'NOT_CONFIGURED')}) }}"
+        update_report: "{{ update_report | combine({'status': 'OK', 'reason': 'NONE', 'checks': ('PASSED' if (system_updates_health_urls | length + system_updates_health_ports | length) else 'NOT_CONFIGURED')}) }}"
   rescue:
     - name: Record failure without copying raw module output
       ansible.builtin.set_fact:
@@ -156,7 +171,7 @@
             'candidates': update_apt.candidates | default([]),
             'held': update_apt.held | default([]),
             'dnf_updates_available': update_dnf.changed | default(false),
-            'restarted': update_restarts.results | default([]) | selectattr('changed', 'defined') | selectattr('changed') | map(attribute='item') | list,
+            'restarted': (update_restarts.results | default([]) | selectattr('changed', 'defined') | selectattr('changed') | map(attribute='item') | list) + (update_podman_restarts.results | default([]) | selectattr('changed', 'defined') | selectattr('changed') | map(attribute='item') | list),
             'reboot': ('REQUIRED' if update_reboot.stat.exists | default(false) else ('NO_MARKER' if update_reboot.stat is defined else ('REQUIRED' if update_rpm_reboot.rc | default(-1) == 1 else ('NOT_REQUIRED' if update_rpm_reboot.rc | default(-1) == 0 else 'UNKNOWN')))),
             'security_coverage': 'Distribution security metadata only; third-party sources, containers and application updates require separate verification',
             'advisories': 'Not collected; no CVE closure asserted'

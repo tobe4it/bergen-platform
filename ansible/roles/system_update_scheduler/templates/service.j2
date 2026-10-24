@@ -5,6 +5,7 @@ After=network-online.target
 
 [Service]
 Type=oneshot
+SuccessExitStatus=1 3
 User={{ system_update_scheduler_user }}
 WorkingDirectory={{ system_update_scheduler_repo }}
 Environment=ANSIBLE_CONFIG={{ system_update_scheduler_repo }}/ansible.cfg

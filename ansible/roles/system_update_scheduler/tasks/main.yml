@@ -46,3 +46,12 @@
     daemon_reload: '{{ scheduler_units.changed }}'
     enabled: true
     state: started
+
+- name: Start authorized policy run asynchronously
+  ansible.builtin.systemd:
+    name: bergen-system-updates.service
+    state: started
+    no_block: true
+  when:
+    - system_update_scheduler_run_now | default(false) | bool
+    - not (system_update_scheduler_watchdog | bool)
