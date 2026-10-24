@@ -40,13 +40,13 @@ def private_json(path):
     return json.loads(path.read_text())
 
 
-def command(argv, timeout, capture=False):
+def command(argv, timeout, capture=False, extra_env=None):
     return subprocess.run(argv, cwd=ROOT, stdin=subprocess.DEVNULL,
                           stdout=subprocess.PIPE if capture else subprocess.DEVNULL,
                           stderr=subprocess.DEVNULL, text=True, timeout=timeout,
                           env={**os.environ, 'ANSIBLE_NOCOLOR': '1',
                                'ANSIBLE_HOST_KEY_CHECKING': 'True',
-                               'ANSIBLE_RETRY_FILES_ENABLED': 'False'})
+                               'ANSIBLE_RETRY_FILES_ENABLED': 'False', **(extra_env or {})})
 
 
 def inventory_args(config):
@@ -94,6 +94,32 @@ def validate(config):
             raise ValueError('INVALID_MAIL_ADDRESS')
 
 
+def failure_details(stdout, host, task=None):
+    prefix = 'BERGEN_UPDATE_DIAGNOSTIC='
+    frames = [line[len(prefix):] for line in stdout.splitlines() if line.startswith(prefix)]
+    if len(frames) != 1:
+        return {}
+    try:
+        events = json.loads(frames[0])
+        if not isinstance(events, list) or len(events) > 32:
+            return {}
+        events = [e for e in events if isinstance(e, dict) and e.get('host') == host]
+        matching = [e for e in events if e.get('task') == task]
+        event = (matching or [e for e in events if not e.get('ignored')] or events)[0]
+        if not re.fullmatch(r'[A-Z0-9_]{1,80}', event.get('code', '')):
+            return {}
+        # The callback uses fixed task names; never import arbitrary messages.
+        result = {'failure_code': event['code']}
+        name = event.get('task', '')
+        if re.fullmatch(r'[A-Za-z ]{1,120}', name):
+            result['failed_task'] = name
+        if type(event.get('rc')) is int:
+            result['failure_rc'] = event['rc']
+        return result
+    except (ValueError, TypeError, IndexError):
+        return {}
+
+
 def run_host(config, host, policy, apply, result_path):
     variables = {
         'system_updates_apply': apply,
@@ -108,7 +134,9 @@ def run_host(config, host, policy, apply, result_path):
         result = command([config['ansible_playbook'], *inventory_args(config),
                           str(ROOT / 'ansible/playbooks/system-updates.yml'),
                           '--limit', host, '--extra-vars', '@' + str(variables_path)],
-                         config.get('host_timeout_seconds', 3600))
+                         config.get('host_timeout_seconds', 3600), True,
+                         extra_env={'ANSIBLE_STDOUT_CALLBACK': 'bergen_update_diagnostic',
+                                    'ANSIBLE_CALLBACK_PLUGINS': str(ROOT / 'ansible/callback_plugins')})
         if result_path.exists():
             report = json.loads(result_path.read_text())
         else:
@@ -116,6 +144,8 @@ def run_host(config, host, policy, apply, result_path):
                       'reason': 'NO_HOST_REPORT', 'packages': []}
         if result.returncode and report.get('status') == 'OK':
             report.update(status='FAILED', reason='ANSIBLE_NONZERO_EXIT')
+        if report.get('status') in ('FAILED', 'UNREACHABLE'):
+            report.update(failure_details(getattr(result, 'stdout', '') or '', host, report.get('failed_task')))
         return report
     except subprocess.TimeoutExpired:
         # Never retry a package transaction blindly: remote work may still be running.
@@ -188,12 +218,20 @@ def render(report):
                host.get('reboot', 'UNKNOWN'), host.get('checks', 'NOT_RUN')]
         rows.append('<tr>' + ''.join('<td>' + html.escape(v) + '</td>' for v in row) + '</tr>')
         lines += [' | '.join(row), '  Befund: ' + host.get('reason', 'NONE')]
+        if host.get('failed_task'):
+            lines.append('  Fehlgeschlagener Task: ' + host['failed_task'])
+        if host.get('failure_code'):
+            lines.append('  Fehlerursache: ' + host['failure_code'])
+        if 'failure_rc' in host:
+            lines.append('  Task-Rückgabecode: ' + str(host['failure_rc']))
         for package in host.get('packages', []):
             lines.append(f"  {package['name']}: {package['old']} → {package['new']}")
         if host.get('deferred'):
             lines.append('  Zurückgestellt: ' + host['deferred'])
         if host['status'] in ('FAILED', 'UNREACHABLE'):
-            lines.append('  PRIORITÄT 1: Erreichbarkeit/Fehler prüfen; bei Timeout Transaktionszustand vor Wiederholung klären.')
+            lines.append('  PRIORITÄT 1: Gemeldete Fehlerursache beheben und betroffenen Host erneut prüfen.')
+        if host.get('reason') == 'TIMEOUT_REMOTE_STATE_UNKNOWN':
+            lines.append('  Transaktionszustand vor Wiederholung klären; Remote-Arbeit kann noch laufen.')
         if host.get('held'):
             lines.append('  PRIORITÄT 1: Zurückgehaltene Sicherheitsupdates prüfen.')
         if host.get('mode') == 'AUDIT' and (host.get('candidates') or host.get('dnf_updates_available')):

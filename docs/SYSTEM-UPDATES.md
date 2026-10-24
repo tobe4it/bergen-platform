@@ -173,6 +173,17 @@ mail delivery is unavailable too; use an external monitoring channel for that.
 
 ## Validation
 
+The runner selects the `bergen_update_diagnostic` stdout callback for each host.
+It captures fixed error categories and allowlisted task names even when a role
+rescues the original error, and includes them in the text, HTML and JSON report.
+Connection failures are classified separately (DNS, host keys, authentication,
+timeout, refusal or routing). Known APT refusal codes, DNF metadata verification,
+Python and become failures are distinguished. Raw module messages, exception
+text, connection endpoints and invocation arguments are never copied into this
+diagnostic frame. Tasks marked `no_log` emit only `ERROR_DETAILS_REDACTED`.
+Unknown errors remain explicitly unclassified; no success or root cause is
+inferred from missing diagnostics. This does not relax any installation gates.
+
 ### Repair of the observed subscription-less PVE 9 source layout
 
 `scripts/repair_proxmox_update_sources.py --config CONFIG` targets only the exact
