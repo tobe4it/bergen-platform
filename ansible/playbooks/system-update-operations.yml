@@ -1,0 +1,32 @@
+---
+- name: Read operating evidence independently of package update success
+  hosts: all
+  gather_facts: false
+  become: true
+  tasks:
+    - name: Require a single selected host and explicit output path
+      ansible.builtin.assert:
+        that:
+          - ansible_play_hosts_all | length == 1
+          - operations_result_file is defined
+          - operations_result_file.startswith('/')
+    - name: Read bounded operating evidence without local service logs
+      bergen_system_report:
+        mode: '{{ operations_mode | default("system") }}'
+        host_names: '{{ operations_host_names | default({}) }}'
+        since: '{{ operations_since | default(0) }}'
+        until: '{{ operations_until | default(0) }}'
+        via_ctid: '{{ operations_via_ctid | default(0) }}'
+        expected_hostname: '{{ operations_expected_hostname | default("bergen-syslog") }}'
+      register: operations_probe
+      failed_when: false
+      ignore_unreachable: true
+      no_log: true
+    - name: Keep only bounded evidence on the controller
+      ansible.builtin.copy:
+        content: '{{ operations_probe.operations | default({"status": "ERROR", "reason": "OPERATIONS_PROBE_FAILED"}) | to_nice_json }}'
+        dest: '{{ operations_result_file }}'
+        mode: '0600'
+      delegate_to: localhost
+      become: false
+      no_log: true

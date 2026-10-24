@@ -1,0 +1,72 @@
+name: System update regression
+on:
+  pull_request:
+    paths:
+      - 'scripts/system_updates.py'
+      - 'scripts/release_system_updates.py'
+      - 'tests/test_system_update_release.py'
+      - 'scripts/system_operations.py'
+      - 'scripts/configure_system_operations.py'
+      - 'ansible/library/bergen_system_report.py'
+      - 'ansible/playbooks/system-update-operations.yml'
+      - 'ansible/module_utils/bergen_operations.py'
+      - 'tests/test_system_operations.py'
+      - 'scripts/register_system_update_hosts.py'
+      - 'tests/test_system_update_registration.py'
+      - 'scripts/configure_system_updates.py'
+      - 'scripts/repair_proxmox_update_sources.py'
+      - 'ansible/**/system*update*'
+      - 'ansible/roles/system_updates/**'
+      - 'ansible/roles/system_update_scheduler/**'
+      - 'ansible/library/bergen_apt_security.py'
+      - 'ansible/callback_plugins/bergen_update_diagnostic.py'
+      - 'tests/test_system_update_diagnostic.py'
+      - 'tests/test_system_updates.py'
+      - 'tests/test_proxmox_update_sources.py'
+      - 'tests/fixtures/system-update-filter.yml'
+      - '.github/workflows/system-updates.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'scripts/system_updates.py'
+      - 'scripts/release_system_updates.py'
+      - 'tests/test_system_update_release.py'
+      - 'scripts/system_operations.py'
+      - 'scripts/configure_system_operations.py'
+      - 'ansible/library/bergen_system_report.py'
+      - 'ansible/playbooks/system-update-operations.yml'
+      - 'ansible/module_utils/bergen_operations.py'
+      - 'tests/test_system_operations.py'
+      - 'scripts/register_system_update_hosts.py'
+      - 'tests/test_system_update_registration.py'
+      - 'scripts/configure_system_updates.py'
+      - 'scripts/repair_proxmox_update_sources.py'
+      - 'ansible/roles/system_updates/**'
+      - 'ansible/roles/system_update_scheduler/**'
+      - 'ansible/library/bergen_apt_security.py'
+      - 'ansible/callback_plugins/bergen_update_diagnostic.py'
+      - 'tests/test_system_update_diagnostic.py'
+      - 'tests/test_system_updates.py'
+      - 'tests/test_proxmox_update_sources.py'
+      - 'tests/fixtures/system-update-filter.yml'
+permissions:
+  contents: read
+jobs:
+  tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: pip install 'ansible-core>=2.19,<2.20'
+      - run: python -m unittest discover -s tests -p test_system_updates.py -v
+      - run: python -m unittest discover -s tests -p test_system_update_release.py -v
+      - run: python -m unittest discover -s tests -p test_system_operations.py -v
+      - run: python -m unittest discover -s tests -p test_system_update_registration.py -v
+      - run: python -m unittest discover -s tests -p test_system_update_diagnostic.py -v
+      - run: python -m unittest discover -s tests -p test_proxmox_update_sources.py -v
+      - run: ansible-playbook --syntax-check ansible/playbooks/system-updates.yml
+      - run: ansible-playbook --syntax-check ansible/playbooks/system-update-operations.yml
+      - run: ansible-playbook --syntax-check ansible/playbooks/install-system-update-scheduler.yml
+      - run: ansible-playbook -i localhost, -c local tests/fixtures/system-update-filter.yml

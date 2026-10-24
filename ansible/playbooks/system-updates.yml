@@ -1,0 +1,14 @@
+---
+- name: Process exactly one inventory host selected by the controller runner
+  hosts: all
+  gather_facts: false
+  become: true
+  pre_tasks:
+    - name: Require runner scope and private result location
+      ansible.builtin.assert:
+        that:
+          - ansible_play_hosts_all | length == 1
+          - system_updates_result_file is defined
+          - system_updates_result_file.startswith('/')
+  roles:
+    - system_updates

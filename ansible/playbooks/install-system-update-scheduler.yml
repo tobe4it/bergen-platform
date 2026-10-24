@@ -1,0 +1,11 @@
+---
+- name: Install update scheduler on explicitly selected controller or independent observer
+  hosts: controllers
+  gather_facts: false
+  become: true
+  pre_tasks:
+    - name: Require exactly one installation target
+      ansible.builtin.assert:
+        that: ansible_play_hosts_all | length == 1
+  roles:
+    - system_update_scheduler

@@ -1,0 +1,186 @@
+---
+- name: Initialize bounded report
+  ansible.builtin.set_fact:
+    update_report:
+      status: FAILED
+      reason: INCOMPLETE
+      packages: []
+      restarted: []
+      reboot: UNKNOWN
+      checks: NOT_RUN
+    update_before: {}
+    update_have_before: false
+
+- name: Inspect and update this host
+  block:
+    - name: Read operating system facts
+      ansible.builtin.setup:
+        gather_subset: [min]
+
+    - name: Require supported backend and explicit restart and verification policy for writes
+      ansible.builtin.assert:
+        that:
+          - ansible_facts.pkg_mgr in ['apt', 'dnf', 'dnf5']
+          - not (system_updates_apply | bool) or system_updates_restart_services | length > 0
+          - not (system_updates_apply | bool) or (system_updates_health_urls | length + system_updates_health_ports | length) > 0
+          - ansible_facts.pkg_mgr == 'apt' or system_updates_dnf_metadata_verified | bool
+          - ansible_facts.pkg_mgr != 'apt' or ansible_facts.distribution in ['Debian', 'Ubuntu']
+        fail_msg: UPDATE_POLICY_INCOMPLETE_OR_UNSUPPORTED
+
+    - name: Read installed versions before transaction
+      ansible.builtin.package_facts:
+        manager: auto
+    - name: Preserve before versions
+      ansible.builtin.set_fact:
+        update_before: '{{ ansible_facts.packages }}'
+        update_have_before: true
+
+    - name: Check service health before any update
+      ansible.builtin.uri:
+        url: '{{ item }}'
+        status_code: 200
+        validate_certs: true
+        return_content: false
+        timeout: 20
+      loop: '{{ system_updates_health_urls }}'
+      no_log: true
+
+    - name: Verify configured consumers before transaction
+      ansible.builtin.include_tasks: verify-consumers.yml
+
+    - name: Refresh APT metadata strictly
+      ansible.builtin.command:
+        argv: [apt-get, -o, APT::Update::Error-Mode=any, update]
+      changed_when: false
+      when: ansible_facts.pkg_mgr == 'apt'
+
+    - name: Select or apply trusted distribution security fixes
+      bergen_apt_security:
+        apply: '{{ system_updates_apply }}'
+        origins: "{{ ['Debian', 'Debian-Security'] if ansible_facts.distribution == 'Debian' else ['Ubuntu'] }}"
+        codename: '{{ ansible_facts.distribution_release }}'
+      register: update_apt
+      when: ansible_facts.pkg_mgr == 'apt'
+
+    - name: Select or apply DNF security fixes
+      ansible.builtin.dnf:
+        name: '*'
+        state: latest
+        security: true
+        update_only: true
+        update_cache: true
+        lock_timeout: 120
+      check_mode: '{{ not (system_updates_apply | bool) }}'
+      register: update_dnf
+      when: ansible_facts.pkg_mgr in ['dnf', 'dnf5']
+
+    - name: Restart explicitly configured consumers after package change
+      ansible.builtin.service:
+        name: '{{ item }}'
+        state: restarted
+      loop: '{{ system_updates_restart_services }}'
+      register: update_restarts
+      when:
+        - system_updates_apply | bool
+        - update_apt.changed | default(false) or update_dnf.changed | default(false)
+
+    - name: Restart explicitly configured rootful Podman consumers
+      ansible.builtin.command:
+        argv: [podman, restart, '{{ item }}']
+      loop: '{{ system_updates_restart_podman_containers }}'
+      register: update_podman_restarts
+      when:
+        - system_updates_apply | bool
+        - update_apt.changed | default(false) or update_dnf.changed | default(false)
+
+    - name: Verify configured consumers after transaction
+      ansible.builtin.include_tasks: verify-consumers.yml
+
+    - name: Verify application endpoints after transaction
+      ansible.builtin.uri:
+        url: '{{ item }}'
+        status_code: 200
+        validate_certs: true
+        return_content: false
+        timeout: 20
+      loop: '{{ system_updates_health_urls }}'
+      register: update_health
+      retries: 3
+      delay: 5
+      until: update_health is succeeded
+      no_log: true
+
+    - name: Record successful inspection
+      ansible.builtin.set_fact:
+        update_report: "{{ update_report | combine({'status': 'OK', 'reason': 'NONE', 'checks': ('PASSED' if (system_updates_health_urls | length + system_updates_health_ports | length) else 'NOT_CONFIGURED')}) }}"
+  rescue:
+    - name: Record failure without copying raw module output
+      ansible.builtin.set_fact:
+        update_report: "{{ update_report | combine({'status': 'FAILED', 'reason': 'TASK_FAILED', 'failed_task': ansible_failed_task.name}) }}"
+  always:
+    - name: Read versions even after partial package failure
+      ansible.builtin.package_facts:
+        manager: auto
+      register: update_after
+      ignore_errors: true
+      when: update_have_before | bool
+
+    - name: Record verified package changes
+      ansible.builtin.set_fact:
+        update_report: "{{ update_report | combine({'packages': update_before | system_update_delta(ansible_facts.packages)}) }}"
+      when:
+        - update_have_before | bool
+        - update_after is succeeded
+
+    - name: Mark missing final package inventory as failure
+      ansible.builtin.set_fact:
+        update_report: "{{ update_report | combine({'status': 'FAILED', 'reason': 'FINAL_PACKAGE_INVENTORY_FAILED'}) }}"
+      when:
+        - update_have_before | bool
+        - update_after is failed
+
+    - name: Check Debian reboot marker
+      ansible.builtin.stat:
+        path: /var/run/reboot-required
+      register: update_reboot
+      ignore_errors: true
+      when: ansible_facts.pkg_mgr | default('') == 'apt'
+
+    - name: Discover standalone DNF restart checker
+      ansible.builtin.stat:
+        path: /usr/bin/needs-restarting
+      register: update_restart_tool
+      when: ansible_facts.pkg_mgr | default('') in ['dnf', 'dnf5']
+
+    - name: Check DNF reboot requirement
+      ansible.builtin.command:
+        argv: [/usr/bin/needs-restarting, -r]
+      changed_when: false
+      failed_when: false
+      register: update_rpm_reboot
+      when:
+        - ansible_facts.pkg_mgr | default('') in ['dnf', 'dnf5']
+        - update_restart_tool.stat.executable | default(false)
+
+    - name: Assemble allowlisted details
+      ansible.builtin.set_fact:
+        update_report: >-
+          {{ update_report | combine({
+            'mode': ('APPLY' if system_updates_apply | bool else 'AUDIT'),
+            'os': ansible_facts.distribution | default('UNKNOWN'),
+            'candidates': update_apt.candidates | default([]),
+            'held': update_apt.held | default([]),
+            'dnf_updates_available': update_dnf.changed | default(false),
+            'restarted': (update_restarts.results | default([]) | selectattr('changed', 'defined') | selectattr('changed') | map(attribute='item') | list) + (update_podman_restarts.results | default([]) | selectattr('changed', 'defined') | selectattr('changed') | map(attribute='item') | list),
+            'reboot': ('REQUIRED' if update_reboot.stat.exists | default(false) else ('NO_MARKER' if update_reboot.stat is defined else ('REQUIRED' if update_rpm_reboot.rc | default(-1) == 1 else ('NOT_REQUIRED' if update_rpm_reboot.rc | default(-1) == 0 else 'UNKNOWN')))),
+            'security_coverage': 'Distribution security metadata only; third-party sources, containers and application updates require separate verification',
+            'advisories': 'Not collected; no CVE closure asserted'
+          }) }}
+
+    - name: Write controller result without raw logs or credentials
+      ansible.builtin.copy:
+        content: '{{ update_report | to_nice_json }}'
+        dest: '{{ system_updates_result_file }}'
+        mode: '0600'
+      delegate_to: localhost
+      become: false

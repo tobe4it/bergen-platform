@@ -1,0 +1,10 @@
+[Unit]
+Description=Bergen Platform daily update {{ 'watchdog' if system_update_scheduler_watchdog | bool else 'schedule' }}
+
+[Timer]
+OnCalendar={{ system_update_scheduler_calendar }}
+RandomizedDelaySec=5m
+Persistent=true
+
+[Install]
+WantedBy=timers.target
